@@ -956,7 +956,15 @@ end subroutine hcurl_grad_curltp
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
-!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `'zerob'` Dirichlet for all global boundary DOF
+!!
+!! @note For both boundary conditions all vertex Grad(H^1) DOFs, including
+!! those in the interior, are also eliminated (unit diagonal, zeroed row), as
+!! they duplicate the lowest-order H(Curl) DOFs. Only rows are zeroed, so the
+!! corresponding entries of the RHS and initial guess must be zeroed as well
+!! (eg. using `oft_hcurl_grad_gzerop`). For `'zerob'` this means that both
+!! `oft_hcurl_grad_zerob` and `oft_hcurl_grad_gzerop` must be applied,
+!! as `oft_hcurl_grad_zerob` alone only zeroes global boundary DOFs.
 !------------------------------------------------------------------------------
 subroutine hcurl_grad_getmop(hcurl_grad_rep,mat,bc)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
@@ -1040,10 +1048,12 @@ do i=1,hgrad_rep%mesh%nc
   call hgrad_rep%ncdofs(i,j_grad)
   mop21=TRANSPOSE(mop12)
   !---Apply bc to local matrix
+  IF(bc_flag>0)THEN
+    !---Vertex Grad(H^1) DOFs are always removed (duplicate lowest-order H(Curl) DOFs)
+    mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
+    mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
+  END IF
   SELECT CASE(bc_flag)
-    CASE(1)
-      mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
-      mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
     CASE(2)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j_curl(jr)))THEN
@@ -1051,9 +1061,6 @@ do i=1,hgrad_rep%mesh%nc
           mop12(jr,:)=0.d0
         END IF
       END DO
-      !---Vertex Grad(H^1) DOFs are always removed (duplicate lowest-order H(Curl) DOFs)
-      mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
-      mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
       DO jr=hgrad_rep%mesh%cell_np+1,hgrad_rep%nce
         IF(hgrad_rep%global%gbe(j_grad(jr)))THEN
           mop21(jr,:)=0.d0
@@ -1073,41 +1080,30 @@ deallocate(mop11,mop12,mop21,mop22)
 !$omp end parallel
 ALLOCATE(mop11(1,1),j_curl(1))
 !---Set diagonal entries for dirichlet rows
+mop11(1,1)=1.d0
+IF(bc_flag>0)THEN
+  !---Vertex Grad(H^1) DOFs (always removed, including those on the global boundary)
+  DO i=1,hgrad_rep%mesh%np
+    IF(hgrad_rep%mesh%bp(i))CYCLE
+    j_curl=i
+    call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
+  END DO
+  DO i=1,hgrad_rep%mesh%nbp
+    jr=hgrad_rep%mesh%lbp(i)
+    ! IF(.NOT.hgrad_rep%mesh%linkage%lpo(i))CYCLE
+    IF(.NOT.hgrad_rep%mesh%pstitch%leo(i))CYCLE
+    j_curl=jr
+    call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
+  END DO
+END IF
 SELECT CASE(bc_flag)
-  CASE(1)
-    mop11(1,1)=1.d0
-    DO i=1,hgrad_rep%mesh%np
-      IF(hgrad_rep%mesh%bp(i))CYCLE
-      j_curl=i
-      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
-    END DO
-    DO i=1,hgrad_rep%mesh%nbp
-      jr=hgrad_rep%mesh%lbp(i)
-      ! IF(.NOT.hgrad_rep%mesh%linkage%lpo(i))CYCLE
-      IF(.NOT.hgrad_rep%mesh%pstitch%leo(i))CYCLE
-      j_curl=jr
-      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
-    END DO
   CASE(2)
-    mop11(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
       IF(.NOT.hcurl_rep%global%gbe(jr))CYCLE
       IF(.NOT.hcurl_rep%linkage%leo(i))CYCLE
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
-    END DO
-    !---Vertex Grad(H^1) DOFs (always removed, including those on the global boundary)
-    DO i=1,hgrad_rep%mesh%np
-      IF(hgrad_rep%mesh%bp(i))CYCLE
-      j_curl=i
-      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
-    END DO
-    DO i=1,hgrad_rep%mesh%nbp
-      jr=hgrad_rep%mesh%lbp(i)
-      IF(.NOT.hgrad_rep%mesh%pstitch%leo(i))CYCLE
-      j_curl=jr
-      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
     !---Non-vertex Grad(H^1) DOFs on the global boundary
     DO i=1,hgrad_rep%nbe

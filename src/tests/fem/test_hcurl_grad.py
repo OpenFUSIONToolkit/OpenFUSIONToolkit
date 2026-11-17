@@ -86,25 +86,22 @@ def validate_zerob_result(exp_error):
         return False
     return True
 
+# Mesh levels for single level tests (MPI cases use one more refinement after decomposition)
+def single_level_mesh(nlevels,mpi=False):
+    if mpi:
+        return nlevels-1, nlevels+1
+    else:
+        return nlevels, nlevels
+
 # 'zerob' mass matrix projection test function
 def zerob_projection(nlevels,order,exp_error,grid_type=1,mpi=False,petsc=False):
-    if mpi:
-        nbase = nlevels-1
-        nlev = nlevels+1
-    else:
-        nbase = nlevels
-        nlev = nlevels
+    nbase, nlev = single_level_mesh(nlevels, mpi)
     assert hcurl_grad_setup(nbase, nlev, order, grid_type, petsc=petsc, zerob=True)
     assert validate_zerob_result(exp_error)
 
 # Single level test function
 def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False,petsc=False):
-    if mpi:
-        nbase = nlevels-1
-        nlev = nlevels+1
-    else:
-        nbase = nlevels
-        nlev = nlevels
+    nbase, nlev = single_level_mesh(nlevels, mpi)
     assert hcurl_grad_setup(nbase, nlev, order, grid_type, petsc=petsc)
     assert validate_result(exp_its, exp_error)
 # Multi-level test function
@@ -213,6 +210,15 @@ def test_hex_r3_p4_mg(petsc_flag=False):
 #============================================================================
 # Projection tests using 'zerob' mass matrix
 @pytest.mark.parametrize("mpi", (False, True))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 @pytest.mark.parametrize("order,exp_error", ((1, 2.7564E-2), (2, 2.0973E-3), (3, 1.4600E-4)))
-def test_zerob_proj(order, exp_error, mpi):
-    zerob_projection(3, order, exp_error, mpi=mpi)
+def test_zerob_proj(order, exp_error, mpi, petsc_flag):
+    """L2 projection of an analytic field with zero tangential boundary component
+    on a tet cube using the 'zerob' mass matrix, checked against reference errors."""
+    zerob_projection(3, order, exp_error, mpi=mpi, petsc=petsc_flag)
+@pytest.mark.parametrize("mpi", (False, True))
+@pytest.mark.parametrize("petsc_flag", (True, False))
+@pytest.mark.parametrize("order,exp_error", ((1, 3.6377E-2), (2, 3.6105E-3), (3, 1.1195E-4)))
+def test_hex_zerob_proj(order, exp_error, mpi, petsc_flag):
+    """Same as test_zerob_proj on a hex cube, exercising the hex vertex/boundary DOF layout."""
+    zerob_projection(3, order, exp_error, grid_type=2, mpi=mpi, petsc=petsc_flag)
