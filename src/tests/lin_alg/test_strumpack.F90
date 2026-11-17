@@ -8,9 +8,15 @@
 !> Regression tests for direct solves of sparse matrices using STRUMPACK.
 !!
 !! A sparse, non-symmetric matrix from a 2D convection-diffusion stencil is
-!! factored and solved, then modified and refactored twice (same non-zero
-!! pattern and full factorization) and the solutions are compared against
-!! known exact solutions.
+!! factored and solved, then modified and refactored three times and the
+!! solutions are compared against known exact solutions:
+!! - Same non-zero pattern (`update(.FALSE.)`)
+!! - Full factorization (`update(.TRUE.)`)
+!! - Changed non-zero pattern with `update(.FALSE.)`, which must be detected
+!!   and trigger a full factorization
+!!
+!! Solver options are set directly or read from XML (`use_xml`), in which case
+!! the parsed options are also written to the results file.
 !!
 !! @authors Chris Hansen
 !! @date October 2026
@@ -27,10 +33,10 @@ INTEGER(i4) :: nsize = 60
 INTEGER(i4) :: comp_type = -1
 INTEGER(i4) :: leaf_size = -1
 INTEGER(i4) :: min_sep_size = -1
-REAL(r8) :: rel_tol = -1.d0
-LOGICAL :: iter_refine = .FALSE.
+REAL(r8) :: comp_rel_tol = -1.d0
+LOGICAL :: use_xml = .FALSE.
 NAMELIST/test_strumpack_options/nsize,comp_type,leaf_size,min_sep_size, &
-  rel_tol,iter_refine
+  comp_rel_tol,use_xml
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
@@ -52,25 +58,31 @@ CONTAINS
 !---------------------------------------------------------------------------------
 SUBROUTINE test_solve()
 INTEGER(i4) :: i
-REAL(r8) :: err(3)
+REAL(r8) :: err(4)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: x_exact
 CLASS(oft_vector), POINTER :: u,g
 TYPE(oft_native_matrix), TARGET :: mat
 TYPE(oft_lusolver) :: linv
+TYPE(xml_node) :: solver_node
 !---Build matrix
-CALL build_sparse(mat)
+CALL build_sparse(mat,5)
 nrows=mat%nr
 CALL create_local_vec(u)
 CALL create_local_vec(g)
 !---Setup solver
-linv%package='strumpack'
-linv%iter_refine=iter_refine
+IF(use_xml)THEN
+  CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr)
+  IF(ierr/=0)CALL oft_abort('Could not find XML node.','test_solve',__FILE__)
+  CALL linv%setup_from_xml(solver_node)
+ELSE
+  linv%package='strumpack'
 #ifdef HAVE_STRUMPACK
-linv%strumpack_struct%comp_type=comp_type
-linv%strumpack_struct%leaf_size=leaf_size
-linv%strumpack_struct%min_sep_size=min_sep_size
-linv%strumpack_struct%rel_tol=rel_tol
+  linv%strumpack_struct%comp_type=comp_type
+  linv%strumpack_struct%leaf_size=leaf_size
+  linv%strumpack_struct%min_sep_size=min_sep_size
+  linv%strumpack_struct%comp_rel_tol=comp_rel_tol
 #endif
+END IF
 linv%A=>mat
 !---Initial solve
 ALLOCATE(x_exact(nrows))
@@ -86,6 +98,11 @@ err(2)=check_solve(linv,mat,u,g,x_exact)
 CALL shift_diagonal(mat,0.5d0)
 CALL linv%update(.TRUE.)
 err(3)=check_solve(linv,mat,u,g,x_exact)
+!---Change non-zero pattern but request same-pattern refactor (must be detected)
+CALL mat%delete()
+CALL build_sparse(mat,9)
+CALL linv%update(.FALSE.)
+err(4)=check_solve(linv,mat,u,g,x_exact)
 !---Cleanup
 CALL linv%delete()
 DEALLOCATE(x_exact)
@@ -97,34 +114,45 @@ DEALLOCATE(u,g)
 WRITE(*,*)'Relative errors =',err
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='strumpack.results')
-  DO i=1,3
+  DO i=1,4
     WRITE(io_unit,*)err(i)
   END DO
+#ifdef HAVE_STRUMPACK
+  IF(use_xml)THEN
+    WRITE(io_unit,*)linv%package
+    WRITE(io_unit,*)linv%strumpack_struct%comp_type
+    WRITE(io_unit,*)linv%strumpack_struct%comp_rel_tol
+    WRITE(io_unit,*)linv%strumpack_struct%leaf_size
+    WRITE(io_unit,*)linv%strumpack_struct%min_sep_size
+  END IF
+#endif
   CLOSE(io_unit)
 END IF
 END SUBROUTINE test_solve
 !---------------------------------------------------------------------------------
 !> Build sparse matrix from a 5-point convection-diffusion stencil on a
-!! `nsize` x `nsize` grid
+!! `nsize` x `nsize` grid, optionally with diagonal neighbors (9-point stencil)
 !---------------------------------------------------------------------------------
-SUBROUTINE build_sparse(mat)
+SUBROUTINE build_sparse(mat,npts)
 TYPE(oft_native_matrix), INTENT(inout) :: mat
+INTEGER(i4), INTENT(in) :: npts
 INTEGER(i4) :: i,j,k,row,nnz
-INTEGER(i4) :: di(5) = [0,-1,1,0,0], dj(5) = [0,0,0,-1,1]
-REAL(r8) :: stencil(5) = [4.d0,-1.2d0,-0.8d0,-1.1d0,-0.9d0]
+INTEGER(i4) :: di(9) = [0,-1,1,0,0,-1,1,-1,1], dj(9) = [0,0,0,-1,1,-1,-1,1,1]
+REAL(r8) :: stencil(9) = [4.d0,-1.2d0,-0.8d0,-1.1d0,-0.9d0,-0.1d0,-0.05d0,-0.05d0,-0.1d0]
 mat%nr=nsize**2; mat%nc=nsize**2
 mat%nrg=mat%nr; mat%ncg=mat%nc
-ALLOCATE(mat%kr(mat%nr+1),mat%lc(5*mat%nr),mat%M(5*mat%nr))
+ALLOCATE(mat%kr(mat%nr+1),mat%lc(npts*mat%nr),mat%M(npts*mat%nr))
 nnz=0
 mat%kr(1)=1
 DO j=1,nsize
   DO i=1,nsize
     row=(j-1)*nsize+i
-    DO k=1,5
+    DO k=1,npts
       IF((i+di(k)<1).OR.(i+di(k)>nsize).OR.(j+dj(k)<1).OR.(j+dj(k)>nsize))CYCLE
       nnz=nnz+1
       mat%lc(nnz)=row+di(k)+dj(k)*nsize
       mat%M(nnz)=stencil(k)
+      IF((k==1).AND.(npts>5))mat%M(nnz)=mat%M(nnz)+1.d0 ! Keep diagonally dominant
     END DO
     mat%kr(row+1)=nnz+1
   END DO

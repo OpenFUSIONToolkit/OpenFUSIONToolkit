@@ -2123,20 +2123,24 @@ group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="B
 #
 group = parser.add_argument_group("SuperLU", "SuperLU package options")
 group.add_argument("--build_superlu", default=0, type=int, choices=(0,1), help="Build SuperLU library? (default: 0)")
-group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
 #
 group = parser.add_argument_group("SuperLU-DIST", "SuperLU-DIST package options")
 group.add_argument("--build_superlu_dist", default=0, type=int, choices=(0,1), help="Build SuperLU-DIST library? (default: 0)")
 group.add_argument("--superlu_dist_threads", action="store_true", default=False, help="Build SuperLU-DIST with thread support (OpenMP)")
-group.add_argument("--superlu_dist_wrapper", action="store_true", default=False, help="SuperLU-DIST included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--superlu_dist_wrapper", action="store_true", default=False, help="SuperLU-DIST included in compilers")
 #
 group = parser.add_argument_group("UMFPACK", "UMFPACK package options")
 group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library? (default: 0)")
-group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
 #
 group = parser.add_argument_group("STRUMPACK", "STRUMPACK package options")
 group.add_argument("--build_strumpack", default=0, type=int, choices=(0,1), help="Build STRUMPACK library? (default: 0)")
-group.add_argument("--strumpack_wrapper", action="store_true", default=False, help="STRUMPACK included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--strumpack_wrapper", action="store_true", default=False, help="STRUMPACK included in compilers")
 #
 group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
@@ -2148,7 +2152,8 @@ group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Bu
 group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
 group.add_argument("--petsc_version", default="3.23", type=str,
     help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.23)")
-group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
 fetch_progress = options.no_dl_progress
@@ -2233,7 +2238,7 @@ if use_mpi:
 else:
     if options.hdf5_parallel:
         print('Warning: Reverting to serial HDF5 library without MPI')
-    if (options.build_petsc == 1) or options.petsc_wrapper:
+    if options.build_petsc == 1:
         parser.exit(-1, 'PETSc requires MPI\n')
 # HDF5
 HDF5_HL_required = False
@@ -2249,23 +2254,25 @@ packages.append(LIBXML2(not options.libxml2_shared))
 if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
 # Are we building PETSc?
-if (options.build_petsc == 1) or options.petsc_wrapper:
+if options.build_petsc == 1:
+    if options.build_strumpack == 1:
+        parser.exit(-1, 'STRUMPACK is not currently supported with PETSc\n')
     packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,
                           with_superlu_dist=options.petsc_superlu_dist, with_umfpack=options.petsc_umfpack,
-                          with_mumps=options.petsc_mumps, version=options.petsc_version, comp_wrapper=options.petsc_wrapper,
+                          with_mumps=options.petsc_mumps, version=options.petsc_version,
                           mpi_f08=(not options.mpi_use_headers)))
 else:
     packages.append(METIS(options.metis_wrapper))
-    if (options.build_superlu == 1) or options.superlu_wrapper:
-        packages.append(SUPERLU(options.superlu_wrapper))
-    if (options.build_superlu_dist == 1) or options.superlu_dist_wrapper:
+    if options.build_superlu == 1:
+        packages.append(SUPERLU())
+    if options.build_superlu_dist == 1:
         if not use_mpi:
             parser.exit(-1, 'SuperLU-DIST requires MPI\n')
-        packages.append(SUPERLU_DIST(options.superlu_dist_threads, options.superlu_dist_wrapper))
-    if (options.build_umfpack == 1) or options.umfpack_wrapper:
-        packages.append(UMFPACK(options.umfpack_wrapper))
-    if (options.build_strumpack == 1) or options.strumpack_wrapper:
-        packages.append(STRUMPACK((options.oft_use_openmp == 1), options.strumpack_wrapper))
+        packages.append(SUPERLU_DIST(options.superlu_dist_threads))
+    if options.build_umfpack == 1:
+        packages.append(UMFPACK())
+    if options.build_strumpack == 1:
+        packages.append(STRUMPACK(options.oft_use_openmp == 1))
 #
 for package in packages:
     config_dict = package.install(config_dict, keep_build_dirs=options.keep_build_dirs)
