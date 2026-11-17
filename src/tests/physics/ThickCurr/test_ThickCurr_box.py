@@ -12,8 +12,11 @@ from thickcurr_testing import run_driver, write_box_mesh, check_value, box_tau
 
 ETA = 1.256637E-6  # Resistivity [Ohm-m], gives a magnetic diffusivity of ~1 m^2/s
 MESH_FILE = 'thickcurr_box.h5'
-MG_MAX_LITS = 100      # Maximum linear iterations per step with p-multigrid (set from reference runs)
-MG_MAX_LITS_MPI = 100  # Maximum linear iterations per step with p-multigrid on two MPI processes
+# Range of maximum linear iterations per step with the XML p-multigrid definition (reference: 14 in serial, 20 on
+# two processes). The default (non-XML) smoothers require only ~3 iterations on this small case, so the lower bound
+# detects the XML definition being ignored.
+MG_LITS_RANGE = (8, 20)
+MG_LITS_RANGE_MPI = (8, 30)
 
 
 def box_signals():
@@ -29,7 +32,7 @@ def box_signals():
     return [b1[0], b2[1], (b3[0]+b3[1])/math.sqrt(2.0), floop]
 
 
-def run_decay(order, nproc=1, pre='lu', eig_shift=None, in_memory=False, pmg=False, max_lits=None):
+def run_decay(order, nproc=1, pre='lu', eig_shift=None, in_memory=False, pmg=False, lits_range=None):
     write_box_mesh(MESH_FILE, (4, 4, 4))
     # Crank-Nicolson for second-order time accuracy (no stiff pseudo-vacuum modes here)
     config = {'case': 'decay', 'mesh_file': MESH_FILE, 'eta': [ETA], 'order': order, 'dt': 1.E-3, 'theta': 0.5,
@@ -59,10 +62,12 @@ def run_decay(order, nproc=1, pre='lu', eig_shift=None, in_memory=False, pmg=Fal
     retval &= check_value("History time", results['hist_t1'], t_final, 1.E-10)
     for i, (val, val_exp) in enumerate(zip(results['hist_signals1'], results['signals1'])):
         retval &= check_value("History signal {0}".format(i+1), val, val_exp, 1.E-8)
-    # Check preconditioner effectiveness (number of linear iterations per step)
-    if (max_lits is not None) and (results['max_lits'] > max_lits):
-        print("FAILED: Too many linear iterations ({0} > {1})".format(results['max_lits'], max_lits))
-        retval = False
+    # Check that the expected preconditioner is used (maximum number of linear iterations per step)
+    if lits_range is not None:
+        if (results['max_lits'] < lits_range[0]) or (results['max_lits'] > lits_range[1]):
+            print("FAILED: Linear iterations outside expected range ({0} not in [{1}, {2}])".format(
+                results['max_lits'], *lits_range))
+            retval = False
     return retval
 
 
@@ -117,15 +122,16 @@ def test_decay_pmg_mpi():
 
 def test_decay_pmg_xml():
     '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner defined in XML, checking
-    that the XML definition is used (iteration count).'''
-    assert run_decay(2, pre='mg', pmg=True, max_lits=MG_MAX_LITS)
+    that the XML definition is used (iteration count). The XML is passed directly to ThickCurr from Python, so
+    no global XML is loaded.'''
+    assert run_decay(2, pre='mg', pmg=True, lits_range=MG_LITS_RANGE)
 
 
 @pytest.mark.mpi
 def test_decay_pmg_xml_mpi():
     '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner defined in XML on two MPI
     processes.'''
-    assert run_decay(2, nproc=2, pre='mg', pmg=True, max_lits=MG_MAX_LITS_MPI)
+    assert run_decay(2, nproc=2, pre='mg', pmg=True, lits_range=MG_LITS_RANGE_MPI)
 
 
 def test_decay_after_eigs():
