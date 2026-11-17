@@ -114,13 +114,13 @@ err_good=project_error(good_field)
 err_bad=project_error(3)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='periodic.results')
-  WRITE(io_unit,*)MERGE(1,0,base_mesh%periodic%revolved),MERGE(1,0,mg_mesh%mesh%periodic%revolved)
-  WRITE(io_unit,*)nper
-  WRITE(io_unit,*)base_mesh%np,base_mesh%ne,base_mesh%nf
-  WRITE(io_unit,*)base_counts
-  WRITE(io_unit,*)fine_counts
-  WRITE(io_unit,*)err_good
-  WRITE(io_unit,*)err_bad
+  WRITE(io_unit,'(2I2)')MERGE(1,0,base_mesh%periodic%revolved),MERGE(1,0,mg_mesh%mesh%periodic%revolved)
+  WRITE(io_unit,'(3I12)')nper
+  WRITE(io_unit,'(3I12)')base_mesh%np,base_mesh%ne,base_mesh%nf
+  WRITE(io_unit,'(4I12)')base_counts
+  WRITE(io_unit,'(4I12)')fine_counts
+  WRITE(io_unit,'(ES24.16)')err_good
+  WRITE(io_unit,'(ES24.16)')err_bad
   CLOSE(io_unit)
 END IF
 !---Finalize enviroment

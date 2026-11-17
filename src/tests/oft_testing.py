@@ -59,10 +59,11 @@ def run_OFT(command, nproc, timeout, return_stdout=False, expect_abort=None):
         timeout *= 4
     # Wait for process to complete or timeout, reading the output as it arrives; waiting without reading
     # deadlocks once the output fills the pipe buffer (64 KB)
+    timed_out = False
     try:
         outs, errs = pid.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        print("FAILED: OFT timed out after {0} s".format(timeout))
+        timed_out = True
         kill_process_group(pid)
         outs, errs = pid.communicate()
     except BaseException:
@@ -79,6 +80,12 @@ def run_OFT(command, nproc, timeout, return_stdout=False, expect_abort=None):
     print("ERRCODE = {0}".format(errcode))
     print("========== END OFT OUTPUT ==========")
     #
+    if timed_out:
+        print("FAILED: OFT timed out after {0} s".format(timeout))
+        if return_stdout:
+            return False, std_out
+        else:
+            return False
     if std_out.find('Not compiled with PETSc') > -1:
         pytest.skip("Not compiled with PETSc")
         if return_stdout:
