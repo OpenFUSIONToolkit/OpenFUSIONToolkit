@@ -948,9 +948,12 @@ end subroutine vector_borrow_local
 !! are synchronized from their owning process (`stitch(0)`, as done by `restore_local`):
 !! - `sync=.TRUE.` is always safe and must be used when processes sharing a value
 !!   may have written different values to it.
-!! - `sync=.FALSE.` skips the MPI exchange. Use it only if every process sharing a
-!!   value made the same modification (eg. zeroing based on a global boundary flag),
-!!   or if the caller synchronizes the vector explicitly before it is used.
+!! - `sync=.FALSE.` skips the MPI exchange. Use it only if shared values are
+!!   consistent across processes when the array is released, ie. the vector was
+!!   consistent on borrow and every process sharing a value made the same
+!!   modification (eg. zeroing based on a global boundary flag). Native vectors check
+!!   this in debug builds (`OFT_DEBUG`). To synchronize several blocks once, release
+!!   them all with `sync=.TRUE.` or release the whole vector instead.
 !! Backends that keep a single copy of each shared value (eg. PETSc) only retain
 !! the owned values, which is the same result as `sync=.TRUE.`.
 !!

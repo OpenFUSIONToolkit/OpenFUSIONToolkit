@@ -965,6 +965,43 @@ DEBUG_STACK_PUSH
 call oft_global_stitch(self%stitch_info,self%v,up_method)
 DEBUG_STACK_POP
 end subroutine vec_stitch
+#ifdef OFT_DEBUG
+!---------------------------------------------------------------------------------
+!> Check that values shared between processes agree with their owner's value
+!!
+!! Debug builds only (`OFT_DEBUG`). Used by `release_local` with `sync=.FALSE.`, which
+!! requires shared values to be consistent across processes at release. The values
+!! are compared with the result of `stitch(0)` on a copy, and all processes abort if
+!! any shared value differs from its owner's value by more than a relative 1.E-12.
+!! This is a collective operation.
+!---------------------------------------------------------------------------------
+subroutine native_check_shared(seam,vals,caller)
+type(oft_seam), intent(inout) :: seam !< Seam structure of the vector
+real(r8), intent(in) :: vals(:) !< Local values of the vector
+character(LEN=*), intent(in) :: caller !< Name of calling routine (for error message)
+integer(i4) :: i,j,nbad
+real(r8) :: dmax
+real(r8), allocatable, dimension(:) :: tmp
+ALLOCATE(tmp(SIZE(vals)))
+tmp=vals
+CALL oft_global_stitch(seam,tmp,0)
+nbad=0
+dmax=0.d0
+DO i=1,seam%nbe
+  j=seam%lbe(i)
+  IF(ABS(tmp(j)-vals(j))>1.d-12*MAX(ABS(tmp(j)),ABS(vals(j))))THEN
+    nbad=nbad+1
+    dmax=MAX(dmax,ABS(tmp(j)-vals(j)))
+  END IF
+END DO
+DEALLOCATE(tmp)
+IF(nbad>0)WRITE(*,'(A,I8,A,I8,A,ES12.4)')'Rank ',oft_env%rank,': ',nbad, &
+  ' shared values differ from owner, max abs difference ',dmax
+nbad=oft_mpi_sum(nbad)
+IF(nbad>0)CALL oft_abort('Shared values inconsistent after release_local with sync=.FALSE. ('//caller//')', &
+  'native_check_shared',__FILE__)
+end subroutine native_check_shared
+#endif
 !---------------------------------------------------------------------------------
 !> Borrow local values without a copy
 !!
@@ -1018,6 +1055,9 @@ END IF
 IF(.NOT.match)CALL oft_abort('Array was not borrowed from this vector','vec_release_local',__FILE__)
 NULLIFY(array)
 IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
+#ifdef OFT_DEBUG
+IF((.NOT.sync).AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL native_check_shared(self%stitch_info,self%v,'vec_release_local')
+#endif
 DEBUG_STACK_POP
 end subroutine vec_release_local
 !---------------------------------------------------------------------------------
@@ -2098,6 +2138,13 @@ END IF
 IF(.NOT.match)CALL oft_abort('Array was not borrowed from this vector','cvec_release_local',__FILE__)
 NULLIFY(array)
 IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
+#ifdef OFT_DEBUG
+!---Real and imaginary parts are checked separately (complex vector seams have no buffers)
+IF((.NOT.sync).AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))THEN
+  CALL native_check_shared(self%stitch_info,REAL(self%v,r8),'cvec_release_local (real part)')
+  CALL native_check_shared(self%stitch_info,AIMAG(self%v),'cvec_release_local (imaginary part)')
+END IF
+#endif
 DEBUG_STACK_POP
 end subroutine cvec_release_local
 !---------------------------------------------------------------------------------

@@ -319,19 +319,20 @@ END DO
 CALL y%release_local(bvals,OFT_ACCESS_WRITE,.TRUE.)
 CALL check_exact('Borrow write with sync = restore_local',maxdiff(y,z),0.d0)
 CALL check_exact('Shared values consistent after sync',inconsistency(y),0.d0)
-!---Without sync the process dependent values are kept (differ on shared entries in parallel)
-CALL y%borrow_local(bvals,OFT_ACCESS_WRITE)
+!---Without sync a modification made identically on all processes keeps shared values consistent
+CALL z%copy(y)
+CALL y%borrow_local(bvals,OFT_ACCESS_READWRITE)
 DO i=1,y%n
-  bvals(i)=vals(i)
+  bvals(i)=bvals(i)-0.5d0*REAL(MOD(x%map(1)%offsetg+x%map(1)%lge(i),7_i8),r8)
 END DO
-CALL y%release_local(bvals,OFT_ACCESS_WRITE,.FALSE.)
-v1=inconsistency(y)
-IF((oft_env%nprocs>1).NEQV.(v1>0.5d0))THEN
-  nfail=nfail+1
-  IF(oft_env%head_proc)WRITE(*,*)'FAILED: Unexpected consistency without sync',v1
-ELSE
-  IF(oft_env%head_proc)WRITE(*,*)'PASSED: Values kept without sync'
-END IF
+CALL y%release_local(bvals,OFT_ACCESS_READWRITE,.FALSE.)
+CALL z%borrow_local(bvals,OFT_ACCESS_READWRITE)
+DO i=1,z%n
+  bvals(i)=bvals(i)-0.5d0*REAL(MOD(x%map(1)%offsetg+x%map(1)%lge(i),7_i8),r8)
+END DO
+CALL z%release_local(bvals,OFT_ACCESS_READWRITE,.TRUE.)
+CALL check_exact('Borrow read-write without sync = with sync',maxdiff(y,z),0.d0)
+CALL check_exact('Shared values consistent without sync',inconsistency(y),0.d0)
 DEALLOCATE(vals)
 CALL x%delete
 CALL y%delete
