@@ -33,7 +33,8 @@ USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
   oft_global_reduction, oft_global_norm1, oft_stitch_check
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
-  oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph
+  oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
+  OFT_ACCESS_READWRITE
 IMPLICIT NONE
 #include "local.h"
 private
@@ -74,6 +75,14 @@ contains
   procedure :: norm => vec_norm
   !> Perform global stitching
   procedure :: stitch => vec_stitch
+  !> Borrow local values without a copy
+  procedure :: borrow_local => vec_borrow_local
+  !> Release borrowed local values
+  procedure :: release_local => vec_release_local
+  !> Copy values from a second vector
+  procedure :: copy => vec_copy
+  !> Add a linear combination of vectors
+  procedure :: maxpy => vec_maxpy
   !> Delete vector
   procedure :: delete => vec_delete
 end type oft_native_vector
@@ -114,6 +123,14 @@ contains
   procedure :: norm => cvec_norm
   !> Perform global stitching
   procedure :: stitch => cvec_stitch
+  !> Borrow local values without a copy
+  procedure :: borrow_local => cvec_borrow_local
+  !> Release borrowed local values
+  procedure :: release_local => cvec_release_local
+  procedure :: copy_real => cvec_copy_vec
+  procedure :: copy_complex => cvec_copy_cvec
+  !> Add a linear combination of vectors
+  procedure :: maxpy => cvec_maxpy
   !> Delete vector
   procedure :: delete => cvec_delete
 end type oft_native_cvector
@@ -306,6 +323,21 @@ INTERFACE
   END SUBROUTINE oft_metis_partgraph
 END INTERFACE
 INTEGER(i4), PARAMETER :: lc_offset = HUGE(INT(1,2))
+!> Number of rows processed together by multi-vector kernels (`mdot`, `maxpy`), chosen
+!! so that one row block of every vector involved stays in cache
+INTEGER(i4), PARAMETER :: native_vec_chunk = 512
+!---------------------------------------------------------------------------------
+!> Contiguous pointer to the values of a real vector (for multi-vector kernels)
+!---------------------------------------------------------------------------------
+type :: native_rvals_ptr
+  real(r8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
+end type native_rvals_ptr
+!---------------------------------------------------------------------------------
+!> Contiguous pointer to the values of a complex vector (for multi-vector kernels)
+!---------------------------------------------------------------------------------
+type :: native_cvals_ptr
+  complex(c8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
+end type native_cvals_ptr
 !---Declare public entities
 public native_vector_cast, native_cvector_cast, native_matrix_cast, native_cmatrix_cast
 public partition_graph, native_matrix_setup_full
@@ -525,6 +557,7 @@ logical, optional, intent(in) :: add !< Add values instead of replace
 logical, optional, intent(in) :: wait !< Wait to perform global sync
 logical :: do_add,do_wait
 integer(i4) :: j
+real(r8), allocatable, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 do_add=.FALSE.
 IF(PRESENT(add))do_add=add
@@ -556,10 +589,26 @@ ELSE
   IF(ASSOCIATED(self%local_tmp))CALL oft_abort("Existing partial restore found when restoring full vector", &
     "vec_restore_local",__FILE__)
   IF(do_wait)CALL oft_abort("Wait not supported when restoring full vector","vec_restore_local",__FILE__)
-  ALLOCATE(self%local_tmp(self%n))
-  self%local_tmp=array
-  CALL full_restore_local(self%local_tmp)
-  DEALLOCATE(self%local_tmp)
+  IF(do_add)THEN
+    !---Contributions must be summed before adding, which needs a modifiable copy
+    ALLOCATE(atmp(self%n))
+    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
+    !$omp do simd
+    DO j=1,self%n
+      atmp(j)=array(j)
+    END DO
+    !$omp end parallel
+    CALL full_restore_local(atmp)
+    DEALLOCATE(atmp)
+  ELSE
+    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
+    !$omp do simd
+    DO j=1,self%n
+      self%v(j)=array(j)
+    END DO
+    !$omp end parallel
+    CALL self%stitch(0)
+  END IF
 END IF
 DEBUG_STACK_POP
 contains
@@ -567,23 +616,13 @@ contains
 subroutine full_restore_local(array_loc)
 real(r8), intent(inout) :: array_loc(:)
 integer(i4) :: i
-IF(do_add)THEN
-  call oft_global_stitch(self%stitch_info,array_loc,1)
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  DO i=1,self%n
-    self%v(i)=self%v(i)+array_loc(i)
-  END DO
-  !$omp end parallel
-ELSE
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  DO i=1,self%n
-    self%v(i)=array_loc(i)
-  END DO
-  !$omp end parallel
-  IF(.NOT.do_wait)CALL self%stitch(0)
-END IF
+call oft_global_stitch(self%stitch_info,array_loc,1)
+!$omp parallel if(self%n>OFT_OMP_VTHRESH)
+!$omp do simd
+DO i=1,self%n
+  self%v(i)=self%v(i)+array_loc(i)
+END DO
+!$omp end parallel
 end subroutine full_restore_local
 end subroutine vec_restore_local
 !---------------------------------------------------------------------------------
@@ -622,19 +661,37 @@ if(present(beta).AND.present(b))then ! Add two vectors to the source
     CALL b%get_local(btmp)
     dealloc_flag(2)=.TRUE.
   END SELECT
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,self%n
-    self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
-  end do
-  !$omp end parallel
+  IF(gamma==0.d0)THEN ! Do not read destination (avoids propagating non-finite values)
+    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
+    !$omp do simd
+    do i=1,self%n
+      self%v(i) = alpha*atmp(i) + beta*btmp(i)
+    end do
+    !$omp end parallel
+  ELSE
+    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
+    !$omp do simd
+    do i=1,self%n
+      self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
+    end do
+    !$omp end parallel
+  END IF
 else ! Add one vector to the source
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,self%n
-    self%v(i) = gamma*self%v(i) + alpha*atmp(i)
-  end do
-  !$omp end parallel
+  IF(gamma==0.d0)THEN ! Do not read destination (avoids propagating non-finite values)
+    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
+    !$omp do simd
+    do i=1,self%n
+      self%v(i) = alpha*atmp(i)
+    end do
+    !$omp end parallel
+  ELSE
+    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
+    !$omp do simd
+    do i=1,self%n
+      self%v(i) = gamma*self%v(i) + alpha*atmp(i)
+    end do
+    !$omp end parallel
+  END IF
 end if
 IF(dealloc_flag(1))DEALLOCATE(atmp)
 IF(dealloc_flag(2))DEALLOCATE(btmp)
@@ -736,47 +793,121 @@ end select
 DEBUG_STACK_POP
 end function vec_dot_cvec
 !---------------------------------------------------------------------------------
-!> Dot product with an array of vectors
+!> Dot products with an array of vectors
+!!
+!! All products are computed in a single pass over row blocks (one parallel region),
+!! so each block of `self` is loaded once for all `n` products. Values shared with
+!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
+!! "oft_global_dp") and the results are combined with a single MPI reduction, which
+!! is skipped when the local mesh is complete (`stitch_info%full`).
 !---------------------------------------------------------------------------------
 function vec_mdot_vec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i
+integer(i4) :: i,j,k,ib,ie
+real(r8) :: tmp,dloc(n)
+type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
-DO i=1,n
-  select type(this=>a(i)%f)
+DO k=1,n
+  select type(this=>a(k)%f)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_mdot_vec',__FILE__)
-    dots(i)=oft_global_dp(self%stitch_info,self%v,this%v,this%n,no_reduce=.TRUE.)
+    vals(k)%v=>this%v
   class default
     CALL oft_abort('"a" is not a native vector.','vec_mdot_vec',__FILE__)
   end select
 END DO
-IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
+dloc=0.d0
+IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
+  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !$omp do schedule(static)
+  DO ib=1,self%n,native_vec_chunk
+    ie=MIN(self%n,ib+native_vec_chunk-1)
+    DO k=1,n
+      tmp=0.d0
+      !$omp simd reduction(+:tmp)
+    DO i=ib,ie
+        tmp=tmp+self%v(i)*vals(k)%v(i)
+      END DO
+      dloc(k)=dloc(k)+tmp
+    END DO
+  END DO
+  !$omp end do nowait
+  !---Remove values not owned by this process
+  !$omp do schedule(static)
+  DO i=1,self%stitch_info%nbe
+    IF(self%stitch_info%leo(i))CYCLE
+    j=self%stitch_info%lbe(i)
+    DO k=1,n
+      dloc(k)=dloc(k)-self%v(j)*vals(k)%v(j)
+    END DO
+  END DO
+  !$omp end do nowait
+  !$omp end parallel
+END IF
+IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
+dots=dloc
 DEBUG_STACK_POP
 end function vec_mdot_vec
 !---------------------------------------------------------------------------------
-!> Dot product with an array of complex vectors
+!> Dot products with an array of vectors
+!!
+!! All products are computed in a single pass over row blocks (one parallel region),
+!! so each block of `self` is loaded once for all `n` products. Values shared with
+!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
+!! "oft_global_dp") and the results are combined with a single MPI reduction, which
+!! is skipped when the local mesh is complete (`stitch_info%full`).
 !---------------------------------------------------------------------------------
 function vec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i
+integer(i4) :: i,j,k,ib,ie
+complex(c8) :: tmp,dloc(n)
+type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
-DO i=1,n
-  select type(this=>a(i)%f)
+DO k=1,n
+  select type(this=>a(k)%f)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_mdot_cvec',__FILE__)
-    dots(i)=oft_global_dp(self%stitch_info,self%v,this%v,this%n,no_reduce=.TRUE.)
+    vals(k)%v=>this%v
   class default
     CALL oft_abort('"a" is not a native complex vector.','vec_mdot_cvec',__FILE__)
   end select
 END DO
-IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
+dloc=(0.d0,0.d0)
+IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
+  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !$omp do schedule(static)
+  DO ib=1,self%n,native_vec_chunk
+    ie=MIN(self%n,ib+native_vec_chunk-1)
+    DO k=1,n
+      tmp=(0.d0,0.d0)
+      !$omp simd reduction(+:tmp)
+      DO i=ib,ie
+        tmp=tmp+self%v(i)*vals(k)%v(i)
+      END DO
+      dloc(k)=dloc(k)+tmp
+    END DO
+  END DO
+  !$omp end do nowait
+  !---Remove values not owned by this process
+  !$omp do schedule(static)
+  DO i=1,self%stitch_info%nbe
+    IF(self%stitch_info%leo(i))CYCLE
+    j=self%stitch_info%lbe(i)
+    DO k=1,n
+      dloc(k)=dloc(k)-self%v(j)*vals(k)%v(j)
+    END DO
+  END DO
+  !$omp end do nowait
+  !$omp end parallel
+END IF
+IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
+dots=dloc
 DEBUG_STACK_POP
 end function vec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -826,6 +957,126 @@ DEBUG_STACK_PUSH
 call oft_global_stitch(self%stitch_info,self%v,up_method)
 DEBUG_STACK_POP
 end subroutine vec_stitch
+!---------------------------------------------------------------------------------
+!> Borrow local values without a copy
+!!
+!! Returns a pointer to the vector's own storage (or to the range of block `iblock`).
+!! See @ref oft_la_base::vector_borrow_local "vector_borrow_local" for the contract.
+!---------------------------------------------------------------------------------
+subroutine vec_borrow_local(self,array,mode,iblock)
+class(oft_native_vector), intent(inout) :: self !< Vector object
+real(r8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
+integer(i4), intent(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
+integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'vec_borrow_local',__FILE__)
+IF(PRESENT(iblock))THEN
+  IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_borrow_local',__FILE__)
+  array=>self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+ELSE
+  array=>self%v
+END IF
+DEBUG_STACK_POP
+end subroutine vec_borrow_local
+!---------------------------------------------------------------------------------
+!> Release local values obtained with `borrow_local`
+!!
+!! Values were modified in place, so only the optional synchronization (`stitch(0)`)
+!! is performed. See @ref oft_la_base::vector_release_local "vector_release_local"
+!! for the contract.
+!---------------------------------------------------------------------------------
+subroutine vec_release_local(self,array,mode,sync,iblock)
+class(oft_native_vector), intent(inout) :: self !< Vector object
+real(r8), pointer, contiguous, intent(inout) :: array(:) !< Borrowed local values (nullified on return)
+integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
+logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
+integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
+logical :: match
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'vec_release_local',__FILE__)
+IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
+  'vec_release_local',__FILE__)
+!---Check that the array was borrowed from this vector (zero-size targets never match)
+IF(PRESENT(iblock))THEN
+  IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_release_local',__FILE__)
+  match=(self%map(iblock)%n==0)
+  IF(.NOT.match)match=ASSOCIATED(array,self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n))
+ELSE
+  match=(self%n==0)
+  IF(.NOT.match)match=ASSOCIATED(array,self%v)
+END IF
+IF(.NOT.match)CALL oft_abort('Array was not borrowed from this vector','vec_release_local',__FILE__)
+NULLIFY(array)
+IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
+DEBUG_STACK_POP
+end subroutine vec_release_local
+!---------------------------------------------------------------------------------
+!> Copy values from a second vector
+!!
+!! self = a
+!---------------------------------------------------------------------------------
+subroutine vec_copy(self,a)
+class(oft_native_vector), intent(inout) :: self !< Vector object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+integer(i4) :: i
+real(r8), pointer, contiguous, dimension(:) :: atmp
+DEBUG_STACK_PUSH
+IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','vec_copy',__FILE__)
+NULLIFY(atmp)
+CALL a%borrow_local(atmp,OFT_ACCESS_READ)
+!$omp parallel if(self%n>OFT_OMP_VTHRESH)
+!$omp do simd
+DO i=1,self%n
+  self%v(i)=atmp(i)
+END DO
+!$omp end parallel
+CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
+DEBUG_STACK_POP
+end subroutine vec_copy
+!---------------------------------------------------------------------------------
+!> Add a linear combination of vectors
+!!
+!! self = self + \f$ \sum_k \alpha_k a_k \f$
+!!
+!! All vectors are processed in a single pass over row blocks (one parallel region),
+!! so each block of `self` is loaded once for all `n` updates. Terms are added in
+!! order of increasing `k`, giving the same result as `n` successive calls to `add`.
+!---------------------------------------------------------------------------------
+subroutine vec_maxpy(self,alpha,a,n)
+class(oft_native_vector), intent(inout) :: self !< Vector object
+integer(i4), intent(in) :: n !< Number of vectors
+real(r8), intent(in) :: alpha(n) !< Scale factors [n]
+type(oft_vector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
+integer(i4) :: i,k,ib,ie
+type(native_rvals_ptr) :: vals(n)
+DEBUG_STACK_PUSH
+IF(n<1)THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
+DO k=1,n
+  select type(this=>a(k)%f)
+  class is(oft_native_vector)
+    IF(self%n/=this%n)CALL oft_abort('Vector lengths do not match.','vec_maxpy',__FILE__)
+    vals(k)%v=>this%v
+  class default
+    CALL oft_abort('"a" is not a native vector.','vec_maxpy',__FILE__)
+  end select
+END DO
+!$omp parallel do private(ie,k,i) schedule(static) if(self%n>OFT_OMP_VTHRESH)
+DO ib=1,self%n,native_vec_chunk
+  ie=MIN(self%n,ib+native_vec_chunk-1)
+  DO k=1,n
+    !$omp simd
+    DO i=ib,ie
+      self%v(i)=self%v(i)+alpha(k)*vals(k)%v(i)
+    END DO
+  END DO
+END DO
+DEBUG_STACK_POP
+end subroutine vec_maxpy
 !---------------------------------------------------------------------------------
 !> Finalize vector
 !---------------------------------------------------------------------------------
@@ -1284,6 +1535,7 @@ logical, optional, intent(in) :: add !< Add values instead of replace
 logical, optional, intent(in) :: wait !< Wait to perform global sync?
 integer(i4) :: j
 logical :: do_add,do_wait
+complex(c8), allocatable, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 do_add=.FALSE.
 IF(PRESENT(add))do_add=add
@@ -1318,10 +1570,22 @@ ELSE
     "cvec_restore_local",__FILE__)
   IF(do_wait)CALL oft_abort("Wait not supported when restoring full vector", &
     "cvec_restore_local",__FILE__)
-  ALLOCATE(self%local_tmp(self%n))
-  self%local_tmp=array
-  CALL full_restore_local(self%local_tmp)
-  DEALLOCATE(self%local_tmp)
+  IF(do_add)THEN
+    !---Contributions must be summed before adding, which needs a modifiable copy
+    ALLOCATE(atmp(self%n))
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    DO j=1,self%n
+      atmp(j)=array(j)
+    END DO
+    CALL full_restore_local(atmp)
+    DEALLOCATE(atmp)
+  ELSE
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    DO j=1,self%n
+      self%v(j)=array(j)
+    END DO
+    CALL self%stitch(0)
+  END IF
 END IF
 DEBUG_STACK_POP
 contains
@@ -1329,19 +1593,11 @@ contains
 subroutine full_restore_local(array_loc)
 complex(c8), intent(inout) :: array_loc(:)
 integer(i4) :: i
-IF(do_add)THEN
-  call oft_global_stitch(self%stitch_info,array_loc,1)
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  DO i=1,self%n
-    self%v(i)=self%v(i)+array_loc(i)
-  END DO
-ELSE
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  DO i=1,self%n
-    self%v(i)=array_loc(i)
-  END DO
-  IF(.NOT.do_wait)CALL self%stitch(0)
-END IF
+call oft_global_stitch(self%stitch_info,array_loc,1)
+!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+DO i=1,self%n
+  self%v(i)=self%v(i)+array_loc(i)
+END DO
 end subroutine full_restore_local
 end subroutine cvec_restore_local
 !---------------------------------------------------------------------------------
@@ -1380,15 +1636,29 @@ if(present(beta).AND.present(b))then ! Add two vectors to the source
     CALL b%get_local(btmp)
     dealloc_flag(2)=.TRUE.
   END SELECT
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
-  end do
+  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = alpha*atmp(i) + beta*btmp(i)
+    end do
+  ELSE
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
+    end do
+  END IF
 else ! Add one vector to the source
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = gamma*self%v(i) + alpha*atmp(i)
-  end do
+  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = alpha*atmp(i)
+    end do
+  ELSE
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = gamma*self%v(i) + alpha*atmp(i)
+    end do
+  END IF
 end if
 IF(dealloc_flag(1))DEALLOCATE(atmp)
 IF(dealloc_flag(2))DEALLOCATE(btmp)
@@ -1430,15 +1700,29 @@ if(present(beta).AND.present(b))then ! Add two vectors to the source
     CALL b%get_local(btmp)
     dealloc_flag(2)=.TRUE.
   END SELECT
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
-  end do
+  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = alpha*atmp(i) + beta*btmp(i)
+    end do
+  ELSE
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
+    end do
+  END IF
 else ! Add one vector to the source
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = gamma*self%v(i) + alpha*atmp(i)
-  end do
+  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = alpha*atmp(i)
+    end do
+  ELSE
+    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+    do i=1,self%n
+      self%v(i) = gamma*self%v(i) + alpha*atmp(i)
+    end do
+  END IF
 end if
 IF(dealloc_flag(1))DEALLOCATE(atmp)
 IF(dealloc_flag(2))DEALLOCATE(btmp)
@@ -1575,47 +1859,121 @@ end select
 DEBUG_STACK_POP
 end function cvec_dot_cvec
 !---------------------------------------------------------------------------------
-!> Dot product with an array of vectors
+!> Dot products with an array of vectors
+!!
+!! All products are computed in a single pass over row blocks (one parallel region),
+!! so each block of `self` is loaded once for all `n` products. Values shared with
+!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
+!! "oft_global_dp") and the results are combined with a single MPI reduction, which
+!! is skipped when the local mesh is complete (`stitch_info%full`).
 !---------------------------------------------------------------------------------
 function cvec_mdot_vec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
-complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i
+complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
+integer(i4) :: i,j,k,ib,ie
+complex(c8) :: tmp,dloc(n)
+type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
-DO i=1,n
-  select type(this=>a(i)%f)
+DO k=1,n
+  select type(this=>a(k)%f)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_mdot_vec',__FILE__)
-    dots(i)=oft_global_dp(self%stitch_info,self%v,this%v,this%n,no_reduce=.TRUE.)
+    vals(k)%v=>this%v
   class default
     CALL oft_abort('"a" is not a native vector.','cvec_mdot_vec',__FILE__)
   end select
 END DO
-dots=oft_mpi_sum(dots,n)
+dloc=(0.d0,0.d0)
+IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
+  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !$omp do schedule(static)
+  DO ib=1,self%n,native_vec_chunk
+    ie=MIN(self%n,ib+native_vec_chunk-1)
+    DO k=1,n
+      tmp=(0.d0,0.d0)
+      !$omp simd reduction(+:tmp)
+      DO i=ib,ie
+        tmp=tmp+CONJG(self%v(i))*vals(k)%v(i)
+      END DO
+      dloc(k)=dloc(k)+tmp
+    END DO
+  END DO
+  !$omp end do nowait
+  !---Remove values not owned by this process
+  !$omp do schedule(static)
+  DO i=1,self%stitch_info%nbe
+    IF(self%stitch_info%leo(i))CYCLE
+    j=self%stitch_info%lbe(i)
+    DO k=1,n
+      dloc(k)=dloc(k)-CONJG(self%v(j))*vals(k)%v(j)
+    END DO
+  END DO
+  !$omp end do nowait
+  !$omp end parallel
+END IF
+IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
+dots=dloc
 DEBUG_STACK_POP
 end function cvec_mdot_vec
 !---------------------------------------------------------------------------------
-!> Dot product with an array of vectors
+!> Dot products with an array of vectors
+!!
+!! All products are computed in a single pass over row blocks (one parallel region),
+!! so each block of `self` is loaded once for all `n` products. Values shared with
+!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
+!! "oft_global_dp") and the results are combined with a single MPI reduction, which
+!! is skipped when the local mesh is complete (`stitch_info%full`).
 !---------------------------------------------------------------------------------
 function cvec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
-complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i
+complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
+integer(i4) :: i,j,k,ib,ie
+complex(c8) :: tmp,dloc(n)
+type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
-DO i=1,n
-  select type(this=>a(i)%f)
+DO k=1,n
+  select type(this=>a(k)%f)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_mdot_cvec',__FILE__)
-    dots(i)=oft_global_dp(self%stitch_info,self%v,this%v,this%n,no_reduce=.TRUE.)
+    vals(k)%v=>this%v
   class default
     CALL oft_abort('"a" is not a native complex vector.','cvec_mdot_cvec',__FILE__)
   end select
 END DO
-dots=oft_mpi_sum(dots,n)
+dloc=(0.d0,0.d0)
+IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
+  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !$omp do schedule(static)
+  DO ib=1,self%n,native_vec_chunk
+    ie=MIN(self%n,ib+native_vec_chunk-1)
+    DO k=1,n
+      tmp=(0.d0,0.d0)
+      !$omp simd reduction(+:tmp)
+      DO i=ib,ie
+        tmp=tmp+CONJG(self%v(i))*vals(k)%v(i)
+      END DO
+      dloc(k)=dloc(k)+tmp
+    END DO
+  END DO
+  !$omp end do nowait
+  !---Remove values not owned by this process
+  !$omp do schedule(static)
+  DO i=1,self%stitch_info%nbe
+    IF(self%stitch_info%leo(i))CYCLE
+    j=self%stitch_info%lbe(i)
+    DO k=1,n
+      dloc(k)=dloc(k)-CONJG(self%v(j))*vals(k)%v(j)
+    END DO
+  END DO
+  !$omp end do nowait
+  !$omp end parallel
+END IF
+IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
+dots=dloc
 DEBUG_STACK_POP
 end function cvec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -1665,6 +2023,142 @@ DEBUG_STACK_PUSH
 call oft_global_stitch(self%stitch_info,self%v,up_method)
 DEBUG_STACK_POP
 end subroutine cvec_stitch
+!---------------------------------------------------------------------------------
+!> Borrow local values without a copy
+!!
+!! Returns a pointer to the vector's own storage (or to the range of block `iblock`).
+!! See @ref oft_la_base::vector_borrow_local "vector_borrow_local" for the contract.
+!---------------------------------------------------------------------------------
+subroutine cvec_borrow_local(self,array,mode,iblock)
+class(oft_native_cvector), intent(inout) :: self !< Vector object
+complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
+integer(i4), intent(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
+integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'cvec_borrow_local',__FILE__)
+IF(PRESENT(iblock))THEN
+  IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_borrow_local',__FILE__)
+  array=>self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+ELSE
+  array=>self%v
+END IF
+DEBUG_STACK_POP
+end subroutine cvec_borrow_local
+!---------------------------------------------------------------------------------
+!> Release local values obtained with `borrow_local`
+!!
+!! Values were modified in place, so only the optional synchronization (`stitch(0)`)
+!! is performed. See @ref oft_la_base::vector_release_local "vector_release_local"
+!! for the contract.
+!---------------------------------------------------------------------------------
+subroutine cvec_release_local(self,array,mode,sync,iblock)
+class(oft_native_cvector), intent(inout) :: self !< Vector object
+complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Borrowed local values (nullified on return)
+integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
+logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
+integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
+logical :: match
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'cvec_release_local',__FILE__)
+IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
+  'cvec_release_local',__FILE__)
+!---Check that the array was borrowed from this vector (zero-size targets never match)
+IF(PRESENT(iblock))THEN
+  IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_release_local',__FILE__)
+  match=(self%map(iblock)%n==0)
+  IF(.NOT.match)match=ASSOCIATED(array,self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n))
+ELSE
+  match=(self%n==0)
+  IF(.NOT.match)match=ASSOCIATED(array,self%v)
+END IF
+IF(.NOT.match)CALL oft_abort('Array was not borrowed from this vector','cvec_release_local',__FILE__)
+NULLIFY(array)
+IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
+DEBUG_STACK_POP
+end subroutine cvec_release_local
+!---------------------------------------------------------------------------------
+!> Copy values from a real vector
+!!
+!! self = a
+!---------------------------------------------------------------------------------
+subroutine cvec_copy_vec(self,a)
+class(oft_native_cvector), intent(inout) :: self !< Vector object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+integer(i4) :: i
+real(r8), pointer, contiguous, dimension(:) :: atmp
+DEBUG_STACK_PUSH
+IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','cvec_copy_vec',__FILE__)
+NULLIFY(atmp)
+CALL a%borrow_local(atmp,OFT_ACCESS_READ)
+!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+DO i=1,self%n
+  self%v(i)=CMPLX(atmp(i),0.d0,c8)
+END DO
+CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
+DEBUG_STACK_POP
+end subroutine cvec_copy_vec
+!---------------------------------------------------------------------------------
+!> Copy values from a second complex vector
+!!
+!! self = a
+!---------------------------------------------------------------------------------
+subroutine cvec_copy_cvec(self,a)
+class(oft_native_cvector), intent(inout) :: self !< Vector object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
+integer(i4) :: i
+complex(c8), pointer, contiguous, dimension(:) :: atmp
+DEBUG_STACK_PUSH
+IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','cvec_copy_cvec',__FILE__)
+NULLIFY(atmp)
+CALL a%borrow_local(atmp,OFT_ACCESS_READ)
+!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
+DO i=1,self%n
+  self%v(i)=atmp(i)
+END DO
+CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
+DEBUG_STACK_POP
+end subroutine cvec_copy_cvec
+!---------------------------------------------------------------------------------
+!> Add a linear combination of complex vectors
+!!
+!! self = self + \f$ \sum_k \alpha_k a_k \f$
+!!
+!! Single pass over row blocks, see @ref vec_maxpy.
+!---------------------------------------------------------------------------------
+subroutine cvec_maxpy(self,alpha,a,n)
+class(oft_native_cvector), intent(inout) :: self !< Vector object
+integer(i4), intent(in) :: n !< Number of vectors
+complex(c8), intent(in) :: alpha(n) !< Scale factors [n]
+type(oft_cvector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
+integer(i4) :: i,k,ib,ie
+type(native_cvals_ptr) :: vals(n)
+DEBUG_STACK_PUSH
+IF(n<1)THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
+DO k=1,n
+  select type(this=>a(k)%f)
+  class is(oft_native_cvector)
+    IF(self%n/=this%n)CALL oft_abort('Vector lengths do not match.','cvec_maxpy',__FILE__)
+    vals(k)%v=>this%v
+  class default
+    CALL oft_abort('"a" is not a native complex vector.','cvec_maxpy',__FILE__)
+  end select
+END DO
+!$omp parallel do private(ie,k,i) schedule(static) if(self%n>OFT_OMP_VTHRESH)
+DO ib=1,self%n,native_vec_chunk
+  ie=MIN(self%n,ib+native_vec_chunk-1)
+  DO k=1,n
+    DO i=ib,ie
+      self%v(i)=self%v(i)+alpha(k)*vals(k)%v(i)
+    END DO
+  END DO
+END DO
+DEBUG_STACK_POP
+end subroutine cvec_maxpy
 !---------------------------------------------------------------------------------
 !> Finalize vector
 !---------------------------------------------------------------------------------
