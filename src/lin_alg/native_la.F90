@@ -138,11 +138,10 @@ end type oft_native_cvector
 !---------------------------------------------------------------------------------
 !> Transposed (CSC) index for the non-zero pattern of a native CRS matrix
 !!
-!! Built on first use by the transpose products and released with the matrix. Entries
+!! Built on first use by the transpose products and released with the pattern. Entries
 !! within each column are ordered by increasing row index.
 !---------------------------------------------------------------------------------
 type :: native_csc_index
-  integer(i4) :: nnz = -1 !< Number of non-zeros in the pattern used to build the index
   integer(i4), pointer, contiguous, dimension(:) :: kc => NULL() !< Column pointer to row list [nc+1]
   integer(i4), pointer, contiguous, dimension(:) :: lr => NULL() !< Row index of each entry [nnz]
   integer(i4), pointer, contiguous, dimension(:) :: lm => NULL() !< Location of each entry in CRS value array [nnz]
@@ -150,30 +149,71 @@ end type native_csc_index
 !---------------------------------------------------------------------------------
 !> Location of the diagonal entry in each row of a native CRS matrix
 !!
-!! Built on first use by matrix assembly and released with the matrix.
+!! Built on first use by matrix assembly and released with the pattern.
 !---------------------------------------------------------------------------------
 type :: native_diag_index
-  integer(i4) :: nnz = -1 !< Number of non-zeros in the pattern used to build the index
   integer(i4), pointer, contiguous, dimension(:) :: loc => NULL() !< Location of diagonal in CRS value array (0 if absent) [nr]
 end type native_diag_index
+!---------------------------------------------------------------------------------
+!> Non-zero pattern of native CRS matrices, shared between matrices by reference counting
+!!
+!! Holds everything that depends only on the location of the non-zeros: the CRS
+!! structure (`kr`, `lc`), the block maps, the 2-byte column list, the transposed
+!! (CSC) index, the diagonal locations and the seam and redundant-row data used to
+!! assemble full local matrices (@ref native_matrix_setup_full). Matrices with the
+!! same structure (eg. several operators on one FE space) can share one pattern, each
+!! holding only its own values.
+!!
+!! Ownership rules:
+!! - A pattern is created by @ref native_pattern_create, which takes ownership of the
+!!   CRS arrays and block maps passed to it, or by @ref native_matrix_adopt_pattern
+!!   from a matrix whose `kr`/`lc` were set directly.
+!! - Every matrix using a pattern holds one reference (@ref native_matrix_set_pattern,
+!!   @ref native_matrix_share). Other holders (eg. a pattern cache of an FE
+!!   representation) take a reference with @ref native_pattern_retain.
+!! - @ref native_pattern_release drops one reference; the pattern and everything it
+!!   owns are freed when the last reference is released. Deleting a matrix releases
+!!   its reference.
+!! - A pattern must not be modified once created; derived data (2-byte column list,
+!!   CSC index, diagonal locations, linkage) is built on first use and is valid for
+!!   the lifetime of the pattern.
+!!
+!! `kr`, `lc`, `map`, `linkage`, `redind`, `nred` and `nnz` of a matrix are aliases of
+!! the pattern components and must be treated as read-only.
+!---------------------------------------------------------------------------------
+type, public :: oft_native_pattern
+  integer(i4) :: refcount = 0 !< Number of references held (matrices and other holders)
+  integer(i4) :: nr = 0 !< Number of rows
+  integer(i4) :: nc = 0 !< Number of columns
+  integer(i4) :: nnz = 0 !< Number of non-zero entries
+  integer(i4) :: ni = 0 !< Number of row blocks in `map`
+  integer(i4) :: nj = 0 !< Number of column blocks in `map`
+  integer(i4) :: nred = 0 !< Number of redundant rows (set by @ref native_matrix_setup_full)
+  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list [nr+1]
+  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list [nnz]
+  integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list (built by assembly)
+  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows [nred]
+  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Block maps [ni,nj] (optional)
+  type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrices (built by @ref native_matrix_setup_full)
+  type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
+  type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
+end type oft_native_pattern
 !---------------------------------------------------------------------------------
 !> Native CRS matrix class
 !---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_native_matrix
   logical :: full_current = .FALSE. !< Is full matrix current?
-  integer(i4) :: nnz = 0 !< Number of non-zero entries
-  integer(i4) :: nred = 0 !< Number of redundant rows
-  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows
-  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list
-  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
-  integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list
-  type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
-  type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
+  integer(i4) :: nnz = 0 !< Number of non-zero entries (alias of `pattern%nnz`)
+  integer(i4) :: nred = 0 !< Number of redundant rows (alias of `pattern%nred`)
+  type(oft_native_pattern), pointer :: pattern => NULL() !< Non-zero pattern (possibly shared)
+  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows (alias of `pattern%redind`)
+  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list (alias of `pattern%kr`)
+  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list (alias of `pattern%lc`)
   real(r8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
-  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Global context
-  type(oft_seam), pointer :: linkage => NULL() !< Global linkage information
+  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Block maps (alias of `pattern%map`)
+  type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrix (alias of `pattern%linkage`)
 contains
   procedure :: apply_real => mat_apply_vec
   procedure :: apply_complex => mat_apply_cvec
@@ -205,20 +245,18 @@ end type oft_native_matrix
 !---------------------------------------------------------------------------------
 type, public, extends(oft_cmatrix) :: oft_native_cmatrix
   logical :: full_current = .FALSE. !< Is full matrix current?
-  integer(i4) :: nnz = 0 !< Number of non-zero entries
-  integer(i4) :: nred = 0 !< Number of redundant rows
+  integer(i4) :: nnz = 0 !< Number of non-zero entries (alias of `pattern%nnz`)
+  integer(i4) :: nred = 0 !< Number of redundant rows (alias of `pattern%nred`)
   integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
-  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows
-  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list
-  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
-  integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list
-  type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
-  type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
+  type(oft_native_pattern), pointer :: pattern => NULL() !< Non-zero pattern (possibly shared)
+  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows (alias of `pattern%redind`)
+  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list (alias of `pattern%kr`)
+  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list (alias of `pattern%lc`)
   complex(c8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
-  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Global context
-  type(oft_seam), pointer :: linkage => NULL() !< Global linkage information
+  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Block maps (alias of `pattern%map`)
+  type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrix (alias of `pattern%linkage`)
 contains
   procedure :: apply_real => cmat_apply_vec
   procedure :: apply_complex => cmat_apply_cvec
@@ -341,10 +379,35 @@ INTERFACE native_put_vals
   MODULE PROCEDURE native_put_rvals
   MODULE PROCEDURE native_put_cvals
 END INTERFACE native_put_vals
+!> Number of native CRS patterns currently allocated (for diagnostics and testing)
+INTEGER(i4), PUBLIC, PROTECTED :: native_pattern_live = 0
+!---------------------------------------------------------------------------------
+!> Use a non-zero pattern for a native CRS matrix (real or complex)
+!---------------------------------------------------------------------------------
+INTERFACE native_matrix_set_pattern
+  MODULE PROCEDURE native_matrix_set_pattern_real
+  MODULE PROCEDURE native_matrix_set_pattern_comp
+END INTERFACE native_matrix_set_pattern
+!---------------------------------------------------------------------------------
+!> Create a pattern from the CRS structure set directly on a native matrix (real or complex)
+!---------------------------------------------------------------------------------
+INTERFACE native_matrix_adopt_pattern
+  MODULE PROCEDURE native_matrix_adopt_pattern_real
+  MODULE PROCEDURE native_matrix_adopt_pattern_comp
+END INTERFACE native_matrix_adopt_pattern
+!---------------------------------------------------------------------------------
+!> Create a native CRS matrix (real or complex) sharing the pattern of an existing one
+!---------------------------------------------------------------------------------
+INTERFACE native_matrix_share
+  MODULE PROCEDURE native_matrix_share_real
+  MODULE PROCEDURE native_matrix_share_comp
+END INTERFACE native_matrix_share
 !---Declare public entities
 public native_vector_cast, native_cvector_cast, native_matrix_cast, native_cmatrix_cast
 public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
+public native_pattern_create, native_pattern_retain, native_pattern_release
+public native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -2043,10 +2106,295 @@ end select
 DEBUG_STACK_POP
 end FUNCTION native_matrix_cast
 !---------------------------------------------------------------------------------
-!> Build transposed (CSC) index for a CRS non-zero pattern, if not already current
+!> Create a native CRS non-zero pattern
 !!
-!! The index is rebuilt if the number of rows/columns or non-zeros has changed since it
-!! was built. Callers that may run concurrently on the same matrix must serialize calls
+!! The new pattern takes ownership of `kr`, `lc` and (if present) `map`, whose
+!! pointers are nullified on return. Its reference count is zero; it is retained by
+!! @ref native_matrix_set_pattern or @ref native_pattern_retain.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_pattern_create(pattern,nr,nc,kr,lc,map)
+TYPE(oft_native_pattern), POINTER, INTENT(out) :: pattern !< New pattern
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: nc !< Number of columns
+INTEGER(i4), POINTER, CONTIGUOUS, INTENT(inout) :: kr(:) !< Row pointer [nr+1] (ownership is transferred)
+INTEGER(i4), POINTER, CONTIGUOUS, INTENT(inout) :: lc(:) !< Column list [nnz] (ownership is transferred)
+TYPE(oft_matrix_map), POINTER, OPTIONAL, INTENT(inout) :: map(:,:) !< Block maps (ownership is transferred)
+DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(kr))CALL oft_abort('Row pointer not allocated','native_pattern_create',__FILE__)
+IF(SIZE(kr)/=nr+1)CALL oft_abort('Row pointer size does not match number of rows', &
+  'native_pattern_create',__FILE__)
+ALLOCATE(pattern)
+pattern%nr=nr
+pattern%nc=nc
+pattern%nnz=kr(nr+1)-1
+pattern%kr=>kr
+pattern%lc=>lc
+NULLIFY(kr,lc)
+IF(PRESENT(map))THEN
+  IF(ASSOCIATED(map))THEN
+    pattern%map=>map
+    pattern%ni=SIZE(map,DIM=1)
+    pattern%nj=SIZE(map,DIM=2)
+    NULLIFY(map)
+  END IF
+END IF
+!$omp atomic
+native_pattern_live=native_pattern_live+1
+DEBUG_STACK_POP
+END SUBROUTINE native_pattern_create
+!---------------------------------------------------------------------------------
+!> Take a reference to a native CRS non-zero pattern
+!---------------------------------------------------------------------------------
+SUBROUTINE native_pattern_retain(pattern)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern
+IF(.NOT.ASSOCIATED(pattern))CALL oft_abort('Pattern not associated','native_pattern_retain',__FILE__)
+pattern%refcount=pattern%refcount+1
+END SUBROUTINE native_pattern_retain
+!---------------------------------------------------------------------------------
+!> Release a reference to a native CRS non-zero pattern
+!!
+!! The pattern and everything it owns are freed when the last reference is
+!! released. `pattern` is nullified on return in either case.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_pattern_release(pattern)
+TYPE(oft_native_pattern), POINTER, INTENT(inout) :: pattern !< Pattern
+INTEGER(i4) :: i,j
+IF(.NOT.ASSOCIATED(pattern))RETURN
+DEBUG_STACK_PUSH
+pattern%refcount=pattern%refcount-1
+IF(pattern%refcount<=0)THEN
+  IF(ASSOCIATED(pattern%kr))DEALLOCATE(pattern%kr)
+  IF(ASSOCIATED(pattern%lc))DEALLOCATE(pattern%lc)
+  IF(ASSOCIATED(pattern%lc_small))DEALLOCATE(pattern%lc_small)
+  IF(ASSOCIATED(pattern%redind))DEALLOCATE(pattern%redind)
+  CALL native_csc_delete(pattern%csc)
+  CALL native_diag_delete(pattern%diag_index)
+  IF(ASSOCIATED(pattern%map))THEN
+    DO i=1,SIZE(pattern%map,DIM=1)
+      DO j=1,SIZE(pattern%map,DIM=2)
+        IF(ASSOCIATED(pattern%map(i,j)%lc_map))DEALLOCATE(pattern%map(i,j)%lc_map)
+        IF(ASSOCIATED(pattern%map(i,j)%ext))DEALLOCATE(pattern%map(i,j)%ext)
+      END DO
+    END DO
+    DEALLOCATE(pattern%map)
+  END IF
+  IF(ASSOCIATED(pattern%linkage))THEN
+    IF(ASSOCIATED(pattern%linkage%send))THEN
+      DO i=0,pattern%linkage%nproc_con
+        IF(ASSOCIATED(pattern%linkage%send(i)%v))DEALLOCATE(pattern%linkage%send(i)%v,pattern%linkage%recv(i)%v)
+        IF(ASSOCIATED(pattern%linkage%csend(i)%v))DEALLOCATE(pattern%linkage%csend(i)%v,pattern%linkage%crecv(i)%v)
+      END DO
+      DEALLOCATE(pattern%linkage%send,pattern%linkage%recv)
+      DEALLOCATE(pattern%linkage%csend,pattern%linkage%crecv)
+    END IF
+    IF(ASSOCIATED(pattern%linkage%kle))DEALLOCATE(pattern%linkage%kle)
+    IF(ASSOCIATED(pattern%linkage%lbe))DEALLOCATE(pattern%linkage%lbe)
+    IF(ASSOCIATED(pattern%linkage%lle))DEALLOCATE(pattern%linkage%lle)
+    DEALLOCATE(pattern%linkage)
+  END IF
+  DEALLOCATE(pattern)
+  !$omp atomic
+  native_pattern_live=native_pattern_live-1
+END IF
+NULLIFY(pattern)
+DEBUG_STACK_POP
+END SUBROUTINE native_pattern_release
+!---------------------------------------------------------------------------------
+!> Point the pattern aliases of a matrix at the components of its pattern
+!!
+!! Shared by the real and complex CRS matrix classes; the arguments are the alias
+!! components of the matrix.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_pattern_alias(pattern,kr,lc,map,linkage,redind,nred,nnz)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern (may be null)
+INTEGER(i4), POINTER, CONTIGUOUS, INTENT(inout) :: kr(:) !< Row pointer alias
+INTEGER(i4), POINTER, CONTIGUOUS, INTENT(inout) :: lc(:) !< Column list alias
+TYPE(oft_matrix_map), POINTER, INTENT(inout) :: map(:,:) !< Block map alias
+TYPE(oft_seam), POINTER, INTENT(inout) :: linkage !< Linkage alias
+INTEGER(i4), POINTER, CONTIGUOUS, INTENT(inout) :: redind(:) !< Redundant row alias
+INTEGER(i4), INTENT(out) :: nred !< Number of redundant rows
+INTEGER(i4), INTENT(out) :: nnz !< Number of non-zeros
+IF(ASSOCIATED(pattern))THEN
+  kr=>pattern%kr
+  lc=>pattern%lc
+  map=>pattern%map
+  linkage=>pattern%linkage
+  redind=>pattern%redind
+  nred=pattern%nred
+  nnz=pattern%nnz
+ELSE
+  NULLIFY(kr,lc,map,linkage,redind)
+  nred=0
+  nnz=0
+END IF
+END SUBROUTINE native_pattern_alias
+!---------------------------------------------------------------------------------
+!> Use a non-zero pattern for a real CRS matrix
+!!
+!! Any previous pattern is released, a reference to `pattern` is taken and the
+!! pattern aliases (`kr`, `lc`, `map`, etc.) are updated. Matrix values are not
+!! allocated or changed.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_set_pattern_real(self,pattern)
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern to use
+TYPE(oft_native_pattern), POINTER :: old
+IF(pattern%nr/=self%nr)CALL oft_abort('Pattern rows do not match matrix','native_matrix_set_pattern',__FILE__)
+IF(pattern%nc/=self%nc)CALL oft_abort('Pattern columns do not match matrix','native_matrix_set_pattern',__FILE__)
+CALL native_pattern_retain(pattern)
+old=>self%pattern
+self%pattern=>pattern
+CALL native_pattern_release(old)
+self%full_current=.FALSE.
+CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
+END SUBROUTINE native_matrix_set_pattern_real
+!---------------------------------------------------------------------------------
+!> Use a non-zero pattern for a complex CRS matrix, see @ref native_matrix_set_pattern_real
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_set_pattern_comp(self,pattern)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern to use
+TYPE(oft_native_pattern), POINTER :: old
+IF(pattern%nr/=self%nr)CALL oft_abort('Pattern rows do not match matrix','native_matrix_set_pattern',__FILE__)
+IF(pattern%nc/=self%nc)CALL oft_abort('Pattern columns do not match matrix','native_matrix_set_pattern',__FILE__)
+CALL native_pattern_retain(pattern)
+old=>self%pattern
+self%pattern=>pattern
+CALL native_pattern_release(old)
+self%full_current=.FALSE.
+CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
+END SUBROUTINE native_matrix_set_pattern_comp
+!---------------------------------------------------------------------------------
+!> Create a pattern from the `kr`, `lc` and `map` set directly on a real CRS matrix
+!!
+!! For code that builds the CRS structure of a matrix itself: after setting `nr`,
+!! `nc`, `kr` and `lc` (and optionally `map`) on a matrix without a pattern, this
+!! moves them into a new pattern used by the matrix. Native matrix methods call this
+!! automatically for matrices without a pattern.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_adopt_pattern_real(self)
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix
+TYPE(oft_native_pattern), POINTER :: pattern
+INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr,lc
+TYPE(oft_matrix_map), POINTER, DIMENSION(:,:) :: map
+IF(ASSOCIATED(self%pattern))CALL oft_abort('Matrix already has a pattern','native_matrix_adopt_pattern',__FILE__)
+kr=>self%kr
+lc=>self%lc
+map=>self%map
+CALL native_pattern_create(pattern,self%nr,self%nc,kr,lc,map)
+CALL native_matrix_set_pattern_real(self,pattern)
+END SUBROUTINE native_matrix_adopt_pattern_real
+!---------------------------------------------------------------------------------
+!> Create a pattern from the `kr`, `lc` and `map` set directly on a complex CRS matrix,
+!! see @ref native_matrix_adopt_pattern_real
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_adopt_pattern_comp(self)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix
+TYPE(oft_native_pattern), POINTER :: pattern
+INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr,lc
+TYPE(oft_matrix_map), POINTER, DIMENSION(:,:) :: map
+IF(ASSOCIATED(self%pattern))CALL oft_abort('Matrix already has a pattern','native_matrix_adopt_pattern',__FILE__)
+kr=>self%kr
+lc=>self%lc
+map=>self%map
+CALL native_pattern_create(pattern,self%nr,self%nc,kr,lc,map)
+CALL native_matrix_set_pattern_comp(self,pattern)
+END SUBROUTINE native_matrix_adopt_pattern_comp
+!---------------------------------------------------------------------------------
+!> Get the dimensions, block mappings and pattern of a native CRS matrix (real or complex)
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_layout(source,pattern,nr,nc,nrg,ncg,nrslice,ncslice,ni,nj,i_map,j_map,force_local)
+CLASS(*), TARGET, INTENT(inout) :: source !< Native real or complex CRS matrix
+TYPE(oft_native_pattern), POINTER, INTENT(out) :: pattern !< Pattern of `source`
+INTEGER(i4), INTENT(out) :: nr !< Local number of rows
+INTEGER(i4), INTENT(out) :: nc !< Local number of columns
+INTEGER(i8), INTENT(out) :: nrg !< Global number of rows
+INTEGER(i8), INTENT(out) :: ncg !< Global number of columns
+INTEGER(i4), INTENT(out) :: nrslice !< Number of owned rows
+INTEGER(i4), INTENT(out) :: ncslice !< Number of owned columns
+INTEGER(i4), INTENT(out) :: ni !< Number of row blocks
+INTEGER(i4), INTENT(out) :: nj !< Number of column blocks
+TYPE(oft_map), POINTER, INTENT(out) :: i_map(:) !< Row block mapping
+TYPE(oft_map), POINTER, INTENT(out) :: j_map(:) !< Column block mapping
+LOGICAL, INTENT(out) :: force_local !< Local-only flag
+SELECT TYPE(source)
+CLASS IS(oft_native_matrix)
+  IF(.NOT.ASSOCIATED(source%pattern))CALL native_matrix_adopt_pattern_real(source)
+  pattern=>source%pattern
+  nr=source%nr; nc=source%nc; nrg=source%nrg; ncg=source%ncg
+  nrslice=source%nrslice; ncslice=source%ncslice; ni=source%ni; nj=source%nj
+  i_map=>source%i_map; j_map=>source%j_map; force_local=source%force_local
+CLASS IS(oft_native_cmatrix)
+  IF(.NOT.ASSOCIATED(source%pattern))CALL native_matrix_adopt_pattern_comp(source)
+  pattern=>source%pattern
+  nr=source%nr; nc=source%nc; nrg=source%nrg; ncg=source%ncg
+  nrslice=source%nrslice; ncslice=source%ncslice; ni=source%ni; nj=source%nj
+  i_map=>source%i_map; j_map=>source%j_map; force_local=source%force_local
+CLASS DEFAULT
+  CALL oft_abort('Source is not a native CRS matrix','native_matrix_layout',__FILE__)
+END SELECT
+END SUBROUTINE native_matrix_layout
+!---------------------------------------------------------------------------------
+!> Create a real CRS matrix sharing the non-zero pattern of an existing matrix
+!!
+!! `source` may be a real or complex native CRS matrix. The new matrix has the same
+!! dimensions and block mappings, references the same @ref oft_native_pattern (so
+!! the CRS structure, block maps, cached indices and linkage are not duplicated or
+!! rebuilt) and has its own values, initialized to zero.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_share_real(source,new)
+CLASS(*), TARGET, INTENT(inout) :: source !< Matrix whose pattern is shared
+CLASS(oft_matrix), POINTER, INTENT(out) :: new !< New matrix
+TYPE(oft_native_pattern), POINTER :: pattern
+TYPE(oft_map), POINTER :: i_map(:),j_map(:)
+DEBUG_STACK_PUSH
+ALLOCATE(oft_native_matrix::new)
+SELECT TYPE(this=>new)
+CLASS IS(oft_native_matrix)
+  CALL native_matrix_layout(source,pattern,this%nr,this%nc,this%nrg,this%ncg,this%nrslice,this%ncslice, &
+    this%ni,this%nj,i_map,j_map,this%force_local)
+  IF(ASSOCIATED(pattern%map))THEN
+    ALLOCATE(this%i_map(this%ni),this%j_map(this%nj))
+    this%i_map=i_map
+    this%j_map=j_map
+  END IF
+  CALL native_matrix_set_pattern_real(this,pattern)
+  ALLOCATE(this%M(this%nnz))
+  CALL nk_set(this%nnz,0.d0,this%M)
+END SELECT
+DEBUG_STACK_POP
+END SUBROUTINE native_matrix_share_real
+!---------------------------------------------------------------------------------
+!> Create a complex CRS matrix sharing the non-zero pattern of an existing matrix
+!!
+!! See @ref native_matrix_share_real.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_matrix_share_comp(source,new)
+CLASS(*), TARGET, INTENT(inout) :: source !< Matrix whose pattern is shared
+CLASS(oft_cmatrix), POINTER, INTENT(out) :: new !< New matrix
+TYPE(oft_native_pattern), POINTER :: pattern
+TYPE(oft_map), POINTER :: i_map(:),j_map(:)
+DEBUG_STACK_PUSH
+ALLOCATE(oft_native_cmatrix::new)
+SELECT TYPE(this=>new)
+CLASS IS(oft_native_cmatrix)
+  CALL native_matrix_layout(source,pattern,this%nr,this%nc,this%nrg,this%ncg,this%nrslice,this%ncslice, &
+    this%ni,this%nj,i_map,j_map,this%force_local)
+  IF(ASSOCIATED(pattern%map))THEN
+    ALLOCATE(this%i_map(this%ni),this%j_map(this%nj))
+    this%i_map=i_map
+    this%j_map=j_map
+  END IF
+  CALL native_matrix_set_pattern_comp(this,pattern)
+  ALLOCATE(this%M(this%nnz))
+  CALL nk_set(this%nnz,(0.d0,0.d0),this%M)
+END SELECT
+DEBUG_STACK_POP
+END SUBROUTINE native_matrix_share_comp
+!---------------------------------------------------------------------------------
+!> Build transposed (CSC) index for a CRS non-zero pattern, if not already built
+!!
+!! The index is owned by the pattern, which does not change once created. Callers that may run concurrently on the same matrix must serialize calls
 !! (eg. using a named critical section).
 !---------------------------------------------------------------------------------
 SUBROUTINE native_csc_build(csc,kr,lc,nr,nc)
@@ -2058,10 +2406,7 @@ INTEGER(i4), INTENT(in) :: lc(:) !< CRS column list [nnz]
 INTEGER(i4) :: i,j,k,nnz
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: knext
 nnz=kr(nr+1)-1
-IF(ASSOCIATED(csc%kc))THEN
-  IF((csc%nnz==nnz).AND.(SIZE(csc%kc)==nc+1).AND.(csc%kc(nc+1)==kr(nr+1)))RETURN
-  CALL native_csc_delete(csc)
-END IF
+IF(ASSOCIATED(csc%kc))RETURN
 ALLOCATE(csc%kc(nc+1),csc%lr(nnz),csc%lm(nnz))
 !---Count entries in each column
 csc%kc=0
@@ -2084,7 +2429,6 @@ DO i=1,nr
   END DO
 END DO
 DEALLOCATE(knext)
-csc%nnz=nnz
 END SUBROUTINE native_csc_build
 !---------------------------------------------------------------------------------
 !> Release transposed (CSC) index
@@ -2094,14 +2438,13 @@ TYPE(native_csc_index), INTENT(inout) :: csc !< Transposed index
 IF(ASSOCIATED(csc%kc))DEALLOCATE(csc%kc)
 IF(ASSOCIATED(csc%lr))DEALLOCATE(csc%lr)
 IF(ASSOCIATED(csc%lm))DEALLOCATE(csc%lm)
-csc%nnz=-1
 END SUBROUTINE native_csc_delete
 !---------------------------------------------------------------------------------
-!> Build index of diagonal entry locations for a CRS non-zero pattern, if not already current
+!> Build index of diagonal entry locations for a CRS non-zero pattern, if not already built
 !!
-!! Rows without a diagonal entry are marked with location 0. The index is rebuilt if
-!! the number of rows or non-zeros has changed since it was built. Callers that may
-!! run concurrently on the same matrix must serialize calls.
+!! Rows without a diagonal entry are marked with location 0. The index is owned by the
+!! pattern, which does not change once created. Callers that may run concurrently on
+!! the same pattern must serialize calls.
 !---------------------------------------------------------------------------------
 SUBROUTINE native_diag_build(dind,kr,lc,nr)
 TYPE(native_diag_index), INTENT(inout) :: dind !< Diagonal index
@@ -2109,10 +2452,7 @@ INTEGER(i4), INTENT(in) :: nr !< Number of rows
 INTEGER(i4), INTENT(in) :: kr(nr+1) !< CRS row pointer [nr+1]
 INTEGER(i4), INTENT(in) :: lc(:) !< CRS column list [nnz]
 INTEGER(i4) :: i,jp,jn,jr
-IF(ASSOCIATED(dind%loc))THEN
-  IF((dind%nnz==kr(nr+1)-1).AND.(SIZE(dind%loc)==nr))RETURN
-  CALL native_diag_delete(dind)
-END IF
+IF(ASSOCIATED(dind%loc))RETURN
 ALLOCATE(dind%loc(nr))
 !$omp parallel do private(jp,jn,jr) if(nr>OFT_OMP_VTHRESH)
 DO i=1,nr
@@ -2122,7 +2462,6 @@ DO i=1,nr
   IF(jr>0)jr=jr+jp-1
   dind%loc(i)=jr
 END DO
-dind%nnz=kr(nr+1)-1
 END SUBROUTINE native_diag_build
 !---------------------------------------------------------------------------------
 !> Release index of diagonal entry locations
@@ -2130,7 +2469,6 @@ END SUBROUTINE native_diag_build
 SUBROUTINE native_diag_delete(dind)
 TYPE(native_diag_index), INTENT(inout) :: dind !< Diagonal index
 IF(ASSOCIATED(dind%loc))DEALLOCATE(dind%loc)
-dind%nnz=-1
 END SUBROUTINE native_diag_delete
 !---------------------------------------------------------------------------------
 !> Compute matrix-vector product
@@ -2148,8 +2486,9 @@ if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_vec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_vec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
-IF(ASSOCIATED(self%lc_small))THEN
-  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
+IF(ASSOCIATED(self%pattern%lc_small))THEN
+  CALL nk_csr_matvec(self%nr,self%kr,self%pattern%lc_small,self%M,atmp,btmp)
 ELSE
   CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
@@ -2174,8 +2513,9 @@ if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_cvec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
-IF(ASSOCIATED(self%lc_small))THEN
-  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
+IF(ASSOCIATED(self%pattern%lc_small))THEN
+  CALL nk_csr_matvec(self%nr,self%kr,self%pattern%lc_small,self%M,atmp,btmp)
 ELSE
   CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
@@ -2200,10 +2540,11 @@ if(b%n/=self%nc)call oft_abort('Col mismatch','mat_applyt_vec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','mat_applyt_vec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
 !$omp critical (oft_native_csc_build)
-CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+CALL native_csc_build(self%pattern%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+CALL nk_csc_matvec(self%nc,self%pattern%csc%kc,self%pattern%csc%lr,self%pattern%csc%lm,self%M,atmp,btmp)
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
@@ -2225,10 +2566,11 @@ if(b%n/=self%nc)call oft_abort('Col mismatch','mat_applyt_cvec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','mat_applyt_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
 !$omp critical (oft_native_csc_build)
-CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+CALL native_csc_build(self%pattern%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+CALL nk_csc_matvec(self%nc,self%pattern%csc%kc,self%pattern%csc%lr,self%pattern%csc%lm,self%M,atmp,btmp)
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
@@ -2309,6 +2651,7 @@ subroutine mat_assemble(self,diag)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
 !---Setup diagonal scaling
 if(present(diag))then
   IF(associated(self%D))THEN
@@ -2320,9 +2663,9 @@ if(present(diag))then
   CLASS IS(oft_native_vector)
     !---Get diagonal matrix values (rows without a diagonal entry get zero)
     !$omp critical (oft_native_diag_build)
-    CALL native_diag_build(self%diag_index,self%kr,self%lc,self%nr)
+    CALL native_diag_build(self%pattern%diag_index,self%kr,self%lc,self%nr)
     !$omp end critical (oft_native_diag_build)
-    CALL nk_csr_get_diag(self%nr,self%diag_index%loc,self%M,this%v)
+    CALL nk_csr_get_diag(self%nr,self%pattern%diag_index%loc,self%M,this%v)
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','mat_assemble',__FILE__)
   END SELECT
@@ -2330,7 +2673,9 @@ if(present(diag))then
   call diag%add(0.d0,1.d0,self%D)
 end if
 !---Common assembly tasks
-CALL native_lc_small_build(self%lc_small,self%lc,self%nnz,self%nc)
+!$omp critical (oft_native_lc_small_build)
+CALL native_lc_small_build(self%pattern%lc_small,self%lc,self%nnz,self%nc)
+!$omp end critical (oft_native_lc_small_build)
 DEBUG_STACK_POP
 end subroutine mat_assemble
 !---------------------------------------------------------------------------------
@@ -2385,51 +2730,28 @@ DEBUG_STACK_POP
 end subroutine mat_zero_cols
 !---------------------------------------------------------------------------------
 !> Delete matrix
+!!
+!! Values are freed and the reference to the non-zero pattern is released, so
+!! the pattern is only freed if no other matrix (or holder) uses it.
 !---------------------------------------------------------------------------------
 subroutine mat_delete(self)
-class(oft_native_matrix), intent(inout) :: self
-integer(i4) :: i,j
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ASSOCIATED(self%M))deallocate(self%M)
 if(ASSOCIATED(self%Md))deallocate(self%Md)
+IF(ASSOCIATED(self%Mfull))DEALLOCATE(self%Mfull)
 IF(ASSOCIATED(self%D))THEN
   CALL self%D%delete
   DEALLOCATE(self%D)
 END IF
-IF(ASSOCIATED(self%kr))DEALLOCATE(self%kr)
-IF(ASSOCIATED(self%lc))DEALLOCATE(self%lc)
-IF(ASSOCIATED(self%lc_small))DEALLOCATE(self%lc_small)
-CALL native_csc_delete(self%csc)
-CALL native_diag_delete(self%diag_index)
-!---
-if(ASSOCIATED(self%map))THEN
-  DO i=1,self%ni
-    DO j=1,self%nj
-      IF(ASSOCIATED(self%map(i,j)%lc_map))DEALLOCATE(self%map(i,j)%lc_map)
-      IF(ASSOCIATED(self%map(i,j)%ext))DEALLOCATE(self%map(i,j)%ext)
-    END DO
-  END DO
-  DEALLOCATE(self%map,self%i_map,self%j_map)
-END IF
-IF(ASSOCIATED(self%linkage))THEN
-  IF(ASSOCIATED(self%linkage%send))THEN
-    DO i=0,self%linkage%nproc_con
-      IF(ASSOCIATED(self%linkage%send(i)%v))DEALLOCATE(self%linkage%send(i)%v,self%linkage%recv(i)%v)
-      IF(ASSOCIATED(self%linkage%csend(i)%v))DEALLOCATE(self%linkage%csend(i)%v,self%linkage%crecv(i)%v)
-    END DO
-    DEALLOCATE(self%linkage%send,self%linkage%recv)
-    DEALLOCATE(self%linkage%csend,self%linkage%crecv)
-  END IF
-  IF(ASSOCIATED(self%linkage%kle))DEALLOCATE(self%linkage%kle)
-  IF(ASSOCIATED(self%linkage%lbe))DEALLOCATE(self%linkage%lbe)
-  IF(ASSOCIATED(self%linkage%lle))DEALLOCATE(self%linkage%lle)
-  DEALLOCATE(self%linkage)
-END IF
-IF(ASSOCIATED(self%Mfull))DEALLOCATE(self%Mfull)
-IF(ASSOCIATED(self%redind))DEALLOCATE(self%redind)
+!---Block mappings belong to the matrix, block maps to the pattern
+IF(ASSOCIATED(self%map))DEALLOCATE(self%i_map,self%j_map)
+!---Matrices built without a pattern own their structure
+IF((.NOT.ASSOCIATED(self%pattern)).AND.ASSOCIATED(self%kr))CALL native_matrix_adopt_pattern(self)
+CALL native_pattern_release(self%pattern)
+CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
 IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
-self%nred=0
 DEBUG_STACK_POP
 end subroutine mat_delete
 !---------------------------------------------------------------------------------
@@ -2500,7 +2822,12 @@ integer(i8), pointer, dimension(:,:) :: letmp,leout
 logical :: periodic
 logical, allocatable, dimension(:) :: glob_inc
 logical, allocatable, dimension(:,:) :: skips
-IF(ASSOCIATED(self%linkage))RETURN
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
+!---Linkage is built once per pattern and shared by all matrices using it
+IF(ASSOCIATED(self%pattern%linkage))THEN
+  CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
+  RETURN
+END IF
 DEBUG_STACK_PUSH
 !---
 IF(oft_debug_print(2))WRITE(*,*)'Creating CRS stitching structures'
@@ -2511,9 +2838,10 @@ CLASS DEFAULT
   CALL oft_abort('"u" is not a vector object.','native_matrix_setup_full',__FILE__)
 END SELECT
 IF(uv%stitch_info%skip)THEN
-  ALLOCATE(self%linkage)
-  self%linkage%full=.TRUE.
-  self%linkage%skip=.TRUE.
+  ALLOCATE(self%pattern%linkage)
+  self%pattern%linkage%full=.TRUE.
+  self%pattern%linkage%skip=.TRUE.
+  CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
   DEBUG_STACK_POP
   RETURN
 END IF
@@ -2531,7 +2859,9 @@ IF(MINVAL(lge)<=0)CALL oft_abort('BAD LGE value','native_matrix_setup_full',__FI
 !---
 ALLOCATE(ncon(0:uv%stitch_info%nproc_con),nrecv(uv%stitch_info%nproc_con))
 ncon=0
-ALLOCATE(self%linkage)
+!---Build into the pattern; the matrix aliases point at the pattern components
+ALLOCATE(self%pattern%linkage)
+self%linkage=>self%pattern%linkage
 self%linkage%nproc_con=uv%stitch_info%nproc_con
 self%linkage%proc_split=uv%stitch_info%proc_split
 self%linkage%proc_con=>uv%stitch_info%proc_con
@@ -2897,17 +3227,18 @@ IF(periodic)THEN
     j=uv%stitch_info%lbe(uv%stitch_info%lle(2,i))
     IF(k>j)glob_inc(k)=.TRUE.
   END DO
-  self%nred=COUNT(glob_inc)
-  ALLOCATE(self%redind(self%nred))
-  self%nred=0
+  self%pattern%nred=COUNT(glob_inc)
+  ALLOCATE(self%pattern%redind(self%pattern%nred))
+  self%pattern%nred=0
   DO i=1,uv%stitch_info%nbe
     IF(glob_inc(uv%stitch_info%lbe(i)))THEN
-      self%nred=self%nred+1
-      self%redind(self%nred)=uv%stitch_info%lbe(i)
+      self%pattern%nred=self%pattern%nred+1
+      self%pattern%redind(self%pattern%nred)=uv%stitch_info%lbe(i)
     END IF
   END DO
   DEALLOCATE(glob_inc)
 END IF
+CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine native_matrix_setup_full
@@ -2920,11 +3251,17 @@ IF(self%full_current)RETURN
 DEBUG_STACK_PUSH
 IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
 IF(.NOT.ASSOCIATED(self%Mfull))ALLOCATE(self%Mfull(self%nnz))
+IF(.NOT.ASSOCIATED(self%pattern))CALL oft_abort('Linkage not built (see native_matrix_setup_full)', &
+  'matrix_update_slice',__FILE__)
+IF(.NOT.ASSOCIATED(self%pattern%linkage))CALL oft_abort('Linkage not built (see native_matrix_setup_full)', &
+  'matrix_update_slice',__FILE__)
+!---Linkage may have been built through another matrix sharing the pattern
+CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
 !---Get values
 CALL nk_copy(self%nnz,self%M,self%Mfull)
-CALL oft_global_stitch(self%linkage,self%Mfull,1)
+CALL oft_global_stitch(self%pattern%linkage,self%Mfull,1)
 !---Replace redundant rows with identity rows
-IF(self%nred>0)CALL nk_csr_identity_rows(self%nred,self%redind,self%kr,self%lc,self%Mfull)
+IF(self%pattern%nred>0)CALL nk_csr_identity_rows(self%pattern%nred,self%pattern%redind,self%kr,self%lc,self%Mfull)
 self%full_current=.TRUE.
 DEBUG_STACK_POP
 end subroutine matrix_update_slice
@@ -3044,6 +3381,7 @@ IF(.NOT.ASSOCIATED(self%lcmap))THEN
     CALL sort_array(self%lc(jp:jn),self%lcmap(jp:jn),jn-jp+1)
   end do
   DEALLOCATE(slice_map)
+  CALL native_matrix_adopt_pattern(self)
   ALLOCATE(self%M(self%nnz))
 END IF
 !---Get values
@@ -3115,8 +3453,9 @@ if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_vec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_vec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
-IF(ASSOCIATED(self%lc_small))THEN
-  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
+IF(ASSOCIATED(self%pattern%lc_small))THEN
+  CALL nk_csr_matvec(self%nr,self%kr,self%pattern%lc_small,self%M,atmp,btmp)
 ELSE
   CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
@@ -3141,8 +3480,9 @@ if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_cvec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
-IF(ASSOCIATED(self%lc_small))THEN
-  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
+IF(ASSOCIATED(self%pattern%lc_small))THEN
+  CALL nk_csr_matvec(self%nr,self%kr,self%pattern%lc_small,self%M,atmp,btmp)
 ELSE
   CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
@@ -3168,10 +3508,11 @@ if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_vec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','cmat_applyt_vec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
 !$omp critical (oft_native_csc_build)
-CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+CALL native_csc_build(self%pattern%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+CALL nk_csc_matvec(self%nc,self%pattern%csc%kc,self%pattern%csc%lr,self%pattern%csc%lm,self%M,atmp,btmp)
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
@@ -3193,10 +3534,11 @@ if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_cvec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','cmat_applyt_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
 !$omp critical (oft_native_csc_build)
-CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+CALL native_csc_build(self%pattern%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+CALL nk_csc_matvec(self%nc,self%pattern%csc%kc,self%pattern%csc%lr,self%pattern%csc%lm,self%M,atmp,btmp)
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
@@ -3277,6 +3619,7 @@ subroutine cmat_assemble(self,diag)
 class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
 !---Setup diagonal scaling
 if(present(diag))then
   IF(associated(self%D))THEN
@@ -3288,9 +3631,9 @@ if(present(diag))then
   CLASS IS(oft_native_cvector)
     !---Get diagonal matrix values (rows without a diagonal entry get zero)
     !$omp critical (oft_native_diag_build)
-    CALL native_diag_build(self%diag_index,self%kr,self%lc,self%nr)
+    CALL native_diag_build(self%pattern%diag_index,self%kr,self%lc,self%nr)
     !$omp end critical (oft_native_diag_build)
-    CALL nk_csr_get_diag(self%nr,self%diag_index%loc,self%M,this%v)
+    CALL nk_csr_get_diag(self%nr,self%pattern%diag_index%loc,self%M,this%v)
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','cmat_assemble',__FILE__)
   END SELECT
@@ -3298,7 +3641,9 @@ if(present(diag))then
   call diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
 end if
 !---Common assembly tasks
-CALL native_lc_small_build(self%lc_small,self%lc,self%nnz,self%nc)
+!$omp critical (oft_native_lc_small_build)
+CALL native_lc_small_build(self%pattern%lc_small,self%lc,self%nnz,self%nc)
+!$omp end critical (oft_native_lc_small_build)
 DEBUG_STACK_POP
 end subroutine cmat_assemble
 !---------------------------------------------------------------------------------
@@ -3353,51 +3698,28 @@ DEBUG_STACK_POP
 end subroutine cmat_zero_cols
 !---------------------------------------------------------------------------------
 !> Delete matrix
+!!
+!! Values are freed and the reference to the non-zero pattern is released, so
+!! the pattern is only freed if no other matrix (or holder) uses it.
 !---------------------------------------------------------------------------------
 subroutine cmat_delete(self)
-class(oft_native_cmatrix), intent(inout) :: self
-integer(i4) :: i,j
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ASSOCIATED(self%M))deallocate(self%M)
 if(ASSOCIATED(self%Md))deallocate(self%Md)
+IF(ASSOCIATED(self%Mfull))DEALLOCATE(self%Mfull)
 IF(ASSOCIATED(self%D))THEN
   CALL self%D%delete
   DEALLOCATE(self%D)
 END IF
-IF(ASSOCIATED(self%kr))DEALLOCATE(self%kr)
-IF(ASSOCIATED(self%lc))DEALLOCATE(self%lc)
-IF(ASSOCIATED(self%lc_small))DEALLOCATE(self%lc_small)
-CALL native_csc_delete(self%csc)
-CALL native_diag_delete(self%diag_index)
-!---
-if(ASSOCIATED(self%map))THEN
-  DO i=1,self%ni
-    DO j=1,self%nj
-      IF(ASSOCIATED(self%map(i,j)%lc_map))DEALLOCATE(self%map(i,j)%lc_map)
-      IF(ASSOCIATED(self%map(i,j)%ext))DEALLOCATE(self%map(i,j)%ext)
-    END DO
-  END DO
-  DEALLOCATE(self%map,self%i_map,self%j_map)
-END IF
-IF(ASSOCIATED(self%linkage))THEN
-  IF(ASSOCIATED(self%linkage%send))THEN
-    DO i=0,self%linkage%nproc_con
-      IF(ASSOCIATED(self%linkage%send(i)%v))DEALLOCATE(self%linkage%send(i)%v,self%linkage%recv(i)%v)
-      IF(ASSOCIATED(self%linkage%csend(i)%v))DEALLOCATE(self%linkage%csend(i)%v,self%linkage%crecv(i)%v)
-    END DO
-    DEALLOCATE(self%linkage%send,self%linkage%recv)
-    DEALLOCATE(self%linkage%csend,self%linkage%crecv)
-  END IF
-  IF(ASSOCIATED(self%linkage%kle))DEALLOCATE(self%linkage%kle)
-  IF(ASSOCIATED(self%linkage%lbe))DEALLOCATE(self%linkage%lbe)
-  IF(ASSOCIATED(self%linkage%lle))DEALLOCATE(self%linkage%lle)
-  DEALLOCATE(self%linkage)
-END IF
-IF(ASSOCIATED(self%Mfull))DEALLOCATE(self%Mfull)
-IF(ASSOCIATED(self%redind))DEALLOCATE(self%redind)
+!---Block mappings belong to the matrix, block maps to the pattern
+IF(ASSOCIATED(self%map))DEALLOCATE(self%i_map,self%j_map)
+!---Matrices built without a pattern own their structure
+IF((.NOT.ASSOCIATED(self%pattern)).AND.ASSOCIATED(self%kr))CALL native_matrix_adopt_pattern(self)
+CALL native_pattern_release(self%pattern)
+CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
 IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
-self%nred=0
 DEBUG_STACK_POP
 end subroutine cmat_delete
 !---------------------------------------------------------------------------------
