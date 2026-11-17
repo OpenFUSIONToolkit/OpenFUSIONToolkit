@@ -1637,19 +1637,32 @@ if(self%down) then ! Down smoother
   do k=1,self%its
     call self%A%apply(self%p,self%q)
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-    do i=1,u%n
-      uv%v(i)=uv%v(i)+self%p%v(i)
-      gv%v(i)=gv%v(i)-self%q%v(i)
-      self%p%v(i)=self%df*gv%v(i)/md%v(i)
-    end do
+    IF(k<self%its)THEN
+      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
+      do i=1,u%n
+        uv%v(i)=uv%v(i)+self%p%v(i)
+        gv%v(i)=gv%v(i)-self%q%v(i)
+        self%p%v(i)=self%df*gv%v(i)/md%v(i)
+      end do
+    ELSE ! Last iteration, also save state for up smoother (u and g are final here)
+      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
+      do i=1,u%n
+        uv%v(i)=uv%v(i)+self%p%v(i)
+        gv%v(i)=gv%v(i)-self%q%v(i)
+        self%p%v(i)=self%df*gv%v(i)/md%v(i)
+        self%u_save(i)=uv%v(i)
+        self%g_save(i)=gv%v(i)
+      end do
+    END IF
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   end do
-  !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-  do i=1,u%n
-    self%u_save(i)=uv%v(i)
-    self%g_save(i)=gv%v(i)
-  end do
+  IF(self%its<1)THEN
+    !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
+    do i=1,u%n
+      self%u_save(i)=uv%v(i)
+      self%g_save(i)=gv%v(i)
+    end do
+  END IF
   self%down=.FALSE.
 else ! Up smoother
   !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
@@ -1658,20 +1671,33 @@ else ! Up smoother
     gv%v(i)=self%g_save(i)
   end do
   IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
+  !---The update of u with the (BC-applied) correction from step k is deferred into the
+  !---sweep of step k+1, which is valid as neither A%apply nor bc%apply(q) touch u
   do k=1,self%its
     call self%A%apply(self%p,self%q)
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-    do i=1,u%n
-      gv%v(i)=gv%v(i)-self%q%v(i)
-      self%p%v(i)=self%df*gv%v(i)/md%v(i)
-    end do
+    IF(k==1)THEN
+      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
+      do i=1,u%n
+        gv%v(i)=gv%v(i)-self%q%v(i)
+        self%p%v(i)=self%df*gv%v(i)/md%v(i)
+      end do
+    ELSE
+      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
+      do i=1,u%n
+        uv%v(i)=uv%v(i)+self%p%v(i)
+        gv%v(i)=gv%v(i)-self%q%v(i)
+        self%p%v(i)=self%df*gv%v(i)/md%v(i)
+      end do
+    END IF
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
+  end do
+  IF(self%its>0)THEN
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
     do i=1,u%n
       uv%v(i)=uv%v(i)+self%p%v(i)
     end do
-  end do
+  END IF
   self%down=.TRUE.
 end if
 DEBUG_STACK_POP
