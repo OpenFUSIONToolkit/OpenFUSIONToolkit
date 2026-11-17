@@ -669,16 +669,12 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=hdots(1:i)
     wnorm0=SQRT(hdots(i+1))
-    do k=1,i
-      call w%add(1.d0,-h(k,i),v(k)%f)
-    end do
+    call w%maxpy(-h(1:i,i),v(1:i),i)
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(w%dot(w))
     IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=w%mdot(v(1:i),i)
-      do k=1,i
-        call w%add(1.d0,-hdots(k),v(k)%f)
-      end do
+      call w%maxpy(-hdots(1:i),v(1:i),i)
       h(1:i,i)=h(1:i,i)+hdots(1:i)
       h(i+1,i)=SQRT(w%dot(w))
     END IF
@@ -710,9 +706,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
         call w%copy(u) ! Form iterate in w (used as scratch)
-        do k=1,i
-          call w%add(1.d0,hdots(k),z(k)%f)
-        end do
+        call w%maxpy(hdots(1:i),z(1:i),i)
         inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(w%dot(w)))
         IF(inner_conv)EXIT
       END IF
@@ -727,9 +721,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     call u%copy(w) ! Already formed by inner convergence check
   ELSE
     CALL gmres_backsolve(k,h,res,hdots)
-    do i=1,k
-      call u%add(1.d0,hdots(i),z(i)%f)
-    enddo
+    call u%maxpy(hdots(1:k),z(1:k),k)
   END IF
   ! Early inner exits based on |r|/|u| must be confirmed with the true residual
   IF(((nits==its).OR.((k<nrits).AND.(.NOT.inner_conv))).AND.(.NOT.self%full_residual))EXIT
@@ -966,16 +958,12 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=CONJG(hdots(1:i)) ! mdot gives w^H v_k
     wnorm0=SQRT(REAL(hdots(i+1),r8))
-    do k=1,i
-      call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
-    end do
+    call w%maxpy(-h(1:i,i),v(1:i),i)
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(REAL(w%dot(w),r8))
     IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=CONJG(w%mdot(v(1:i),i))
-      do k=1,i
-        call w%add((1.d0,0.d0),-hdots(k),v(k)%f)
-      end do
+      call w%maxpy(-hdots(1:i),v(1:i),i)
       h(1:i,i)=h(1:i,i)+hdots(1:i)
       h(i+1,i)=SQRT(REAL(w%dot(w),r8))
     END IF
@@ -1007,9 +995,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
         call w%copy(u) ! Form iterate in w (used as scratch)
-        do k=1,i
-          call w%add((1.d0,0.d0),hdots(k),z(k)%f)
-        end do
+        call w%maxpy(hdots(1:i),z(1:i),i)
         inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(w%dot(w),r8)))
         IF(inner_conv)EXIT
       END IF
@@ -1024,9 +1010,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     call u%copy(w) ! Already formed by inner convergence check
   ELSE
     CALL gmres_backsolve(k,h,res,hdots)
-    do i=1,k
-      call u%add((1.d0,0.d0),hdots(i),z(i)%f)
-    enddo
+    call u%maxpy(hdots(1:k),z(1:k),k)
   END IF
   IF((nits==its).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
