@@ -47,15 +47,22 @@ def run_native_la(nprocs):
 @pytest.mark.coverage
 def test_native_la():
     '''Native transpose products (adjoint identity on a non-symmetric operator), vector norms,
-    complex products and mixed real/complex dot products on a single process.'''
+    complex products and mixed real/complex dot products on a single process. Also borrowed
+    (zero-copy) vector access in each access mode against get_local/restore_local, copy, maxpy
+    (bitwise equal to successive add calls) and mdot (against individual dot products) for real
+    and complex vectors, and boundary condition operators that skip synchronization.'''
     assert run_native_la(1)
 
 @pytest.mark.mpi
 def test_native_la_mpi2():
-    '''Native transpose products and vector norms with interface DOFs shared between 2 processes.'''
+    '''Native transpose products, vector norms, borrowed access with and without synchronization,
+    copy, maxpy, mdot (real and complex) and boundary condition operators with interface DOFs
+    shared between 2 processes.'''
     assert run_native_la(2)
 
 @pytest.mark.mpi
 def test_native_la_mpi4():
-    '''Native transpose products and vector norms with interface DOFs shared between 4 processes.'''
+    '''Native transpose products, vector norms, borrowed access with and without synchronization,
+    copy, maxpy, mdot (real and complex) and boundary condition operators with interface DOFs
+    shared between 4 processes.'''
     assert run_native_la(4)
