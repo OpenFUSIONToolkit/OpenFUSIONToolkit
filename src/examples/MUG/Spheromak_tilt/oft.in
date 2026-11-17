@@ -34,7 +34,7 @@
  vbc='all'         ! Zero-flow BC for velocity
  dt=2.e-7          ! Maximum time step
  eta=1.            ! Resistivity
- nu_par=10.        ! Fluid viscosity
+ nu_visc=10.        ! Fluid viscosity
  nsteps=3000       ! Number of time steps to take
  rst_freq=10       ! Restart file frequency
  lin_tol=1.E-9     ! Linear solver tolerance
