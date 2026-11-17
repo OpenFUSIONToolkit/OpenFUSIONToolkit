@@ -258,6 +258,8 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL()
   TYPE(oft_native_submatrix), pointer, dimension(:) :: alocals => NULL() !< Local matrix block
   TYPE(oft_seam), pointer, dimension(:) :: local_stitch => NULL() !< Local vectors
+  TYPE(oft_native_vector), pointer, dimension(:) :: ulocs => NULL() !< Local solution vector for each block
+  TYPE(oft_native_vector), pointer, dimension(:) :: glocs => NULL() !< Local RHS vector for each block
   TYPE(oft_solver_ptr), pointer, dimension(:) :: solvers => NULL() !< Local block solvers
   TYPE(oft_1d_int), pointer, dimension(:) :: parts => NULL() !< Local partition indices
 CONTAINS
@@ -2057,7 +2059,7 @@ LOGICAL :: thread_safe,color_avail
 LOGICAL, POINTER, DIMENSION(:) :: eflag
 INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
-TYPE(oft_native_vector) :: uloc,gloc
+TYPE(oft_native_vector) :: uloc
 REAL(r8), POINTER, DIMENSION(:) :: vals,uvals,gvals
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
@@ -2289,6 +2291,12 @@ IF(self%nlocal>1)THEN
       self%local_stitch(i)%be=.FALSE.
     END DO
   END IF
+  !---Persistent local vectors for each block
+  IF(.NOT.ASSOCIATED(self%ulocs))ALLOCATE(self%ulocs(self%nlocal),self%glocs(self%nlocal))
+  DO i=1,self%nlocal
+    CALL bjprecond_local_vec(self%ulocs(i),self%parts(i)%n,self%local_stitch(i))
+    CALL bjprecond_local_vec(self%glocs(i),self%parts(i)%n,self%local_stitch(i))
+  END DO
   IF(self%update_slice)THEN
     CALL A_native%update_slice
     !$omp parallel do
@@ -2299,83 +2307,88 @@ IF(self%nlocal>1)THEN
   NULLIFY(uvals,gvals)
   CALL u%get_local(uvals)
   CALL g%get_local(gvals)
-  !$omp parallel private(j,uloc,gloc) if(thread_safe)
-  NULLIFY(gloc%local_tmp,uloc%local_tmp)
+  !---Each block (and its local vectors) is only accessed by one thread
+  !$omp parallel private(j) if(thread_safe)
   !$omp do schedule(dynamic,1)
   DO i=1,self%nlocal
-    !---Setup local vectors
-    gloc%n=self%parts(i)%n; uloc%n=self%parts(i)%n
-    gloc%ng=self%parts(i)%n; uloc%ng=self%parts(i)%n
-    gloc%nslice=self%parts(i)%n; uloc%nslice=self%parts(i)%n
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    gloc%stitch_info=>self%local_stitch(i)
-    uloc%stitch_info=>self%local_stitch(i)
     !---Get local slice for solve
     !$omp simd
     DO j=1,self%parts(i)%n
-      gloc%v(j)=gvals(ABS(self%parts(i)%v(j)))
-      uloc%v(j)=uvals(ABS(self%parts(i)%v(j)))
+      self%glocs(i)%v(j)=gvals(ABS(self%parts(i)%v(j)))
+      self%ulocs(i)%v(j)=uvals(ABS(self%parts(i)%v(j)))
     END DO
     !---Solve sub-system
     self%solvers(i)%s%A=>self%alocals(i)
-    CALL self%solvers(i)%s%apply(uloc,gloc)
+    CALL self%solvers(i)%s%apply(self%ulocs(i),self%glocs(i))
     !---Replace local slice into solution
     !$omp simd
     DO j=1,self%parts(i)%n
-      IF(self%parts(i)%v(j)>0)uvals(self%parts(i)%v(j))=uloc%v(j)
+      IF(self%parts(i)%v(j)>0)uvals(self%parts(i)%v(j))=self%ulocs(i)%v(j)
     END DO
-    DEALLOCATE(gloc%v,uloc%v)
   END DO
   !$omp end parallel
   CALL u%restore_local(uvals)
   DEALLOCATE(uvals,gvals)
 ELSE
+  !---Persistent local vectors, with a local seam that skips all stitching/reductions
+  IF(.NOT.ASSOCIATED(self%local_stitch))THEN
+    ALLOCATE(self%local_stitch(1))
+    self%local_stitch(1)%skip=.TRUE.
+  END IF
+  IF(.NOT.ASSOCIATED(self%ulocs))ALLOCATE(self%ulocs(1),self%glocs(1))
   IF(self%boundary_overlap)THEN
     IF(self%update_slice)CALL A_native%update_slice
     !---Setup local vectors
-    gloc%n=g%n; uloc%n=u%n
-    NULLIFY(gloc%local_tmp,uloc%local_tmp)
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    ALLOCATE(gloc%stitch_info,uloc%stitch_info)
-    gloc%stitch_info%skip=.TRUE.
-    uloc%stitch_info%skip=.TRUE.
+    CALL bjprecond_local_vec(self%glocs(1),g%n,self%local_stitch(1))
+    CALL bjprecond_local_vec(self%ulocs(1),u%n,self%local_stitch(1))
     !---Get local slice for solve
-    CALL g%get_local(gloc%v)
-    CALL u%get_local(uloc%v)
+    CALL g%get_local(self%glocs(1)%v)
+    CALL u%get_local(self%ulocs(1)%v)
     !---Zero source on redundant rows
     IF(ASSOCIATED(A_native%redind))THEN
       DO i=1,A_native%nred
-        gloc%v(A_native%redind(i))=0.d0
+        self%glocs(1)%v(A_native%redind(i))=0.d0
       END DO
     END IF
     !---Solve sub-system
     self%solvers(1)%s%A=>self%A
-    CALL self%solvers(1)%s%apply(uloc,gloc)
+    CALL self%solvers(1)%s%apply(self%ulocs(1),self%glocs(1))
     !---Replace local slice into solution
-    CALL u%restore_local(uloc%v)
+    CALL u%restore_local(self%ulocs(1)%v)
   ELSE
     IF(self%update_slice)CALL self%alocals(1)%update_slice
     !---Setup local vectors
-    gloc%n=g%nslice; uloc%n=u%nslice
-    NULLIFY(gloc%local_tmp,uloc%local_tmp)
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    ALLOCATE(gloc%stitch_info,uloc%stitch_info)
-    gloc%stitch_info%skip=.TRUE.
-    uloc%stitch_info%skip=.TRUE.
+    CALL bjprecond_local_vec(self%glocs(1),g%nslice,self%local_stitch(1))
+    CALL bjprecond_local_vec(self%ulocs(1),u%nslice,self%local_stitch(1))
     !---Get local slice for solve
-    CALL g%get_slice(gloc%v)
-    CALL u%get_slice(uloc%v)
+    CALL g%get_slice(self%glocs(1)%v)
+    CALL u%get_slice(self%ulocs(1)%v)
     !---Solve sub-system
     self%solvers(1)%s%A=>self%alocals(1)
-    CALL self%solvers(1)%s%apply(uloc,gloc)
+    CALL self%solvers(1)%s%apply(self%ulocs(1),self%glocs(1))
     !---Replace local slice into solution
-    CALL u%restore_slice(uloc%v)
+    CALL u%restore_slice(self%ulocs(1)%v)
   END IF
-  DEALLOCATE(gloc%v,uloc%v,gloc%stitch_info,uloc%stitch_info)
 END IF
 self%update_slice=.FALSE.
 DEBUG_STACK_POP
 END SUBROUTINE bjprecond_apply
+!------------------------------------------------------------------------------
+!> Setup a persistent local vector for @ref oft_bjprecond, (re)allocating if needed
+!------------------------------------------------------------------------------
+SUBROUTINE bjprecond_local_vec(vec,n,seam)
+TYPE(oft_native_vector), INTENT(inout) :: vec !< Local vector
+INTEGER(i4), INTENT(in) :: n !< Number of local values
+TYPE(oft_seam), TARGET, INTENT(inout) :: seam !< Local seam for vector
+IF(ASSOCIATED(vec%v))THEN
+  IF(SIZE(vec%v)/=n)DEALLOCATE(vec%v)
+END IF
+IF(.NOT.ASSOCIATED(vec%v))ALLOCATE(vec%v(n))
+vec%n=n
+vec%ng=INT(n,i8)
+vec%nslice=n
+vec%stitch_info=>seam
+END SUBROUTINE bjprecond_local_vec
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
 !------------------------------------------------------------------------------
@@ -2489,9 +2502,17 @@ IF(ASSOCIATED(self%parts))THEN
   END DO
   DEALLOCATE(self%parts)
 END IF
+!---Destroy local vectors
+IF(ASSOCIATED(self%ulocs))THEN
+  DO i=1,SIZE(self%ulocs)
+    IF(ASSOCIATED(self%ulocs(i)%v))DEALLOCATE(self%ulocs(i)%v)
+    IF(ASSOCIATED(self%glocs(i)%v))DEALLOCATE(self%glocs(i)%v)
+  END DO
+  DEALLOCATE(self%ulocs,self%glocs)
+END IF
 !---Destroy local stitch information
 IF(ASSOCIATED(self%local_stitch))THEN
-  DO i=1,self%nlocal
+  DO i=1,SIZE(self%local_stitch)
     IF(ASSOCIATED(self%local_stitch(i)%be))DEALLOCATE(self%local_stitch(i)%be)
   END DO
   DEALLOCATE(self%local_stitch)
