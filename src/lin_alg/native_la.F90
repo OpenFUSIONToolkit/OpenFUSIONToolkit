@@ -2493,7 +2493,7 @@ type(eout), allocatable, dimension(:) :: lerecv,lesend
 type(emap), allocatable, dimension(:) :: lrmaps
 integer(i4) :: i,j,k,m,mm,ierr,nbetmp,nbemax,jp,jn,jk,neout,netmp,neel
 integer(i4), allocatable, dimension(:) :: isort,lsort,ind_sort
-integer(i4), allocatable, dimension(:) :: lle_tmp,ncon,nrecv
+integer(i4), allocatable, dimension(:) :: lle_tmp,ncon,nrecv,bemap
 integer(i8) :: last
 integer(i8), allocatable, dimension(:) :: lge,sort_list
 integer(i8), pointer, dimension(:,:) :: letmp,leout
@@ -2589,8 +2589,13 @@ DO j=0,self%linkage%nproc_con
   jn=uv%stitch_info%kle(j+1)-jp
   IF(jn>0)call sort_array(lle_tmp(jp:jp+jn-1),jn)
 END DO
-!---Point dummy output array to Send array
-ALLOCATE(skips(0:self%linkage%nproc_con,self%nr))
+!---Flag connections for each boundary row (skips(:,0) is used for non-boundary rows)
+ALLOCATE(bemap(self%nr))
+bemap=0
+DO i=1,uv%stitch_info%nbe
+  bemap(uv%stitch_info%lbe(i))=i
+END DO
+ALLOCATE(skips(0:self%linkage%nproc_con,0:uv%stitch_info%nbe))
 skips=.TRUE.
 DO i=1,uv%stitch_info%nbe
   DO m=0,self%linkage%nproc_con
@@ -2598,7 +2603,7 @@ DO i=1,uv%stitch_info%nbe
     jn=uv%stitch_info%kle(m+1)-jp
     IF(jn>0)THEN
       jk=search_array(i,lle_tmp(jp:jp+jn-1),jn)
-      IF(jk/=0)skips(m,uv%stitch_info%lbe(i))=.FALSE.
+      IF(jk/=0)skips(m,i)=.FALSE.
     END IF
   END DO
 END DO
@@ -2670,7 +2675,7 @@ DO i=1,self%linkage%nbe
   lesend(0)%le(:,i) = lge(letmp(:,k))
   lrmaps(0)%le(i) = k
   DO m=1,self%linkage%nproc_con
-    IF(skips(m,letmp(1,k)).OR.skips(m,letmp(2,k)))CYCLE
+    IF(skips(m,bemap(letmp(1,k))).OR.skips(m,bemap(letmp(2,k))))CYCLE
     ncon(m)=ncon(m)+1
   END DO
 END DO
@@ -2696,7 +2701,7 @@ IF(.NOT.uv%stitch_info%full)THEN
   DO i=1,self%linkage%nbe
     k=ind_sort(i)
     DO m=1,self%linkage%nproc_con
-      IF(skips(m,letmp(1,k)).OR.skips(m,letmp(2,k)))CYCLE
+      IF(skips(m,bemap(letmp(1,k))).OR.skips(m,bemap(letmp(2,k))))CYCLE
       ncon(m)=ncon(m)+1
       lesend(m)%le(:,ncon(m)) = lge(letmp(:,k))
       lrmaps(m)%le(ncon(m)) = k
@@ -2704,7 +2709,7 @@ IF(.NOT.uv%stitch_info%full)THEN
   END DO
 END IF
 #endif
-DEALLOCATE(letmp,skips,lge)
+DEALLOCATE(letmp,skips,bemap,lge)
 !---
 #ifdef HAVE_MPI
 IF(.NOT.uv%stitch_info%full)THEN
