@@ -118,6 +118,18 @@ contains
   procedure :: delete => cvec_delete
 end type oft_native_cvector
 !---------------------------------------------------------------------------------
+!> Transposed (CSC) index for the non-zero pattern of a native CRS matrix
+!!
+!! Built on first use by the transpose products and released with the matrix. Entries
+!! within each column are ordered by increasing row index.
+!---------------------------------------------------------------------------------
+type :: native_csc_index
+  integer(i4) :: nnz = -1 !< Number of non-zeros in the pattern used to build the index
+  integer(i4), pointer, contiguous, dimension(:) :: kc => NULL() !< Column pointer to row list [nc+1]
+  integer(i4), pointer, contiguous, dimension(:) :: lr => NULL() !< Row index of each entry [nnz]
+  integer(i4), pointer, contiguous, dimension(:) :: lm => NULL() !< Location of each entry in CRS value array [nnz]
+end type native_csc_index
+!---------------------------------------------------------------------------------
 !> Native CRS matrix class
 !---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_native_matrix
@@ -128,6 +140,7 @@ type, public, extends(oft_matrix) :: oft_native_matrix
   integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list
   integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
   integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list
+  type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
   real(r8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
@@ -171,6 +184,7 @@ type, public, extends(oft_cmatrix) :: oft_native_cmatrix
   integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list
   integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
   integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list
+  type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
   complex(c8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
@@ -1741,7 +1755,8 @@ END FUNCTION native_row_split
 !!
 !! Uses @ref native_row_split with one part per thread in the current team, so each
 !! thread processes a contiguous block of rows with a similar number of non-zeros.
-!! Outside of an active parallel region all rows are returned.
+!! Outside of an active parallel region all rows are returned. The same splitting
+!! applies to columns when a CSC column pointer is passed instead.
 !---------------------------------------------------------------------------------
 SUBROUTINE native_thread_rows(kr,nr,ifirst,ilast)
 INTEGER(i4), INTENT(in) :: nr !< Number of rows
@@ -1754,6 +1769,60 @@ nthreads=omp_get_num_threads()
 ifirst=native_row_split(kr,nr,ithread,nthreads)
 ilast=native_row_split(kr,nr,ithread+1,nthreads)-1
 END SUBROUTINE native_thread_rows
+!---------------------------------------------------------------------------------
+!> Build transposed (CSC) index for a CRS non-zero pattern, if not already current
+!!
+!! The index is rebuilt if the number of rows/columns or non-zeros has changed since it
+!! was built. Callers that may run concurrently on the same matrix must serialize calls
+!! (eg. using a named critical section).
+!---------------------------------------------------------------------------------
+SUBROUTINE native_csc_build(csc,kr,lc,nr,nc)
+TYPE(native_csc_index), INTENT(inout) :: csc !< Transposed index
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: nc !< Number of columns
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CRS row pointer [nr+1]
+INTEGER(i4), INTENT(in) :: lc(:) !< CRS column list [nnz]
+INTEGER(i4) :: i,j,k,nnz
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: knext
+nnz=kr(nr+1)-1
+IF(ASSOCIATED(csc%kc))THEN
+  IF((csc%nnz==nnz).AND.(SIZE(csc%kc)==nc+1).AND.(csc%kc(nc+1)==kr(nr+1)))RETURN
+  CALL native_csc_delete(csc)
+END IF
+ALLOCATE(csc%kc(nc+1),csc%lr(nnz),csc%lm(nnz))
+!---Count entries in each column
+csc%kc=0
+DO j=1,nnz
+  csc%kc(lc(j)+1)=csc%kc(lc(j)+1)+1
+END DO
+csc%kc(1)=1
+DO k=1,nc
+  csc%kc(k+1)=csc%kc(k+1)+csc%kc(k)
+END DO
+!---Fill entries, traversing rows in order so rows are increasing within each column
+ALLOCATE(knext(nc))
+knext=csc%kc(1:nc)
+DO i=1,nr
+  DO j=kr(i),kr(i+1)-1
+    k=lc(j)
+    csc%lr(knext(k))=i
+    csc%lm(knext(k))=j
+    knext(k)=knext(k)+1
+  END DO
+END DO
+DEALLOCATE(knext)
+csc%nnz=nnz
+END SUBROUTINE native_csc_build
+!---------------------------------------------------------------------------------
+!> Release transposed (CSC) index
+!---------------------------------------------------------------------------------
+SUBROUTINE native_csc_delete(csc)
+TYPE(native_csc_index), INTENT(inout) :: csc !< Transposed index
+IF(ASSOCIATED(csc%kc))DEALLOCATE(csc%kc)
+IF(ASSOCIATED(csc%lr))DEALLOCATE(csc%lr)
+IF(ASSOCIATED(csc%lm))DEALLOCATE(csc%lm)
+csc%nnz=-1
+END SUBROUTINE native_csc_delete
 !---------------------------------------------------------------------------------
 !> Compute matrix-vector product
 !!
@@ -1890,7 +1959,8 @@ class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source vector
 class(oft_vector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,k
+integer(i4) :: j,k,ifirst,ilast
+real(r8) :: tmp
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','mat_applyt_vec',__FILE__)
@@ -1913,27 +1983,20 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=0.d0
-IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=INT(self%lc_small(j),4)+lc_offset
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
+!---Apply operator using transposed index (every entry of btmp is overwritten)
+!$omp critical (oft_native_csc_build)
+CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+!$omp end critical (oft_native_csc_build)
+!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
+DO k=ifirst,ilast
+  tmp=0.d0
+  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
+    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
   END DO
-ELSE
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=self%lc(j)
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
-  END DO
-END IF
+  btmp(k)=tmp
+END DO
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -1952,7 +2015,8 @@ class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,k
+integer(i4) :: j,k,ifirst,ilast
+complex(c8) :: tmp
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','mat_applyt_cvec',__FILE__)
@@ -1975,27 +2039,20 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=(0.d0,0.d0)
-IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=INT(self%lc_small(j),4)+lc_offset
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
+!---Apply operator using transposed index (every entry of btmp is overwritten)
+!$omp critical (oft_native_csc_build)
+CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+!$omp end critical (oft_native_csc_build)
+!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
+DO k=ifirst,ilast
+  tmp=(0.d0,0.d0)
+  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
+    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
   END DO
-ELSE
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=self%lc(j)
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
-  END DO
-END IF
+  btmp(k)=tmp
+END DO
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -2314,6 +2371,7 @@ END IF
 IF(ASSOCIATED(self%kr))DEALLOCATE(self%kr)
 IF(ASSOCIATED(self%lc))DEALLOCATE(self%lc)
 IF(ASSOCIATED(self%lc_small))DEALLOCATE(self%lc_small)
+CALL native_csc_delete(self%csc)
 !---
 if(ASSOCIATED(self%map))THEN
   DO i=1,self%ni
@@ -3158,7 +3216,8 @@ class(oft_native_cmatrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,k
+integer(i4) :: j,k,ifirst,ilast
+complex(c8) :: tmp
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
 DEBUG_STACK_PUSH
@@ -3182,27 +3241,20 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=(0.d0,0.d0)
-IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=INT(self%lc_small(j),4)+lc_offset
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
+!---Apply operator using transposed index (every entry of btmp is overwritten)
+!$omp critical (oft_native_csc_build)
+CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+!$omp end critical (oft_native_csc_build)
+!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
+DO k=ifirst,ilast
+  tmp=(0.d0,0.d0)
+  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
+    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
   END DO
-ELSE
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=self%lc(j)
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
-  END DO
-END IF
+  btmp(k)=tmp
+END DO
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -3221,7 +3273,8 @@ class(oft_native_cmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,k
+integer(i4) :: j,k,ifirst,ilast
+complex(c8) :: tmp
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_cvec',__FILE__)
@@ -3244,27 +3297,20 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=(0.d0,0.d0)
-IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=INT(self%lc_small(j),4)+lc_offset
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
+!---Apply operator using transposed index (every entry of btmp is overwritten)
+!$omp critical (oft_native_csc_build)
+CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
+!$omp end critical (oft_native_csc_build)
+!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
+DO k=ifirst,ilast
+  tmp=(0.d0,0.d0)
+  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
+    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
   END DO
-ELSE
-  !$omp parallel do private(j,k) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      k=self%lc(j)
-      !$omp atomic
-      btmp(k) = btmp(k) + self%M(j)*atmp(i)
-    END DO
-  END DO
-END IF
+  btmp(k)=tmp
+END DO
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -3582,6 +3628,7 @@ END IF
 IF(ASSOCIATED(self%kr))DEALLOCATE(self%kr)
 IF(ASSOCIATED(self%lc))DEALLOCATE(self%lc)
 IF(ASSOCIATED(self%lc_small))DEALLOCATE(self%lc_small)
+CALL native_csc_delete(self%csc)
 !---
 if(ASSOCIATED(self%map))THEN
   DO i=1,self%ni
