@@ -1205,7 +1205,7 @@ class GEQDSKEquilibrium:
             int_fe_dl = np.sum(fe_dl)
 
             def flx_avg(quantity):
-                return np.sum(fe_dl * quantity) / int_fe_dl
+                return np.sum(fe_dl * quantity) / int_fe_dl  # noqa: B023
 
             avg["R"][k] = flx_avg(r_s)
             avg["1/R"][k] = flx_avg(1.0 / r_s)

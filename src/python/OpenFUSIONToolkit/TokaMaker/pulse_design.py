@@ -9468,16 +9468,16 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
                 mygs.plot_constraints(fig, ax)
                 mygs.plot_psi(fig, ax, xpoint_color='r', vacuum_nlevels=4)
                 _status = '' if ok else '  [FAILED -- unconverged psi]'
-                ax.set_title(f"seed {idx:02d}   t = {t:.2f} s   Ip = {Ip/1e6:.2f} MA"
-                             f"   ({'diverted' if diverted else 'limited'}){_status}",
+                ax.set_title(f"seed {idx:02d}   t = {t:.2f} s   Ip = {Ip/1e6:.2f} MA"  # noqa: B023
+                             f"   ({'diverted' if diverted else 'limited'}){_status}",  # noqa: B023
                              fontsize=14, color=('k' if ok else 'darkred'))
                 plt.tight_layout()
                 _suffix = '' if ok else '_FAILED'
-                fig.savefig(os.path.join(save_dir, f"seed_{idx:03d}_{name}{_suffix}.png"),
+                fig.savefig(os.path.join(save_dir, f"seed_{idx:03d}_{name}{_suffix}.png"),  # noqa: B023
                             dpi=150, bbox_inches='tight')
                 plt.close(fig)
             except Exception as fig_err:
-                print(f"  [{run_name}] seed {idx} figure failed: {fig_err}")
+                print(f"  [{run_name}] seed {idx} figure failed: {fig_err}")  # noqa: B023
                 plt.close('all')
 
         try:

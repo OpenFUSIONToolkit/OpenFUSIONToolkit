@@ -215,7 +215,7 @@ cubit.cmd('export Genesis "tMaker_cubit.g" overwrite block all')
 
 class gs_Domain:
     '''! Grad-Sharvanov domain definitions for TokaMaker with Triangle library meshing'''
-    def __init__(self,rextent=None,zextents=[None,None],rpad=1.2,zpad=[1.2,1.2],json_filename=None):
+    def __init__(self,rextent=None,zextents=(None,None),rpad=1.2,zpad=(1.2,1.2),json_filename=None):
         '''! Create a new Grad-Shafranov domain
 
         @param region_list List of @ref oftpy.Region objects that define mesh
@@ -242,7 +242,7 @@ class gs_Domain:
                 region.append(Region(load_dict=region))
         else:
             self.rextent = rextent
-            self.zextents = zextents
+            self.zextents = list(zextents)
             self.rpad = None
             if self.rextent is None:
                 self.rpad = rpad
@@ -560,6 +560,7 @@ class gs_Domain:
                             raise ValueError('User specified "zextents[0]" does not enclose all regions')
                     if self.zextents[1] is None:
                         self.zextents[1] = self.zpad[1]*self.zmax
+                    else:
                         if self.zmax > self.zextents[1]:
                             raise ValueError('User specified "zextents[1]" does not enclose all regions')
                     # Create boundary region
@@ -836,7 +837,7 @@ def load_gs_mesh(filename,use_hdf5=True):
 
 class Mesh:
     '''! Mesh builder class for triangle library'''
-    def __init__(self,region_list,merge_thresh=1.E-4,debug=False,extra_reg_defs=[]):
+    def __init__(self,region_list,merge_thresh=1.E-4,debug=False,extra_reg_defs=None):
         '''! Initialize Mesh builder object
 
         @param region_list List of @ref oftpy.Region objects that define mesh
@@ -1025,7 +1026,7 @@ class Mesh:
         print('  # of unique points    = {0}'.format(self._resampled_points.shape[0]))
         print('  # of unique segments  = {0}'.format(len(self._segments)))
         # Build list of region definitions
-        self._reg_defs = extra_reg_defs
+        self._reg_defs = [] if extra_reg_defs is None else list(extra_reg_defs)
         for ireg, region in enumerate(region_list):
             imin = -1
             dmin = 1.E99

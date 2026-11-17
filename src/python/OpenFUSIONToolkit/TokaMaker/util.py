@@ -231,7 +231,7 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
                                numpy.concatenate([z_outer, z_iu, z_il])])
 
 
-def create_spline_flux_fun(npts,x,y,axis_bc=[1,0.0],edge_bc=[1,0.0],normalize=True):
+def create_spline_flux_fun(npts,x,y,axis_bc=(1,0.0),edge_bc=(1,0.0),normalize=True):
     r'''! Build cubic spline flux function
 
     @param npts Number of points for definition
@@ -343,7 +343,7 @@ def read_eqdsk(filename):
 
 
 def read_ifile(filename):
-    '''! Read i-file inverse equilibrium file
+    r'''! Read i-file inverse equilibrium file
 
     @param filename Path to file
     @result Dictionary containing i-file information (when present: `ffp`, `pp` for \f$FF'\f$, \f$P'\f$;
