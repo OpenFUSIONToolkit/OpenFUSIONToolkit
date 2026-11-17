@@ -25,6 +25,27 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 !---------------------------------------------------------------------------------
+!> @name Vector access modes
+!!
+!! Access modes for borrowing the local values of a vector without a copy
+!! (`borrow_local`/`release_local` on @ref oft_vector and @ref oft_cvector). The same
+!! mode must be passed to the borrow and the matching release.
+!!
+!! The modes are bit flags (`OFT_ACCESS_READWRITE = IOR(OFT_ACCESS_READ,OFT_ACCESS_WRITE)`).
+!! Besides documenting intent they say which copy of the data becomes stale for a
+!! backend that keeps values in more than one memory space (eg. host and device):
+!! - `OFT_ACCESS_READ`: current values are needed on borrow; nothing becomes stale on release.
+!! - `OFT_ACCESS_WRITE`: values on borrow are undefined (no transfer is needed before the
+!!   borrow) and the caller must assign every entry of the borrowed range; after release
+!!   the borrowed copy is authoritative and any other copy is stale.
+!! - `OFT_ACCESS_READWRITE`: current values are needed on borrow; after release the
+!!   borrowed copy is authoritative and any other copy is stale.
+!! @{
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_READ = 1 !< Read-only access
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_WRITE = 2 !< Write-only access (all entries must be set)
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_READWRITE = 3 !< Read-write access
+!! @}
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 type, public :: oft_local_mat
@@ -108,6 +129,14 @@ CONTAINS
   procedure(vec_norm), deferred :: norm
   !> Perform global sitching
   procedure(vec_stitch), deferred :: stitch
+  !> Borrow local values (no copy where supported), see @ref vector_borrow_local
+  procedure :: borrow_local => vector_borrow_local
+  !> Release local values obtained with `borrow_local`, see @ref vector_release_local
+  procedure :: release_local => vector_release_local
+  !> Copy values from a second vector
+  procedure :: copy => vector_copy
+  !> Add a linear combination of vectors
+  procedure :: maxpy => vector_maxpy
   !> Delete vector
   procedure :: delete => vector_delete
 END TYPE oft_vector
@@ -168,6 +197,16 @@ CONTAINS
   procedure(cvec_norm), deferred :: norm
   !> Perform global sitching
   procedure(cvec_stitch), deferred :: stitch
+  !> Borrow local values (no copy where supported), see @ref cvector_borrow_local
+  procedure :: borrow_local => cvector_borrow_local
+  !> Release local values obtained with `borrow_local`, see @ref cvector_release_local
+  procedure :: release_local => cvector_release_local
+  procedure :: copy_real => cvector_copy_vec
+  procedure :: copy_complex => cvector_copy_cvec
+  !> Copy values from a second vector
+  generic :: copy => copy_real, copy_complex
+  !> Add a linear combination of vectors
+  procedure :: maxpy => cvector_maxpy
   !> Delete vector
   procedure :: delete => cvector_delete
 END TYPE oft_cvector
@@ -865,6 +904,207 @@ END INTERFACE
 !---Declare public entities
 public vector_extrapolate
 contains
+!---------------------------------------------------------------------------------
+!> Borrow the local values (or a block of them) of a vector
+!!
+!! On return `array` refers to the local values of the vector, including values
+!! shared with other processes (as for `get_local`), or of block `iblock` only.
+!! Backends that store local values contiguously (native vectors) return a pointer
+!! into the vector's own storage without copying; this default implementation,
+!! used by other backends, returns a copy obtained with `get_local`. Callers must
+!! work correctly in both cases.
+!!
+!! Contract:
+!! - `array` is owned by the vector: do not allocate, deallocate or reassociate it,
+!!   and always give it back with `release_local` using the same `mode` and `iblock`.
+!! - Between borrow and release do not call any other method of the vector (or of a
+!!   vector created as an alias of it) that reads or modifies its values, including
+!!   `stitch`, and do not delete it. Borrowing several different vectors at once is
+!!   fine, as is borrowing the same vector more than once for reading only.
+!! - Writing through `array` is only allowed if `mode` includes @ref OFT_ACCESS_WRITE.
+!!   With @ref OFT_ACCESS_WRITE alone the initial contents are undefined and every
+!!   entry must be assigned before release.
+!! - `array` is invalid after release (it is nullified).
+!---------------------------------------------------------------------------------
+subroutine vector_borrow_local(self,array,mode,iblock)
+class(oft_vector), intent(inout) :: self !< Vector object
+real(r8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
+integer(i4), intent(in) :: mode !< Access mode (@ref OFT_ACCESS_READ, @ref OFT_ACCESS_WRITE or @ref OFT_ACCESS_READWRITE)
+integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
+real(r8), pointer, dimension(:) :: vtmp
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'vector_borrow_local',__FILE__)
+NULLIFY(vtmp)
+CALL self%get_local(vtmp,iblock)
+array=>vtmp
+DEBUG_STACK_POP
+end subroutine vector_borrow_local
+!---------------------------------------------------------------------------------
+!> Release local values obtained with @ref vector_borrow_local
+!!
+!! If `mode` includes @ref OFT_ACCESS_WRITE the values in `array` become the local
+!! values of the vector. `sync` then selects whether values shared between processes
+!! are synchronized from their owning process (`stitch(0)`, as done by `restore_local`):
+!! - `sync=.TRUE.` is always safe and must be used when processes sharing a value
+!!   may have written different values to it.
+!! - `sync=.FALSE.` skips the MPI exchange. Use it only if every process sharing a
+!!   value made the same modification (eg. zeroing based on a global boundary flag),
+!!   or if the caller synchronizes the vector explicitly before it is used.
+!! Backends that keep a single copy of each shared value (eg. PETSc) only retain
+!! the owned values, which is the same result as `sync=.TRUE.`.
+!!
+!! For @ref OFT_ACCESS_READ `sync` must be `.FALSE.`. `array` is nullified on return.
+!---------------------------------------------------------------------------------
+subroutine vector_release_local(self,array,mode,sync,iblock)
+class(oft_vector), intent(inout) :: self !< Vector object
+real(r8), pointer, contiguous, intent(inout) :: array(:) !< Borrowed local values (nullified on return)
+integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
+logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
+integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'vector_release_local',__FILE__)
+IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
+  'vector_release_local',__FILE__)
+IF(IAND(mode,OFT_ACCESS_WRITE)/=0)THEN
+  IF(PRESENT(iblock))THEN
+    CALL self%restore_local(array,iblock,wait=(.NOT.sync))
+  ELSE
+    CALL self%restore_local(array)
+  END IF
+END IF
+DEALLOCATE(array)
+DEBUG_STACK_POP
+end subroutine vector_release_local
+!---------------------------------------------------------------------------------
+!> Copy values from a second vector
+!!
+!! self = a
+!!
+!! @note This default implementation uses `add`, so non-finite values in `self` may
+!! propagate; backends should override it with a direct copy.
+!---------------------------------------------------------------------------------
+subroutine vector_copy(self,a)
+class(oft_vector), intent(inout) :: self !< Vector object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+DEBUG_STACK_PUSH
+CALL self%add(0.d0,1.d0,a)
+DEBUG_STACK_POP
+end subroutine vector_copy
+!---------------------------------------------------------------------------------
+!> Add a linear combination of vectors
+!!
+!! self = self + \f$ \sum_k \alpha_k a_k \f$
+!!
+!! Each entry is updated by adding the terms in order of increasing `k`, so the result
+!! is the same as `n` successive calls to `add`. This default implementation does
+!! exactly that.
+!---------------------------------------------------------------------------------
+subroutine vector_maxpy(self,alpha,a,n)
+class(oft_vector), intent(inout) :: self !< Vector object
+integer(i4), intent(in) :: n !< Number of vectors
+real(r8), intent(in) :: alpha(n) !< Scale factors [n]
+type(oft_vector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
+integer(i4) :: k
+DEBUG_STACK_PUSH
+DO k=1,n
+  CALL self%add(1.d0,alpha(k),a(k)%f)
+END DO
+DEBUG_STACK_POP
+end subroutine vector_maxpy
+!---------------------------------------------------------------------------------
+!> Borrow the local values (or a block of them) of a complex vector
+!!
+!! See @ref vector_borrow_local for the contract.
+!---------------------------------------------------------------------------------
+subroutine cvector_borrow_local(self,array,mode,iblock)
+class(oft_cvector), intent(inout) :: self !< Vector object
+complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
+integer(i4), intent(in) :: mode !< Access mode (@ref OFT_ACCESS_READ, @ref OFT_ACCESS_WRITE or @ref OFT_ACCESS_READWRITE)
+integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
+complex(c8), pointer, dimension(:) :: vtmp
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'cvector_borrow_local',__FILE__)
+NULLIFY(vtmp)
+CALL self%get_local(vtmp,iblock)
+array=>vtmp
+DEBUG_STACK_POP
+end subroutine cvector_borrow_local
+!---------------------------------------------------------------------------------
+!> Release local values obtained with @ref cvector_borrow_local
+!!
+!! See @ref vector_release_local for the contract.
+!---------------------------------------------------------------------------------
+subroutine cvector_release_local(self,array,mode,sync,iblock)
+class(oft_cvector), intent(inout) :: self !< Vector object
+complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Borrowed local values (nullified on return)
+integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
+logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
+integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
+DEBUG_STACK_PUSH
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+  'cvector_release_local',__FILE__)
+IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
+  'cvector_release_local',__FILE__)
+IF(IAND(mode,OFT_ACCESS_WRITE)/=0)THEN
+  IF(PRESENT(iblock))THEN
+    CALL self%restore_local(array,iblock,wait=(.NOT.sync))
+  ELSE
+    CALL self%restore_local(array)
+  END IF
+END IF
+DEALLOCATE(array)
+DEBUG_STACK_POP
+end subroutine cvector_release_local
+!---------------------------------------------------------------------------------
+!> Copy values from a real vector
+!!
+!! self = a
+!!
+!! @note This default implementation uses `add`, see @ref vector_copy.
+!---------------------------------------------------------------------------------
+subroutine cvector_copy_vec(self,a)
+class(oft_cvector), intent(inout) :: self !< Vector object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+DEBUG_STACK_PUSH
+CALL self%add((0.d0,0.d0),(1.d0,0.d0),a)
+DEBUG_STACK_POP
+end subroutine cvector_copy_vec
+!---------------------------------------------------------------------------------
+!> Copy values from a second complex vector
+!!
+!! self = a
+!!
+!! @note This default implementation uses `add`, see @ref vector_copy.
+!---------------------------------------------------------------------------------
+subroutine cvector_copy_cvec(self,a)
+class(oft_cvector), intent(inout) :: self !< Vector object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
+DEBUG_STACK_PUSH
+CALL self%add((0.d0,0.d0),(1.d0,0.d0),a)
+DEBUG_STACK_POP
+end subroutine cvector_copy_cvec
+!---------------------------------------------------------------------------------
+!> Add a linear combination of complex vectors
+!!
+!! self = self + \f$ \sum_k \alpha_k a_k \f$
+!!
+!! See @ref vector_maxpy.
+!---------------------------------------------------------------------------------
+subroutine cvector_maxpy(self,alpha,a,n)
+class(oft_cvector), intent(inout) :: self !< Vector object
+integer(i4), intent(in) :: n !< Number of vectors
+complex(c8), intent(in) :: alpha(n) !< Scale factors [n]
+type(oft_cvector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
+integer(i4) :: k
+DEBUG_STACK_PUSH
+DO k=1,n
+  CALL self%add((1.d0,0.d0),alpha(k),a(k)%f)
+END DO
+DEBUG_STACK_POP
+end subroutine cvector_maxpy
 !---------------------------------------------------------------------------------
 !> Finalize vector
 !!
