@@ -14,6 +14,7 @@
 !!   `loverlap` bit for bit (restricted)
 !! - Subdomain matrices with overlap across processes match the entries of the
 !!   globally assembled matrix (assembled independently from all local matrices)
+!! - Updating the preconditioner after the operator values change
 !! - GMRES iteration counts with restricted and additive Schwarz for 0, 1 and 2
 !!   overlap layers (written to `schwarz.results` for checking by the driver)
 !!
@@ -97,6 +98,8 @@ its(2)=solve(1,1,.FALSE.,.TRUE.,v)
 its(3)=solve(1,2,.FALSE.,.TRUE.,v)
 its(4)=solve(1,1,.TRUE.,.TRUE.,v)
 its(5)=solve(1,2,.TRUE.,.TRUE.,v)
+!---Numeric update of the subdomain matrices after the operator values change
+CALL check_update()
 !---Several blocks per process: no overlap, additive and restricted with overlap 1
 its(6)=solve(4,0,.TRUE.,.TRUE.,v)
 its(7)=solve(4,1,.TRUE.,.TRUE.,v)
@@ -152,6 +155,45 @@ ELSE
   CALL bj%delete
 END IF
 END FUNCTION solve
+! Scaling the operator and updating the preconditioner scales the solution
+SUBROUTINE check_update()
+TYPE(oft_native_gmres_solver) :: linv
+TYPE(oft_schwarz_precond), TARGET :: sw
+#ifdef HAVE_SUPERLU
+TYPE(oft_lusolver), TARGET :: sub
+sub%package='super'
+#else
+TYPE(oft_ilusolver), TARGET :: sub
+sub%package='native'
+#endif
+linv%A=>lop
+linv%its=-3
+linv%nrits=20
+linv%atol=1.d-12
+sw%overlap=1
+sw%pre=>sub
+linv%pre=>sw
+CALL v%set(0.d0)
+CALL g%copy(g0)
+CALL linv%apply(v,g)
+SELECT TYPE(lop)
+TYPE IS(oft_native_matrix)
+  lop%M=2.d0*lop%M
+  lop%full_current=.FALSE.
+END SELECT
+CALL linv%update(.FALSE.)
+CALL w%set(0.d0)
+CALL g%copy(g0)
+CALL linv%apply(w,g)
+CALL w%scale(2.d0)
+CALL check_tol('Updated Schwarz solution scales with operator',maxdiff(v,w)/SQRT(v%dot(v)),1.d-8)
+SELECT TYPE(lop)
+TYPE IS(oft_native_matrix)
+  lop%M=0.5d0*lop%M
+  lop%full_current=.FALSE.
+END SELECT
+CALL sw%delete
+END SUBROUTINE check_update
 ! Subdomain matrix with overlap across processes against the assembled global matrix
 SUBROUTINE check_subdomain(levels)
 INTEGER(i4), INTENT(in) :: levels
