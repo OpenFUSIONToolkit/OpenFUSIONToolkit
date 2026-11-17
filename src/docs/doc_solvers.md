@@ -99,15 +99,23 @@ This method is supported through both the native and PETSc backends through
 
 \subsection doc_solvers_basic_schwarz Additive Schwarz
 
-This method is currently only supported with the PETSc backend through
-\ref oft_petsc_solvers::oft_petsc_asprecond "oft_petsc_asprecond" as a preconditioner.
+This method is provided as a preconditioner through both the native and PETSc backends through
+\ref oft_native_solvers::oft_schwarz_precond "oft_schwarz_precond" and
+\ref oft_petsc_solvers::oft_petsc_asprecond "oft_petsc_asprecond". Subdomains are grown from a
+non-overlapping partition by `overlap` layers along the matrix graph and solved with the
+sub-solver given by the nested `pre` element. In the native backend, with `nlocal=1` each process
+has one subdomain made of its owned rows, grown across processes; with several local blocks
+(`nlocal>1`, or negative for field based blocks) the blocks are grown within the owned rows of
+each process. `overlap=0` is block-Jacobi.
 
 **XML Spec:** `<pre type="add_schwarz">`
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
 | `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
-| `overlap`  | Overlap size | int | Yes |
+| `groups`   | Group index for each field in multi-field vector [n] (native only) | int | Yes |
+| `overlap`  | Overlap size (native default: 1) | int | Yes |
+| `type`     | Combination of subdomain solutions: `restricted` (default) or `additive` (native only) | str | No |
 
 \section doc_solvers_krylov Krylov Solvers
 
