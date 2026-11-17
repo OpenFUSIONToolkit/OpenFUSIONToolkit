@@ -18,6 +18,9 @@
 !! - copy, maxpy and mdot for real and complex vectors against add and dot
 !! - Boundary condition operators that skip synchronization against the copying path
 !! - Summation stitching gives bitwise identical shared values (eg. periodic images)
+!! - Shared matrix non-zero patterns: sharing by FE operators, identical results for
+!!   independent and pattern-sharing matrices (real and complex), linkage built once,
+!!   and patterns freed with their last reference
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -29,11 +32,15 @@ USE multigrid_build, ONLY: multigrid_construct
 USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_value, ieee_quiet_nan
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_vector_ptr, oft_cvector_ptr, &
   OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
-USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvector
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvector, &
+  oft_native_cmatrix, oft_native_pattern, native_matrix_share, native_matrix_setup_full, &
+  native_pattern_live
+USE oft_la_base, ONLY: oft_cmatrix, oft_graph_ptr
+USE oft_la_utils, ONLY: create_matrix
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
-USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_zerob, oft_vlag_zerob
+USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob, oft_vlag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,nfail
 LOGICAL :: cstitch
@@ -56,6 +63,7 @@ CALL test_access()
 CALL test_multi()
 CALL test_bc()
 CALL test_stitch()
+CALL test_pattern()
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='native_la.results')
   WRITE(io_unit,*)nfail
@@ -586,4 +594,157 @@ CALL x%delete
 CALL ones%delete
 DEALLOCATE(x,ones)
 END SUBROUTINE test_stitch
+! Shared non-zero patterns of native CRS matrices
+SUBROUTINE test_pattern()
+INTEGER(i4) :: i,nlive0,nlive1,refs0
+REAL(r8) :: v1
+REAL(r8), POINTER, DIMENSION(:) :: xr,xi
+COMPLEX(c8), POINTER, DIMENSION(:) :: cvals
+CLASS(oft_vector), POINTER :: x,y,z,w
+CLASS(oft_cvector), POINTER :: cx,cz
+CLASS(oft_matrix), POINTER :: lop => NULL()
+CLASS(oft_matrix), POINTER :: mop => NULL()
+CLASS(oft_matrix), POINTER :: indep => NULL()
+CLASS(oft_matrix), POINTER :: shared => NULL()
+CLASS(oft_matrix), POINTER :: shared2 => NULL()
+CLASS(oft_cmatrix), POINTER :: cshared => NULL()
+TYPE(oft_graph_ptr) :: graphs(1,1)
+TYPE(oft_native_matrix), POINTER :: A,B,B2,L,Mm
+TYPE(oft_native_cmatrix), POINTER :: C
+CALL ML_oft_lagrange%vec_create(x)
+CALL ML_oft_lagrange%vec_create(y)
+CALL ML_oft_lagrange%vec_create(z)
+CALL ML_oft_lagrange%vec_create(w)
+CALL fill(x,0.37d0,0.1d0)
+CALL fill(y,0.11d0,-0.2d0)
+nlive0=native_pattern_live
+!---Operators created by the same FE representation share its cached pattern
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'none')
+L=>native_cast(lop)
+refs0=L%pattern%refcount
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
+Mm=>native_cast(mop)
+CALL check_exact('FE operators share pattern',MERGE(1.d0,0.d0,ASSOCIATED(L%pattern,Mm%pattern)),1.d0)
+CALL check_exact('Shared pattern reference count',REAL(Mm%pattern%refcount-refs0,r8),1.d0)
+CALL check_exact('No pattern created for second operator',REAL(native_pattern_live-nlive0,r8),0.d0)
+!---Independent matrix with the same structure (no pattern cache) and the operator values
+ALLOCATE(graphs(1,1)%g)
+graphs(1,1)%g%nr=ML_oft_lagrange%current_level%ne
+graphs(1,1)%g%nrg=ML_oft_lagrange%current_level%global%ne
+graphs(1,1)%g%nc=ML_oft_lagrange%current_level%ne
+graphs(1,1)%g%ncg=ML_oft_lagrange%current_level%global%ne
+graphs(1,1)%g%nnz=ML_oft_lagrange%current_level%nee
+graphs(1,1)%g%kr=>ML_oft_lagrange%current_level%kee
+graphs(1,1)%g%lc=>ML_oft_lagrange%current_level%lee
+CALL create_matrix(indep,graphs,x,x)
+DEALLOCATE(graphs(1,1)%g)
+A=>native_cast(indep)
+CALL check_exact('Independent matrix has new pattern',REAL(native_pattern_live-nlive0,r8),1.d0)
+CALL check_exact('Independent pattern not shared',MERGE(1.d0,0.d0,ASSOCIATED(A%pattern,L%pattern)),0.d0)
+A%M=L%M
+!---Matrix sharing the pattern of the independent matrix gives identical results
+CALL native_matrix_share(indep,shared)
+B=>native_cast(shared)
+CALL check_exact('Share uses source pattern',MERGE(1.d0,0.d0,ASSOCIATED(A%pattern,B%pattern)),1.d0)
+CALL check_exact('Share reference count',REAL(A%pattern%refcount,r8),2.d0)
+CALL check_exact('Share zero-initialized',oft_mpi_max(MAXVAL(ABS(B%M))),0.d0)
+B%M=A%M
+CALL indep%apply(x,z)
+CALL shared%apply(x,w)
+CALL check_exact('Shared A x = independent A x',maxdiff(z,w),0.d0)
+CALL indep%applyt(y,z)
+CALL shared%applyt(y,w)
+CALL check_exact('Shared A^T y = independent A^T y',maxdiff(z,w),0.d0)
+CALL lop%apply(x,w)
+CALL indep%apply(x,z)
+CALL check_exact('FE operator A x = independent A x',maxdiff(z,w),0.d0)
+!---Deleting one of several matrices sharing a pattern keeps it for the others
+nlive1=native_pattern_live
+CALL indep%delete
+DEALLOCATE(indep)
+CALL check_exact('Pattern kept after deleting one user',REAL(native_pattern_live-nlive1,r8),0.d0)
+CALL check_exact('Reference count after delete',REAL(B%pattern%refcount,r8),1.d0)
+CALL shared%apply(x,w)
+CALL check_exact('A x unchanged after deleting source',maxdiff(z,w),0.d0)
+!---Linkage for full local matrices is built once per pattern
+CALL native_matrix_share(shared,shared2)
+B2=>native_cast(shared2)
+B2%M=B%M
+CALL native_matrix_setup_full(B,x)
+CALL native_matrix_setup_full(B2,x)
+CALL check_exact('Linkage shared',MERGE(1.d0,0.d0,ASSOCIATED(B%linkage,B2%linkage)),1.d0)
+CALL check_exact('Linkage owned by pattern',MERGE(1.d0,0.d0,ASSOCIATED(B2%linkage,B2%pattern%linkage)),1.d0)
+CALL check_exact('Redundant rows shared',REAL(B2%nred-B%nred,r8),0.d0)
+CALL B%update_slice
+CALL B2%update_slice
+v1=0.d0
+IF(B%nnz>0)v1=MAXVAL(ABS(B%Mfull-B2%Mfull))
+CALL check_exact('Full local matrices equal',oft_mpi_max(v1),0.d0)
+CALL native_matrix_setup_full(L,x)
+CALL native_matrix_setup_full(Mm,x)
+CALL check_exact('FE operator linkage shared',MERGE(1.d0,0.d0,ASSOCIATED(L%linkage,Mm%linkage)),1.d0)
+!---Complex matrix sharing a real pattern
+CALL native_matrix_share(shared,cshared)
+SELECT TYPE(cshared)
+CLASS IS(oft_native_cmatrix)
+  C=>cshared
+CLASS DEFAULT
+  CALL oft_abort('Native complex matrix expected','test_pattern',__FILE__)
+END SELECT
+CALL check_exact('Complex share uses real pattern',MERGE(1.d0,0.d0,ASSOCIATED(C%pattern,B%pattern)),1.d0)
+C%M=CMPLX(B%M,0.d0,c8)
+IF(cstitch)THEN ! Complex vector stitching is only supported without linked copies
+  CALL x%new(cx)
+  CALL x%new(cz)
+  NULLIFY(xr,xi,cvals)
+  CALL x%get_local(xr)
+  CALL y%get_local(xi)
+  ALLOCATE(cvals(x%n))
+  cvals=CMPLX(xr,xi,c8)
+  CALL cx%restore_local(cvals)
+  CALL cshared%apply(cx,cz)
+  CALL cz%get_local(cvals)
+  CALL shared%apply(x,z)
+  CALL shared%apply(y,w)
+  CALL z%get_local(xr)
+  CALL w%get_local(xi)
+  CALL check_exact('Re(complex shared A cx)',MAXVAL(ABS(REAL(cvals,r8)-xr)),0.d0)
+  CALL check_exact('Im(complex shared A cx)',MAXVAL(ABS(AIMAG(cvals)-xi)),0.d0)
+  DEALLOCATE(xr,xi,cvals)
+  CALL cx%delete
+  CALL cz%delete
+  DEALLOCATE(cx,cz)
+END IF
+!---Pattern is freed with its last reference
+CALL check_exact('Reference count with three users',REAL(B%pattern%refcount,r8),3.d0)
+CALL shared%delete
+DEALLOCATE(shared)
+CALL cshared%delete
+DEALLOCATE(cshared)
+CALL check_exact('Pattern kept for last user',REAL(native_pattern_live-nlive1,r8),0.d0)
+CALL shared2%delete
+DEALLOCATE(shared2)
+CALL check_exact('Pattern freed with last user',REAL(native_pattern_live-nlive1,r8),-1.d0)
+!---FE pattern stays cached after its operators are deleted
+CALL lop%delete
+CALL mop%delete
+DEALLOCATE(lop,mop)
+CALL check_exact('FE pattern kept by cache',REAL(native_pattern_live-nlive0,r8),0.d0)
+CALL x%delete
+CALL y%delete
+CALL z%delete
+CALL w%delete
+DEALLOCATE(x,y,z,w)
+END SUBROUTINE test_pattern
+! Cast a matrix to a native CRS matrix pointer (aborts otherwise)
+FUNCTION native_cast(mat) RESULT(nmat)
+CLASS(oft_matrix), POINTER, INTENT(in) :: mat
+TYPE(oft_native_matrix), POINTER :: nmat
+SELECT TYPE(mat)
+TYPE IS(oft_native_matrix)
+  nmat=>mat
+CLASS DEFAULT
+  CALL oft_abort('Native matrix expected','native_cast',__FILE__)
+END SELECT
+END FUNCTION native_cast
 END PROGRAM test_native_la
