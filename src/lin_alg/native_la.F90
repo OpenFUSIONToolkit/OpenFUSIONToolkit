@@ -806,7 +806,9 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie
+integer(i4) :: i,j,k,ib,ie,i1,i2
+real(r8), pointer, contiguous, dimension(:) :: xv
+real(r8), pointer, contiguous, dimension(:) :: av
 real(r8) :: tmp,dloc(n)
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
@@ -821,27 +823,29 @@ DO k=1,n
 END DO
 dloc=0.d0
 IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !$omp do schedule(static)
-  DO ib=1,self%n,native_vec_chunk
-    ie=MIN(self%n,ib+native_vec_chunk-1)
+  xv=>self%v
+  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !---Each thread processes one contiguous range of rows, in blocks
+  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
+  DO ib=i1,i2,native_vec_chunk
+    ie=MIN(i2,ib+native_vec_chunk-1)
     DO k=1,n
+      av=>vals(k)%v
       tmp=0.d0
       !$omp simd reduction(+:tmp)
-    DO i=ib,ie
-        tmp=tmp+self%v(i)*vals(k)%v(i)
+      DO i=ib,ie
+        tmp=tmp+xv(i)*av(i)
       END DO
       dloc(k)=dloc(k)+tmp
     END DO
   END DO
-  !$omp end do nowait
   !---Remove values not owned by this process
   !$omp do schedule(static)
   DO i=1,self%stitch_info%nbe
     IF(self%stitch_info%leo(i))CYCLE
     j=self%stitch_info%lbe(i)
     DO k=1,n
-      dloc(k)=dloc(k)-self%v(j)*vals(k)%v(j)
+      dloc(k)=dloc(k)-xv(j)*vals(k)%v(j)
     END DO
   END DO
   !$omp end do nowait
@@ -865,7 +869,9 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie
+integer(i4) :: i,j,k,ib,ie,i1,i2
+real(r8), pointer, contiguous, dimension(:) :: xv
+complex(c8), pointer, contiguous, dimension(:) :: av
 complex(c8) :: tmp,dloc(n)
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
@@ -880,27 +886,29 @@ DO k=1,n
 END DO
 dloc=(0.d0,0.d0)
 IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !$omp do schedule(static)
-  DO ib=1,self%n,native_vec_chunk
-    ie=MIN(self%n,ib+native_vec_chunk-1)
+  xv=>self%v
+  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !---Each thread processes one contiguous range of rows, in blocks
+  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
+  DO ib=i1,i2,native_vec_chunk
+    ie=MIN(i2,ib+native_vec_chunk-1)
     DO k=1,n
+      av=>vals(k)%v
       tmp=(0.d0,0.d0)
       !$omp simd reduction(+:tmp)
       DO i=ib,ie
-        tmp=tmp+self%v(i)*vals(k)%v(i)
+        tmp=tmp+xv(i)*av(i)
       END DO
       dloc(k)=dloc(k)+tmp
     END DO
   END DO
-  !$omp end do nowait
   !---Remove values not owned by this process
   !$omp do schedule(static)
   DO i=1,self%stitch_info%nbe
     IF(self%stitch_info%leo(i))CYCLE
     j=self%stitch_info%lbe(i)
     DO k=1,n
-      dloc(k)=dloc(k)-self%v(j)*vals(k)%v(j)
+      dloc(k)=dloc(k)-xv(j)*vals(k)%v(j)
     END DO
   END DO
   !$omp end do nowait
@@ -1049,7 +1057,8 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Number of vectors
 real(r8), intent(in) :: alpha(n) !< Scale factors [n]
 type(oft_vector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
-integer(i4) :: i,k,ib,ie
+integer(i4) :: i,k,ib,ie,i1,i2
+real(r8), pointer, contiguous, dimension(:) :: yv,av
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 IF(n<1)THEN
@@ -1065,16 +1074,21 @@ DO k=1,n
     CALL oft_abort('"a" is not a native vector.','vec_maxpy',__FILE__)
   end select
 END DO
-!$omp parallel do private(ie,k,i) schedule(static) if(self%n>OFT_OMP_VTHRESH)
-DO ib=1,self%n,native_vec_chunk
-  ie=MIN(self%n,ib+native_vec_chunk-1)
+yv=>self%v
+!$omp parallel private(i1,i2,ib,ie,k,i,av) if(self%n>OFT_OMP_VTHRESH)
+!---Each thread processes one contiguous range of rows, in blocks
+CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
+DO ib=i1,i2,native_vec_chunk
+  ie=MIN(i2,ib+native_vec_chunk-1)
   DO k=1,n
+    av=>vals(k)%v
     !$omp simd
     DO i=ib,ie
-      self%v(i)=self%v(i)+alpha(k)*vals(k)%v(i)
+      yv(i)=yv(i)+alpha(k)*av(i)
     END DO
   END DO
 END DO
+!$omp end parallel
 DEBUG_STACK_POP
 end subroutine vec_maxpy
 !---------------------------------------------------------------------------------
@@ -1872,7 +1886,9 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie
+integer(i4) :: i,j,k,ib,ie,i1,i2
+complex(c8), pointer, contiguous, dimension(:) :: xv
+real(r8), pointer, contiguous, dimension(:) :: av
 complex(c8) :: tmp,dloc(n)
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
@@ -1887,27 +1903,29 @@ DO k=1,n
 END DO
 dloc=(0.d0,0.d0)
 IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !$omp do schedule(static)
-  DO ib=1,self%n,native_vec_chunk
-    ie=MIN(self%n,ib+native_vec_chunk-1)
+  xv=>self%v
+  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !---Each thread processes one contiguous range of rows, in blocks
+  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
+  DO ib=i1,i2,native_vec_chunk
+    ie=MIN(i2,ib+native_vec_chunk-1)
     DO k=1,n
+      av=>vals(k)%v
       tmp=(0.d0,0.d0)
       !$omp simd reduction(+:tmp)
       DO i=ib,ie
-        tmp=tmp+CONJG(self%v(i))*vals(k)%v(i)
+        tmp=tmp+CONJG(xv(i))*av(i)
       END DO
       dloc(k)=dloc(k)+tmp
     END DO
   END DO
-  !$omp end do nowait
   !---Remove values not owned by this process
   !$omp do schedule(static)
   DO i=1,self%stitch_info%nbe
     IF(self%stitch_info%leo(i))CYCLE
     j=self%stitch_info%lbe(i)
     DO k=1,n
-      dloc(k)=dloc(k)-CONJG(self%v(j))*vals(k)%v(j)
+      dloc(k)=dloc(k)-CONJG(xv(j))*vals(k)%v(j)
     END DO
   END DO
   !$omp end do nowait
@@ -1931,7 +1949,9 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie
+integer(i4) :: i,j,k,ib,ie,i1,i2
+complex(c8), pointer, contiguous, dimension(:) :: xv
+complex(c8), pointer, contiguous, dimension(:) :: av
 complex(c8) :: tmp,dloc(n)
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
@@ -1946,27 +1966,29 @@ DO k=1,n
 END DO
 dloc=(0.d0,0.d0)
 IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  !$omp parallel private(ie,j,k,i,tmp) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !$omp do schedule(static)
-  DO ib=1,self%n,native_vec_chunk
-    ie=MIN(self%n,ib+native_vec_chunk-1)
+  xv=>self%v
+  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
+  !---Each thread processes one contiguous range of rows, in blocks
+  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
+  DO ib=i1,i2,native_vec_chunk
+    ie=MIN(i2,ib+native_vec_chunk-1)
     DO k=1,n
+      av=>vals(k)%v
       tmp=(0.d0,0.d0)
       !$omp simd reduction(+:tmp)
       DO i=ib,ie
-        tmp=tmp+CONJG(self%v(i))*vals(k)%v(i)
+        tmp=tmp+CONJG(xv(i))*av(i)
       END DO
       dloc(k)=dloc(k)+tmp
     END DO
   END DO
-  !$omp end do nowait
   !---Remove values not owned by this process
   !$omp do schedule(static)
   DO i=1,self%stitch_info%nbe
     IF(self%stitch_info%leo(i))CYCLE
     j=self%stitch_info%lbe(i)
     DO k=1,n
-      dloc(k)=dloc(k)-CONJG(self%v(j))*vals(k)%v(j)
+      dloc(k)=dloc(k)-CONJG(xv(j))*vals(k)%v(j)
     END DO
   END DO
   !$omp end do nowait
@@ -2132,7 +2154,8 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Number of vectors
 complex(c8), intent(in) :: alpha(n) !< Scale factors [n]
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
-integer(i4) :: i,k,ib,ie
+integer(i4) :: i,k,ib,ie,i1,i2
+complex(c8), pointer, contiguous, dimension(:) :: yv,av
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 IF(n<1)THEN
@@ -2148,15 +2171,21 @@ DO k=1,n
     CALL oft_abort('"a" is not a native complex vector.','cvec_maxpy',__FILE__)
   end select
 END DO
-!$omp parallel do private(ie,k,i) schedule(static) if(self%n>OFT_OMP_VTHRESH)
-DO ib=1,self%n,native_vec_chunk
-  ie=MIN(self%n,ib+native_vec_chunk-1)
+yv=>self%v
+!$omp parallel private(i1,i2,ib,ie,k,i,av) if(self%n>OFT_OMP_VTHRESH)
+!---Each thread processes one contiguous range of rows, in blocks
+CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
+DO ib=i1,i2,native_vec_chunk
+  ie=MIN(i2,ib+native_vec_chunk-1)
   DO k=1,n
+    av=>vals(k)%v
+    !$omp simd
     DO i=ib,ie
-      self%v(i)=self%v(i)+alpha(k)*vals(k)%v(i)
+      yv(i)=yv(i)+alpha(k)*av(i)
     END DO
   END DO
 END DO
+!$omp end parallel
 DEBUG_STACK_POP
 end subroutine cvec_maxpy
 !---------------------------------------------------------------------------------
