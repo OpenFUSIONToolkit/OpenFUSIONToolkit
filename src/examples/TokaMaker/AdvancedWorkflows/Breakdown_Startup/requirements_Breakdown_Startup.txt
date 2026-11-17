@@ -1,0 +1,9 @@
+# Python packages required by ARC_breakdown_startup_ex.ipynb, in addition to
+# OpenFUSIONToolkit itself. clarabel is the conic solver used by
+# startup_optimizer.py and is the only dependency specific to this example.
+numpy
+scipy
+matplotlib
+h5py
+clarabel
+jupyterlab
