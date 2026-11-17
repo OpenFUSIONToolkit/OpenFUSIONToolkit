@@ -130,6 +130,15 @@ type :: native_csc_index
   integer(i4), pointer, contiguous, dimension(:) :: lm => NULL() !< Location of each entry in CRS value array [nnz]
 end type native_csc_index
 !---------------------------------------------------------------------------------
+!> Location of the diagonal entry in each row of a native CRS matrix
+!!
+!! Built on first use by matrix assembly and released with the matrix.
+!---------------------------------------------------------------------------------
+type :: native_diag_index
+  integer(i4) :: nnz = -1 !< Number of non-zeros in the pattern used to build the index
+  integer(i4), pointer, contiguous, dimension(:) :: loc => NULL() !< Location of diagonal in CRS value array (0 if absent) [nr]
+end type native_diag_index
+!---------------------------------------------------------------------------------
 !> Native CRS matrix class
 !---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_native_matrix
@@ -141,6 +150,7 @@ type, public, extends(oft_matrix) :: oft_native_matrix
   integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
   integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list
   type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
+  type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
   real(r8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
@@ -185,6 +195,7 @@ type, public, extends(oft_cmatrix) :: oft_native_cmatrix
   integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
   integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list
   type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
+  type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
   complex(c8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
@@ -1824,6 +1835,42 @@ IF(ASSOCIATED(csc%lm))DEALLOCATE(csc%lm)
 csc%nnz=-1
 END SUBROUTINE native_csc_delete
 !---------------------------------------------------------------------------------
+!> Build index of diagonal entry locations for a CRS non-zero pattern, if not already current
+!!
+!! Rows without a diagonal entry are marked with location 0. The index is rebuilt if
+!! the number of rows or non-zeros has changed since it was built. Callers that may
+!! run concurrently on the same matrix must serialize calls.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_diag_build(dind,kr,lc,nr)
+TYPE(native_diag_index), INTENT(inout) :: dind !< Diagonal index
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CRS row pointer [nr+1]
+INTEGER(i4), INTENT(in) :: lc(:) !< CRS column list [nnz]
+INTEGER(i4) :: i,jp,jn,jr
+IF(ASSOCIATED(dind%loc))THEN
+  IF((dind%nnz==kr(nr+1)-1).AND.(SIZE(dind%loc)==nr))RETURN
+  CALL native_diag_delete(dind)
+END IF
+ALLOCATE(dind%loc(nr))
+!$omp parallel do private(jp,jn,jr) if(nr>OFT_OMP_VTHRESH)
+DO i=1,nr
+  jp=kr(i)
+  jn=kr(i+1)-jp
+  jr=search_array(i,lc(jp:jp+jn-1),jn)
+  IF(jr>0)jr=jr+jp-1
+  dind%loc(i)=jr
+END DO
+dind%nnz=kr(nr+1)-1
+END SUBROUTINE native_diag_build
+!---------------------------------------------------------------------------------
+!> Release index of diagonal entry locations
+!---------------------------------------------------------------------------------
+SUBROUTINE native_diag_delete(dind)
+TYPE(native_diag_index), INTENT(inout) :: dind !< Diagonal index
+IF(ASSOCIATED(dind%loc))DEALLOCATE(dind%loc)
+dind%nnz=-1
+END SUBROUTINE native_diag_delete
+!---------------------------------------------------------------------------------
 !> Compute matrix-vector product
 !!
 !! b = self * a
@@ -2233,7 +2280,7 @@ end subroutine mat_atomic_add_values
 subroutine mat_assemble(self,diag)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
-integer(i4) :: i,jp,jn,jr
+integer(i4) :: i,jr
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 if(present(diag))then
@@ -2244,12 +2291,18 @@ if(present(diag))then
   call diag%new(self%D)
   SELECT TYPE(this=>self%D)
   CLASS IS(oft_native_vector)
-    !---Get diagonal matrix values
-    !$omp parallel do private(jp,jn,jr)
+    !---Get diagonal matrix values (rows without a diagonal entry get zero)
+    !$omp critical (oft_native_diag_build)
+    CALL native_diag_build(self%diag_index,self%kr,self%lc,self%nr)
+    !$omp end critical (oft_native_diag_build)
+    !$omp parallel do private(jr) if(self%nr>OFT_OMP_VTHRESH)
     do i=1,self%nr ! loop over dof
-      jp=self%kr(i); jn=self%kr(i+1)-jp
-      jr=search_array(i,self%lc(jp:jp+jn-1),jn)+jp-1
-      this%v(i)=self%M(jr)
+      jr=self%diag_index%loc(i)
+      IF(jr>0)THEN
+        this%v(i)=self%M(jr)
+      ELSE
+        this%v(i)=0.d0
+      END IF
     enddo
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','mat_assemble',__FILE__)
@@ -2372,6 +2425,7 @@ IF(ASSOCIATED(self%kr))DEALLOCATE(self%kr)
 IF(ASSOCIATED(self%lc))DEALLOCATE(self%lc)
 IF(ASSOCIATED(self%lc_small))DEALLOCATE(self%lc_small)
 CALL native_csc_delete(self%csc)
+CALL native_diag_delete(self%diag_index)
 !---
 if(ASSOCIATED(self%map))THEN
   DO i=1,self%ni
@@ -3491,7 +3545,7 @@ end subroutine cmat_atomic_add_values
 subroutine cmat_assemble(self,diag)
 class(oft_native_cmatrix), intent(inout) :: self
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
-integer(i4) :: i,jp,jn,jr
+integer(i4) :: i,jr
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 if(present(diag))then
@@ -3502,12 +3556,18 @@ if(present(diag))then
   call diag%new(self%D)
   SELECT TYPE(this=>self%D)
   CLASS IS(oft_native_cvector)
-    !---Get diagonal matrix values
-    !$omp parallel do private(jp,jn,jr)
+    !---Get diagonal matrix values (rows without a diagonal entry get zero)
+    !$omp critical (oft_native_diag_build)
+    CALL native_diag_build(self%diag_index,self%kr,self%lc,self%nr)
+    !$omp end critical (oft_native_diag_build)
+    !$omp parallel do private(jr) if(self%nr>OFT_OMP_VTHRESH)
     do i=1,self%nr ! loop over dof
-      jp=self%kr(i); jn=self%kr(i+1)-jp
-      jr=search_array(i,self%lc(jp:jp+jn-1),jn)+jp-1
-      this%v(i)=self%M(jr)
+      jr=self%diag_index%loc(i)
+      IF(jr>0)THEN
+        this%v(i)=self%M(jr)
+      ELSE
+        this%v(i)=(0.d0,0.d0)
+      END IF
     enddo
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','cmat_assemble',__FILE__)
@@ -3629,6 +3689,7 @@ IF(ASSOCIATED(self%kr))DEALLOCATE(self%kr)
 IF(ASSOCIATED(self%lc))DEALLOCATE(self%lc)
 IF(ASSOCIATED(self%lc_small))DEALLOCATE(self%lc_small)
 CALL native_csc_delete(self%csc)
+CALL native_diag_delete(self%diag_index)
 !---
 if(ASSOCIATED(self%map))THEN
   DO i=1,self%ni
