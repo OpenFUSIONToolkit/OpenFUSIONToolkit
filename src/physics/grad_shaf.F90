@@ -24,7 +24,8 @@ USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell, cell_is_curved
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
 USE oft_stitching, ONLY: oft_seam, seam_list, destory_seam
 !---
-USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr, oft_map, map_list
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr, oft_map, map_list, &
+  OFT_ACCESS_READWRITE
 USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks, create_dense_graph, create_vector, &
 create_local_stitch
 USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_solver_bc
@@ -1307,20 +1308,19 @@ subroutine zerob_apply(self,a)
 class(oft_gs_zerob), intent(inout) :: self !< BC object
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+real(r8), pointer, contiguous, dimension(:) :: vloc
 DEBUG_STACK_PUSH
 NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do
 do i=1,self%fe_rep%ne
   IF(self%node_flag(i))vloc(i)=0.d0
 end do
 !---
-call a%restore_local(vloc)
-deallocate(vloc)
+call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
