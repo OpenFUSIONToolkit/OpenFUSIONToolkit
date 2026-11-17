@@ -117,6 +117,13 @@ oftpy_get_slens = ctypes_subroutine(oftpy_lib.oftpy_get_slens,
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
     [c_int])
 
+# oftpy_get_mpi_info(rank,nprocs)
+oftpy_get_mpi_info = ctypes_subroutine(oftpy_lib.oftpy_get_mpi_info,
+    [c_int_ptr, c_int_ptr])
+
+# oftpy_finalize()
+oftpy_finalize = ctypes_subroutine(oftpy_lib.oftpy_finalize)
+
 # oftpy_set_nthreads(nthreads)
 oftpy_set_nthreads = ctypes_subroutine(oftpy_lib.oftpy_set_nthreads,
     [c_int])

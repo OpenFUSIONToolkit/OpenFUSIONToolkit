@@ -16,6 +16,10 @@ cd Marklin
 ./test_examples.sh $ROOT_PATH/example_test.err
 cd ..
 
+cd ThickCurr
+./test_examples.sh $ROOT_PATH/example_test.err
+cd ..
+
 if [ $(wc -c < "$ROOT_PATH/example_test.err") -gt 0 ]; then
     cat $ROOT_PATH/example_test.err
     exit 1

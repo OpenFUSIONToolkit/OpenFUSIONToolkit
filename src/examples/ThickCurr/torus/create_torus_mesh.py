@@ -5,9 +5,9 @@
 #------------------------------------------------------------------------------
 # Create the native mesh for the ThickCurr torus example using GMSH: a solid conducting
 # torus (region 2) at the center of a spherical vacuum domain (region 1). A disk in the
-# z=0 plane is embedded in the hole of the torus so that the flux through the hole can be
-# measured with a flux probe. A second-order (curved) mesh is generated to accurately
-# represent the curved surfaces.
+# z=0 plane is embedded in the hole of the torus, which can be used to measure the flux through
+# the hole with a face-based flux probe (flux loops in the Python interface do not require this).
+# A second-order (curved) mesh is generated to accurately represent the curved surfaces.
 #
 # Requires the `gmsh` python package (eg. `pip install gmsh`)
 import gmsh

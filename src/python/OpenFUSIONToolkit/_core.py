@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 import os
+import atexit
 import platform
 import shutil
 import tempfile
@@ -141,6 +142,22 @@ class OFT_env():
             oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
+        # Get MPI information
+        rank = c_int()
+        nprocs = c_int()
+        oftpy_get_mpi_info(ctypes.byref(rank),ctypes.byref(nprocs))
+        ## MPI rank of this process (0 if not running with MPI)
+        self.rank = rank.value
+        ## Number of MPI tasks (1 if not running with MPI)
+        self.nprocs = nprocs.value
+        ## Is this the head (rank 0) process?
+        self.head_proc = (self.rank == 0)
+        ## Has the MPI environment been finalized?
+        self.mpi_finalized = False
+        # Process that initialized OFT (only this process finalizes MPI)
+        self._init_pid = os.getpid()
+        # Finalize MPI on exit (required by MPI when running in parallel)
+        atexit.register(self._finalize_mpi)
 
     def print_ascii_logo(self, italic=True):
         '''! Print OFT ASCII logo
@@ -269,6 +286,16 @@ class OFT_env():
             stacklevel=2
         )
         write_oft_xml(xml_blocks,path)
+
+    def _finalize_mpi(self):
+        '''! Finalize MPI environment at exit
+
+        @note Compiled objects that are destroyed after this point (eg. during interpreter shutdown) should not
+        perform MPI communication
+        '''
+        if os.getpid() == self._init_pid:
+            self.mpi_finalized = True
+            oftpy_finalize()
 
     def _remove_tempfiles(self):
         '''! Remove known temporary files'''

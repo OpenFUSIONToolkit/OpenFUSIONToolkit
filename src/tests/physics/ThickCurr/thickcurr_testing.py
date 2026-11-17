@@ -7,6 +7,7 @@
 # decay times for the test geometries
 import os
 import sys
+import json
 import math
 import numpy
 import h5py
@@ -62,85 +63,38 @@ def write_box_mesh(filename, n, slab=None):
         h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
 
 
-OFT_IN_TEMPLATE = """
-&runtime_options
- ppn=1
- debug=0
- test_run=T
-/
-
-&mesh_options
- meshname='box'
- cad_type=0
- nlevels={nlevels}
- nbase={nbase}
- grid_order=1
-/
-
-&native_mesh_options
- filename='{mesh_file}'
-/
-
-&test_thickcurr_options
- order={order}
- minlev={minlev}
- nev={nev}
- eig_shift={eig_shift}
- test_case='{test_case}'
-/
-
-&thickcurr_options
- dt={dt}
- theta={theta}
- nsteps={nsteps}
- rst_freq={rst_freq}
- lin_tol=1.E-10
-/
-
-&thickcurr_plot_options
- rst_start=0
- rst_end={nsteps}
-/
-"""
-
-XML_TEMPLATE = """<oft>
+LU_XML = """<oft>
   <thickcurr>
-    <region>
-      <id>{cond_reg}</id>
-      <eta>{eta}</eta>
-    </region>
-    {pre}
+    <pre type="block_jacobi">
+      <nlocal>1</nlocal>
+      <solver type="lu"></solver>
+    </pre>
   </thickcurr>
 </oft>
 """
 
-LU_PRE = """<pre type="block_jacobi">
-      <nlocal>1</nlocal>
-      <solver type="lu"></solver>
-    </pre>"""
 
-
-def thickcurr_setup(test_case, mesh_file, cond_reg, eta, order=2, nbase=1, nlevels=1, minlev=-1, nev=5,
-                    dt=1.E-3, theta=1.0, nsteps=10, rst_freq=5, direct=True, nproc=1, timeout=180,
-                    eig_shift=-1.0):
-    '''Write input files and run the ThickCurr test program'''
+def run_driver(config, nproc=1, timeout=180):
+    '''Run the Python ThickCurr driver (`thickcurr_driver.py`) with the given configuration, using MPI if
+    `nproc > 1`, and return the results written by the driver (None on failure)'''
     os.chdir(test_dir)
-    for filename in ('thickcurr.results', 'thickcurr.hist'):
+    for filename in ('thickcurr_results.json', 'thickcurr.hist', 'floops.hist'):
         if os.path.exists(filename):
             os.remove(filename)
-    with open('oft.in', 'w+') as fid:
-        fid.write(OFT_IN_TEMPLATE.format(nlevels=nlevels, nbase=nbase, mesh_file=mesh_file, order=order,
-                                         minlev=minlev, nev=nev, eig_shift=eig_shift, test_case=test_case, dt=dt, theta=theta,
-                                         nsteps=nsteps, rst_freq=rst_freq))
-    with open('oft_in.xml', 'w+') as fid:
-        fid.write(XML_TEMPLATE.format(cond_reg=cond_reg, eta=eta, pre=(LU_PRE if direct else '')))
-    return run_OFT("./test_thickcurr oft.in oft_in.xml", nproc, timeout)
-
-
-def read_results():
-    '''Read values written by the test program, one per line'''
-    with open(os.path.join(test_dir, 'thickcurr.results'), 'r') as fid:
-        return [float(line) for line in fid if line.strip()]
+    if config.get('direct', True):
+        with open('oft_in.xml', 'w+') as fid:
+            fid.write(LU_XML)
+        config['xml_filename'] = 'oft_in.xml'
+    with open('thickcurr_config.json', 'w+') as fid:
+        json.dump(config, fid)
+    command = "{0} {1} thickcurr_config.json".format(sys.executable, os.path.join(test_dir, 'thickcurr_driver.py'))
+    if not run_OFT(command, nproc, timeout):
+        return None
+    if not os.path.exists('thickcurr_results.json'):
+        print("FAILED: No results file written by driver")
+        return None
+    with open('thickcurr_results.json', 'r') as fid:
+        return json.load(fid)
 
 
 def check_value(name, value, expected, rtol):

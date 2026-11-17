@@ -185,6 +185,7 @@ TYPE(oft_ml_fem_comp_type), POINTER, PUBLIC :: thickcurr_ML_hcurl_grad => NULL()
 TYPE(oft_ml_fem_type), POINTER, PUBLIC :: thickcurr_ML_lagrange => NULL() !< Lagrange FE space (optional, for plotting)
 TYPE(oft_ml_fem_comp_type), POINTER, PUBLIC :: thickcurr_ML_vlagrange => NULL() !< Vector Lagrange FE space (optional, for plotting)
 INTEGER(i4), PUBLIC :: thickcurr_minlev = -1 !< Lowest MG level (negative to use top level only)
+TYPE(xml_node), POINTER, PUBLIC :: thickcurr_xml => NULL() !< XML root to search for `thickcurr` element (optional, default: global XML)
 !---Run parameters
 REAL(r8) :: tc_dt = 1.E-4_r8 !< Time step [s]
 REAL(r8) :: tc_theta = 1._r8 !< Time centering parameter
@@ -228,6 +229,7 @@ CLASS(oft_solver), POINTER :: tc_lag_minv => NULL() !< Vector Lagrange mass solv
 PUBLIC thickcurr_setup, thickcurr_run, thickcurr_eigs, thickcurr_plot, thickcurr_save_field
 PUBLIC thickcurr_diag, thickcurr_plot_order, thickcurr_rst_save, thickcurr_rst_load, thickcurr_delete
 PUBLIC thickcurr_zerob, thickcurr_clean_field, thickcurr_driver_apply, thickcurr_probe_apply
+PUBLIC thickcurr_set_options
 CONTAINS
 !------------------------------------------------------------------------------
 !> Read run settings for ThickCurr from input files
@@ -300,7 +302,10 @@ tc_rst_freq=rst_freq
 tc_rst_ind=rst_ind
 tc_nu=nu_tc
 !---Look for XML nodes
-IF(ASSOCIATED(oft_env%xml))THEN
+IF(ASSOCIATED(thickcurr_xml))THEN
+  CALL xml_get_element(thickcurr_xml,"thickcurr",tc_root_node,ierr)
+  IF(ierr==0)CALL xml_get_element(tc_root_node,"pre",tc_pre_node,ierr)
+ELSE IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"thickcurr",tc_root_node,ierr)
   IF(ierr==0)CALL xml_get_element(tc_root_node,"pre",tc_pre_node,ierr)
 END IF
@@ -625,6 +630,51 @@ DO i=1,linkage%nbe
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_add_bc_diag
+!------------------------------------------------------------------------------
+!> Update run settings after setup
+!!
+!! Overrides values set in the `thickcurr_options` input group. If the time step or
+!! time centering change after setup, the LHS matrices are rebuilt and the
+!! preconditioner is updated.
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_set_options(dt,theta,lin_tol,nsteps,rst_freq,rst_ind)
+REAL(r8), OPTIONAL, INTENT(in) :: dt !< Time step [s]
+REAL(r8), OPTIONAL, INTENT(in) :: theta !< Time centering parameter [0.5,1]
+REAL(r8), OPTIONAL, INTENT(in) :: lin_tol !< Linear solver tolerance
+INTEGER(i4), OPTIONAL, INTENT(in) :: nsteps !< Number of time steps
+INTEGER(i4), OPTIONAL, INTENT(in) :: rst_freq !< Frequency of restart files
+INTEGER(i4), OPTIONAL, INTENT(in) :: rst_ind !< Index of restart file to start from
+REAL(r8) :: dt_old
+DEBUG_STACK_PUSH
+dt_old=tc_theta*tc_dt
+IF(PRESENT(dt))THEN
+  IF(dt<=0.d0)CALL oft_abort('Invalid time step, must be > 0','thickcurr_set_options',__FILE__)
+  tc_dt=dt
+END IF
+IF(PRESENT(theta))THEN
+  IF(theta<0.5d0.OR.theta>1.d0)CALL oft_abort('Invalid "theta", must be in [0.5,1]','thickcurr_set_options',__FILE__)
+  tc_theta=theta
+END IF
+IF(PRESENT(lin_tol))THEN
+  tc_lin_tol=lin_tol
+  IF(ASSOCIATED(tc_solver))tc_solver%atol=tc_lin_tol
+END IF
+IF(PRESENT(nsteps))THEN
+  IF(nsteps<0)CALL oft_abort('Invalid "nsteps", must be >= 0','thickcurr_set_options',__FILE__)
+  tc_nsteps=nsteps
+END IF
+IF(PRESENT(rst_freq))THEN
+  IF(rst_freq<=0)CALL oft_abort('Invalid "rst_freq", must be > 0','thickcurr_set_options',__FILE__)
+  tc_rst_freq=rst_freq
+END IF
+IF(PRESENT(rst_ind))tc_rst_ind=rst_ind
+!---Rebuild operators if effective time step changed
+IF(tc_initialized.AND.(ABS(tc_theta*tc_dt-dt_old)>1.d-14*dt_old))THEN
+  CALL thickcurr_build_lhs(tc_theta*tc_dt)
+  CALL tc_solver%update(.FALSE.)
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_set_options
 !------------------------------------------------------------------------------
 !> Build (or rebuild) the LHS matrices \f$ M_{\sigma} + \theta \Delta t K \f$ on all MG levels
 !!
@@ -1604,8 +1654,9 @@ END SUBROUTINE thickcurr_save_field
 !! | `rst_start=0`      | First restart file to read | int |
 !! | `rst_end=2000`     | Last restart file to read | int |
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_plot(probes)
+SUBROUTINE thickcurr_plot(probes,rst_range)
 CLASS(oft_thickcurr_probe), OPTIONAL, INTENT(inout) :: probes !< Probe object (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: rst_range(2) !< First and last restart files to plot (optional, overrides input file)
 INTEGER(i4) :: i,io_unit,ierr
 INTEGER(i4) :: rst_start=0
 INTEGER(i4) :: rst_end=2000
@@ -1625,6 +1676,10 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,thickcurr_plot_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr>0)CALL oft_abort('Error parsing ThickCurr plot options in input file.','thickcurr_plot',__FILE__)
+IF(PRESENT(rst_range))THEN
+  rst_start=rst_range(1)
+  rst_end=rst_range(2)
+END IF
 IF(.NOT.tc_initialized)CALL thickcurr_setup
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
   CALL oft_abort("Invalid Curl FE object","thickcurr_plot",__FILE__)
