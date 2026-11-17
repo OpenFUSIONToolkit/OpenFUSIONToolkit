@@ -30,7 +30,7 @@ USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph, &
   oft_graph_ptr, oft_matrix, oft_matrix_ptr, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
-  native_vector_slice_push, native_vector_slice_pop
+  native_vector_slice_push, native_vector_slice_pop, oft_native_pattern, native_pattern_release
 USE oft_la_utils, ONLY: create_vector, create_matrix
 IMPLICIT NONE
 #include "local.h"
@@ -69,6 +69,9 @@ TYPE, ABSTRACT, PUBLIC :: oft_afem_type
   TYPE(fem_mpi_global), POINTER :: global => NULL() !< Global index information
   CLASS(oft_vector), POINTER :: cache_PETSc => NULL() !< PETSc vector cache
   CLASS(oft_vector), POINTER :: cache_native => NULL() !< Native vector cache
+  !> Non-zero pattern shared by all native matrices created with `mat_create` (one
+  !! reference is held until the representation is deleted)
+  TYPE(oft_native_pattern), POINTER :: mat_pattern => NULL()
 CONTAINS
   !> Setup FE representation
   PROCEDURE(afem_setup), DEFERRED :: setup
@@ -272,6 +275,7 @@ IF(ASSOCIATED(self%cache_native))THEN
   CALL self%cache_native%delete()
   DEALLOCATE(self%cache_native)
 END IF
+CALL native_pattern_release(self%mat_pattern)
 end subroutine afem_delete
 !------------------------------------------------------------------------------
 !> Compute element to element linkage for a FE representation
@@ -1612,6 +1616,11 @@ DEBUG_STACK_POP
 end subroutine afem_vec_load
 !------------------------------------------------------------------------------
 !> Create self-matrix for FE representation
+!!
+!! Native matrices created by this method share one non-zero pattern (see
+!! @ref oft_native_la::oft_native_pattern "oft_native_pattern"), which is cached on
+!! the representation, so the CRS structure, block maps and linkage for full local
+!! matrices are built once per representation.
 !------------------------------------------------------------------------------
 subroutine afem_mat_create(self,new)
 CLASS(oft_afem_type), INTENT(inout) :: self
@@ -1629,7 +1638,7 @@ graphs(1,1)%g%nnz=self%nee
 graphs(1,1)%g%kr=>self%kee
 graphs(1,1)%g%lc=>self%lee
 !---
-CALL create_matrix(new,graphs,tmp_vec,tmp_vec)
+CALL create_matrix(new,graphs,tmp_vec,tmp_vec,pattern=self%mat_pattern)
 CALL tmp_vec%delete
 DEALLOCATE(graphs(1,1)%g,tmp_vec)
 DEBUG_STACK_POP
