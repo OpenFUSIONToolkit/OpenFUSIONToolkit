@@ -474,7 +474,7 @@ DEBUG_STACK_PUSH
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_local',__FILE__)
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%n))
-  !$omp do simd
+  !$omp simd
   do j=1,self%map(iblock)%n
     array(j) = self%v(self%map(iblock)%offset+j)
   end do
