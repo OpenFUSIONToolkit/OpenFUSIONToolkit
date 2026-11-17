@@ -31,7 +31,8 @@ USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
-  oft_graph_ptr, oft_graph
+  oft_graph_ptr, oft_graph, &
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_deriv_matrices, ONLY: create_diagmatrix
 #ifdef HAVE_ARPACK
@@ -473,14 +474,14 @@ end subroutine dinterp_apply
 subroutine zerob_apply(self,a)
 class(oft_hcurl_grad_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: agrad,acurl
+real(r8), pointer, contiguous, dimension(:) :: agrad,acurl
 integer(i4) :: i,j
 class(oft_afem_type), pointer :: hcurl_rep,hgrad_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(agrad,acurl)
-CALL a%get_local(acurl,1)
-CALL a%get_local(agrad,2)
+CALL a%borrow_local(acurl,OFT_ACCESS_READWRITE,1)
+CALL a%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
 hcurl_rep=>self%ML_hcurl_grad_rep%current_level%fields(1)%fe
 hgrad_rep=>self%ML_hcurl_grad_rep%current_level%fields(2)%fe
 ! Apply operator
@@ -493,9 +494,9 @@ do i=1,hgrad_rep%nbe
   j=hgrad_rep%lbe(i)
   if(hgrad_rep%global%gbe(j))agrad(j)=0.d0
 end do
-CALL a%restore_local(acurl,1)
-CALL a%restore_local(agrad,2)
-DEALLOCATE(acurl,agrad)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(acurl,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
+CALL a%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -511,7 +512,7 @@ end subroutine zerob_delete
 subroutine curl_zerob_apply(self,a)
 class(oft_hcurl_grad_czerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: acurl
+real(r8), pointer, contiguous, dimension(:) :: acurl
 integer(i4) :: i,j
 class(oft_afem_type), pointer :: hcurl_rep
 DEBUG_STACK_PUSH
@@ -519,14 +520,14 @@ SELECT TYPE(this=>self%ML_hcurl_grad_rep%current_level%fields(1)%fe)
 CLASS IS(oft_fem_type)
   !---Cast to vector type
   NULLIFY(acurl)
-  CALL a%get_local(acurl,1)
+  CALL a%borrow_local(acurl,OFT_ACCESS_READWRITE,1)
   ! Apply operator
   do i=1,this%nbe
     j=this%lbe(i)
     if(this%global%gbe(j))acurl(j)=0.d0
   end do
-  CALL a%restore_local(acurl,1)
-  DEALLOCATE(acurl)
+  !---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+  CALL a%release_local(acurl,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
 CLASS DEFAULT
   CALL oft_abort("Invalid fe object","curl_zerob_apply",__FILE__)
 END SELECT
@@ -538,20 +539,20 @@ end subroutine curl_zerob_apply
 subroutine grad_zerop_apply(self,a)
 class(oft_hcurl_grad_gzerop), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: agrad
+real(r8), pointer, contiguous, dimension(:) :: agrad
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 SELECT TYPE(this=>self%ML_hcurl_grad_rep%current_level%fields(2)%fe)
 CLASS IS(oft_fem_type)
   !---Cast to vector type
   NULLIFY(agrad)
-  CALL a%get_local(agrad,2)
+  CALL a%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
   ! Apply operator
   do i=1,this%mesh%np
     agrad(i)=0.d0
   end do
-  CALL a%restore_local(agrad,2)
-  DEALLOCATE(agrad)
+  !---All vertex values are zeroed on every process, so no sync is needed
+  CALL a%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
 CLASS DEFAULT
   CALL oft_abort("Invalid fe object","grad_zerop_apply",__FILE__)
 END SELECT
@@ -563,14 +564,14 @@ end subroutine grad_zerop_apply
 subroutine zeroi_apply(self,a)
 class(oft_hcurl_grad_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: agrad,acurl
+real(r8), pointer, contiguous, dimension(:) :: agrad,acurl
 integer(i4) :: i
 class(oft_afem_type), pointer :: hcurl_rep,hgrad_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(agrad,acurl)
-CALL a%get_local(acurl,1)
-CALL a%get_local(agrad,2)
+CALL a%borrow_local(acurl,OFT_ACCESS_READWRITE,1)
+CALL a%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
 hcurl_rep=>self%ML_hcurl_grad_rep%current_level%fields(1)%fe
 hgrad_rep=>self%ML_hcurl_grad_rep%current_level%fields(2)%fe
 ! Apply operator
@@ -583,9 +584,9 @@ DO i=1,hgrad_rep%ne
   IF(hgrad_rep%global%gbe(i))CYCLE
   agrad(i)=0.d0
 END DO
-CALL a%restore_local(acurl,1)
-CALL a%restore_local(agrad,2)
-DEALLOCATE(acurl,agrad)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(acurl,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
+CALL a%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
 DEBUG_STACK_POP
 end subroutine zeroi_apply
 !------------------------------------------------------------------------------
@@ -1377,14 +1378,14 @@ end subroutine divout_delete
 subroutine zerograd_apply(self,a)
 class(oft_hcurl_grad_gzero), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
-real(r8), pointer, dimension(:) :: ugrad
+real(r8), pointer, contiguous, dimension(:) :: ugrad
 DEBUG_STACK_PUSH
 !---Get local field
 NULLIFY(ugrad)
-CALL a%get_local(ugrad,2)
+CALL a%borrow_local(ugrad,OFT_ACCESS_WRITE,2)
 ugrad=0.d0
-CALL a%restore_local(ugrad,2)
-DEALLOCATE(ugrad)
+!---The whole block is zeroed on every process, so no sync is needed
+CALL a%release_local(ugrad,OFT_ACCESS_WRITE,sync=.FALSE.,iblock=2)
 DEBUG_STACK_POP
 end subroutine zerograd_apply
 !------------------------------------------------------------------------------
@@ -1640,7 +1641,8 @@ class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 integer(i4) :: i
-real(r8), pointer, dimension(:) :: agrad,acurl,tmp
+real(r8), pointer, contiguous, dimension(:) :: agrad,acurl
+real(r8), allocatable, dimension(:) :: tmp
 class(oft_mesh), pointer :: mesh
 CLASS(oft_ml_fem_type), POINTER :: ML_curl
 DEBUG_STACK_PUSH
@@ -1664,8 +1666,8 @@ IF(ML_curl%current_level%order==1)THEN
       CALL oft_abort("Invalid FE type","ml_vecspace_interp",__FILE__)
   END SELECT
   NULLIFY(agrad,acurl)
-  CALL afine%get_local(acurl,1)
-  CALL afine%get_local(agrad,2)
+  CALL afine%borrow_local(acurl,OFT_ACCESS_READWRITE,1)
+  CALL afine%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
   ALLOCATE(tmp(mesh%np))
   !---
   !$omp parallel if(mesh%np>OFT_OMP_VTHRESH)
@@ -1681,9 +1683,11 @@ IF(ML_curl%current_level%order==1)THEN
   END DO
   !$omp end parallel
   !---
-  CALL afine%restore_local(acurl,1,wait=.TRUE.)
-  CALL afine%restore_local(agrad,2)
-  DEALLOCATE(acurl,agrad,tmp)
+  !---Every process applies the same update to a shared value (consistent input values and
+  !   global edge orientation), so no sync is needed
+  CALL afine%release_local(acurl,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
+  CALL afine%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+  DEALLOCATE(tmp)
 END IF
 DEBUG_STACK_POP
 end subroutine ml_vecspace_interp
@@ -1697,31 +1701,32 @@ class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i
-real(r8), pointer, dimension(:) :: array_c,array_f
+real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
 CLASS(oft_ml_fem_type), POINTER :: ML_grad
 DEBUG_STACK_PUSH
 !---
 ML_grad=>self%ML_FE_rep%ml_fields(2)%ml
 NULLIFY(array_c,array_f)
 lbege=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%nbase)%lbege
-CALL acors%get_local(array_c,1)
-CALL afine%get_local(array_f,1)
+CALL acors%borrow_local(array_c,OFT_ACCESS_READ,1)
+CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE,1)
 !$omp parallel do
-do i=1,afine%n
+do i=1,SIZE(array_f)
   array_f(i)=array_c(ABS(lbege(i)))
 end do
-CALL afine%restore_local(array_f,1)
-DEALLOCATE(array_c,array_f)
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.FALSE.,iblock=1)
+CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.,iblock=1)
 !---
 lptmp=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c,2)
-CALL afine%get_local(array_f,2)
+CALL acors%borrow_local(array_c,OFT_ACCESS_READ,2)
+CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE,2)
 !$omp parallel do
-do i=1,afine%n
+do i=1,SIZE(array_f)
   array_f(i)=array_c(lptmp(i))
 end do
-CALL afine%restore_local(array_f,2)
-DEALLOCATE(array_c,array_f)
+!---Keep owner sync (once, for both blocks): base-level values are computed independently on each process
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.,iblock=2)
+CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.,iblock=2)
 DEBUG_STACK_POP
 end subroutine base_pop
 !------------------------------------------------------------------------------
@@ -1756,7 +1761,8 @@ class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias,array_c,array_f
+real(r8), pointer, dimension(:) :: alias
+real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
 CLASS(oft_ml_fem_type), POINTER :: Ml_curl,ML_grad
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h1_fem), POINTER :: grad_rep
@@ -1769,8 +1775,8 @@ Ml_curl=>self%ML_FE_rep%ml_fields(1)%ml
 ML_grad=>self%ML_FE_rep%ml_fields(2)%ml
 lbege=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%nbase)%lbege
 lptmp=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_WRITE)
+CALL afine%borrow_local(array_f,OFT_ACCESS_READ)
 !---
 allocate(alias(acors%n))
 alias=0.d0
@@ -1798,8 +1804,9 @@ do i=1,grad_rep%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%restore_local(array_c)
-deallocate(alias,array_c,array_f)
+call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+deallocate(alias)
 DEBUG_STACK_POP
 end subroutine base_push
 !------------------------------------------------------------------------------

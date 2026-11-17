@@ -28,7 +28,8 @@ USE oft_sort, ONLY: sort_array, search_array
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr, oft_local_mat
+  oft_graph, oft_graph_ptr, oft_local_mat, &
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
@@ -512,11 +513,11 @@ subroutine zerob_apply(self,a)
 class(oft_lag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+real(r8), pointer, contiguous, dimension(:) :: vloc
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,self%ML_lag_rep%current_level%nbe
@@ -524,8 +525,8 @@ do i=1,self%ML_lag_rep%current_level%nbe
   if(self%ML_lag_rep%current_level%global%gbe(j))vloc(j)=0.d0
 end do
 !---
-call a%restore_local(vloc)
-deallocate(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -544,19 +545,19 @@ end subroutine zerob_delete
 subroutine zerogrnd_apply(self,a)
 class(oft_lag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: aloc
+real(r8), pointer, contiguous, dimension(:) :: aloc
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER ::lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zerogrnd_apply",__FILE__)
 !---Zero boundary values
 NULLIFY(aloc)
-CALL a%get_local(aloc)
+CALL a%borrow_local(aloc,OFT_ACCESS_READWRITE)
 !---
 if(lag_rep%mesh%igrnd(1)>0)aloc(lag_rep%mesh%igrnd(1))=0.d0
 if(lag_rep%mesh%igrnd(2)>0)aloc(lag_rep%mesh%igrnd(2))=0.d0
-CALL a%restore_local(aloc)
-DEALLOCATE(aloc)
+!---The ground node is set on every process that holds it, so no sync is needed
+CALL a%release_local(aloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !------------------------------------------------------------------------------
@@ -566,28 +567,30 @@ subroutine vzerob_apply(self,a)
 class(oft_vlag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer :: vloc(:,:),vtmp(:)
+real(r8), pointer, contiguous, dimension(:) :: vx,vy,vz
 CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
-ALLOCATE(vloc(3,a%n))
-DO i=1,3
-  vtmp=>vloc(i,:)
-  call a%get_local(vtmp,i)
-END DO
+NULLIFY(vx,vy,vz)
+CALL a%borrow_local(vx,OFT_ACCESS_READWRITE,1)
+CALL a%borrow_local(vy,OFT_ACCESS_READWRITE,2)
+CALL a%borrow_local(vz,OFT_ACCESS_READWRITE,3)
 !---Zero boundary values
 lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
-  if(lag_rep%global%gbe(j))vloc(:,j)=0.d0
+  if(lag_rep%global%gbe(j))then
+    vx(j)=0.d0
+    vy(j)=0.d0
+    vz(j)=0.d0
+  end if
 end do
 !---
-DO i=1,3
-  vtmp=>vloc(i,:)
-  call a%restore_local(vtmp,i,wait=(i/=3))
-END DO
-DEALLOCATE(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(vx,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
+CALL a%release_local(vy,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+CALL a%release_local(vz,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=3)
 DEBUG_STACK_POP
 end subroutine vzerob_apply
 !------------------------------------------------------------------------------
@@ -2101,17 +2104,19 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
-real(r8), pointer, dimension(:) :: array_c,array_f
+real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_READ)
+CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE)
 !$omp parallel do
 do i=1,afine%n
   array_f(i)=array_c(lptmp(i))
 end do
-CALL afine%restore_local(array_f)
-DEALLOCATE(array_c,array_f)
+!---Keep owner sync: base-level values are computed independently on each process
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine lag_base_pop
 !------------------------------------------------------------------------------
@@ -2123,13 +2128,15 @@ class(oft_vector), intent(inout) :: afine !< Needs docs
 class(oft_vector), intent(inout) :: acors !< Needs docs
 integer(i4), pointer :: lptmp(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias,array_c,array_f
+real(r8), pointer, dimension(:) :: alias
+real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
 DEBUG_STACK_PUSH
 !---
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_WRITE)
+CALL afine%borrow_local(array_f,OFT_ACCESS_READ)
 lag_fine=>self%ML_FE_rep%levels(self%ML_FE_rep%level+1)%fe
 !---
 allocate(alias(acors%n))
@@ -2147,8 +2154,9 @@ do i=1,lag_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%restore_local(array_c)
-deallocate(alias,array_c,array_f)
+call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+deallocate(alias)
 DEBUG_STACK_POP
 end subroutine lag_base_push
 !------------------------------------------------------------------------------

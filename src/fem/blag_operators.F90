@@ -23,7 +23,8 @@ USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr
+  oft_graph, oft_graph_ptr, &
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 #ifdef HAVE_ARPACK
@@ -373,12 +374,12 @@ subroutine zerob_apply(self,a)
 class(oft_blag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+real(r8), pointer, contiguous, dimension(:) :: vloc
 DEBUG_STACK_PUSH
 NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,self%ML_lag_rep%current_level%nbe
@@ -387,8 +388,8 @@ do i=1,self%ML_lag_rep%current_level%nbe
   IF(self%ML_lag_rep%current_level%global%gbe(j))vloc(j)=0.d0
 end do
 !---
-call a%restore_local(vloc)
-deallocate(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -407,20 +408,20 @@ subroutine zerogrnd_apply(self,a)
 class(oft_blag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+real(r8), pointer, contiguous, dimension(:) :: vloc
 DEBUG_STACK_PUSH
 NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 vloc(self%ML_lag_rep%current_level%lbe(1))=0.d0
 ! !---Zero boundary values
 ! !$omp parallel do
 ! do i=1,oft_blagrange%nbe
 !   vloc(oft_blagrange%lbe(i))=0.d0
 ! end do
-call a%restore_local(vloc)
-deallocate(vloc)
+!---Keep owner sync: the zeroed node (first local boundary node) differs between processes
+call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !------------------------------------------------------------------------------
@@ -430,13 +431,13 @@ subroutine zeroe_apply(self,a)
 class(oft_blag_zeroe), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+real(r8), pointer, contiguous, dimension(:) :: vloc
 class(oft_scalar_bfem), pointer :: this
 DEBUG_STACK_PUSH
 IF(.NOT.oft_2D_lagrange_cast(this,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zeroe_apply",__FILE__)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,this%ne
@@ -444,8 +445,8 @@ do i=1,this%ne
   if(self%parent_geom_flag(j)/=3)vloc(i)=0.d0
 end do
 !---
-call a%restore_local(vloc)
-deallocate(vloc)
+!---Keep owner sync (zeroing uses parent mesh geometry flags)
+call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zeroe_apply
 !------------------------------------------------------------------------------

@@ -32,7 +32,8 @@ USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
-  oft_graph_ptr, oft_graph
+  oft_graph_ptr, oft_graph, &
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 #ifdef HAVE_ARPACK
@@ -420,19 +421,19 @@ end subroutine hcurl_gradtp
 subroutine zerob_apply(self,a)
 class(oft_hcurl_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: aloc
+real(r8), pointer, contiguous, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 ! Cast to vector type
 NULLIFY(aloc)
-CALL a%get_local(aloc)
+CALL a%borrow_local(aloc,OFT_ACCESS_READWRITE)
 ! Apply operator
 do i=1,self%ML_hcurl_rep%current_level%nbe
   j=self%ML_hcurl_rep%current_level%lbe(i)
   if(self%ML_hcurl_rep%current_level%global%gbe(j))aloc(j)=0.d0
 end do
-CALL a%restore_local(aloc)
-DEALLOCATE(aloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(aloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -1515,17 +1516,19 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer :: lbege(:)
 integer(i4) :: i
-real(r8), pointer, dimension(:) :: array_c,array_f
+real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lbege=>self%ML_FE_rep%ml_mesh%inter(self%ML_FE_rep%ml_mesh%nbase)%lbege
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_READ)
+CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE)
 !$omp parallel do
 do i=1,afine%n
   array_f(i)=array_c(ABS(lbege(i)))
 end do
-CALL afine%restore_local(array_f)
-DEALLOCATE(array_c,array_f)
+!---Keep owner sync: base-level values are computed independently on each process
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine hcurl_base_pop
 !------------------------------------------------------------------------------
@@ -1537,13 +1540,15 @@ class(oft_vector), intent(inout) :: afine !< Vector to transfer
 class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer :: lbege(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias,array_c,array_f
+real(r8), pointer, dimension(:) :: alias
+real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: hcurl_fine => NULL()
 DEBUG_STACK_PUSH
 !---
 lbege=>self%ML_FE_rep%ml_mesh%inter(self%ML_FE_rep%ml_mesh%nbase)%lbege
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_WRITE)
+CALL afine%borrow_local(array_f,OFT_ACCESS_READ)
 hcurl_fine=>self%ML_FE_rep%levels(self%ML_FE_rep%level+1)%fe
 !---
 allocate(alias(acors%n))
@@ -1561,8 +1566,9 @@ do i=1,hcurl_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%restore_local(array_c)
-deallocate(alias,array_c,array_f)
+call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+deallocate(alias)
 DEBUG_STACK_POP
 end subroutine hcurl_base_push
 !------------------------------------------------------------------------------
