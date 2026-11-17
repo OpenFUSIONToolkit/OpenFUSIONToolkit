@@ -1144,7 +1144,7 @@ CALL a%get_slice(avals)
 !---Apply real part
 CALL atmp%restore_slice(REAL(avals))
 CALL self%apply(atmp,btmp)
-CALL b%add((0.d0,0.d0),(1.d0,0.d0),btmp)
+CALL b%copy(btmp)
 !---Apply imaginary part
 CALL atmp%restore_slice(AIMAG(avals))
 CALL self%apply(atmp,btmp)
@@ -1173,7 +1173,7 @@ CALL a%get_slice(avals)
 !---Apply real part
 CALL atmp%restore_slice(REAL(avals,r8))
 CALL self%applyt(atmp,btmp)
-CALL b%add((0.d0,0.d0),(1.d0,0.d0),btmp)
+CALL b%copy(btmp)
 !---Apply imaginary part
 CALL atmp%restore_slice(AIMAG(avals))
 CALL self%applyt(atmp,btmp)
@@ -1218,7 +1218,7 @@ class(oft_vector), target, intent(inout) :: a !< Vector object
 class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: atmp
 CALL a%new(atmp)
-CALL atmp%add((0.d0,0.d0),(1.d0,0.d0),a)
+CALL atmp%copy(a)
 CALL self%apply_complex(atmp,b)
 CALL atmp%delete()
 DEALLOCATE(atmp)
@@ -1234,7 +1234,7 @@ class(oft_vector), target, intent(inout) :: a !< Vector object
 class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: atmp
 CALL a%new(atmp)
-CALL atmp%add((0.d0,0.d0),(1.d0,0.d0),a)
+CALL atmp%copy(a)
 CALL self%applyt_complex(atmp,b)
 CALL atmp%delete()
 DEALLOCATE(atmp)

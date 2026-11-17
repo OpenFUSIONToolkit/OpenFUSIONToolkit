@@ -363,7 +363,7 @@ call u%new(p)
 call u%new(q)
 if(self%precond)then
   call u%new(r)
-  call r%add(0.d0,1.d0,g)
+  call r%copy(g)
 end if
 if(associated(self%pre))call u%new(s)
 if(associated(self%bc))call self%bc%apply(g)
@@ -380,13 +380,13 @@ else
   alfa=1.d0; f=pdq/2.d0-gg
 endif
 call g%add(1.d0,-1.d0,q)
-call p%add(0.d0,1.d0,g)
+call p%copy(g)
 if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,p)
   oft_env%pm=pm_save
   if(associated(self%bc))call self%bc%apply(s)
-  call p%add(0.d0,1.d0,s)
+  call p%copy(s)
 end if
 gg = g%dot(p)
 ggin = g%dot(g)
@@ -398,7 +398,7 @@ if(its==0.or.gg==0.d0)then
   call q%delete
   deallocate(p,q)
   if(self%precond)then
-    call g%add(0.d0,1.d0,r)
+    call g%copy(r)
     CALL r%delete
     DEALLOCATE(r)
   end if
@@ -426,13 +426,13 @@ do k=1,max_its
   call u%add(1.d0,alfa,p)
   call g%add(1.d0,-alfa,q)
   if(associated(self%cleaner))call self%cleaner%apply(g)
-  call q%add(0.d0,1.d0,g)
+  call q%copy(g)
   if(associated(self%pre))then
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,q)
     oft_env%pm=pm_save
     if(associated(self%bc))call self%bc%apply(s)
-    call q%add(0.d0,1.d0,s)
+    call q%copy(s)
   end if
   if(associated(self%orthog))call self%orthog%apply(q)
   ggold=gg
@@ -459,7 +459,7 @@ call p%delete
 call q%delete
 DEALLOCATE(p,q)
 if(self%precond)then
-  call g%add(0.d0,1.d0,r)
+  call g%copy(r)
   CALL r%delete
   DEALLOCATE(r)
 end if
@@ -645,7 +645,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   do i=1,nrits
     ! Precondition search direction
     if(associated(self%pre))then
-      call w%add(0.d0,1.d0,v(i)%f)
+      call w%copy(v(i)%f)
       CALL z(i)%f%set(0.d0)
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
       pre_full_res=self%pre%full_residual
@@ -654,7 +654,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
-      call z(i)%f%add(0.d0,1.d0,v(i)%f)
+      call z(i)%f%copy(v(i)%f)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
@@ -709,7 +709,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       CALL gmres_backsolve(i,h,res,hdots)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
-        call w%add(0.d0,1.d0,u) ! Form iterate in w (used as scratch)
+        call w%copy(u) ! Form iterate in w (used as scratch)
         do k=1,i
           call w%add(1.d0,hdots(k),z(k)%f)
         end do
@@ -724,7 +724,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   k=i
   ! Update iterate
   IF(inner_conv)THEN
-    call u%add(0.d0,1.d0,w) ! Already formed by inner convergence check
+    call u%copy(w) ! Already formed by inner convergence check
   ELSE
     CALL gmres_backsolve(k,h,res,hdots)
     do i=1,k
@@ -752,7 +752,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(uu==uuold)EXIT
 end do
 END IF
-call g%add(0.d0,1.d0,r)
+call g%copy(r)
 deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
 IF(nits==its)self%cits=-1
@@ -942,7 +942,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   do i=1,nrits
     ! Precondition search direction
     if(associated(self%pre))then
-      call w%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
+      call w%copy(v(i)%f)
       CALL z(i)%f%set((0.d0,0.d0))
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
       pre_full_res=self%pre%full_residual
@@ -951,7 +951,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
-      call z(i)%f%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
+      call z(i)%f%copy(v(i)%f)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
@@ -1006,7 +1006,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       CALL gmres_backsolve(i,h,res,hdots)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
-        call w%add((0.d0,0.d0),(1.d0,0.d0),u) ! Form iterate in w (used as scratch)
+        call w%copy(u) ! Form iterate in w (used as scratch)
         do k=1,i
           call w%add((1.d0,0.d0),hdots(k),z(k)%f)
         end do
@@ -1021,7 +1021,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   k=i
   ! Update iterate
   IF(inner_conv)THEN
-    call u%add((0.d0,0.d0),(1.d0,0.d0),w) ! Already formed by inner convergence check
+    call u%copy(w) ! Already formed by inner convergence check
   ELSE
     CALL gmres_backsolve(k,h,res,hdots)
     do i=1,k
@@ -1047,7 +1047,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(uu==uuold)EXIT
 end do
 END IF
-call g%add((0.d0,0.d0),(1.d0,0.d0),r)
+call g%copy(r)
 deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
 IF(nits==its)self%cits=-1
@@ -1268,13 +1268,13 @@ call u%scale(sf)
 call b%scale(sf)
 call c%scale(sf)
 call g%add(0.d0,1.d0,c,-1.d0/ev,b)
-call f%add(0.d0,1.d0,g)
+call f%copy(g)
 if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,f)
   oft_env%pm=pm_save
   if(associated(self%bc))call self%bc%apply(s)
-  call f%add(0.d0,1.d0,s)
+  call f%copy(s)
 end if
 gg = g%dot(f)
 ggnew = g%dot(g)
@@ -1299,7 +1299,7 @@ ninner = INT(u%ng,4)
 if((self%ninner>0).AND.(self%ninner<u%ng))ninner=self%ninner
 ! iterate to find the solution
 do ir=1,self%nrestarts ! restart loop
-call e%add(0.d0,1.d0,f)
+call e%copy(f)
 do n=1,ninner
   if(associated(self%orthog))call self%orthog%apply(e)
   call A%apply(e,g)
@@ -1333,13 +1333,13 @@ do n=1,ninner
   call b%add(sf,alfa*sf,f)
   call c%add(sf,alfa*sf,g)
   call g%add(0.d0,1.d0,c,-1.d0/ev,b)
-  call f%add(0.d0,1.d0,g)
+  call f%copy(g)
   if ( associated(self%pre) )then
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,f)
     oft_env%pm=pm_save
     if(associated(self%bc))call self%bc%apply(s)
-    call f%add(0.d0,1.d0,s)
+    call f%copy(s)
   end if
   gg = g%dot(f)
   ggnew = g%dot(g)
@@ -1496,7 +1496,7 @@ CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 CLASS(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 DEBUG_STACK_PUSH
 if(g%n/=u%n)call oft_abort('Size mismatch','identity_inv_apply',__FILE__)
-call u%add(0.d0,1.d0,g)
+call u%copy(g)
 DEBUG_STACK_POP
 end subroutine identity_inv_apply
 !------------------------------------------------------------------------------
@@ -1539,7 +1539,7 @@ if(g%n/=self%A%nr)call oft_abort('Row mismatch.','diag_scale_apply',__FILE__)
 if(u%n/=self%A%nc)call oft_abort('Col mismatch.','diag_scale_apply',__FILE__)
 if(.NOT.associated(self%A%D))call oft_abort('No diagonal entries.','diag_scale_apply',__FILE__)
 !---
-call u%add(0.d0,1.d0,g)
+call u%copy(g)
 call u%mult(self%A%D,div_flag=.TRUE.)
 DEBUG_STACK_POP
 end subroutine diag_scale_apply
@@ -1837,7 +1837,7 @@ IF(.NOT.self%initialized)THEN
   END IF
   CALL solver_setup(self)
 END IF
-call self%r%add(0.d0,1.d0,g)
+call self%r%copy(g)
 !---Report input residual
 IF(self%report_err>0)CALL print_residual('In:')
 !---Apply down smoother
@@ -1869,7 +1869,7 @@ if(associated(self%base_solve))then
   self%timings(4)=self%timings(4)+mytimer%tock()
 end if
 !---Reset RHS
-call g%add(0.d0,1.d0,self%r)
+call g%copy(self%r)
 !---Apply up smoother
 if(associated(self%smooth_up))then
   !---Report up residual
@@ -1877,7 +1877,7 @@ if(associated(self%smooth_up))then
     CALL self%smooth_up%A%apply(u,g)
     CALL g%add(1.d0,-1.d0,self%r)
     CALL print_residual('Up:')
-    call g%add(0.d0,1.d0,self%r)
+    call g%copy(self%r)
   END IF
   !
   CALL mytimer%tick
