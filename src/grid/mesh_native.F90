@@ -971,10 +971,7 @@ DO i=1,mesh%nbe
     IF(ALL(pt_e>0))THEN
         IF(ALL(pt_e==mesh%le(:,j)))CYCLE ! Skip "uncopied" periodic edges
         ind=ABS(mesh_local_findedge(mesh,pt_e))
-        IF(ind==0)THEN
-            CALL oft_abort('Unmatched periodic edge','native_set_periodic',__FILE__)
-        END IF
-        mesh%periodic%le(j)=ind
+        mesh%periodic%le(j)=ind ! Unmatched edges (0) are reported after the parallel region
     END IF
 END DO
 !---Flag periodic faces
@@ -984,17 +981,16 @@ DO i=1,mesh%nbf
     pt_f=mesh%periodic%lp(mesh%lf(:,j))
     IF(ALL(pt_f>0))THEN
         ind=ABS(mesh_local_findface(mesh,pt_f))
-        IF(ind==0)THEN
-            CALL oft_abort('Unmatched periodic face','native_set_periodic',__FILE__)
-        END IF
-        mesh%periodic%lf(j)=ind
-        mesh%bfs(i)=-2
+        mesh%periodic%lf(j)=ind ! Unmatched faces (0) are reported after the parallel region
+        IF(ind>0)mesh%bfs(i)=-2
     END IF
 END DO
 deallocate(pt_f)
 !$omp end parallel
-!---Revolved periodicity is only supported about the x-axis (checked outside the parallel
-!---region, so that at most one thread aborts)
+!---Errors are checked outside the parallel region, so that at most one thread aborts
+IF(ANY(mesh%periodic%le==0))CALL oft_abort('Unmatched periodic edge','native_set_periodic',__FILE__)
+IF(ANY(mesh%periodic%lf==0))CALL oft_abort('Unmatched periodic face','native_set_periodic',__FILE__)
+!---Revolved periodicity is only supported about the x-axis
 DO i=1,mesh%nbf
     j = mesh%lbf(i)
     IF(mesh%periodic%lf(j)>0)THEN
