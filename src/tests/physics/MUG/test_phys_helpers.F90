@@ -10,7 +10,11 @@
 MODULE test_phys_helpers
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh
+USE oft_la_base, ONLY: oft_vector
+USE fem_base, ONLY: oft_afem_type
 USE fem_utils, ONLY: fem_interp
+USE oft_lag_operators, ONLY: oft_lag_vproject
+USE diagnostic, ONLY: vec_energy
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -78,4 +82,39 @@ real(r8) :: pt(3),i,ar,az,s,c
 pt=self%mesh%log2phys(cell,f)
 val=self%v_dir*SIN(DOT_PRODUCT(pt-self%r0,self%k_dir)*2.d0*pi/self%lam)
 end subroutine alfven_eig_interp
+!------------------------------------------------------------------------------
+!> Project a vector Lagrange field onto sine and cosine plane-wave modes
+!!
+!! For each Cartesian direction e_i, computes the L2 projection coefficient of
+!! the field onto e_i sin(2 pi k.r/lam) and e_i cos(2 pi k.r/lam)
+!------------------------------------------------------------------------------
+subroutine lag_vec_mode_proj(fe_rep,mesh,field,k_dir,lam,quad_order,proj)
+class(oft_afem_type), target, intent(inout) :: fe_rep !< Scalar Lagrange FE representation
+class(oft_mesh), target, intent(inout) :: mesh !< Mesh
+class(oft_vector), intent(inout) :: field !< Field to project
+real(r8), intent(in) :: k_dir(3) !< Direction of wave propogation
+real(r8), intent(in) :: lam !< Wavelength
+integer(i4), intent(in) :: quad_order !< Quadrature order for mode normalization
+real(r8), intent(out) :: proj(2,3) !< Projections [sin/cos,component]
+integer(i4) :: i,j
+class(oft_vector), pointer :: rhs
+type(alfven_eig) :: mode
+!---
+CALL field%new(rhs)
+mode%mesh=>mesh
+mode%k_dir=k_dir
+mode%lam=lam
+DO i=1,3
+  mode%v_dir=0.d0
+  mode%v_dir(i)=1.d0
+  DO j=1,2
+    mode%r0=0.d0
+    IF(j==2)mode%r0=-k_dir*lam/4.d0 ! Quarter wavelength shift gives cosine
+    CALL oft_lag_vproject(fe_rep,mode,rhs)
+    proj(j,i)=field%dot(rhs)/vec_energy(mesh,mode,quad_order)
+  END DO
+END DO
+CALL rhs%delete
+DEALLOCATE(rhs)
+end subroutine lag_vec_mode_proj
 END MODULE test_phys_helpers

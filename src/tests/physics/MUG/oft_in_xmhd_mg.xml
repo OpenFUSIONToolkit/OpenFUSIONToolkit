@@ -1,0 +1,16 @@
+<oft>
+  <xmhd>
+    <pre type="mg">
+      <smoother direction="up">
+        <solver type="gmres">
+          <its>2</its>
+          <nrits>2</nrits>
+          <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </smoother>
+    </pre>
+  </xmhd>
+</oft>

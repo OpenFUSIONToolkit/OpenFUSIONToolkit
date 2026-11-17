@@ -180,7 +180,7 @@ IF(linear)THEN
   CALL xmhd_ML_lagrange%vec_create(dden)
   CALL xmhd_ML_lagrange%vec_create(dtemp)
   CALL den%set(1.d19)
-  CALL temp%set(1.d1)
+  CALL temp%set(0.5d0)
   equil_fields%B=>b
   equil_fields%V=>vel
   equil_fields%Ne=>den
@@ -206,7 +206,7 @@ ELSE
   CALL xmhd_ML_lagrange%vec_create(den)
   CALL xmhd_ML_lagrange%vec_create(temp)
   CALL den%set(1.d19)
-  CALL temp%set(1.d1)
+  CALL temp%set(0.5d0)
   equil_fields%B=>b
   equil_fields%V=>vel
   equil_fields%Ne=>den
