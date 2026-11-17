@@ -228,6 +228,8 @@ class tokamaker_settings:
         self.maxits = 40
         ## Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
         self.mode = 1
+        ## Field-line tracer for flux surfaces not handled by the contour method (1 -> LSODE, 3 -> Runge-Kutta with steps limited at cell boundaries)
+        self.trace_type = 3
         ## Under-relaxation factor for NL fixed-point iteration
         self.urf = 0.2
         ## Convergence tolerance for NL solver
@@ -259,6 +261,8 @@ class tokamaker_settings:
             raise ValueError("Both `ffp_target_weight` and `pp_target_weight` must be negative (hard constraint) or positive (soft constraint)")
         if (self.ffp_target_weight <= 0.0) and (self.opoint_target_weight > 0.0):
             raise ValueError("If `opoint_target_weight` is positive, both `ffp_target_weight` and `pp_target_weight` must be positive as well (soft constraint)")
+        if self.trace_type not in (1, 3):
+            raise ValueError("`trace_type` must be 1 (LSODE) or 3 (Runge-Kutta)")
         c_struct_instance = tokamaker_settings_cstruct()
         c_struct_instance.pm = self.pm
         c_struct_instance.free_boundary = self.free_boundary
@@ -267,6 +271,7 @@ class tokamaker_settings:
         c_struct_instance.mirror_mode = self.mirror_mode
         c_struct_instance.maxits = self.maxits
         c_struct_instance.mode = self.mode
+        c_struct_instance.trace_type = self.trace_type
         c_struct_instance.urf = self.urf
         c_struct_instance.nl_tol = self.nl_tol
         c_struct_instance.rmin = self.rmin

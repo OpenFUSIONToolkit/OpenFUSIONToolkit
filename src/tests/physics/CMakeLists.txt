@@ -11,6 +11,10 @@ if( OFT_BUILD_TESTS )
   oft_add_test( test_axi_green.F90 )
   configure_file( test_axi_green.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
+  # Field line tracing tests (shared tracing module)
+  oft_add_test( test_tracing.F90 )
+  configure_file( test_tracing.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+
   # Combined tests (Marklin, ThinCurr, and TokaMaker in one process)
   configure_file( test_python_comb.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( Marklin/cyl_Marklin.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
