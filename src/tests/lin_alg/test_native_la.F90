@@ -12,11 +12,12 @@
 !! The current test cases are:
 !! - Transpose products: adjoint identity \f$ x \cdot (A y) = (A^T x) \cdot y \f$
 !! - 1-norm and inf-norm against reductions over the owned (slice) values
-!! - Complex vector products and mixed real/complex dot products (serial only)
+!! - Complex vector products and mixed real/complex dot products (serial, non-periodic only)
 !! - Borrowed (zero-copy) access with each access mode, with and without
 !!   synchronization, for full vectors and blocks, against get_local/restore_local
 !! - copy, maxpy and mdot for real and complex vectors against add and dot
 !! - Boundary condition operators that skip synchronization against the copying path
+!! - Summation stitching gives bitwise identical shared values (eg. periodic images)
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -28,13 +29,14 @@ USE multigrid_build, ONLY: multigrid_construct
 USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_value, ieee_quiet_nan
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_vector_ptr, oft_cvector_ptr, &
   OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
-USE oft_native_la, ONLY: oft_native_matrix
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvector
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_zerob, oft_vlag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,nfail
+LOGICAL :: cstitch
 REAL(r8), PARAMETER :: tol=1.d-12
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
@@ -45,12 +47,15 @@ CALL oft_init
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 CALL oft_lag_setup(mg_mesh,2,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
+!---Complex stitching needs no linked copies on a process (serial, non-periodic meshes)
+cstitch=(oft_env%nprocs==1).AND.(mg_mesh%mesh%periodic%nper==0)
 !---Run tests
 nfail=0
 CALL test_ops()
 CALL test_access()
 CALL test_multi()
 CALL test_bc()
+CALL test_stitch()
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='native_la.results')
   WRITE(io_unit,*)nfail
@@ -220,7 +225,7 @@ DEALLOCATE(vals)
 CALL check('1-norm',w%norm(1),oft_mpi_sum(v1))
 CALL check('Inf-norm',w%norm(3),oft_mpi_max(v2))
 !---Complex vectors (complex stitching is only supported for local vectors)
-IF(oft_env%nprocs==1)THEN
+IF(cstitch)THEN
   CALL x%new(cx)
   CALL x%new(cz)
   NULLIFY(xr,xi,cvals)
@@ -530,4 +535,55 @@ CALL x%delete
 CALL y%delete
 DEALLOCATE(x,y)
 END SUBROUTINE test_bc
+! Summation stitching of values that differ between copies of a shared entry gives every copy
+! the same value, bit for bit, and conserves the global sum. Run on periodic meshes this covers
+! several images of an entry on one process.
+SUBROUTINE test_stitch()
+INTEGER(i4) :: i
+REAL(r8) :: s_raw,s_sum
+CLASS(oft_vector), POINTER :: x,ones
+CLASS(oft_cvector), POINTER :: cx,cy
+!---Real
+CALL ML_oft_lagrange%vec_create(x)
+CALL ML_oft_lagrange%vec_create(ones)
+CALL ones%set(1.d0)
+s_raw=0.d0
+SELECT TYPE(x)
+TYPE IS(oft_native_vector)
+  DO i=1,x%n
+    x%v(i)=gval(INT(i+1000*oft_env%rank,i8),0.71d0,0.1d0)/3.d0
+    s_raw=s_raw+x%v(i)
+  END DO
+CLASS DEFAULT
+  CALL oft_abort('Native vector expected','test_stitch',__FILE__)
+END SELECT
+s_raw=oft_mpi_sum(s_raw)
+CALL x%stitch(1)
+CALL check_exact('Summation stitch consistent',inconsistency(x),0.d0)
+s_sum=x%dot(ones)
+CALL check('Summation stitch conserves sum',s_sum,s_raw)
+!---Complex (complex seams are not supported with linked copies on a process)
+IF(cstitch)THEN
+  CALL x%new(cx)
+  CALL x%new(cy)
+  SELECT TYPE(cx)
+  TYPE IS(oft_native_cvector)
+    DO i=1,cx%n
+      cx%v(i)=CMPLX(gval(INT(i,i8),0.71d0,0.1d0),gval(INT(i,i8),0.53d0,-0.2d0),c8)/3.d0
+    END DO
+  CLASS DEFAULT
+    CALL oft_abort('Native complex vector expected','test_stitch',__FILE__)
+  END SELECT
+  CALL cx%stitch(1)
+  CALL cy%add((0.d0,0.d0),(1.d0,0.d0),cx)
+  CALL cy%stitch(0)
+  CALL check_exact('Complex summation stitch consistent',cmaxdiff(cx,cy),0.d0)
+  CALL cx%delete
+  CALL cy%delete
+  DEALLOCATE(cx,cy)
+END IF
+CALL x%delete
+CALL ones%delete
+DEALLOCATE(x,ones)
+END SUBROUTINE test_stitch
 END PROGRAM test_native_la

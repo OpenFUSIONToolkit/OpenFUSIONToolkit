@@ -55,6 +55,17 @@ TYPE :: oft_seam
   !! copied seam never shares it with the original.
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: rwork
   COMPLEX(c8), ALLOCATABLE, DIMENSION(:) :: cwork !< Work array for complex stitching [nbe] (see `rwork`)
+  !> Number of boundary elements with three or more contributions in summation stitching
+  !! (-1 until built on first use by \ref oft_stitching::seam_setup_multi)
+  INTEGER(i4) :: nmulti = -1
+  INTEGER(i4) :: multi_max = 0 !< Maximum number of contributions to a boundary element
+  INTEGER(i4) :: multi_nbe = 0 !< Value of `nbe` when the contribution lists were built
+  INTEGER(i4) :: multi_nle = 0 !< Value of `nle` when the contribution lists were built
+  LOGICAL :: multi_full = .FALSE. !< Value of `full` when the contribution lists were built
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lmulti !< Boundary elements with three or more contributions [nmulti]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kmulti !< Pointer to contribution lists [nmulti+1]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: imulti !< Linkage index of each contribution
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: jmulti !< Linkage block (0 for local, otherwise processor) of each contribution
 END TYPE oft_seam
 !---------------------------------------------------------------------------------
 !> Seam object pointer
@@ -92,6 +103,12 @@ END INTERFACE oft_global_reduction
 !! Available stitching methods
 !! - Synchronize global vector using element ownership [0] (initialization)
 !! - Sum proc contributions [1] (stitching)
+!!
+!! Summation produces the same value, bit for bit, on every copy of a shared element.
+!! With two contributions this holds because floating point addition is commutative.
+!! Elements with three or more contributions (eg. periodic images on one process, or
+!! elements shared by three or more processes) are summed in ascending order of value,
+!! which every copy computes identically.
 !---------------------------------------------------------------------------------
 INTERFACE oft_global_stitch
   MODULE PROCEDURE global_stitch_r8
@@ -479,6 +496,8 @@ IF(active_procs>0)THEN
   END DO
 END IF
 #endif
+!---Sum elements with three or more contributions in canonical order
+IF(up_method==1)CALL stitch_multi_r8(self,a)
 !---Move back to full array
 !$omp simd
 DO i=1,self%nbe
@@ -634,6 +653,8 @@ IF(active_procs>0)THEN
   END DO
 END IF
 #endif
+!---Sum elements with three or more contributions in canonical order
+IF(up_method==1)CALL stitch_multi_c8(self,a)
 !---Move back to full array
 !$omp simd
 DO i=1,self%nbe
@@ -771,6 +792,169 @@ end subroutine global_stitch_c8
 ! DEBUG_STACK_POP
 ! end subroutine oft_global_stitch_end
 !---------------------------------------------------------------------------------
+!> Build the contribution lists for boundary elements with three or more contributions
+!!
+!! Used by summation stitching (method 1). Contributions are the element's own value,
+!! local linked values and, unless the local mesh is complete, values from other
+!! processes.
+!---------------------------------------------------------------------------------
+subroutine seam_setup_multi(self)
+type(oft_seam), intent(inout) :: self !< Seam structure
+integer(i4) :: i,j,m,elocal,active_procs
+integer(i4), allocatable :: ncon(:),imap(:),kfill(:)
+DEBUG_STACK_PUSH
+active_procs=self%nproc_con
+IF(self%full)active_procs=0
+IF(ALLOCATED(self%lmulti))DEALLOCATE(self%lmulti,self%kmulti,self%imulti,self%jmulti)
+!---Count contributions to each boundary element
+ALLOCATE(ncon(self%nbe))
+ncon=1
+DO j=0,active_procs
+  DO i=self%kle(j),self%kle(j+1)-1
+    elocal=self%lle(1,i)
+    IF(j==0)elocal=self%lle(2,i) ! Local linkage is applied in reverse
+    ncon(elocal)=ncon(elocal)+1
+  END DO
+END DO
+self%nmulti=COUNT(ncon>=3)
+self%multi_max=MAXVAL(ncon)
+!---Build contribution lists
+ALLOCATE(self%lmulti(self%nmulti),self%kmulti(self%nmulti+1),imap(self%nbe))
+imap=0
+m=0
+self%kmulti(1)=1
+DO i=1,self%nbe
+  IF(ncon(i)<3)CYCLE
+  m=m+1
+  self%lmulti(m)=i
+  imap(i)=m
+  self%kmulti(m+1)=self%kmulti(m)+ncon(i)-1
+END DO
+ALLOCATE(self%imulti(self%kmulti(self%nmulti+1)-1),self%jmulti(self%kmulti(self%nmulti+1)-1))
+ALLOCATE(kfill(self%nmulti))
+kfill=self%kmulti(1:self%nmulti)
+DO j=0,active_procs
+  DO i=self%kle(j),self%kle(j+1)-1
+    elocal=self%lle(1,i)
+    IF(j==0)elocal=self%lle(2,i)
+    m=imap(elocal)
+    IF(m==0)CYCLE
+    self%imulti(kfill(m))=i
+    self%jmulti(kfill(m))=j
+    kfill(m)=kfill(m)+1
+  END DO
+END DO
+DEALLOCATE(ncon,imap,kfill)
+self%multi_nbe=self%nbe
+self%multi_nle=self%nle
+self%multi_full=self%full
+DEBUG_STACK_POP
+end subroutine seam_setup_multi
+!---------------------------------------------------------------------------------
+!> Sum real(r8) contributions to boundary elements with three or more contributions in
+!! ascending order of value, so every copy of an element gets the same result
+!!
+!! Called by \ref oft_stitching::global_stitch_r8 after all contributions have arrived;
+!! overwrites the corresponding entries of `rwork`.
+!---------------------------------------------------------------------------------
+subroutine stitch_multi_r8(self,a)
+type(oft_seam), intent(inout) :: self !< Seam structure
+real(r8), intent(in) :: a(:) !< Local data being stitched (own contributions)
+real(r8), allocatable :: vals(:)
+real(r8) :: tmp
+integer(i4) :: m,k,l,n,i,j
+IF(self%nmulti<0.OR.self%multi_nbe/=self%nbe.OR.self%multi_nle/=self%nle &
+  .OR.(self%multi_full.NEQV.self%full))CALL seam_setup_multi(self)
+IF(self%nmulti==0)RETURN
+DEBUG_STACK_PUSH
+ALLOCATE(vals(self%multi_max))
+DO m=1,self%nmulti
+  !---Gather contributions
+  n=1
+  vals(1)=a(self%lbe(self%lmulti(m)))
+  DO k=self%kmulti(m),self%kmulti(m+1)-1
+    i=self%imulti(k)
+    j=self%jmulti(k)
+    n=n+1
+    IF(j==0)THEN
+      vals(n)=self%send(0)%v(i-self%kle(0)+1)
+    ELSE
+      vals(n)=self%recv(j)%v(i-self%kle(j)+1)
+    END IF
+  END DO
+  !---Insertion sort (lists are short)
+  DO k=2,n
+    tmp=vals(k)
+    DO l=k-1,1,-1
+      IF(vals(l)<=tmp)EXIT
+      vals(l+1)=vals(l)
+    END DO
+    vals(l+1)=tmp
+  END DO
+  !---Sum in sorted order
+  tmp=0.d0
+  DO k=1,n
+    tmp=tmp+vals(k)
+  END DO
+  self%rwork(self%lmulti(m))=tmp
+END DO
+DEALLOCATE(vals)
+DEBUG_STACK_POP
+end subroutine stitch_multi_r8
+!---------------------------------------------------------------------------------
+!> Sum complex(c8) contributions to boundary elements with three or more contributions in
+!! ascending order of value (real part, then imaginary part), so every copy of an element
+!! gets the same result
+!!
+!! Called by \ref oft_stitching::global_stitch_c8 after all contributions have arrived;
+!! overwrites the corresponding entries of `cwork`.
+!---------------------------------------------------------------------------------
+subroutine stitch_multi_c8(self,a)
+type(oft_seam), intent(inout) :: self !< Seam structure
+complex(c8), intent(in) :: a(:) !< Local data being stitched (own contributions)
+complex(c8), allocatable :: vals(:)
+complex(c8) :: tmp
+integer(i4) :: m,k,l,n,i,j
+IF(self%nmulti<0.OR.self%multi_nbe/=self%nbe.OR.self%multi_nle/=self%nle &
+  .OR.(self%multi_full.NEQV.self%full))CALL seam_setup_multi(self)
+IF(self%nmulti==0)RETURN
+DEBUG_STACK_PUSH
+ALLOCATE(vals(self%multi_max))
+DO m=1,self%nmulti
+  !---Gather contributions
+  n=1
+  vals(1)=a(self%lbe(self%lmulti(m)))
+  DO k=self%kmulti(m),self%kmulti(m+1)-1
+    i=self%imulti(k)
+    j=self%jmulti(k)
+    n=n+1
+    IF(j==0)THEN
+      vals(n)=self%csend(0)%v(i-self%kle(0)+1)
+    ELSE
+      vals(n)=self%crecv(j)%v(i-self%kle(j)+1)
+    END IF
+  END DO
+  !---Insertion sort (lists are short)
+  DO k=2,n
+    tmp=vals(k)
+    DO l=k-1,1,-1
+      IF(REAL(vals(l),r8)<REAL(tmp,r8))EXIT
+      IF((REAL(vals(l),r8)==REAL(tmp,r8)).AND.(AIMAG(vals(l))<=AIMAG(tmp)))EXIT
+      vals(l+1)=vals(l)
+    END DO
+    vals(l+1)=tmp
+  END DO
+  !---Sum in sorted order
+  tmp=(0.d0,0.d0)
+  DO k=1,n
+    tmp=tmp+vals(k)
+  END DO
+  self%cwork(self%lmulti(m))=tmp
+END DO
+DEALLOCATE(vals)
+DEBUG_STACK_POP
+end subroutine stitch_multi_c8
+!---------------------------------------------------------------------------------
 !> Validate stitching structure
 !---------------------------------------------------------------------------------
 subroutine oft_stitch_check(self)
@@ -850,6 +1034,8 @@ IF(ASSOCIATED(self%csend))THEN
 END IF
 IF(ALLOCATED(self%rwork))DEALLOCATE(self%rwork)
 IF(ALLOCATED(self%cwork))DEALLOCATE(self%cwork)
+IF(ALLOCATED(self%lmulti))DEALLOCATE(self%lmulti,self%kmulti,self%imulti,self%jmulti)
+self%nmulti=-1
 DEBUG_STACK_POP
 end subroutine destory_seam
 end module oft_stitching
