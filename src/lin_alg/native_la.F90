@@ -33,8 +33,9 @@ USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
   oft_global_reduction, oft_global_norm1, oft_stitch_check
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
-  oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
+  oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
   OFT_ACCESS_READWRITE
+USE oft_native_kernels
 IMPLICIT NONE
 #include "local.h"
 private
@@ -322,22 +323,24 @@ INTERFACE
   INTEGER(c_int), INTENT(inout) :: info !< Parition return status
   END SUBROUTINE oft_metis_partgraph
 END INTERFACE
-INTEGER(i4), PARAMETER :: lc_offset = HUGE(INT(1,2))
-!> Number of rows processed together by multi-vector kernels (`mdot`, `maxpy`), chosen
-!! so that one row block of every vector involved stays in cache
-INTEGER(i4), PARAMETER :: native_vec_chunk = 512
+!> Empty shared-entry lists for seams without shared entries (see @ref native_seam_owned)
+INTEGER(i4), TARGET :: native_no_lbe(1) = 0
+!> Empty shared-entry ownership flags (see @ref native_seam_owned)
+LOGICAL, TARGET :: native_no_leo(1) = .TRUE.
 !---------------------------------------------------------------------------------
-!> Contiguous pointer to the values of a real vector (for multi-vector kernels)
+!> Get a contiguous pointer to the local values of a vector (in place for native vectors)
 !---------------------------------------------------------------------------------
-type :: native_rvals_ptr
-  real(r8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
-end type native_rvals_ptr
+INTERFACE native_get_vals
+  MODULE PROCEDURE native_get_rvals
+  MODULE PROCEDURE native_get_cvals
+END INTERFACE native_get_vals
 !---------------------------------------------------------------------------------
-!> Contiguous pointer to the values of a complex vector (for multi-vector kernels)
+!> Finish writing values obtained with @ref native_get_vals
 !---------------------------------------------------------------------------------
-type :: native_cvals_ptr
-  complex(c8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
-end type native_cvals_ptr
+INTERFACE native_put_vals
+  MODULE PROCEDURE native_put_rvals
+  MODULE PROCEDURE native_put_cvals
+END INTERFACE native_put_vals
 !---Declare public entities
 public native_vector_cast, native_cvector_cast, native_matrix_cast, native_cmatrix_cast
 public partition_graph, native_matrix_setup_full
@@ -364,6 +367,173 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_vector_cast
+!---------------------------------------------------------------------------------
+!> Get the shared-entry lists of a seam for reductions over owned entries
+!!
+!! Returns `.FALSE.` if reductions are skipped for this seam (`seam%skip`). Empty lists
+!! are returned when the seam has no shared entries, so the result can always be
+!! passed to the `nk_owned_*` kernels.
+!---------------------------------------------------------------------------------
+FUNCTION native_seam_owned(seam,nbe,lbe,leo) RESULT(active)
+TYPE(oft_seam), INTENT(in) :: seam !< Seam structure
+INTEGER(i4), INTENT(out) :: nbe !< Number of shared entries
+INTEGER(i4), POINTER, CONTIGUOUS, INTENT(out) :: lbe(:) !< Location of shared entries [nbe]
+LOGICAL, POINTER, CONTIGUOUS, INTENT(out) :: leo(:) !< Ownership flag of shared entries [nbe]
+LOGICAL :: active !< Perform reduction?
+active=(.NOT.seam%skip)
+nbe=0
+lbe=>native_no_lbe
+leo=>native_no_leo
+IF(seam%nbe>0)THEN
+  nbe=seam%nbe
+  lbe=>seam%lbe
+  leo=>seam%leo
+END IF
+END FUNCTION native_seam_owned
+!---------------------------------------------------------------------------------
+!> Get a contiguous pointer to the local values of a real vector
+!!
+!! Native vectors are accessed in place, other vectors are copied with `get_local`.
+!---------------------------------------------------------------------------------
+FUNCTION native_get_rvals(a,vals) RESULT(copied)
+CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Vector
+REAL(r8), POINTER, CONTIGUOUS, INTENT(out) :: vals(:) !< Local values
+LOGICAL :: copied !< Values were copied (deallocate when done)?
+SELECT TYPE(a)
+CLASS IS(oft_native_vector)
+  vals=>a%v
+  copied=.FALSE.
+CLASS DEFAULT
+  NULLIFY(vals)
+  CALL a%get_local(vals)
+  copied=.TRUE.
+END SELECT
+END FUNCTION native_get_rvals
+!---------------------------------------------------------------------------------
+!> Get a contiguous pointer to the local values of a complex vector
+!!
+!! Native vectors are accessed in place, other vectors are copied with `get_local`.
+!---------------------------------------------------------------------------------
+FUNCTION native_get_cvals(a,vals) RESULT(copied)
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a !< Vector
+COMPLEX(c8), POINTER, CONTIGUOUS, INTENT(out) :: vals(:) !< Local values
+LOGICAL :: copied !< Values were copied (deallocate when done)?
+SELECT TYPE(a)
+CLASS IS(oft_native_cvector)
+  vals=>a%v
+  copied=.FALSE.
+CLASS DEFAULT
+  NULLIFY(vals)
+  CALL a%get_local(vals)
+  copied=.TRUE.
+END SELECT
+END FUNCTION native_get_cvals
+!---------------------------------------------------------------------------------
+!> Finish writing values obtained with @ref native_get_rvals
+!!
+!! Copied values are restored (without synchronization) and deallocated.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_put_rvals(a,vals,copied)
+CLASS(oft_vector), INTENT(inout) :: a !< Vector
+REAL(r8), POINTER, CONTIGUOUS, INTENT(inout) :: vals(:) !< Local values
+LOGICAL, INTENT(in) :: copied !< Values were copied?
+IF(copied)THEN
+  CALL a%restore_local(vals,wait=.TRUE.)
+  DEALLOCATE(vals)
+END IF
+END SUBROUTINE native_put_rvals
+!---------------------------------------------------------------------------------
+!> Finish writing values obtained with @ref native_get_cvals
+!!
+!! Copied values are restored (without synchronization) and deallocated.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_put_cvals(a,vals,copied)
+CLASS(oft_cvector), INTENT(inout) :: a !< Vector
+COMPLEX(c8), POINTER, CONTIGUOUS, INTENT(inout) :: vals(:) !< Local values
+LOGICAL, INTENT(in) :: copied !< Values were copied?
+IF(copied)THEN
+  CALL a%restore_local(vals,wait=.TRUE.)
+  DEALLOCATE(vals)
+END IF
+END SUBROUTINE native_put_cvals
+!---------------------------------------------------------------------------------
+!> Locate a block of entries in a native CRS non-zero pattern
+!!
+!! `loc(i,j)` is set to the location of entry (`i_inds(i)`,`j_inds(j)`) in the CRS value
+!! array, or 0 if the entry is not in the pattern. When `iblock` and `jblock` are given
+!! the indices are local to that block and the row extents of the block map are
+!! searched. In that case `loc_cache` may hold the positions within each row extent
+!! from a previous call with the same indices (`loc_cache(1,1)>0`), which are then
+!! used without searching, or is filled for later calls.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_locate(kr,lc,map,j_map,n,m,i_inds,j_inds,loc,iblock,jblock,loc_cache)
+INTEGER(i4), INTENT(in) :: kr(:) !< CRS row pointer
+INTEGER(i4), INTENT(in) :: lc(:) !< CRS column indices
+TYPE(oft_matrix_map), POINTER, INTENT(in) :: map(:,:) !< Block maps (used with `iblock`/`jblock`)
+TYPE(oft_map), POINTER, INTENT(in) :: j_map(:) !< Column block mapping (used with `jblock`)
+INTEGER(i4), INTENT(in) :: n !< Number of rows
+INTEGER(i4), INTENT(in) :: m !< Number of columns
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices [m]
+INTEGER(i4), INTENT(out) :: loc(n,m) !< Locations in CRS value array (0 if not found) [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4), OPTIONAL, INTENT(inout) :: loc_cache(n,m) !< Cache of positions within row extents (optional)
+INTEGER(i4) :: i,j,jp,jn,jk,joff
+LOGICAL :: use_cache
+IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
+  use_cache=.FALSE.
+  IF(PRESENT(loc_cache))use_cache=(loc_cache(1,1)>0)
+  joff=j_map(jblock)%offset
+  DO i=1,n
+    jp=map(iblock,jblock)%ext(1,i_inds(i))
+    jn=map(iblock,jblock)%ext(2,i_inds(i))
+    DO j=1,m
+      IF(use_cache)THEN
+        jk=loc_cache(i,j)
+      ELSE
+        jk=search_array(joff+j_inds(j),lc(jp:jn),jn-jp+1)
+        IF(PRESENT(loc_cache))loc_cache(i,j)=jk
+      END IF
+      loc(i,j)=0
+      IF(jk>0)loc(i,j)=jk+jp-1
+    END DO
+  END DO
+ELSE
+  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
+    'native_locate',__FILE__)
+  DO i=1,n
+    jp=kr(i_inds(i))
+    jn=kr(i_inds(i)+1)-jp
+    DO j=1,m
+      jk=search_array(j_inds(j),lc(jp:jp+jn-1),jn)
+      loc(i,j)=0
+      IF(jk>0)loc(i,j)=jk+jp-1
+    END DO
+  END DO
+END IF
+END SUBROUTINE native_locate
+!---------------------------------------------------------------------------------
+!> Build 2-byte copy of a CRS column list, if the number of columns allows it
+!!
+!! Columns are stored as `lc-lc_offset` (see @ref oft_native_kernels_base::lc_offset
+!! "lc_offset"). Nothing is done if the copy already exists or if there are
+!! `2*lc_offset` or more columns.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_lc_small_build(lc_small,lc,nnz,nc)
+INTEGER(2), POINTER, CONTIGUOUS, INTENT(inout) :: lc_small(:) !< 2-byte column list [nnz]
+INTEGER(i4), INTENT(in) :: lc(:) !< CRS column list [nnz]
+INTEGER(i4), INTENT(in) :: nnz !< Number of non-zeros
+INTEGER(i4), INTENT(in) :: nc !< Number of columns
+INTEGER(i4) :: i
+IF(nc>=2*lc_offset)RETURN
+IF(ASSOCIATED(lc_small))RETURN
+ALLOCATE(lc_small(nnz))
+!$omp simd
+DO i=1,nnz
+  lc_small(i)=INT(lc(i)-lc_offset,2)
+END DO
+END SUBROUTINE native_lc_small_build
 !---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
 !---------------------------------------------------------------------------------
@@ -419,19 +589,18 @@ real(r8), intent(in) :: alpha !< Updated vector value
 integer(i4), optional, intent(in) :: iblock !< Vector sub-block to act on
 logical, optional, intent(in) :: random !< Set to random number, if true alpha is ignored (optional)
 logical :: random_flag
-integer(i4) :: i
+integer(i4) :: i1,i2
 DEBUG_STACK_PUSH
 random_flag=.FALSE.
 IF(PRESENT(random))random_flag=random
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_set',__FILE__)
-  !---
+  i1=self%map(iblock)%offset+1
+  i2=self%map(iblock)%offset+self%map(iblock)%n
   IF(random_flag)THEN
-    CALL oft_random_number(self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n),self%map(iblock)%n)
+    CALL oft_random_number(self%v(i1:i2),self%map(iblock)%n)
   ELSE
-    do i=1,self%map(iblock)%n
-      self%v(self%map(iblock)%offset+i) = alpha
-    end do
+    CALL nk_set(self%map(iblock)%n,alpha,self%v(i1:i2))
   END IF
   CALL self%stitch(0)
 ELSE
@@ -439,10 +608,7 @@ ELSE
     CALL oft_random_number(self%v,self%n)
     CALL self%stitch(0)
   ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = alpha
-    end do
+    CALL nk_set(self%n,alpha,self%v)
   END IF
 END IF
 DEBUG_STACK_POP
@@ -454,31 +620,25 @@ subroutine vec_get_slice(self,array,iblock)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), pointer, intent(inout) :: array(:) !< Slice values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i,j,nslice
+integer(i4) :: i
 DEBUG_STACK_PUSH
-!---
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_slice',__FILE__)
-  !---
-  nslice=self%map(iblock)%nslice
-  IF(.NOT.ASSOCIATED(array))ALLOCATE(array(nslice))
-  !$omp simd
-  do j=1,self%map(iblock)%nslice
-    array(j) = self%v(self%map(iblock)%offset+self%map(iblock)%slice(j))
-  end do
+  IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%nslice))
+  ASSOCIATE(mp=>self%map(iblock))
+    IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n),array(1:mp%nslice))
+  END ASSOCIATE
 ELSE
-  !---
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%nslice))
   IF(self%n==self%nslice)THEN
-    array=self%v
+    CALL nk_copy(self%n,self%v,array)
   ELSE
-    !$omp parallel do private(j) if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%nblocks
-      !$omp simd
-      do j=1,self%map(i)%nslice
-        array(self%map(i)%soffset+j) = self%v(self%map(i)%offset+self%map(i)%slice(j))
-      end do
-    end do
+    DO i=1,self%nblocks
+      ASSOCIATE(mp=>self%map(i))
+        IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n), &
+          array(mp%soffset+1:mp%soffset+mp%nslice))
+      END ASSOCIATE
+    END DO
   END IF
 END IF
 DEBUG_STACK_POP
@@ -491,29 +651,26 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: array(:) !< Slice values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: wait !< Wait to perform global sync?
-integer(i4) :: i,j
+integer(i4) :: i
 logical :: do_wait
 DEBUG_STACK_PUSH
 do_wait=.FALSE.
 IF(PRESENT(wait))do_wait=wait
-!---
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_restore_slice',__FILE__)
-  !$omp simd
-  do j=1,self%map(iblock)%nslice
-    self%v(self%map(iblock)%offset+self%map(iblock)%slice(j)) = array(j)
-  end do
+  ASSOCIATE(mp=>self%map(iblock))
+    IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(1:mp%nslice),self%v(mp%offset+1:mp%offset+mp%n))
+  END ASSOCIATE
 ELSE
   IF(self%n==self%nslice)THEN
-    self%v=array
+    CALL nk_copy(self%n,array,self%v)
   ELSE
-    !$omp parallel do private(j) if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%nblocks
-      !$omp simd
-      do j=1,self%map(i)%nslice
-        self%v(self%map(i)%offset+self%map(i)%slice(j)) = array(self%map(i)%soffset+j)
-      end do
-    end do
+    DO i=1,self%nblocks
+      ASSOCIATE(mp=>self%map(i))
+        IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(mp%soffset+1:mp%soffset+mp%nslice), &
+          self%v(mp%offset+1:mp%offset+mp%n))
+      END ASSOCIATE
+    END DO
   END IF
 END IF
 IF(.NOT.do_wait)call self%stitch(0)
@@ -526,23 +683,17 @@ subroutine vec_get_local(self,array,iblock)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), pointer, intent(inout) :: array(:) !< Local values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i,j
+integer(i4) :: i1,i2
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_local',__FILE__)
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%n))
-  !$omp simd
-  do j=1,self%map(iblock)%n
-    array(j) = self%v(self%map(iblock)%offset+j)
-  end do
+  i1=self%map(iblock)%offset+1
+  i2=self%map(iblock)%offset+self%map(iblock)%n
+  CALL nk_copy(self%map(iblock)%n,self%v(i1:i2),array)
 ELSE
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%n))
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  DO i=1,self%n
-    array(i)=self%v(i)
-  END DO
-  !$omp end parallel
+  CALL nk_copy(self%n,self%v,array)
 END IF
 DEBUG_STACK_POP
 end subroutine vec_get_local
@@ -556,7 +707,7 @@ integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: add !< Add values instead of replace
 logical, optional, intent(in) :: wait !< Wait to perform global sync
 logical :: do_add,do_wait
-integer(i4) :: j
+integer(i4) :: i1,i2
 real(r8), allocatable, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 do_add=.FALSE.
@@ -565,24 +716,20 @@ do_wait=.FALSE.
 IF(PRESENT(wait))do_wait=wait
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_restore_local',__FILE__)
+  i1=self%map(iblock)%offset+1
+  i2=self%map(iblock)%offset+self%map(iblock)%n
   IF(do_add)THEN
     IF(.NOT.ASSOCIATED(self%local_tmp))THEN
       ALLOCATE(self%local_tmp(self%n))
-      self%local_tmp=0.d0
+      CALL nk_set(self%n,0.d0,self%local_tmp)
     END IF
-    !$omp simd
-    do j=1,self%map(iblock)%n
-      self%local_tmp(self%map(iblock)%offset+j) = array(j)
-    end do
+    CALL nk_copy(self%map(iblock)%n,array,self%local_tmp(i1:i2))
     IF(.NOT.do_wait)THEN
       CALL full_restore_local(self%local_tmp)
       DEALLOCATE(self%local_tmp)
     END IF
   ELSE
-    !$omp simd
-    do j=1,self%map(iblock)%n
-      self%v(self%map(iblock)%offset+j) = array(j)
-    end do
+    CALL nk_copy(self%map(iblock)%n,array,self%v(i1:i2))
     IF(.NOT.do_wait)CALL self%stitch(0)
   END IF
 ELSE
@@ -592,21 +739,11 @@ ELSE
   IF(do_add)THEN
     !---Contributions must be summed before adding, which needs a modifiable copy
     ALLOCATE(atmp(self%n))
-    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    DO j=1,self%n
-      atmp(j)=array(j)
-    END DO
-    !$omp end parallel
+    CALL nk_copy(self%n,array,atmp)
     CALL full_restore_local(atmp)
     DEALLOCATE(atmp)
   ELSE
-    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    DO j=1,self%n
-      self%v(j)=array(j)
-    END DO
-    !$omp end parallel
+    CALL nk_copy(self%n,array,self%v)
     CALL self%stitch(0)
   END IF
 END IF
@@ -615,14 +752,8 @@ contains
 !
 subroutine full_restore_local(array_loc)
 real(r8), intent(inout) :: array_loc(:)
-integer(i4) :: i
 call oft_global_stitch(self%stitch_info,array_loc,1)
-!$omp parallel if(self%n>OFT_OMP_VTHRESH)
-!$omp do simd
-DO i=1,self%n
-  self%v(i)=self%v(i)+array_loc(i)
-END DO
-!$omp end parallel
+CALL nk_axpby(self%n,1.d0,1.d0,array_loc,self%v)
 end subroutine full_restore_local
 end subroutine vec_restore_local
 !---------------------------------------------------------------------------------
@@ -637,64 +768,20 @@ real(r8), intent(in) :: alpha !< Scale of first vector
 class(oft_vector), target, intent(inout) :: a !< First vector to add
 real(r8), optional, intent(in) :: beta !< Scale of second vector (optional)
 class(oft_vector), target, optional, intent(inout) :: b !< Second vector to add (optional)
-logical :: dealloc_flag(2)
-integer(i4) :: i
+logical :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-dealloc_flag=.FALSE.
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','vec_add_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flag(1)=.TRUE.
-END SELECT
+copied(1)=native_get_vals(a,atmp)
 if(present(beta).AND.present(b))then ! Add two vectors to the source
   IF(self%n/=b%n)CALL oft_abort('Second source does not match destination size.','vec_add_vec',__FILE__)
-  SELECT TYPE(b)
-  CLASS IS(oft_native_vector)
-    btmp=>b%v
-  CLASS DEFAULT
-    NULLIFY(btmp)
-    CALL b%get_local(btmp)
-    dealloc_flag(2)=.TRUE.
-  END SELECT
-  IF(gamma==0.d0)THEN ! Do not read destination (avoids propagating non-finite values)
-    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    do i=1,self%n
-      self%v(i) = alpha*atmp(i) + beta*btmp(i)
-    end do
-    !$omp end parallel
-  ELSE
-    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    do i=1,self%n
-      self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
-    end do
-    !$omp end parallel
-  END IF
+  copied(2)=native_get_vals(b,btmp)
+  CALL nk_axpbypcz(self%n,gamma,alpha,atmp,beta,btmp,self%v)
+  IF(copied(2))DEALLOCATE(btmp)
 else ! Add one vector to the source
-  IF(gamma==0.d0)THEN ! Do not read destination (avoids propagating non-finite values)
-    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    do i=1,self%n
-      self%v(i) = alpha*atmp(i)
-    end do
-    !$omp end parallel
-  ELSE
-    !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    do i=1,self%n
-      self%v(i) = gamma*self%v(i) + alpha*atmp(i)
-    end do
-    !$omp end parallel
-  END IF
+  CALL nk_axpby(self%n,gamma,alpha,atmp,self%v)
 end if
-IF(dealloc_flag(1))DEALLOCATE(atmp)
-IF(dealloc_flag(2))DEALLOCATE(btmp)
+IF(copied(1))DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine vec_add
 !---------------------------------------------------------------------------------
@@ -706,40 +793,19 @@ subroutine vec_mult(self,a,div_flag)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< vector for multiplication
 logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
-logical :: div,dealloc_flag
-integer(i4) :: i
+logical :: div,copied
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 div=.FALSE.
 if(present(div_flag))div=div_flag
-!---
 IF(self%n/=a%n)CALL oft_abort('Vector sizes do not match.','vec_mult_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-  dealloc_flag=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flag=.TRUE.
-END SELECT
-!---
+copied=native_get_vals(a,atmp)
 if(div)then
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,self%n
-    self%v(i) = self%v(i)/atmp(i)
-  end do
-  !$omp end parallel
+  CALL nk_div(self%n,atmp,self%v)
 else
-  !$omp parallel if(self%n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,self%n
-    self%v(i) = self%v(i)*atmp(i)
-  end do
-  !$omp end parallel
+  CALL nk_mult(self%n,atmp,self%v)
 end if
-IF(dealloc_flag)DEALLOCATE(atmp)
+IF(copied)DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine vec_mult
 !---------------------------------------------------------------------------------
@@ -748,14 +814,8 @@ end subroutine vec_mult
 subroutine vec_scale(self,alpha)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: alpha !< Scale factor
-integer(i4) :: i
 DEBUG_STACK_PUSH
-!$omp parallel if(self%n>OFT_OMP_VTHRESH)
-!$omp do simd
-do i=1,self%n
-  self%v(i) = alpha*self%v(i)
-end do
-!$omp end parallel
+CALL nk_scale(self%n,alpha,self%v)
 DEBUG_STACK_POP
 end subroutine vec_scale
 !---------------------------------------------------------------------------------
@@ -765,11 +825,16 @@ function vec_dot_vec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
 real(r8) :: dot !< \f$ \sum_i self_i a_i \f$
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_dot_vec',__FILE__)
-    dot=oft_global_dp(self%stitch_info,self%v,this%v,this%n)
+    dot=0.d0
+    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','vec_dot_vec',__FILE__)
 end select
@@ -782,11 +847,16 @@ function vec_dot_cvec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_dot_cvec',__FILE__)
-    dot=oft_global_dp(self%stitch_info,self%v,this%v,this%n)
+    dot=(0.d0,0.d0)
+    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','vec_dot_cvec',__FILE__)
 end select
@@ -795,21 +865,20 @@ end function vec_dot_cvec
 !---------------------------------------------------------------------------------
 !> Dot products with an array of vectors
 !!
-!! All products are computed in a single pass over row blocks (one parallel region),
-!! so each block of `self` is loaded once for all `n` products. Values shared with
-!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
-!! "oft_global_dp") and the results are combined with a single MPI reduction, which
-!! is skipped when the local mesh is complete (`stitch_info%full`).
+!! All products are computed in a single pass over row blocks (see
+!! @ref oft_native_kernels::nk_owned_mdot "nk_owned_mdot"), so each block of `self` is
+!! loaded once for all `n` products. Values shared with other processes are counted
+!! only on their owner and the results are combined with a single MPI reduction,
+!! which is skipped when the local mesh is complete (`stitch_info%full`).
 !---------------------------------------------------------------------------------
 function vec_mdot_vec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie,i1,i2
-real(r8), pointer, contiguous, dimension(:) :: xv
-real(r8), pointer, contiguous, dimension(:) :: av
-real(r8) :: tmp,dloc(n)
+integer(i4) :: k,nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -821,58 +890,26 @@ DO k=1,n
     CALL oft_abort('"a" is not a native vector.','vec_mdot_vec',__FILE__)
   end select
 END DO
-dloc=0.d0
-IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  xv=>self%v
-  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !---Each thread processes one contiguous range of rows, in blocks
-  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
-  DO ib=i1,i2,native_vec_chunk
-    ie=MIN(i2,ib+native_vec_chunk-1)
-    DO k=1,n
-      av=>vals(k)%v
-      tmp=0.d0
-      !$omp simd reduction(+:tmp)
-      DO i=ib,ie
-        tmp=tmp+xv(i)*av(i)
-      END DO
-      dloc(k)=dloc(k)+tmp
-    END DO
-  END DO
-  !---Remove values not owned by this process
-  !$omp do schedule(static)
-  DO i=1,self%stitch_info%nbe
-    IF(self%stitch_info%leo(i))CYCLE
-    j=self%stitch_info%lbe(i)
-    DO k=1,n
-      dloc(k)=dloc(k)-xv(j)*vals(k)%v(j)
-    END DO
-  END DO
-  !$omp end do nowait
-  !$omp end parallel
+dots=0.d0
+IF(n>0)THEN
+  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
-IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
-dots=dloc
 DEBUG_STACK_POP
 end function vec_mdot_vec
 !---------------------------------------------------------------------------------
-!> Dot products with an array of vectors
+!> Dot products with an array of complex vectors
 !!
-!! All products are computed in a single pass over row blocks (one parallel region),
-!! so each block of `self` is loaded once for all `n` products. Values shared with
-!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
-!! "oft_global_dp") and the results are combined with a single MPI reduction, which
-!! is skipped when the local mesh is complete (`stitch_info%full`).
+!! Single pass over row blocks with a single MPI reduction, see @ref vec_mdot_vec.
 !---------------------------------------------------------------------------------
 function vec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie,i1,i2
-real(r8), pointer, contiguous, dimension(:) :: xv
-complex(c8), pointer, contiguous, dimension(:) :: av
-complex(c8) :: tmp,dloc(n)
+integer(i4) :: k,nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -884,38 +921,11 @@ DO k=1,n
     CALL oft_abort('"a" is not a native complex vector.','vec_mdot_cvec',__FILE__)
   end select
 END DO
-dloc=(0.d0,0.d0)
-IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  xv=>self%v
-  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !---Each thread processes one contiguous range of rows, in blocks
-  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
-  DO ib=i1,i2,native_vec_chunk
-    ie=MIN(i2,ib+native_vec_chunk-1)
-    DO k=1,n
-      av=>vals(k)%v
-      tmp=(0.d0,0.d0)
-      !$omp simd reduction(+:tmp)
-      DO i=ib,ie
-        tmp=tmp+xv(i)*av(i)
-      END DO
-      dloc(k)=dloc(k)+tmp
-    END DO
-  END DO
-  !---Remove values not owned by this process
-  !$omp do schedule(static)
-  DO i=1,self%stitch_info%nbe
-    IF(self%stitch_info%leo(i))CYCLE
-    j=self%stitch_info%lbe(i)
-    DO k=1,n
-      dloc(k)=dloc(k)-xv(j)*vals(k)%v(j)
-    END DO
-  END DO
-  !$omp end do nowait
-  !$omp end parallel
+dots=(0.d0,0.d0)
+IF(n>0)THEN
+  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
-IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
-dots=dloc
 DEBUG_STACK_POP
 end function vec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -924,8 +934,13 @@ end function vec_mdot_cvec
 function vec_sum(self) result(sum)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8) :: sum !< Sum of vector elements
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
-sum=oft_global_reduction(self%stitch_info,self%v,self%n)
+sum=0.d0
+IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))sum=nk_owned_sum(self%n,self%v,nbe,lbe,leo)
+IF(.NOT.self%stitch_info%full)sum=oft_mpi_sum(sum)
 DEBUG_STACK_POP
 end function vec_sum
 !---------------------------------------------------------------------------------
@@ -935,21 +950,19 @@ function vec_norm(self,itype) result(norm)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
 real(r8) :: norm !< Specified norm of vector
-integer(i4) :: i
-real(r8) :: nloc
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
-    norm=oft_global_norm1(self%stitch_info,self%v,self%n)
+    norm=0.d0
+    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))norm=nk_owned_norm1(self%n,self%v,nbe,lbe,leo)
+    IF(.NOT.self%stitch_info%full)norm=oft_mpi_sum(norm)
   CASE(2)
     norm=SQRT(self%dot(self))
   CASE(3)
-    nloc=0.d0
-    !$omp parallel do simd reduction(max:nloc) if(self%n>OFT_OMP_VTHRESH)
-    DO i=1,self%n
-      nloc=MAX(nloc,ABS(self%v(i)))
-    END DO
-    norm=oft_mpi_max(nloc)
+    norm=oft_mpi_max(nk_norm_inf(self%n,self%v))
   CASE DEFAULT
     CALL oft_abort("Invalid norm type","vec_norm",__FILE__)
 END SELECT
@@ -1068,18 +1081,12 @@ end subroutine vec_release_local
 subroutine vec_copy(self,a)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Source vector
-integer(i4) :: i
 real(r8), pointer, contiguous, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','vec_copy',__FILE__)
 NULLIFY(atmp)
 CALL a%borrow_local(atmp,OFT_ACCESS_READ)
-!$omp parallel if(self%n>OFT_OMP_VTHRESH)
-!$omp do simd
-DO i=1,self%n
-  self%v(i)=atmp(i)
-END DO
-!$omp end parallel
+CALL nk_copy(self%n,atmp,self%v)
 CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
 DEBUG_STACK_POP
 end subroutine vec_copy
@@ -1088,23 +1095,19 @@ end subroutine vec_copy
 !!
 !! self = self + \f$ \sum_k \alpha_k a_k \f$
 !!
-!! All vectors are processed in a single pass over row blocks (one parallel region),
-!! so each block of `self` is loaded once for all `n` updates. Terms are added in
-!! order of increasing `k`, giving the same result as `n` successive calls to `add`.
+!! All vectors are processed in a single pass over row blocks (see
+!! @ref oft_native_kernels::nk_maxpy "nk_maxpy"), so each block of `self` is loaded
+!! once for all `n` updates. Terms are added in order of increasing `k`, giving the
+!! same result as `n` successive calls to `add`.
 !---------------------------------------------------------------------------------
 subroutine vec_maxpy(self,alpha,a,n)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Number of vectors
 real(r8), intent(in) :: alpha(n) !< Scale factors [n]
 type(oft_vector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
-integer(i4) :: i,k,ib,ie,i1,i2
-real(r8), pointer, contiguous, dimension(:) :: yv,av
+integer(i4) :: k
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
-IF(n<1)THEN
-  DEBUG_STACK_POP
-  RETURN
-END IF
 DO k=1,n
   select type(this=>a(k)%f)
   class is(oft_native_vector)
@@ -1114,21 +1117,7 @@ DO k=1,n
     CALL oft_abort('"a" is not a native vector.','vec_maxpy',__FILE__)
   end select
 END DO
-yv=>self%v
-!$omp parallel private(i1,i2,ib,ie,k,i,av) if(self%n>OFT_OMP_VTHRESH)
-!---Each thread processes one contiguous range of rows, in blocks
-CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
-DO ib=i1,i2,native_vec_chunk
-  ie=MIN(i2,ib+native_vec_chunk-1)
-  DO k=1,n
-    av=>vals(k)%v
-    !$omp simd
-    DO i=ib,ie
-      yv(i)=yv(i)+alpha(k)*av(i)
-    END DO
-  END DO
-END DO
-!$omp end parallel
+CALL nk_maxpy(self%n,n,alpha,vals,self%v)
 DEBUG_STACK_POP
 end subroutine vec_maxpy
 !---------------------------------------------------------------------------------
@@ -1458,19 +1447,18 @@ complex(c8), intent(in) :: alpha !< Updated vector value
 integer(i4), optional, intent(in) :: iblock !< Vector sub-block to act on
 logical, optional, intent(in) :: random !< Set to random number, if true alpha is ignored (optional)
 logical :: random_flag
-integer(i4) :: i
+integer(i4) :: i1,i2
 DEBUG_STACK_PUSH
 random_flag=.FALSE.
 IF(PRESENT(random))random_flag=random
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_set',__FILE__)
-  !---
+  i1=self%map(iblock)%offset+1
+  i2=self%map(iblock)%offset+self%map(iblock)%n
   IF(random_flag)THEN
-    CALL oft_random_number(self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n),self%map(iblock)%n)
+    CALL oft_random_number(self%v(i1:i2),self%map(iblock)%n)
   ELSE
-    do i=1,self%map(iblock)%n
-      self%v(self%map(iblock)%offset+i) = alpha
-    end do
+    CALL nk_set(self%map(iblock)%n,alpha,self%v(i1:i2))
   END IF
   CALL self%stitch(0)
 ELSE
@@ -1478,10 +1466,7 @@ ELSE
     CALL oft_random_number(self%v,self%n)
     CALL self%stitch(0)
   ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = alpha
-    end do
+    CALL nk_set(self%n,alpha,self%v)
   END IF
 END IF
 DEBUG_STACK_POP
@@ -1493,28 +1478,25 @@ subroutine cvec_get_slice(self,array,iblock)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), pointer, intent(inout) :: array(:) !< Slice values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i,j,nslice
+integer(i4) :: i
 DEBUG_STACK_PUSH
-!---
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_get_slice',__FILE__)
-  !---
-  nslice=self%map(iblock)%nslice
-  IF(.NOT.ASSOCIATED(array))ALLOCATE(array(nslice))
-  do j=1,self%map(iblock)%nslice
-    array(j) = self%v(self%map(iblock)%offset+self%map(iblock)%slice(j))
-  end do
+  IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%nslice))
+  ASSOCIATE(mp=>self%map(iblock))
+    IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n),array(1:mp%nslice))
+  END ASSOCIATE
 ELSE
-  !---
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%nslice))
   IF(self%n==self%nslice)THEN
-    array=self%v
+    CALL nk_copy(self%n,self%v,array)
   ELSE
-    do i=1,self%nblocks
-      do j=1,self%map(i)%nslice
-        array(self%map(i)%soffset+j) = self%v(self%map(i)%offset+self%map(i)%slice(j))
-      end do
-    end do
+    DO i=1,self%nblocks
+      ASSOCIATE(mp=>self%map(i))
+        IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n), &
+          array(mp%soffset+1:mp%soffset+mp%nslice))
+      END ASSOCIATE
+    END DO
   END IF
 END IF
 DEBUG_STACK_POP
@@ -1527,26 +1509,26 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: array(:) !< Slice values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: wait !< Wait to perform global sync?
-integer(i4) :: i,j
+integer(i4) :: i
 logical :: do_wait
 DEBUG_STACK_PUSH
 do_wait=.FALSE.
 IF(PRESENT(wait))do_wait=wait
-!---
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_restore_slice',__FILE__)
-  do j=1,self%map(iblock)%nslice
-    self%v(self%map(iblock)%offset+self%map(iblock)%slice(j)) = array(j)
-  end do
+  ASSOCIATE(mp=>self%map(iblock))
+    IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(1:mp%nslice),self%v(mp%offset+1:mp%offset+mp%n))
+  END ASSOCIATE
 ELSE
   IF(self%n==self%nslice)THEN
-    self%v=array
+    CALL nk_copy(self%n,array,self%v)
   ELSE
-    do i=1,self%nblocks
-      do j=1,self%map(i)%nslice
-        self%v(self%map(i)%offset+self%map(i)%slice(j)) = array(self%map(i)%soffset+j)
-      end do
-    end do
+    DO i=1,self%nblocks
+      ASSOCIATE(mp=>self%map(i))
+        IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(mp%soffset+1:mp%soffset+mp%nslice), &
+          self%v(mp%offset+1:mp%offset+mp%n))
+      END ASSOCIATE
+    END DO
   END IF
 END IF
 IF(.NOT.do_wait)call self%stitch(0)
@@ -1559,22 +1541,17 @@ subroutine cvec_get_local(self,array,iblock)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), pointer, intent(inout) :: array(:) !< Local values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i,j
+integer(i4) :: i1,i2
 DEBUG_STACK_PUSH
-!---
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_get_local',__FILE__)
-  !---
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%n))
-  do j=1,self%map(iblock)%n
-    array(j) = self%v(self%map(iblock)%offset+j)
-  end do
+  i1=self%map(iblock)%offset+1
+  i2=self%map(iblock)%offset+self%map(iblock)%n
+  CALL nk_copy(self%map(iblock)%n,self%v(i1:i2),array)
 ELSE
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%n))
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  DO i=1,self%n
-    array(i)=self%v(i)
-  END DO
+  CALL nk_copy(self%n,self%v,array)
 END IF
 DEBUG_STACK_POP
 end subroutine cvec_get_local
@@ -1586,58 +1563,45 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: array(:) !< Local values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: add !< Add values instead of replace
-logical, optional, intent(in) :: wait !< Wait to perform global sync?
-integer(i4) :: j
+logical, optional, intent(in) :: wait !< Wait to perform global sync
 logical :: do_add,do_wait
+integer(i4) :: i1,i2
 complex(c8), allocatable, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 do_add=.FALSE.
 IF(PRESENT(add))do_add=add
 do_wait=.FALSE.
 IF(PRESENT(wait))do_wait=wait
-!---
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_restore_local',__FILE__)
-  !---
+  i1=self%map(iblock)%offset+1
+  i2=self%map(iblock)%offset+self%map(iblock)%n
   IF(do_add)THEN
     IF(.NOT.ASSOCIATED(self%local_tmp))THEN
       ALLOCATE(self%local_tmp(self%n))
-      self%local_tmp=(0.d0,0.d0)
+      CALL nk_set(self%n,(0.d0,0.d0),self%local_tmp)
     END IF
-    !$omp simd
-    do j=1,self%map(iblock)%n
-      self%local_tmp(self%map(iblock)%offset+j) = array(j)
-    end do
+    CALL nk_copy(self%map(iblock)%n,array,self%local_tmp(i1:i2))
     IF(.NOT.do_wait)THEN
       CALL full_restore_local(self%local_tmp)
       DEALLOCATE(self%local_tmp)
     END IF
   ELSE
-    !$omp simd
-    do j=1,self%map(iblock)%n
-      self%v(self%map(iblock)%offset+j) = array(j)
-    end do
+    CALL nk_copy(self%map(iblock)%n,array,self%v(i1:i2))
     IF(.NOT.do_wait)CALL self%stitch(0)
   END IF
 ELSE
   IF(ASSOCIATED(self%local_tmp))CALL oft_abort("Existing partial restore found when restoring full vector", &
     "cvec_restore_local",__FILE__)
-  IF(do_wait)CALL oft_abort("Wait not supported when restoring full vector", &
-    "cvec_restore_local",__FILE__)
+  IF(do_wait)CALL oft_abort("Wait not supported when restoring full vector","cvec_restore_local",__FILE__)
   IF(do_add)THEN
     !---Contributions must be summed before adding, which needs a modifiable copy
     ALLOCATE(atmp(self%n))
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    DO j=1,self%n
-      atmp(j)=array(j)
-    END DO
+    CALL nk_copy(self%n,array,atmp)
     CALL full_restore_local(atmp)
     DEALLOCATE(atmp)
   ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    DO j=1,self%n
-      self%v(j)=array(j)
-    END DO
+    CALL nk_copy(self%n,array,self%v)
     CALL self%stitch(0)
   END IF
 END IF
@@ -1646,16 +1610,12 @@ contains
 !
 subroutine full_restore_local(array_loc)
 complex(c8), intent(inout) :: array_loc(:)
-integer(i4) :: i
 call oft_global_stitch(self%stitch_info,array_loc,1)
-!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-DO i=1,self%n
-  self%v(i)=self%v(i)+array_loc(i)
-END DO
+CALL nk_axpby(self%n,(1.d0,0.d0),(1.d0,0.d0),array_loc,self%v)
 end subroutine full_restore_local
 end subroutine cvec_restore_local
 !---------------------------------------------------------------------------------
-!> Add vectors
+!> Add real vectors
 !!
 !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
 !---------------------------------------------------------------------------------
@@ -1666,60 +1626,24 @@ complex(c8), intent(in) :: alpha !< Scale of first vector
 class(oft_vector), target, intent(inout) :: a !< First vector to add
 complex(c8), optional, intent(in) :: beta !< Scale of second vector (optional)
 class(oft_vector), target, optional, intent(inout) :: b !< Second vector to add (optional)
-logical :: dealloc_flag(2)
-integer(i4) :: i
+logical :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-dealloc_flag=.FALSE.
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','cvec_add_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flag(1)=.TRUE.
-END SELECT
+copied(1)=native_get_vals(a,atmp)
 if(present(beta).AND.present(b))then ! Add two vectors to the source
   IF(self%n/=b%n)CALL oft_abort('Second source does not match destination size.','cvec_add_vec',__FILE__)
-  SELECT TYPE(b)
-  CLASS IS(oft_native_vector)
-    btmp=>b%v
-  CLASS DEFAULT
-    NULLIFY(btmp)
-    CALL b%get_local(btmp)
-    dealloc_flag(2)=.TRUE.
-  END SELECT
-  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = alpha*atmp(i) + beta*btmp(i)
-    end do
-  ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
-    end do
-  END IF
+  copied(2)=native_get_vals(b,btmp)
+  CALL nk_axpbypcz(self%n,gamma,alpha,atmp,beta,btmp,self%v)
+  IF(copied(2))DEALLOCATE(btmp)
 else ! Add one vector to the source
-  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = alpha*atmp(i)
-    end do
-  ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = gamma*self%v(i) + alpha*atmp(i)
-    end do
-  END IF
+  CALL nk_axpby(self%n,gamma,alpha,atmp,self%v)
 end if
-IF(dealloc_flag(1))DEALLOCATE(atmp)
-IF(dealloc_flag(2))DEALLOCATE(btmp)
+IF(copied(1))DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine cvec_add_vec
 !---------------------------------------------------------------------------------
-!> Add vectors
+!> Add complex vectors
 !!
 !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
 !---------------------------------------------------------------------------------
@@ -1730,60 +1654,24 @@ complex(c8), intent(in) :: alpha !< Scale of first vector
 class(oft_cvector), target, intent(inout) :: a !< First vector to add
 complex(c8), optional, intent(in) :: beta !< Scale of second vector (optional)
 class(oft_cvector), target, optional, intent(inout) :: b !< Second vector to add (optional)
-logical :: dealloc_flag(2)
-integer(i4) :: i
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
+logical :: copied(2)
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-dealloc_flag=.FALSE.
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','cvec_add_cvec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_cvector)
-  atmp=>a%v
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flag(1)=.TRUE.
-END SELECT
+copied(1)=native_get_vals(a,atmp)
 if(present(beta).AND.present(b))then ! Add two vectors to the source
   IF(self%n/=b%n)CALL oft_abort('Second source does not match destination size.','cvec_add_cvec',__FILE__)
-  SELECT TYPE(b)
-  CLASS IS(oft_native_cvector)
-    btmp=>b%v
-  CLASS DEFAULT
-    NULLIFY(btmp)
-    CALL b%get_local(btmp)
-    dealloc_flag(2)=.TRUE.
-  END SELECT
-  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = alpha*atmp(i) + beta*btmp(i)
-    end do
-  ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = gamma*self%v(i) + alpha*atmp(i) + beta*btmp(i)
-    end do
-  END IF
+  copied(2)=native_get_vals(b,btmp)
+  CALL nk_axpbypcz(self%n,gamma,alpha,atmp,beta,btmp,self%v)
+  IF(copied(2))DEALLOCATE(btmp)
 else ! Add one vector to the source
-  IF(gamma==(0.d0,0.d0))THEN ! Do not read destination (avoids propagating non-finite values)
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = alpha*atmp(i)
-    end do
-  ELSE
-    !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-    do i=1,self%n
-      self%v(i) = gamma*self%v(i) + alpha*atmp(i)
-    end do
-  END IF
+  CALL nk_axpby(self%n,gamma,alpha,atmp,self%v)
 end if
-IF(dealloc_flag(1))DEALLOCATE(atmp)
-IF(dealloc_flag(2))DEALLOCATE(btmp)
+IF(copied(1))DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine cvec_add_cvec
 !---------------------------------------------------------------------------------
-!> Elementwise multiplication with another vector
+!> Elementwise multiplication with a real vector
 !!
 !! \f$ self_i = self_i * a_i \f$
 !---------------------------------------------------------------------------------
@@ -1791,40 +1679,23 @@ subroutine cvec_mult_vec(self,a,div_flag)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< vector for multiplication
 logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
-logical :: div,dealloc_flag
-integer(i4) :: i
+logical :: div,copied
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 div=.FALSE.
 if(present(div_flag))div=div_flag
-!---
 IF(self%n/=a%n)CALL oft_abort('Vector sizes do not match.','cvec_mult_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-  dealloc_flag=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flag=.TRUE.
-END SELECT
-!---
+copied=native_get_vals(a,atmp)
 if(div)then
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = self%v(i)/atmp(i)
-  end do
+  CALL nk_div(self%n,atmp,self%v)
 else
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = self%v(i)*atmp(i)
-  end do
+  CALL nk_mult(self%n,atmp,self%v)
 end if
-IF(dealloc_flag)DEALLOCATE(atmp)
+IF(copied)DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine cvec_mult_vec
 !---------------------------------------------------------------------------------
-!> Elementwise multiplication with another vector
+!> Elementwise multiplication with a complex vector
 !!
 !! \f$ self_i = self_i * a_i \f$
 !---------------------------------------------------------------------------------
@@ -1832,36 +1703,19 @@ subroutine cvec_mult_cvec(self,a,div_flag)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< vector for multiplication
 logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
-logical :: div,dealloc_flag
-integer(i4) :: i
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
+logical :: div,copied
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 div=.FALSE.
 if(present(div_flag))div=div_flag
-!---
 IF(self%n/=a%n)CALL oft_abort('Vector sizes do not match.','cvec_mult_cvec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_cvector)
-  atmp=>a%v
-  dealloc_flag=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flag=.TRUE.
-END SELECT
-!---
+copied=native_get_vals(a,atmp)
 if(div)then
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = self%v(i)/atmp(i)
-  end do
+  CALL nk_div(self%n,atmp,self%v)
 else
-  !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-  do i=1,self%n
-    self%v(i) = self%v(i)*atmp(i)
-  end do
+  CALL nk_mult(self%n,atmp,self%v)
 end if
-IF(dealloc_flag)DEALLOCATE(atmp)
+IF(copied)DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine cvec_mult_cvec
 !---------------------------------------------------------------------------------
@@ -1870,12 +1724,8 @@ end subroutine cvec_mult_cvec
 subroutine cvec_scale(self,alpha)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: alpha !< Scale factor
-integer(i4) :: i
 DEBUG_STACK_PUSH
-!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-do i=1,self%n
-  self%v(i) = alpha*self%v(i)
-end do
+CALL nk_scale(self%n,alpha,self%v)
 DEBUG_STACK_POP
 end subroutine cvec_scale
 !---------------------------------------------------------------------------------
@@ -1884,52 +1734,57 @@ end subroutine cvec_scale
 function cvec_dot_vec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
-complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
+complex(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_dot_vec',__FILE__)
-    dot=oft_global_dp(self%stitch_info,self%v,this%v,this%n)
+    dot=(0.d0,0.d0)
+    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','cvec_dot_vec',__FILE__)
 end select
 DEBUG_STACK_POP
 end function cvec_dot_vec
 !---------------------------------------------------------------------------------
-!> Dot product with a vector
+!> Dot product with a complex vector
 !---------------------------------------------------------------------------------
 function cvec_dot_cvec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
-complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
+complex(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_cvector)
-    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_dot_cvec',__FILE__)
-    dot=oft_global_dp(self%stitch_info,self%v,this%v,this%n)
+    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_dot_cvec',__FILE__)
+    dot=(0.d0,0.d0)
+    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
-    CALL oft_abort('"a" is not a native vector.','vec_dot_cvec',__FILE__)
+    CALL oft_abort('"a" is not a native vector.','cvec_dot_cvec',__FILE__)
 end select
 DEBUG_STACK_POP
 end function cvec_dot_cvec
 !---------------------------------------------------------------------------------
-!> Dot products with an array of vectors
+!> Dot products with an array of real vectors
 !!
-!! All products are computed in a single pass over row blocks (one parallel region),
-!! so each block of `self` is loaded once for all `n` products. Values shared with
-!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
-!! "oft_global_dp") and the results are combined with a single MPI reduction, which
-!! is skipped when the local mesh is complete (`stitch_info%full`).
+!! Single pass over row blocks with a single MPI reduction, see @ref vec_mdot_vec.
 !---------------------------------------------------------------------------------
 function cvec_mdot_vec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie,i1,i2
-complex(c8), pointer, contiguous, dimension(:) :: xv
-real(r8), pointer, contiguous, dimension(:) :: av
-complex(c8) :: tmp,dloc(n)
+integer(i4) :: k,nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -1941,58 +1796,26 @@ DO k=1,n
     CALL oft_abort('"a" is not a native vector.','cvec_mdot_vec',__FILE__)
   end select
 END DO
-dloc=(0.d0,0.d0)
-IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  xv=>self%v
-  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !---Each thread processes one contiguous range of rows, in blocks
-  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
-  DO ib=i1,i2,native_vec_chunk
-    ie=MIN(i2,ib+native_vec_chunk-1)
-    DO k=1,n
-      av=>vals(k)%v
-      tmp=(0.d0,0.d0)
-      !$omp simd reduction(+:tmp)
-      DO i=ib,ie
-        tmp=tmp+CONJG(xv(i))*av(i)
-      END DO
-      dloc(k)=dloc(k)+tmp
-    END DO
-  END DO
-  !---Remove values not owned by this process
-  !$omp do schedule(static)
-  DO i=1,self%stitch_info%nbe
-    IF(self%stitch_info%leo(i))CYCLE
-    j=self%stitch_info%lbe(i)
-    DO k=1,n
-      dloc(k)=dloc(k)-CONJG(xv(j))*vals(k)%v(j)
-    END DO
-  END DO
-  !$omp end do nowait
-  !$omp end parallel
+dots=(0.d0,0.d0)
+IF(n>0)THEN
+  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
-IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
-dots=dloc
 DEBUG_STACK_POP
 end function cvec_mdot_vec
 !---------------------------------------------------------------------------------
-!> Dot products with an array of vectors
+!> Dot products with an array of complex vectors
 !!
-!! All products are computed in a single pass over row blocks (one parallel region),
-!! so each block of `self` is loaded once for all `n` products. Values shared with
-!! other processes are counted only on their owner (as in @ref oft_stitching::oft_global_dp
-!! "oft_global_dp") and the results are combined with a single MPI reduction, which
-!! is skipped when the local mesh is complete (`stitch_info%full`).
+!! Single pass over row blocks with a single MPI reduction, see @ref vec_mdot_vec.
 !---------------------------------------------------------------------------------
 function cvec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: i,j,k,ib,ie,i1,i2
-complex(c8), pointer, contiguous, dimension(:) :: xv
-complex(c8), pointer, contiguous, dimension(:) :: av
-complex(c8) :: tmp,dloc(n)
+integer(i4) :: k,nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -2004,38 +1827,11 @@ DO k=1,n
     CALL oft_abort('"a" is not a native complex vector.','cvec_mdot_cvec',__FILE__)
   end select
 END DO
-dloc=(0.d0,0.d0)
-IF((.NOT.self%stitch_info%skip).AND.(n>0))THEN
-  xv=>self%v
-  !$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,av) reduction(+:dloc) if(self%n>OFT_OMP_VTHRESH)
-  !---Each thread processes one contiguous range of rows, in blocks
-  CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
-  DO ib=i1,i2,native_vec_chunk
-    ie=MIN(i2,ib+native_vec_chunk-1)
-    DO k=1,n
-      av=>vals(k)%v
-      tmp=(0.d0,0.d0)
-      !$omp simd reduction(+:tmp)
-      DO i=ib,ie
-        tmp=tmp+CONJG(xv(i))*av(i)
-      END DO
-      dloc(k)=dloc(k)+tmp
-    END DO
-  END DO
-  !---Remove values not owned by this process
-  !$omp do schedule(static)
-  DO i=1,self%stitch_info%nbe
-    IF(self%stitch_info%leo(i))CYCLE
-    j=self%stitch_info%lbe(i)
-    DO k=1,n
-      dloc(k)=dloc(k)-CONJG(xv(j))*vals(k)%v(j)
-    END DO
-  END DO
-  !$omp end do nowait
-  !$omp end parallel
+dots=(0.d0,0.d0)
+IF(n>0)THEN
+  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
-IF(.NOT.self%stitch_info%full)dloc=oft_mpi_sum(dloc,n)
-dots=dloc
 DEBUG_STACK_POP
 end function cvec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -2044,8 +1840,13 @@ end function cvec_mdot_cvec
 function cvec_sum(self) result(sum)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8) :: sum !< Sum of vector elements
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
-sum=oft_global_reduction(self%stitch_info,self%v,self%n)
+sum=(0.d0,0.d0)
+IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))sum=nk_owned_sum(self%n,self%v,nbe,lbe,leo)
+IF(.NOT.self%stitch_info%full)sum=oft_mpi_sum(sum)
 DEBUG_STACK_POP
 end function cvec_sum
 !---------------------------------------------------------------------------------
@@ -2054,22 +1855,20 @@ end function cvec_sum
 function cvec_norm(self,itype) result(norm)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
-REAL(r8) :: norm !< Specified norm of vector
-integer(i4) :: i
-REAL(r8) :: nloc
+real(r8) :: norm !< Specified norm of vector
+integer(i4) :: nbe
+integer(i4), pointer, contiguous, dimension(:) :: lbe
+logical, pointer, contiguous, dimension(:) :: leo
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
-    norm=oft_global_norm1(self%stitch_info,self%v,self%n)
+    norm=0.d0
+    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))norm=nk_owned_norm1(self%n,self%v,nbe,lbe,leo)
+    IF(.NOT.self%stitch_info%full)norm=oft_mpi_sum(norm)
   CASE(2)
     norm=SQRT(REAL(self%dot(self),r8))
   CASE(3)
-    nloc=0.d0
-    !$omp parallel do simd reduction(max:nloc) if(self%n>OFT_OMP_VTHRESH)
-    DO i=1,self%n
-      nloc=MAX(nloc,ABS(self%v(i)))
-    END DO
-    norm=oft_mpi_max(nloc)
+    norm=oft_mpi_max(nk_norm_inf(self%n,self%v))
   CASE DEFAULT
     CALL oft_abort("Invalid norm type","cvec_norm",__FILE__)
 END SELECT
@@ -2155,16 +1954,12 @@ end subroutine cvec_release_local
 subroutine cvec_copy_vec(self,a)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Source vector
-integer(i4) :: i
 real(r8), pointer, contiguous, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','cvec_copy_vec',__FILE__)
 NULLIFY(atmp)
 CALL a%borrow_local(atmp,OFT_ACCESS_READ)
-!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-DO i=1,self%n
-  self%v(i)=CMPLX(atmp(i),0.d0,c8)
-END DO
+CALL nk_copy(self%n,atmp,self%v)
 CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
 DEBUG_STACK_POP
 end subroutine cvec_copy_vec
@@ -2176,16 +1971,12 @@ end subroutine cvec_copy_vec
 subroutine cvec_copy_cvec(self,a)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
-integer(i4) :: i
 complex(c8), pointer, contiguous, dimension(:) :: atmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','cvec_copy_cvec',__FILE__)
 NULLIFY(atmp)
 CALL a%borrow_local(atmp,OFT_ACCESS_READ)
-!$omp parallel do if(self%n>OFT_OMP_VTHRESH)
-DO i=1,self%n
-  self%v(i)=atmp(i)
-END DO
+CALL nk_copy(self%n,atmp,self%v)
 CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
 DEBUG_STACK_POP
 end subroutine cvec_copy_cvec
@@ -2201,14 +1992,9 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Number of vectors
 complex(c8), intent(in) :: alpha(n) !< Scale factors [n]
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
-integer(i4) :: i,k,ib,ie,i1,i2
-complex(c8), pointer, contiguous, dimension(:) :: yv,av
+integer(i4) :: k
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
-IF(n<1)THEN
-  DEBUG_STACK_POP
-  RETURN
-END IF
 DO k=1,n
   select type(this=>a(k)%f)
   class is(oft_native_cvector)
@@ -2218,21 +2004,7 @@ DO k=1,n
     CALL oft_abort('"a" is not a native complex vector.','cvec_maxpy',__FILE__)
   end select
 END DO
-yv=>self%v
-!$omp parallel private(i1,i2,ib,ie,k,i,av) if(self%n>OFT_OMP_VTHRESH)
-!---Each thread processes one contiguous range of rows, in blocks
-CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),self%n,i1,i2)
-DO ib=i1,i2,native_vec_chunk
-  ie=MIN(i2,ib+native_vec_chunk-1)
-  DO k=1,n
-    av=>vals(k)%v
-    !$omp simd
-    DO i=ib,ie
-      yv(i)=yv(i)+alpha(k)*av(i)
-    END DO
-  END DO
-END DO
-!$omp end parallel
+CALL nk_maxpy(self%n,n,alpha,vals,self%v)
 DEBUG_STACK_POP
 end subroutine cvec_maxpy
 !---------------------------------------------------------------------------------
@@ -2270,62 +2042,6 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_matrix_cast
-!---------------------------------------------------------------------------------
-!> Get the first row of one part of a non-zero balanced, contiguous row partition
-!!
-!! Rows are split into `nparts` contiguous ranges that each contain approximately
-!! the same number of non-zeros. Part `ipart` covers rows
-!! `native_row_split(kr,nr,ipart,nparts)` to `native_row_split(kr,nr,ipart+1,nparts)-1`,
-!! so the parts are disjoint and together cover all rows.
-!---------------------------------------------------------------------------------
-PURE FUNCTION native_row_split(kr,nr,ipart,nparts) RESULT(irow)
-INTEGER(i4), INTENT(in) :: nr !< Number of rows
-INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
-INTEGER(i4), INTENT(in) :: ipart !< Part index (0-based, 0 <= ipart <= nparts)
-INTEGER(i4), INTENT(in) :: nparts !< Number of parts
-INTEGER(i4) :: irow !< First row in part (`nr+1` when `ipart>=nparts`)
-INTEGER(i4) :: ilow,ihigh,imid
-INTEGER(i8) :: nnz_target
-IF(ipart<=0)THEN
-  irow=1
-  RETURN
-ELSE IF(ipart>=nparts)THEN
-  irow=nr+1
-  RETURN
-END IF
-nnz_target=INT(kr(1),i8)+(INT(kr(nr+1)-kr(1),i8)*INT(ipart,i8))/INT(nparts,i8)
-!---First row whose entries start at or after the target
-ilow=1
-ihigh=nr+1
-DO WHILE(ilow<ihigh)
-  imid=(ilow+ihigh)/2
-  IF(INT(kr(imid),i8)<nnz_target)THEN
-    ilow=imid+1
-  ELSE
-    ihigh=imid
-  END IF
-END DO
-irow=ilow
-END FUNCTION native_row_split
-!---------------------------------------------------------------------------------
-!> Get the range of rows to be processed by the calling OpenMP thread
-!!
-!! Uses @ref native_row_split with one part per thread in the current team, so each
-!! thread processes a contiguous block of rows with a similar number of non-zeros.
-!! Outside of an active parallel region all rows are returned. The same splitting
-!! applies to columns when a CSC column pointer is passed instead.
-!---------------------------------------------------------------------------------
-SUBROUTINE native_thread_rows(kr,nr,ifirst,ilast)
-INTEGER(i4), INTENT(in) :: nr !< Number of rows
-INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
-INTEGER(i4), INTENT(out) :: ifirst !< First row for this thread
-INTEGER(i4), INTENT(out) :: ilast !< Last row for this thread (`ilast<ifirst` if none)
-INTEGER(i4) :: ithread,nthreads
-ithread=omp_get_thread_num()
-nthreads=omp_get_num_threads()
-ifirst=native_row_split(kr,nr,ithread,nthreads)
-ilast=native_row_split(kr,nr,ithread+1,nthreads)-1
-END SUBROUTINE native_thread_rows
 !---------------------------------------------------------------------------------
 !> Build transposed (CSC) index for a CRS non-zero pattern, if not already current
 !!
@@ -2425,57 +2141,20 @@ subroutine mat_apply_vec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source vector
 class(oft_vector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,ifirst,ilast
-real(r8) :: tmp
+LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_vec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_vector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
-!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 IF(ASSOCIATED(self%lc_small))THEN
-  do i=ifirst,ilast
-    tmp=0.d0
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
 ELSE
-  do i=ifirst,ilast
-    tmp=0.d0
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(self%lc(j))
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_apply_vec
@@ -2488,57 +2167,20 @@ subroutine mat_apply_cvec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,ifirst,ilast
-complex(c8) :: tmp
+LOGICAL :: copied(2)
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_vec',__FILE__)
-if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_cvector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_cvector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
-!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
+if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_cvec',__FILE__)
+if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_cvec',__FILE__)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 IF(ASSOCIATED(self%lc_small))THEN
-  do i=ifirst,ilast
-    tmp=(0.d0,0.d0)
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
 ELSE
-  do i=ifirst,ilast
-    tmp=(0.d0,0.d0)
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(self%lc(j))
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_apply_cvec
@@ -2551,50 +2193,19 @@ subroutine mat_applyt_vec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source vector
 class(oft_vector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: j,k,ifirst,ilast
-real(r8) :: tmp
+LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','mat_applyt_vec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','mat_applyt_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_vector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator using transposed index (every entry of btmp is overwritten)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 !$omp critical (oft_native_csc_build)
 CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
-DO k=ifirst,ilast
-  tmp=0.d0
-  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
-    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
-  END DO
-  btmp(k)=tmp
-END DO
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_applyt_vec
@@ -2607,50 +2218,19 @@ subroutine mat_applyt_cvec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: j,k,ifirst,ilast
-complex(c8) :: tmp
+LOGICAL :: copied(2)
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','mat_applyt_cvec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','mat_applyt_cvec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_cvector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_cvector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator using transposed index (every entry of btmp is overwritten)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 !$omp critical (oft_native_csc_build)
 CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
-DO k=ifirst,ilast
-  tmp=(0.d0,0.d0)
-  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
-    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
-  END DO
-  btmp(k)=tmp
-END DO
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_applyt_cvec
@@ -2666,32 +2246,14 @@ integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: i,j,jp,jn,jk
+integer(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ANY(i_inds>self%nr))call oft_abort('Index exceeds graph','mat_set_values',__FILE__)
 if(ANY(j_inds>self%nc))call oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  do i=1,n
-    jp=self%map(iblock,jblock)%kr(i_inds(i))
-    jn=self%map(iblock,jblock)%kr(i_inds(i)+1)-jp
-    do j=1,m
-      jk=search_array(j_inds(j),self%map(iblock,jblock)%lc(jp:jp+jn-1),jn)+jp-1
-      self%M(self%map(iblock,jblock)%lc_map(jk))=b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-    'mat_set_values',__FILE__)
-  do i=1,n
-    jp=self%kr(i_inds(i))
-    jn=self%kr(i_inds(i)+1)-jp
-    do j=1,m
-      jk=search_array(j_inds(j),self%lc(jp:jp+jn-1),jn)+jp-1
-      self%M(jk)=b(i,j)
-    end do
-  end do
-END IF
+CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,iblock,jblock)
+IF(ANY(loc==0))CALL oft_abort('Entry not found!','mat_set_values',__FILE__)
+CALL nk_set_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
 end subroutine mat_set_values
 !---------------------------------------------------------------------------------
@@ -2707,60 +2269,21 @@ real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
-logical :: fail_test,use_cache
+integer(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_add_values',__FILE__)
 self%full_current=.FALSE.
-fail_test=.FALSE.
-IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  use_cache=.FALSE.
-  IF(PRESENT(loc_cache))THEN
-    IF(loc_cache(1,1)>0)THEN
-      use_cache=.TRUE.
-      jktmp=loc_cache
-    END IF
-  END IF
-  IF(.NOT.use_cache)THEN
-    DO i=1,n
-      jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-      jn=self%map(iblock,jblock)%ext(2,i_inds(i))
-      DO j=1,m
-        jktmp(i,j)=search_array(self%j_map(jblock)%offset+j_inds(j),self%lc(jp:jn),jn-jp+1)
-        IF(jktmp(i,j)==0)fail_test=.TRUE.
-      END DO
-    END DO
-    IF(PRESENT(loc_cache))loc_cache=jktmp
-  END IF
-  DO i=1,n
-    jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-    DO j=1,m
-      jk=jktmp(i,j)+jp-1
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-    'matrix_add_values',__FILE__)
-  DO i=1,n
-    jp=self%kr(i_inds(i))
-    jn=self%kr(i_inds(i)+1)-jp
-    DO j=1,m
-      jk=search_array(j_inds(j),self%lc(jp:jp+jn-1),jn)+jp-1
-      IF(jk==jp-1)fail_test=.TRUE.
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-END IF
-IF(fail_test)CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
+CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,iblock,jblock,loc_cache)
+IF(ANY(loc==0))CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
+CALL nk_add_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
 end subroutine mat_add_values
 !---------------------------------------------------------------------------------
-!> Add values to a matrix
+!> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
 subroutine mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -2769,55 +2292,14 @@ real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
-logical :: fail_test,use_cache
+integer(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
-IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_add_values',__FILE__)
-IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_add_values',__FILE__)
+IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_atomic_add_values',__FILE__)
+IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_atomic_add_values',__FILE__)
 self%full_current=.FALSE.
-fail_test=.FALSE.
-IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  use_cache=.FALSE.
-  IF(PRESENT(loc_cache))THEN
-    IF(loc_cache(1,1)>0)THEN
-      use_cache=.TRUE.
-      jktmp=loc_cache
-    END IF
-  END IF
-  IF(.NOT.use_cache)THEN
-    DO i=1,n
-      jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-      jn=self%map(iblock,jblock)%ext(2,i_inds(i))
-      DO j=1,m
-        jktmp(i,j)=search_array(self%j_map(jblock)%offset+j_inds(j),self%lc(jp:jn),jn-jp+1)
-        IF(jktmp(i,j)==0)fail_test=.TRUE.
-      END DO
-    END DO
-    IF(PRESENT(loc_cache))loc_cache=jktmp
-  END IF
-  DO i=1,n
-    jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-    DO j=1,m
-      jk=jktmp(i,j)+jp-1
-      !$omp atomic
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-    'matrix_add_values',__FILE__)
-  DO i=1,n
-    jp=self%kr(i_inds(i))
-    jn=self%kr(i_inds(i)+1)-jp
-    DO j=1,m
-      jk=search_array(j_inds(j),self%lc(jp:jp+jn-1),jn)+jp-1
-      IF(jk==jp-1)fail_test=.TRUE.
-      !$omp atomic
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-END IF
-IF(fail_test)CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
+CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,iblock,jblock,loc_cache)
+IF(ANY(loc==0))CALL oft_abort('Entry not found!','mat_atomic_add_values',__FILE__)
+CALL nk_atomic_add_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
 end subroutine mat_atomic_add_values
 !---------------------------------------------------------------------------------
@@ -2826,7 +2308,6 @@ end subroutine mat_atomic_add_values
 subroutine mat_assemble(self,diag)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
-integer(i4) :: i,jr
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 if(present(diag))then
@@ -2841,15 +2322,7 @@ if(present(diag))then
     !$omp critical (oft_native_diag_build)
     CALL native_diag_build(self%diag_index,self%kr,self%lc,self%nr)
     !$omp end critical (oft_native_diag_build)
-    !$omp parallel do private(jr) if(self%nr>OFT_OMP_VTHRESH)
-    do i=1,self%nr ! loop over dof
-      jr=self%diag_index%loc(i)
-      IF(jr>0)THEN
-        this%v(i)=self%M(jr)
-      ELSE
-        this%v(i)=0.d0
-      END IF
-    enddo
+    CALL nk_csr_get_diag(self%nr,self%diag_index%loc,self%M,this%v)
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','mat_assemble',__FILE__)
   END SELECT
@@ -2857,15 +2330,7 @@ if(present(diag))then
   call diag%add(0.d0,1.d0,self%D)
 end if
 !---Common assembly tasks
-IF(self%nc<2*lc_offset)THEN
-  IF(.NOT.ASSOCIATED(self%lc_small))THEN
-    ALLOCATE(self%lc_small(self%nnz))
-    !$omp simd
-    DO i=1,self%nnz
-      self%lc_small(i)=INT(self%lc(i)-lc_offset,2)
-    END DO
-  END IF
-END IF
+CALL native_lc_small_build(self%lc_small,self%lc,self%nnz,self%nc)
 DEBUG_STACK_POP
 end subroutine mat_assemble
 !---------------------------------------------------------------------------------
@@ -2875,7 +2340,7 @@ subroutine mat_zero(self)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
-self%M=0.d0
+CALL nk_set(self%nnz,0.d0,self%M)
 DEBUG_STACK_POP
 end subroutine mat_zero
 !---------------------------------------------------------------------------------
@@ -2888,69 +2353,34 @@ integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: i,j,ir
+integer(i4) :: ioff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(iblock))THEN
-  !$omp parallel do private(ir,j)
-  do i=1,nrows
-    ir=self%i_map(iblock)%offset+irows(i)
-    do j=self%kr(ir),self%kr(ir+1)-1
-      IF(zero_diag.OR.(self%lc(j)/=irows(i)))self%M(j)=0.d0
-    end do
-  end do
-ELSE
-  !$omp parallel do private(j)
-  DO i=1,nrows
-    DO j=self%kr(irows(i)),self%kr(irows(i)+1)-1
-      IF(zero_diag.OR.(self%lc(j)/=irows(i)))THEN
-        self%M(j)=0.d0
-      END IF
-    END DO
-  END DO
-END IF
+ioff=0
+IF(PRESENT(iblock))ioff=self%i_map(iblock)%offset
+CALL nk_csr_zero_rows(nrows,irows,ioff,self%kr,self%lc,zero_diag,self%M)
 DEBUG_STACK_POP
 end subroutine mat_zero_rows
 !---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine mat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
-!---
-integer(i4) :: i,j
 logical :: zero_diag
-!---
+integer(i4) :: coff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(jblock))THEN
-  !$omp parallel do private(j)
-  DO i=1,self%nr
-    do j=self%kr(i),self%kr(i+1)-1
-      IF(ANY(self%lc(j)==icols+self%i_map(jblock)%offset))THEN
-        IF(zero_diag.OR.(self%lc(j)/=i))self%M(j)=0.d0
-      END IF
-    end do
-  end do
-ELSE
-  !$omp parallel do private(j)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      IF(ANY(self%lc(j)==icols))THEN
-        IF(zero_diag.OR.(self%lc(j)/=i))self%M(j)=0.d0
-      END IF
-    END DO
-  END DO
-END IF
+coff=0
+IF(PRESENT(jblock))coff=self%i_map(jblock)%offset
+CALL nk_csr_zero_cols(self%nr,ncols,icols,coff,self%kr,self%lc,zero_diag,self%M)
 DEBUG_STACK_POP
 end subroutine mat_zero_cols
 !---------------------------------------------------------------------------------
@@ -3485,31 +2915,17 @@ end subroutine native_matrix_setup_full
 !> Update full local matrix with values from other processors
 !---------------------------------------------------------------------------------
 subroutine matrix_update_slice(self)
-class(oft_native_matrix), intent(inout) :: self
-integer(i4) :: i,j,k
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 IF(self%full_current)RETURN
 DEBUG_STACK_PUSH
 IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
 IF(.NOT.ASSOCIATED(self%Mfull))ALLOCATE(self%Mfull(self%nnz))
 !---Get values
-!$omp parallel do simd if(self%nnz>OFT_OMP_VTHRESH)
-DO i=1,self%nnz
-  self%Mfull(i)=self%M(i)
-END DO
+CALL nk_copy(self%nnz,self%M,self%Mfull)
 CALL oft_global_stitch(self%linkage,self%Mfull,1)
-!---Zero out redundant rows
-IF(ASSOCIATED(self%redind))THEN
-  !$omp parallel do private(j,k)
-  DO i=1,self%nred
-    k=self%redind(i)
-    DO j=self%kr(k),self%kr(k+1)-1
-      self%Mfull(j)=0.d0
-      IF(self%lc(j)==k)self%Mfull(j)=1.d0
-    END DO
-  END DO
-END IF
+!---Replace redundant rows with identity rows
+IF(self%nred>0)CALL nk_csr_identity_rows(self%nred,self%redind,self%kr,self%lc,self%Mfull)
 self%full_current=.TRUE.
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine matrix_update_slice
 !---------------------------------------------------------------------------------
@@ -3632,10 +3048,7 @@ IF(.NOT.ASSOCIATED(self%lcmap))THEN
 END IF
 !---Get values
 CALL matrix_update_slice(parent)
-!$omp parallel do
-DO i=1,self%nnz
-  self%M(i)=parent%Mfull(self%lcmap(i))
-END DO
+CALL nk_gather(self%nnz,self%lcmap,parent%Mfull,self%M)
 self%full_current=.FALSE.
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
@@ -3686,242 +3099,106 @@ end select
 DEBUG_STACK_POP
 end FUNCTION native_cmatrix_cast
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix-vector product with a real vector
 !!
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine cmat_apply_vec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,ifirst,ilast
+LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
-complex(c8) :: tmp
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_vec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_cvector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
-!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 IF(ASSOCIATED(self%lc_small))THEN
-  do i=ifirst,ilast
-    tmp=(0.d0,0.d0)
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
 ELSE
-  do i=ifirst,ilast
-    tmp=(0.d0,0.d0)
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(self%lc(j))
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_apply_vec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix-vector product with a complex vector
 !!
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine cmat_apply_cvec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j,ifirst,ilast
-complex(c8) :: tmp
+LOGICAL :: copied(2)
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_vec',__FILE__)
-if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_cvector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_cvector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
-!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
+if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_cvec',__FILE__)
+if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_cvec',__FILE__)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 IF(ASSOCIATED(self%lc_small))THEN
-  do i=ifirst,ilast
-    tmp=(0.d0,0.d0)
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc_small,self%M,atmp,btmp)
 ELSE
-  do i=ifirst,ilast
-    tmp=(0.d0,0.d0)
-    do j=self%kr(i),self%kr(i+1)-1
-      tmp=tmp+self%M(j)*atmp(self%lc(j))
-    end do
-    btmp(i)=tmp
-  end do
+  CALL nk_csr_matvec(self%nr,self%kr,self%lc,self%M,atmp,btmp)
 END IF
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_apply_cvec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply matrix vector product for matrix transpose with a real vector
 !!
-!! b = self * a
+!! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine cmat_applyt_vec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: j,k,ifirst,ilast
-complex(c8) :: tmp
+LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_vec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','cmat_applyt_vec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_vector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_cvector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator using transposed index (every entry of btmp is overwritten)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 !$omp critical (oft_native_csc_build)
 CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
-DO k=ifirst,ilast
-  tmp=(0.d0,0.d0)
-  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
-    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
-  END DO
-  btmp(k)=tmp
-END DO
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_applyt_vec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply matrix vector product for matrix transpose with a complex vector
 !!
-!! b = self * a
+!! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine cmat_applyt_cvec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-LOGICAL :: dealloc_flags(2)
-integer(i4) :: j,k,ifirst,ilast
-complex(c8) :: tmp
+LOGICAL :: copied(2)
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_cvec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Row mismatch','cmat_applyt_cvec',__FILE__)
-SELECT TYPE(a)
-CLASS IS(oft_native_cvector)
-  atmp=>a%v
-  dealloc_flags(1)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(atmp)
-  CALL a%get_local(atmp)
-  dealloc_flags(1)=.TRUE.
-END SELECT
-SELECT TYPE(b)
-CLASS IS(oft_native_cvector)
-  btmp=>b%v
-  dealloc_flags(2)=.FALSE.
-CLASS DEFAULT
-  NULLIFY(btmp)
-  CALL b%get_local(btmp)
-  dealloc_flags(2)=.TRUE.
-END SELECT
-!---Apply operator using transposed index (every entry of btmp is overwritten)
+copied(1)=native_get_vals(a,atmp)
+copied(2)=native_get_vals(b,btmp)
 !$omp critical (oft_native_csc_build)
 CALL native_csc_build(self%csc,self%kr,self%lc,self%nr,self%nc)
 !$omp end critical (oft_native_csc_build)
-!$omp parallel private(j,k,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
-CALL native_thread_rows(self%csc%kc,self%nc,ifirst,ilast)
-DO k=ifirst,ilast
-  tmp=(0.d0,0.d0)
-  DO j=self%csc%kc(k),self%csc%kc(k+1)-1
-    tmp=tmp+self%M(self%csc%lm(j))*atmp(self%csc%lr(j))
-  END DO
-  btmp(k)=tmp
-END DO
-!$omp end parallel
-IF(dealloc_flags(1))DEALLOCATE(atmp)
-IF(dealloc_flags(2))THEN
-  CALL b%restore_local(btmp,wait=.TRUE.)
-  DEALLOCATE(btmp)
-END IF
+CALL nk_csc_matvec(self%nc,self%csc%kc,self%csc%lr,self%csc%lm,self%M,atmp,btmp)
+IF(copied(1))DEALLOCATE(atmp)
+CALL native_put_vals(b,btmp,copied(2))
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_applyt_cvec
@@ -3929,7 +3206,7 @@ end subroutine cmat_applyt_cvec
 !> Set values of a matrix
 !---------------------------------------------------------------------------------
 subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
@@ -3937,167 +3214,68 @@ integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: i,j,jp,jn,jk
+integer(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ANY(i_inds>self%nr))call oft_abort('Index exceeds graph','cmat_set_values',__FILE__)
 if(ANY(j_inds>self%nc))call oft_abort('Index exceeds graph','cmat_set_values',__FILE__)
-IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  do i=1,n
-    jp=self%map(iblock,jblock)%kr(i_inds(i))
-    jn=self%map(iblock,jblock)%kr(i_inds(i)+1)-jp
-    do j=1,m
-      jk=search_array(j_inds(j),self%map(iblock,jblock)%lc(jp:jp+jn-1),jn)+jp-1
-      self%M(self%map(iblock,jblock)%lc_map(jk))=b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'cmat_set_values',__FILE__)
-  do i=1,n
-    jp=self%kr(i_inds(i))
-    jn=self%kr(i_inds(i)+1)-jp
-    do j=1,m
-      jk=search_array(j_inds(j),self%lc(jp:jp+jn-1),jn)+jp-1
-      self%M(jk)=b(i,j)
-    end do
-  end do
-END IF
+CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,iblock,jblock)
+IF(ANY(loc==0))CALL oft_abort('Entry not found!','cmat_set_values',__FILE__)
+CALL nk_set_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
 end subroutine cmat_set_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix
 !---------------------------------------------------------------------------------
 subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
-logical :: fail_test,use_cache
+integer(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','cmat_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','cmat_add_values',__FILE__)
 self%full_current=.FALSE.
-fail_test=.FALSE.
-IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  use_cache=.FALSE.
-  IF(PRESENT(loc_cache))THEN
-    IF(loc_cache(1,1)>0)THEN
-      use_cache=.TRUE.
-      jktmp=loc_cache
-    END IF
-  END IF
-  IF(.NOT.use_cache)THEN
-    DO i=1,n
-      jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-      jn=self%map(iblock,jblock)%ext(2,i_inds(i))
-      DO j=1,m
-        jktmp(i,j)=search_array(self%j_map(jblock)%offset+j_inds(j),self%lc(jp:jn),jn-jp+1)
-        IF(jktmp(i,j)==0)fail_test=.TRUE.
-      END DO
-    END DO
-    IF(PRESENT(loc_cache))loc_cache=jktmp
-  END IF
-  DO i=1,n
-    jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-    DO j=1,m
-      jk=jktmp(i,j)+jp-1
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'cmat_add_values',__FILE__)
-  DO i=1,n
-    jp=self%kr(i_inds(i))
-    jn=self%kr(i_inds(i)+1)-jp
-    DO j=1,m
-      jk=search_array(j_inds(j),self%lc(jp:jp+jn-1),jn)+jp-1
-      IF(jk==jp-1)fail_test=.TRUE.
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-END IF
-IF(fail_test)CALL oft_abort('Entry not found!','cmat_add_values',__FILE__)
+CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,iblock,jblock,loc_cache)
+IF(ANY(loc==0))CALL oft_abort('Entry not found!','cmat_add_values',__FILE__)
+CALL nk_add_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
 end subroutine cmat_add_values
 !---------------------------------------------------------------------------------
-!> Add values to a matrix
+!> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
 subroutine cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
-logical :: fail_test,use_cache
+integer(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','cmat_atomic_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','cmat_atomic_add_values',__FILE__)
 self%full_current=.FALSE.
-fail_test=.FALSE.
-IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  use_cache=.FALSE.
-  IF(PRESENT(loc_cache))THEN
-    IF(loc_cache(1,1)>0)THEN
-      use_cache=.TRUE.
-      jktmp=loc_cache
-    END IF
-  END IF
-  IF(.NOT.use_cache)THEN
-    DO i=1,n
-      jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-      jn=self%map(iblock,jblock)%ext(2,i_inds(i))
-      DO j=1,m
-        jktmp(i,j)=search_array(self%j_map(jblock)%offset+j_inds(j),self%lc(jp:jn),jn-jp+1)
-        IF(jktmp(i,j)==0)fail_test=.TRUE.
-      END DO
-    END DO
-    IF(PRESENT(loc_cache))loc_cache=jktmp
-  END IF
-  DO i=1,n
-    jp=self%map(iblock,jblock)%ext(1,i_inds(i))
-    DO j=1,m
-      jk=jktmp(i,j)+jp-1
-      !$omp atomic
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'cmat_atomic_add_values',__FILE__)
-  DO i=1,n
-    jp=self%kr(i_inds(i))
-    jn=self%kr(i_inds(i)+1)-jp
-    DO j=1,m
-      jk=search_array(j_inds(j),self%lc(jp:jp+jn-1),jn)+jp-1
-      IF(jk==jp-1)fail_test=.TRUE.
-      !$omp atomic
-      self%M(jk) = self%M(jk) + b(i,j)
-    END DO
-  END DO
-END IF
-IF(fail_test)CALL oft_abort('Entry not found!','cmat_atomic_add_values',__FILE__)
+CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,iblock,jblock,loc_cache)
+IF(ANY(loc==0))CALL oft_abort('Entry not found!','cmat_atomic_add_values',__FILE__)
+CALL nk_atomic_add_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
 end subroutine cmat_atomic_add_values
 !---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !---------------------------------------------------------------------------------
 subroutine cmat_assemble(self,diag)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
-integer(i4) :: i,jr
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 if(present(diag))then
@@ -4112,15 +3290,7 @@ if(present(diag))then
     !$omp critical (oft_native_diag_build)
     CALL native_diag_build(self%diag_index,self%kr,self%lc,self%nr)
     !$omp end critical (oft_native_diag_build)
-    !$omp parallel do private(jr) if(self%nr>OFT_OMP_VTHRESH)
-    do i=1,self%nr ! loop over dof
-      jr=self%diag_index%loc(i)
-      IF(jr>0)THEN
-        this%v(i)=self%M(jr)
-      ELSE
-        this%v(i)=(0.d0,0.d0)
-      END IF
-    enddo
+    CALL nk_csr_get_diag(self%nr,self%diag_index%loc,self%M,this%v)
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','cmat_assemble',__FILE__)
   END SELECT
@@ -4128,99 +3298,57 @@ if(present(diag))then
   call diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
 end if
 !---Common assembly tasks
-IF(self%nc<2*lc_offset)THEN
-  IF(.NOT.ASSOCIATED(self%lc_small))THEN
-    ALLOCATE(self%lc_small(self%nnz))
-    DO i=1,self%nnz
-      self%lc_small(i)=INT(self%lc(i)-lc_offset,2)
-    END DO
-  END IF
-END IF
+CALL native_lc_small_build(self%lc_small,self%lc,self%nnz,self%nc)
 DEBUG_STACK_POP
 end subroutine cmat_assemble
 !---------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !---------------------------------------------------------------------------------
 subroutine cmat_zero(self)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
-self%M=(0.d0,0.d0)
+CALL nk_set(self%nnz,(0.d0,0.d0),self%M)
 DEBUG_STACK_POP
 end subroutine cmat_zero
 !---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
 !---------------------------------------------------------------------------------
 subroutine cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: i,j,ir
+integer(i4) :: ioff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(iblock))THEN
-  !$omp parallel do private(ir,j)
-  do i=1,nrows
-    ir=self%i_map(iblock)%offset+irows(i)
-    do j=self%kr(ir),self%kr(ir+1)-1
-      IF(zero_diag.OR.(self%lc(j)/=irows(i)))self%M(j)=(0.d0,0.d0)
-    end do
-  end do
-ELSE
-  !$omp parallel do private(j)
-  DO i=1,nrows
-    DO j=self%kr(irows(i)),self%kr(irows(i)+1)-1
-      IF(zero_diag.OR.(self%lc(j)/=irows(i)))THEN
-        self%M(j)=(0.d0,0.d0)
-      END IF
-    END DO
-  END DO
-END IF
+ioff=0
+IF(PRESENT(iblock))ioff=self%i_map(iblock)%offset
+CALL nk_csr_zero_rows(nrows,irows,ioff,self%kr,self%lc,zero_diag,self%M)
 DEBUG_STACK_POP
 end subroutine cmat_zero_rows
 !---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_cmatrix), intent(inout) :: self
+class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
-!---
-integer(i4) :: i,j
 logical :: zero_diag
-!---
+integer(i4) :: coff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(jblock))THEN
-  !$omp parallel do private(j)
-  DO i=1,self%nr
-    do j=self%kr(i),self%kr(i+1)-1
-      IF(ANY(self%lc(j)==icols+self%i_map(jblock)%offset))THEN
-        IF(zero_diag.OR.(self%lc(j)/=i))self%M(j)=(0.d0,0.d0)
-      END IF
-    end do
-  end do
-ELSE
-  !$omp parallel do private(j)
-  DO i=1,self%nr
-    DO j=self%kr(i),self%kr(i+1)-1
-      IF(ANY(self%lc(j)==icols))THEN
-        IF(zero_diag.OR.(self%lc(j)/=i))self%M(j)=(0.d0,0.d0)
-      END IF
-    END DO
-  END DO
-END IF
+coff=0
+IF(PRESENT(jblock))coff=self%i_map(jblock)%offset
+CALL nk_csr_zero_cols(self%nr,ncols,icols,coff,self%kr,self%lc,zero_diag,self%M)
 DEBUG_STACK_POP
 end subroutine cmat_zero_cols
 !---------------------------------------------------------------------------------
@@ -4278,31 +3406,18 @@ end subroutine cmat_delete
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_apply_vec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,i1,i2
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-#ifdef BLAS_THREADED
-CALL dgemv('N',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-#else
-bvals=0.d0
-!$omp parallel private(i1,i2,i,j)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nr,i1,i2)
-DO j=1,self%nc
-  !$omp simd
-  DO i=i1,i2
-    bvals(i)=bvals(i)+self%M(i,j)*avals(j)
-  END DO
-END DO
-!$omp end parallel
-#endif
+CALL nk_dense_matvec(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_mat_apply_vec
 !---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
@@ -4310,101 +3425,56 @@ end subroutine dense_mat_apply_vec
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_apply_cvec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,i1,i2
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-! #ifdef BLAS_THREADED
-! CALL dgemv('N',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-! #else
-bvals=(0.d0,0.d0)
-!$omp parallel private(i1,i2,i,j)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nr,i1,i2)
-DO j=1,self%nc
-  !$omp simd
-  DO i=i1,i2
-    bvals(i)=bvals(i)+self%M(i,j)*avals(j)
-  END DO
-END DO
-!$omp end parallel
-! #endif
+CALL nk_dense_matvec(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_mat_apply_cvec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply the transposed matrix to a field.
 !!
-!! b = self * a
+!! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_applyt_vec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,j1,j2
-real(r8) :: tmp
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-#ifdef BLAS_THREADED
-CALL dgemv('T',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-#else
-bvals=0.d0
-!$omp parallel private(j1,j2,i,j,tmp)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nc,j1,j2)
-DO j=j1,j2
-  tmp=0.d0
-  !$omp simd reduction(+:tmp)
-  DO i=1,self%nr
-    tmp=tmp+self%M(i,j)*avals(i)
-  END DO
-  bvals(j)=tmp
-END DO
-!$omp end parallel
-#endif
+CALL nk_dense_matvect(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_mat_applyt_vec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply the transposed matrix to a field.
 !!
-!! b = self * a
+!! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_applyt_cvec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,j1,j2
-COMPLEX(c8) :: tmp
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-! #ifdef BLAS_THREADED
-! CALL dgemv('T',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-! #else
-bvals=(0.d0,0.d0)
-!$omp parallel private(j1,j2,i,j,tmp)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nc,j1,j2)
-DO j=j1,j2
-  tmp=0.d0
-  !$omp simd reduction(+:tmp)
-  DO i=1,self%nr
-    tmp=tmp+self%M(i,j)*avals(i)
-  END DO
-  bvals(j)=tmp
-END DO
-!$omp end parallel
-! #endif
+CALL nk_dense_matvect(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_mat_applyt_cvec
 !---------------------------------------------------------------------------------
 !> Set values of a matrix
@@ -4651,32 +3721,19 @@ end subroutine dense_mat_delete
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_apply_vec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,i1,i2
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-! #ifdef BLAS_THREADED
-! CALL dgemv('N',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-! #else
-bvals=(0.d0,0.d0)
-!$omp parallel private(i1,i2,i,j)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nr,i1,i2)
-DO j=1,self%nc
-  !$omp simd
-  DO i=i1,i2
-    bvals(i)=bvals(i)+self%M(i,j)*avals(j)
-  END DO
-END DO
-!$omp end parallel
-! #endif
+CALL nk_dense_matvec(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_cmat_apply_vec
 !---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
@@ -4684,102 +3741,57 @@ end subroutine dense_cmat_apply_vec
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_apply_cvec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,i1,i2
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-! #ifdef BLAS_THREADED
-! CALL dgemv('N',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-! #else
-bvals=(0.d0,0.d0)
-!$omp parallel private(i1,i2,i,j)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nr,i1,i2)
-DO j=1,self%nc
-  !$omp simd
-  DO i=i1,i2
-    bvals(i)=bvals(i)+self%M(i,j)*avals(j)
-  END DO
-END DO
-!$omp end parallel
-! #endif
+CALL nk_dense_matvec(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_cmat_apply_cvec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply the transposed matrix to a field.
 !!
-!! b = self * a
+!! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_vec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
-class(oft_cvector), intent(inout) :: b !<  Result of matrix product
-integer(i4) :: i,j,j1,j2
-COMPLEX(c8) :: tmp
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-! #ifdef BLAS_THREADED
-! CALL dgemv('N',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-! #else
-bvals=(0.d0,0.d0)
-!$omp parallel private(j1,j2,i,j,tmp)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nc,j1,j2)
-DO j=j1,j2
-  tmp=0.d0
-  !$omp simd reduction(+:tmp)
-  DO i=1,self%nr
-    tmp=tmp+self%M(i,j)*avals(i)
-  END DO
-  bvals(j)=tmp
-END DO
-!$omp end parallel
-! #endif
+CALL nk_dense_matvect(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_cmat_applyt_vec
 !---------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply the transposed matrix to a field.
 !!
-!! b = self * a
+!! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_cvec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
-integer(i4) :: i,j,j1,j2
-COMPLEX(c8) :: tmp
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
-!---
+DEBUG_STACK_PUSH
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
-! #ifdef BLAS_THREADED
-! CALL dgemv('N',self%nr,self%nc,1.d0,self%M,self%nr,avals,1,0.d0,bvals,1)
-! #else
-bvals=(0.d0,0.d0)
-!$omp parallel private(j1,j2,i,j,tmp)
-CALL oft_thread_slice(oft_tid,oft_env%nthreads,self%nc,j1,j2)
-DO j=j1,j2
-  tmp=0.d0
-  !$omp simd reduction(+:tmp)
-  DO i=1,self%nr
-    tmp=tmp+self%M(i,j)*avals(i)
-  END DO
-  bvals(j)=tmp
-END DO
-!$omp end parallel
-! #endif
+CALL nk_dense_matvect(self%nr,self%nc,self%M,avals,bvals)
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
+DEBUG_STACK_POP
 end subroutine dense_cmat_applyt_cvec
 !---------------------------------------------------------------------------------
 !> Set values of a matrix
