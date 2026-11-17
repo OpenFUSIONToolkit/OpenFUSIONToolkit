@@ -2941,6 +2941,7 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
 IF(.NOT.ASSOCIATED(self%Mfull))ALLOCATE(self%Mfull(self%nnz))
 !---Get values
+!$omp parallel do simd if(self%nnz>OFT_OMP_VTHRESH)
 DO i=1,self%nnz
   self%Mfull(i)=self%M(i)
 END DO
