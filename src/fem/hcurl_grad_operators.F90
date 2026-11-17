@@ -1714,7 +1714,8 @@ CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE,1)
 do i=1,SIZE(array_f)
   array_f(i)=array_c(ABS(lbege(i)))
 end do
-CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.FALSE.,iblock=1)
+!---Keep owner sync: base-level values are computed independently on each process
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.,iblock=1)
 CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.,iblock=1)
 !---
 lptmp=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%nbase+1)%base%lp
@@ -1724,7 +1725,6 @@ CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE,2)
 do i=1,SIZE(array_f)
   array_f(i)=array_c(lptmp(i))
 end do
-!---Keep owner sync (once, for both blocks): base-level values are computed independently on each process
 CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.,iblock=2)
 CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.,iblock=2)
 DEBUG_STACK_POP
