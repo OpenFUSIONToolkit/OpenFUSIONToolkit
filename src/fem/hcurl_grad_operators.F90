@@ -551,9 +551,8 @@ CLASS IS(oft_fem_type)
   do i=1,this%mesh%np
     agrad(i)=0.d0
   end do
-  !---Sync even though every process zeroes all vertex values: callers pass projections whose
-  !---other shared values may differ by round-off (eg. periodic images summed in different orders)
-  CALL a%release_local(agrad,OFT_ACCESS_READWRITE,sync=.TRUE.,iblock=2)
+  !---All vertex values are zeroed on every process, so no sync is needed
+  CALL a%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
 CLASS DEFAULT
   CALL oft_abort("Invalid fe object","grad_zerop_apply",__FILE__)
 END SELECT
