@@ -34,7 +34,8 @@ USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
-  oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace
+  oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
+  OFT_ACCESS_READWRITE
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
@@ -2044,7 +2045,7 @@ LOGICAL, POINTER, DIMENSION(:) :: eflag
 INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc
-REAL(r8), POINTER, DIMENSION(:) :: vals,uvals,gvals
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
@@ -2288,9 +2289,10 @@ IF(self%nlocal>1)THEN
       CALL self%alocals(i)%update_slice
     END DO
   END IF
+  !---Borrow local values (no copy for native vectors)
   NULLIFY(uvals,gvals)
-  CALL u%get_local(uvals)
-  CALL g%get_local(gvals)
+  CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
+  CALL g%borrow_local(gvals,OFT_ACCESS_READ)
   !---Each block (and its local vectors) is only accessed by one thread
   !$omp parallel private(j) if(thread_safe)
   !$omp do schedule(dynamic,1)
@@ -2311,8 +2313,9 @@ IF(self%nlocal>1)THEN
     END DO
   END DO
   !$omp end parallel
-  CALL u%restore_local(uvals)
-  DEALLOCATE(uvals,gvals)
+  !---Local solves on shared rows differ between processes, so synchronize from owner
+  CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=.TRUE.)
+  CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
 ELSE
   !---Persistent local vectors, with a local seam that skips all stitching/reductions
   IF(.NOT.ASSOCIATED(self%local_stitch))THEN
@@ -2633,8 +2636,8 @@ IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','dense_cbjprecond_apply',__FILE_
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','dense_cbjprecond_apply',__FILE__)
 IF(self%nlocal/=SIZE(self%blocks))CALL oft_abort('"nlocal" changed since setup','dense_cbjprecond_apply',__FILE__)
 NULLIFY(uvals,gvals)
-CALL u%get_local(uvals)
-CALL g%get_local(gvals)
+CALL u%borrow_local(uvals,OFT_ACCESS_WRITE)
+CALL g%borrow_local(gvals,OFT_ACCESS_READ)
 uvals=(0.d0,0.d0)
 !$omp parallel private(vloc,i,j,n)
 ALLOCATE(vloc(self%max_block_size,2))
@@ -2653,8 +2656,9 @@ END DO
 !$omp end do
 DEALLOCATE(vloc)
 !$omp end parallel
-CALL u%restore_local(uvals)
-DEALLOCATE(uvals,gvals)
+!---Block solves on shared rows differ between processes, so synchronize from owner
+CALL u%release_local(uvals,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 END SUBROUTINE dense_cbjprecond_apply
 !------------------------------------------------------------------------------
