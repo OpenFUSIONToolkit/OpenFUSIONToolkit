@@ -12,12 +12,15 @@
 !! The current test cases are:
 !! - Transpose products: adjoint identity \f$ x \cdot (A y) = (A^T x) \cdot y \f$
 !! - 1-norm and inf-norm against reductions over the owned (slice) values
-!! - Complex vector products and mixed real/complex dot products (serial, non-periodic only)
+!! - Complex vector products and mixed real/complex dot products
 !! - Borrowed (zero-copy) access with each access mode, with and without
 !!   synchronization, for full vectors and blocks, against get_local/restore_local
 !! - copy, maxpy and mdot for real and complex vectors against add and dot
 !! - Boundary condition operators that skip synchronization against the copying path
 !! - Summation stitching gives bitwise identical shared values (eg. periodic images)
+!! - Complex stitching (all methods) against stitching real and imaginary parts
+!! - Accumulate access for blocks and full vectors, real and complex, against
+!!   get_local/restore_local(add=.TRUE.)
 !! - Shared matrix non-zero patterns: sharing by FE operators, identical results for
 !!   independent and pattern-sharing matrices (real and complex), linkage built once,
 !!   and patterns freed with their last reference
@@ -31,7 +34,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_value, ieee_quiet_nan
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_vector_ptr, oft_cvector_ptr, &
-  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvector, &
   oft_native_cmatrix, oft_native_pattern, native_matrix_share, native_matrix_setup_full, &
   native_pattern_live
@@ -60,6 +63,7 @@ CALL test_access()
 CALL test_multi()
 CALL test_bc()
 CALL test_stitch()
+CALL test_accumulate()
 CALL test_pattern()
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='native_la.results')
@@ -635,6 +639,109 @@ CLASS DEFAULT
 END SELECT
 END SUBROUTINE cfill_raw
 ! Shared non-zero patterns of native CRS matrices
+! Accumulate access (zeroed storage, summed across copies and added on completion) against the
+! get_local/restore_local(add=.TRUE.) pattern it replaces, for a blocked vector and a full vector
+SUBROUTINE test_accumulate()
+INTEGER(i4) :: i,k,iblk
+REAL(r8), POINTER, DIMENSION(:) :: vals
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: avals
+COMPLEX(c8), POINTER, DIMENSION(:) :: cvals
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: cavals
+CLASS(oft_vector), POINTER :: x,y,z
+CLASS(oft_cvector), POINTER :: cy,cz
+!---Blocked (vector Lagrange) field, starting from non-zero values
+CALL ML_oft_vlagrange%vec_create(x)
+CALL x%new(y)
+CALL x%new(z)
+CALL x%set(1.d0,random=.TRUE.)
+DO k=1,2 ! Second pass reuses the accumulation storage
+  CALL y%copy(x)
+  CALL z%copy(x)
+  NULLIFY(vals,avals)
+  DO iblk=1,3
+    CALL z%get_local(vals,iblk)
+    DO i=1,SIZE(vals)
+      vals(i)=contrib(i,iblk+k)
+    END DO
+    CALL z%restore_local(vals,iblk,add=.TRUE.,wait=(iblk/=3))
+    DEALLOCATE(vals)
+  END DO
+  DO iblk=3,1,-1 ! Any order; the last release completes the accumulation
+    CALL y%borrow_local(avals,OFT_ACCESS_ACCUMULATE,iblk)
+    IF(MAXVAL(ABS(avals))/=0.d0)THEN
+      nfail=nfail+1
+      WRITE(*,*)'FAILED: Accumulation storage not zeroed'
+    END IF
+    DO i=1,SIZE(avals)
+      avals(i)=contrib(i,iblk+k)
+    END DO
+    CALL y%release_local(avals,OFT_ACCESS_ACCUMULATE,(iblk==1),iblk)
+  END DO
+  CALL check_exact('Blocked accumulate = restore_local(add)',maxdiff(y,z),0.d0)
+END DO
+CALL check_exact('Accumulated values consistent',inconsistency(y),0.d0)
+!---Only borrowed blocks change
+CALL y%copy(x)
+CALL y%borrow_local(avals,OFT_ACCESS_ACCUMULATE,2)
+avals=1.d0
+CALL y%release_local(avals,OFT_ACCESS_ACCUMULATE,.TRUE.,2)
+CALL z%copy(y)
+CALL z%add(1.d0,-1.d0,x)
+NULLIFY(vals)
+CALL z%get_local(vals,1)
+CALL check_exact('Accumulate leaves other blocks',oft_mpi_max(MAXVAL(ABS(vals))),0.d0)
+DEALLOCATE(vals)
+CALL x%delete
+CALL y%delete
+CALL z%delete
+DEALLOCATE(x,y,z)
+!---Full (scalar) vector, real and complex
+CALL ML_oft_lagrange%vec_create(y)
+CALL y%new(z)
+CALL fill(y,0.21d0,0.3d0)
+CALL z%copy(y)
+NULLIFY(vals,avals)
+ALLOCATE(vals(z%n))
+DO i=1,z%n
+  vals(i)=contrib(i,7)
+END DO
+CALL z%restore_local(vals,add=.TRUE.)
+DEALLOCATE(vals)
+CALL y%borrow_local(avals,OFT_ACCESS_ACCUMULATE)
+DO i=1,y%n
+  avals(i)=contrib(i,7)
+END DO
+CALL y%release_local(avals,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL check_exact('Full accumulate = restore_local(add)',maxdiff(y,z),0.d0)
+CALL y%new(cy)
+CALL y%new(cz)
+CALL cfill(cy,0.17d0,0.2d0)
+CALL cz%copy(cy)
+NULLIFY(cvals,cavals)
+ALLOCATE(cvals(cz%n))
+DO i=1,cz%n
+  cvals(i)=CMPLX(contrib(i,8),contrib(i,9),c8)
+END DO
+CALL cz%restore_local(cvals,add=.TRUE.)
+DEALLOCATE(cvals)
+CALL cy%borrow_local(cavals,OFT_ACCESS_ACCUMULATE)
+DO i=1,cy%n
+  cavals(i)=CMPLX(contrib(i,8),contrib(i,9),c8)
+END DO
+CALL cy%release_local(cavals,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL check_exact('Complex accumulate = restore_local(add)',cmaxdiff(cy,cz),0.d0)
+CALL y%delete
+CALL z%delete
+CALL cy%delete
+CALL cz%delete
+DEALLOCATE(y,z,cy,cz)
+END SUBROUTINE test_accumulate
+! Contribution that differs between copies of an entry (local index and rank dependent)
+PURE FUNCTION contrib(i,k) RESULT(v)
+INTEGER(i4), INTENT(in) :: i,k
+REAL(r8) :: v
+v=COS(0.37d0*REAL(i+1000*oft_env%rank,r8)+REAL(k,r8))/7.d0
+END FUNCTION contrib
 SUBROUTINE test_pattern()
 INTEGER(i4) :: i,nlive0,nlive1,refs0
 REAL(r8) :: v1

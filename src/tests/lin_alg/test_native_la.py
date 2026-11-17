@@ -51,21 +51,22 @@ def test_native_la():
     complex products and mixed real/complex dot products on a single process. Also borrowed
     (zero-copy) vector access in each access mode against get_local/restore_local, copy, maxpy
     (bitwise equal to successive add calls) and mdot (against individual dot products) for real
-    and complex vectors, and boundary condition operators that skip synchronization.'''
+    and complex vectors, boundary condition operators that skip synchronization, complex stitching
+    and accumulate access against get_local/restore_local(add=.TRUE.).'''
     assert run_native_la(1)
 
 @pytest.mark.mpi
 def test_native_la_mpi2():
     '''Native transpose products, vector norms, borrowed access with and without synchronization,
-    copy, maxpy, mdot (real and complex) and boundary condition operators with interface DOFs
-    shared between 2 processes.'''
+    copy, maxpy, mdot (real and complex), boundary condition operators, complex stitching and
+    accumulate access with interface DOFs shared between 2 processes.'''
     assert run_native_la(2)
 
 @pytest.mark.mpi
 def test_native_la_mpi4():
     '''Native transpose products, vector norms, borrowed access with and without synchronization,
-    copy, maxpy, mdot (real and complex) and boundary condition operators with interface DOFs
-    shared between 4 processes.'''
+    copy, maxpy, mdot (real and complex), boundary condition operators, complex stitching and
+    accumulate access with interface DOFs shared between 4 processes.'''
     assert run_native_la(4)
 
 # Periodic meshes hold several images of a shared entry on one process
