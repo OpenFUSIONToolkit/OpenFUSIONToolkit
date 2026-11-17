@@ -823,14 +823,21 @@ DEBUG_STACK_POP
 end subroutine multigrid_reffix_surf
 !------------------------------------------------------------------------------
 !> Add node points for quadratic elements
+!!
+!! Native meshes whose quadratic nodes were supplied (by the reader or by refinement
+!! of a quadratic level) may be curved anywhere, so every cell is flagged as curved,
+!! as in @ref multigrid_add_quad. Otherwise only cells with a boundary edge are
+!! flagged, and the CAD-specific step adjusts the boundary nodes.
 !------------------------------------------------------------------------------
 subroutine multigrid_add_quad_surf(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 INTEGER(i4) :: i,j
 REAL(r8) :: pttmp(3)
+LOGICAL :: ho_supplied
 DEBUG_STACK_PUSH
+ho_supplied=ASSOCIATED(smesh%ho_info%r)
 !---Initialize high order points with straight edges
-IF(.NOT.ASSOCIATED(smesh%ho_info%r))THEN
+IF(.NOT.ho_supplied)THEN
   CALL smesh%set_order(2)
   DO i=1,smesh%ne
     smesh%ho_info%lep(1,i)=i
@@ -849,7 +856,11 @@ IF(.NOT.ASSOCIATED(smesh%ho_info%r))THEN
 ELSE
   CALL smesh%set_order(2)
 END IF
-CALL mesh_global_set_curved(smesh,2)
+IF(ho_supplied.AND.(smesh%cad_type==mesh_native_id))THEN
+  CALL mesh_global_set_curved(smesh,1)
+ELSE
+  CALL mesh_global_set_curved(smesh,2)
+END IF
 !---Select mesh type and adjust boundary
 select case(smesh%cad_type)
   case(mesh_native_id)
