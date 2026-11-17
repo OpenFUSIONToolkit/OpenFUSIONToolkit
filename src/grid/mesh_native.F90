@@ -989,13 +989,19 @@ DO i=1,mesh%nbf
         END IF
         mesh%periodic%lf(j)=ind
         mesh%bfs(i)=-2
-        !---Revolved periodicity is only supported about the x-axis
-        CALL check_revolved_face(j)
-        CALL check_revolved_face(ind)
     END IF
 END DO
 deallocate(pt_f)
 !$omp end parallel
+!---Revolved periodicity is only supported about the x-axis (checked outside the parallel
+!---region, so that at most one thread aborts)
+DO i=1,mesh%nbf
+    j = mesh%lbf(i)
+    IF(mesh%periodic%lf(j)>0)THEN
+        CALL check_revolved_face(j)
+        CALL check_revolved_face(mesh%periodic%lf(j))
+    END IF
+END DO
 !---Remove "uncopied" periodic points
 DO i=1,mesh%nbp
     j=mesh%lbp(i)
