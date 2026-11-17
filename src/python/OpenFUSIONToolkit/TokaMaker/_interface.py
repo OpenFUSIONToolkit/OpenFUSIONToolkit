@@ -20,6 +20,7 @@ class tokamaker_settings_cstruct(c_struct):
                 ("mirror_mode", c_bool),
                 ("maxits", c_int),
                 ("mode", c_int),
+                ("trace_type", c_int),
                 ("urf", c_double),
                 ("nl_tol", c_double),
                 ("rmin", c_double),
