@@ -39,6 +39,7 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
+USE oft_native_kernels, ONLY: nk_jacobi_start, nk_jacobi_sweep, nk_jacobi_restart, nk_copy, nk_axpby
 USE oft_lu, ONLY: lapack_matinv
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
@@ -1591,7 +1592,7 @@ class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_vector), pointer :: p,q
 class(oft_native_vector), pointer :: uv,gv,md
-integer(i4) :: i,k,ierr
+integer(i4) :: k
 DEBUG_STACK_PUSH
 IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','jblock_precond_apply',__FILE__)
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','jblock_precond_apply',__FILE__)
@@ -1615,48 +1616,26 @@ IF(self%warn_once.AND.self%its<=0)THEN
 END IF
 !---
 if(self%down) then ! Down smoother
-  !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-  do i=1,u%n
-    uv%v(i)=0.d0
-    self%p%v(i)=self%df*gv%v(i)/md%v(i)
-  end do
+  CALL nk_jacobi_start(u%n,self%df,md%v,gv%v,uv%v,self%p%v)
   IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   do k=1,self%its
     call self%A%apply(self%p,self%q)
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
     IF(k<self%its)THEN
-      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-      do i=1,u%n
-        uv%v(i)=uv%v(i)+self%p%v(i)
-        gv%v(i)=gv%v(i)-self%q%v(i)
-        self%p%v(i)=self%df*gv%v(i)/md%v(i)
-      end do
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v,u=uv%v)
     ELSE ! Last iteration, also save state for up smoother (u and g are final here)
-      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-      do i=1,u%n
-        uv%v(i)=uv%v(i)+self%p%v(i)
-        gv%v(i)=gv%v(i)-self%q%v(i)
-        self%p%v(i)=self%df*gv%v(i)/md%v(i)
-        self%u_save(i)=uv%v(i)
-        self%g_save(i)=gv%v(i)
-      end do
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v,u=uv%v, &
+        usave=self%u_save,gsave=self%g_save)
     END IF
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   end do
   IF(self%its<1)THEN
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-    do i=1,u%n
-      self%u_save(i)=uv%v(i)
-      self%g_save(i)=gv%v(i)
-    end do
+    CALL nk_copy(u%n,uv%v,self%u_save)
+    CALL nk_copy(u%n,gv%v,self%g_save)
   END IF
   self%down=.FALSE.
 else ! Up smoother
-  !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-  do i=1,u%n
-    self%p%v(i)=uv%v(i)-self%u_save(i)
-    gv%v(i)=self%g_save(i)
-  end do
+  CALL nk_jacobi_restart(u%n,uv%v,self%u_save,self%g_save,gv%v,self%p%v)
   IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   !---The update of u with the (BC-applied) correction from step k is deferred into the
   !---sweep of step k+1, which is valid as neither A%apply nor bc%apply(q) touch u
@@ -1664,27 +1643,13 @@ else ! Up smoother
     call self%A%apply(self%p,self%q)
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
     IF(k==1)THEN
-      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-      do i=1,u%n
-        gv%v(i)=gv%v(i)-self%q%v(i)
-        self%p%v(i)=self%df*gv%v(i)/md%v(i)
-      end do
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v)
     ELSE
-      !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-      do i=1,u%n
-        uv%v(i)=uv%v(i)+self%p%v(i)
-        gv%v(i)=gv%v(i)-self%q%v(i)
-        self%p%v(i)=self%df*gv%v(i)/md%v(i)
-      end do
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v,u=uv%v)
     END IF
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   end do
-  IF(self%its>0)THEN
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-    do i=1,u%n
-      uv%v(i)=uv%v(i)+self%p%v(i)
-    end do
-  END IF
+  IF(self%its>0)CALL nk_axpby(u%n,1.d0,1.d0,self%p%v,uv%v)
   self%down=.TRUE.
 end if
 DEBUG_STACK_POP
