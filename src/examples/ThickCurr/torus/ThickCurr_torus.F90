@@ -33,8 +33,8 @@
 !! which gives \f$ \tau = L/R \approx 230 \f$ ms for this case. As the eigenmode adjusts its current
 !! distribution to maximize the decay time, the true value is expected to be somewhat larger than this
 !! estimate, while the nearby conducting wall reduces the inductance (and decay time) slightly. Using the
-!! included mesh ThickCurr gives \f$ \tau \approx 239.5 \f$ ms, which agrees with the result on a finer
-!! mesh (6337 cells) to within 0.2%. The next slowest modes, with \f$ \tau \approx 81 \f$ ms, are nearly
+!! included mesh ThickCurr gives \f$ \tau \approx 240.0 \f$ ms, which agrees with the result on a coarser
+!! mesh (6337 cells) to within 0.1%. The next slowest modes, with \f$ \tau \approx 81 \f$ ms, are nearly
 !! degenerate.
 !!
 !!\section doc_thickcurr_torus_ex_mesh Mesh generation
@@ -44,11 +44,11 @@
 !! is generated to accurately represent the curved surfaces of the torus and outer boundary. The
 !! script also embeds a disk of radius 0.45 m in the \f$ z = 0 \f$ plane within the hole of the torus,
 !! which is used to measure the magnetic flux through the hole. The resulting mesh (`thickcurr_torus.h5`,
-!! 3571 cells) is included with this example.
+!! 12180 cells) is included with this example.
 !!
-!! \note The direct solver used in this example requires approximately 2.5 GB of memory and the example
-!! takes approximately 5 minutes to run in serial with SuperLU. As the cost of the direct solve grows rapidly
-!! with problem size, care should be taken when refining the mesh (a mesh with 6337 cells required ~6 GB).
+!! \note With the p-multigrid preconditioner used in this example (see \ref doc_thickcurr_torus_ex_input_xml)
+!! the example requires approximately 2.5 GB of memory and takes approximately XXRUNTIMEXX minutes to run in
+!! serial with SuperLU, of which approximately XXEIGTIMEXX minutes are spent in the eigenvalue solve.
 !!
 !!\section doc_thickcurr_torus_ex_code Code Walk Through
 !!
@@ -208,10 +208,11 @@ INTEGER(4) :: i,ierr,io_unit,minlev,toplev
 INTEGER(4) :: order = 2
 INTEGER(4) :: nev = 4
 REAL(8) :: B0 = 1.d-1
+REAL(8) :: eig_shift = 1.d-1
 LOGICAL :: run_eigs = .TRUE.
 LOGICAL :: run_td = .TRUE.
 LOGICAL :: plot_run = .FALSE.
-NAMELIST/thickcurr_torus_options/order,nev,B0,run_eigs,run_td,plot_run
+NAMELIST/thickcurr_torus_options/order,nev,B0,eig_shift,run_eigs,run_td,plot_run
 !!\subsubsection doc_thickcurr_torus_ex_driver_setup OFT Initialization
 !! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
@@ -267,10 +268,16 @@ END IF
 !!\subsubsection doc_thickcurr_torus_ex_driver_eigs Compute decay times
 !!
 !! The slowest decay times are computed using \ref thick_wall::thickcurr_eigs "thickcurr_eigs", with
-!! the eigenmodes saved to the plot group `thickcurr_eigs` in the `eigs/` subdirectory.
+!! the eigenmodes saved to the plot group `thickcurr_eigs` in the `eigs/` subdirectory. By default, the
+!! eigenvalue solve uses the time step as a shift, which must be small enough to accurately resolve the
+!! time-dependent evolution. As the convergence of the eigenvalue solve is much faster with a shift
+!! comparable to the slowest decay time, a separate shift (`eig_shift`) is passed here. The LHS matrices
+!! and preconditioner are rebuilt for the eigenvalue solve and restored afterward for the time-dependent
+!! simulation. For this example, using `eig_shift=0.1` instead of the time step (`dt=1.E-2`) reduces the
+!! cost of the eigenvalue solve by approximately a factor of XXSPEEDUPXX.
 IF(run_eigs)THEN
   ALLOCATE(tau(nev))
-  CALL thickcurr_eigs(nev,tau,save_plot=.TRUE.)
+  CALL thickcurr_eigs(nev,tau,save_plot=.TRUE.,shift=eig_shift)
   IF(oft_env%head_proc)THEN
     WRITE(*,'(A)')'Slowest decay times [ms]'
     DO i=1,nev
@@ -359,13 +366,14 @@ END PROGRAM ThickCurr_torus
 !! order=2             ! FE order
 !! nev=4               ! Number of eigenvalues to compute
 !! B0=0.1              ! Initial vertical magnetic field [T]
+!! eig_shift=0.1       ! Shift for eigenvalue solve [s]
 !! run_eigs=T          ! Compute decay times?
 !! run_td=T            ! Run time-dependent simulation?
 !! plot_run=F          ! Run plotting only (from existing restart files)
 !!/
 !!
 !!&thickcurr_options
-!! dt=1.E-2            ! Time step [s] (also used as the shift for eigenvalue solves)
+!! dt=1.E-2            ! Time step [s]
 !! theta=1.0           ! Time centering (1 -> backward Euler)
 !! nsteps=100          ! Number of time steps to take
 !! rst_freq=5          ! Restart file frequency
@@ -380,7 +388,14 @@ END PROGRAM ThickCurr_torus
 !!
 !!\subsection doc_thickcurr_torus_ex_input_xml XML input file
 !!
-!! The torus is region 2 in the mesh (the vacuum region is region 1).
+!! The torus is region 2 in the mesh (the vacuum region is region 1). The preconditioner is a p-multigrid
+!! V-cycle (`type="mg"`) between the second-order (`order=2`) and linear FE levels on the same mesh. On the
+!! second-order level the smoother is two iterations of GMRES, preconditioned with block-Jacobi using
+!! 200 local blocks, each solved with a direct (LU) solver. On the linear (coarse) level a single block
+!! (`nlocal=1`) is used, which corresponds to a direct solve of the full coarse system. Compared to a direct
+!! solve of the full system, this approach greatly reduces the required memory and allows larger meshes
+!! to be used (eg. a direct solve on a 6337 cell mesh required ~6 GB, while the included mesh with p-multigrid
+!! requires ~2.5 GB). Typically, 7-15 GMRES iterations are required per time step.
 !!
 !!\verbatim
 !!~$ ./ThickCurr_torus oft.in oft_in.xml
@@ -388,7 +403,8 @@ END PROGRAM ThickCurr_torus
 !!
 ! OFT_DOC_INCLUDE: oft_in.xml
 !!
-!! \note As for \ref doc_thickcurr_slab_ex, a direct solver is used and this example should be run in serial.
+!! \note As the p-multigrid preconditioner uses a direct solver on the coarse level, this example should be
+!! run in serial.
 !!
 !!\section doc_thickcurr_torus_ex_post Post-Processing
 !!
@@ -398,7 +414,7 @@ END PROGRAM ThickCurr_torus
 !! torus (`torus_flux.hist`) and the magnetic energy (`thickcurr.hist`) as a function of time. Initially
 !! the flux decays slowly, as faster decaying modes redistribute the induced currents, after which the flux
 !! decays with the slowest decay time from the eigenvalue solve. With backward Euler time stepping the
-!! observed decay time is \f$ \Delta t / ln(1 + \Delta t / \tau) \approx 244.5 \f$ ms for the time step used
+!! observed decay time is \f$ \Delta t / ln(1 + \Delta t / \tau) \approx 244.9 \f$ ms for the time step used
 !! here, see \ref doc_thickcurr_slab_ex_post_hist.
 !!
 !!\verbatim

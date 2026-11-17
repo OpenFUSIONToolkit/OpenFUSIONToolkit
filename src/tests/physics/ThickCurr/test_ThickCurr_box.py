@@ -18,11 +18,11 @@ def write_mesh(nproc):
     return 2 if nproc > 1 else 1
 
 
-def run_decay(order, nproc=1, direct=True):
+def run_decay(order, nproc=1, direct=True, eig_shift=-1.0):
     nlevels = write_mesh(nproc)
     # Crank-Nicolson for second-order time accuracy (no stiff pseudo-vacuum modes here)
     assert thickcurr_setup('decay', MESH_FILE, 1, ETA, order=order, nlevels=nlevels, dt=1.E-3, theta=0.5,
-                           nsteps=20, rst_freq=10, direct=direct, nproc=nproc)
+                           nsteps=20, rst_freq=10, direct=direct, nproc=nproc, eig_shift=eig_shift)
     rate, shape_err = read_results()
     rate_exp = 1.0/box_tau(ETA, (1, 1, 0))
     retval = check_value("Decay rate", rate, rate_exp, 2.E-2)
@@ -32,10 +32,10 @@ def run_decay(order, nproc=1, direct=True):
     return retval
 
 
-def run_eigs(order, nproc=1):
+def run_eigs(order, nproc=1, dt=5.E-2, eig_shift=-1.0):
     nlevels = write_mesh(nproc)
-    assert thickcurr_setup('eigs', MESH_FILE, 1, ETA, order=order, nlevels=nlevels, dt=5.E-2, nev=5,
-                           nproc=nproc)
+    assert thickcurr_setup('eigs', MESH_FILE, 1, ETA, order=order, nlevels=nlevels, dt=dt, nev=5,
+                           nproc=nproc, eig_shift=eig_shift)
     tau = read_results()
     # Lowest modes: (1,1,0) family (3-fold degenerate), then (1,1,1) (2-fold, TE and TM)
     tau_exp = [box_tau(ETA, (1, 1, 0))]*3 + [box_tau(ETA, (1, 1, 1))]*2
@@ -74,3 +74,15 @@ def test_eigs(order):
     '''Slowest decay times of a conducting cube from the eigenvalue solver (thickcurr_eigs), compared with the
     analytic diffusion eigenvalues including their degeneracy.'''
     assert run_eigs(order)
+
+
+def test_eigs_shift():
+    '''Slowest decay times of a conducting cube using a shift for the eigenvalue solve that differs from the
+    time step (requires rebuilding the LHS matrices and updating the preconditioner).'''
+    assert run_eigs(2, dt=1.E-3, eig_shift=5.E-2)
+
+
+def test_decay_after_eigs():
+    '''Time advance of a conducting cube eigenmode after an eigenvalue solve with a different shift, checking
+    that the time advance operators are restored.'''
+    assert run_decay(2, eig_shift=5.E-2)

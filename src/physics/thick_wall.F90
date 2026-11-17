@@ -409,9 +409,8 @@ DO level=tc_level,tc_minlev,-1
   CALL thickcurr_ML_hcurl_grad%set_level(level,propogate=.TRUE.)
   CALL thickcurr_set_bcs(level)
   NULLIFY(tc_lhs(level)%m)
-  CALL thickcurr_build_mat(tc_lhs(level)%m,1.d0,tc_theta*tc_dt,.TRUE.,1.d0,.TRUE.)
 END DO
-CALL thickcurr_ML_hcurl_grad%set_level(tc_level,propogate=.TRUE.)
+CALL thickcurr_build_lhs(tc_theta*tc_dt)
 CALL thickcurr_build_mat(tc_kop,0.d0,1.d0,.FALSE.,0.d0,.TRUE.)
 CALL thickcurr_build_mat(tc_mcop,1.d0,0.d0,.FALSE.,0.d0,.FALSE.)
 CALL thickcurr_build_mat(tc_mop,1.d0,0.d0,.TRUE.,0.d0,.TRUE.)
@@ -626,6 +625,23 @@ DO i=1,linkage%nbe
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_add_bc_diag
+!------------------------------------------------------------------------------
+!> Build (or rebuild) the LHS matrices \f$ M_{\sigma} + \theta \Delta t K \f$ on all MG levels
+!!
+!! If the matrices already exist their values are replaced, but preconditioners
+!! must be updated separately (eg. `tc_solver%update`).
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_build_lhs(dt_eff)
+REAL(r8), INTENT(in) :: dt_eff !< Effective time step (\f$ \theta \Delta t \f$) [s]
+INTEGER(i4) :: level
+DEBUG_STACK_PUSH
+DO level=tc_level,tc_minlev,-1
+  CALL thickcurr_ML_hcurl_grad%set_level(level,propogate=.TRUE.)
+  CALL thickcurr_build_mat(tc_lhs(level)%m,1.d0,dt_eff,.TRUE.,1.d0,.TRUE.)
+END DO
+CALL thickcurr_ML_hcurl_grad%set_level(tc_level,propogate=.TRUE.)
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_build_lhs
 !------------------------------------------------------------------------------
 !> Construct a ThickCurr operator on the current FE level
 !!
@@ -1259,8 +1275,12 @@ END SUBROUTINE eig_amat_apply
 !! largest \f$ \mu = 1 / (1 + \theta \Delta t \lambda) \f$ using ARPACK, where \f$ P \f$
 !! is the \f$ M_{\sigma} \f$-orthogonal projection that removes gradients. This reuses
 !! the LHS matrix and linear solver from the time-dependent advance, so the time step
-!! `dt` acts as a shift and should be chosen to be comparable to the time constants
-!! of interest.
+!! \f$ \theta \Delta t \f$ acts as a shift and should be chosen to be comparable to the
+!! time constants of interest. A different shift can be specified with `shift`, in which
+!! case the LHS matrices are rebuilt (and preconditioners updated) for the eigenvalue solve
+!! and restored afterward. As the eigenvalues \f$ \mu \f$ of the slowest modes are better
+!! separated for larger shifts, using a shift comparable to the slowest decay time can
+!! significantly reduce the cost of the eigenvalue solve.
 !!
 !! @note Fields with no resistive decay (eg. toroidal flux in a perfectly conducting
 !! torus) have \f$ \mu = 1 \f$ and are returned with \f$ \tau = -1 \f$.
@@ -1269,16 +1289,18 @@ END SUBROUTINE eig_amat_apply
 !! `eigs/` subdirectory (so that they are not overwritten by other plot files), with the
 !! mode index used as the time.
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol)
+SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift)
 INTEGER(i4), INTENT(in) :: nev !< Number of eigenvalues to compute
 REAL(r8), INTENT(out) :: tau(nev) !< Decay times for each mode (largest first) [s]
 TYPE(oft_vector_ptr), OPTIONAL, INTENT(inout) :: vecs(nev) !< Eigenvectors (optional, created if not associated)
 LOGICAL, OPTIONAL, INTENT(in) :: save_plot !< Save modes to plot file? (optional)
 REAL(r8), OPTIONAL, INTENT(in) :: tol !< Eigensolver tolerance (optional)
+REAL(r8), OPTIONAL, INTENT(in) :: shift !< Shift [s] (optional, default: \f$ \theta \Delta t \f$)
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
 INTEGER(i4), ALLOCATABLE :: sort_inds(:)
 REAL(r8) :: alam,mu,dt_eff,energy
+LOGICAL :: reshift
 REAL(r8), POINTER, DIMENSION(:) :: vslice
 CLASS(oft_vector), POINTER :: u,dadt
 TYPE(thickcurr_eig_amat), TARGET :: amat
@@ -1291,6 +1313,17 @@ IF(.NOT.tc_initialized)CALL thickcurr_setup
 do_plot=.FALSE.
 IF(PRESENT(save_plot))do_plot=save_plot
 dt_eff=tc_theta*tc_dt
+reshift=.FALSE.
+IF(PRESENT(shift))THEN
+  IF(shift<=0.d0)CALL oft_abort("Invalid shift, must be > 0","thickcurr_eigs",__FILE__)
+  reshift=(ABS(shift-dt_eff)>1.d-14*dt_eff)
+  dt_eff=shift
+END IF
+!---Rebuild LHS matrices and update preconditioner for requested shift
+IF(reshift)THEN
+  CALL thickcurr_build_lhs(dt_eff)
+  CALL tc_solver%update(.FALSE.)
+END IF
 CALL thickcurr_grad_proj_setup
 !------------------------------------------------------------------------------
 ! Setup eigensolver
@@ -1311,7 +1344,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,'(A)')'Starting ThickCurr eigenvalue solve'
   WRITE(*,'(2X,A,I6)')    'nev        = ',nev
-  WRITE(*,'(2X,A,ES11.3)')'Shift (dt) = ',dt_eff
+  WRITE(*,'(2X,A,ES11.3)')'Shift      = ',dt_eff
 END IF
 CALL arsolver%apply(u,alam)
 IF(arsolver%info<0)CALL oft_abort("Eigenvalue solve failed","thickcurr_eigs",__FILE__)
@@ -1377,6 +1410,11 @@ END IF
 CALL u%delete
 DEALLOCATE(u,sort_inds)
 CALL arsolver%delete
+!---Restore LHS matrices and preconditioner for time advance
+IF(reshift)THEN
+  CALL thickcurr_build_lhs(tc_theta*tc_dt)
+  CALL tc_solver%update(.FALSE.)
+END IF
 DEBUG_STACK_POP
 #else
 tau=0.d0

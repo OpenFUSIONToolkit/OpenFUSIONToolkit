@@ -19,13 +19,14 @@
  order=2           ! FE order
  nev=4             ! Number of eigenvalues to compute
  B0=0.1            ! Initial vertical magnetic field [T]
+ eig_shift=0.1     ! Shift for eigenvalue solve [s]
  run_eigs=T        ! Compute decay times?
  run_td=T          ! Run time-dependent simulation?
  plot_run=F        ! Run plotting only (from existing restart files)
 /
 
 &thickcurr_options
- dt=1.E-2          ! Time step [s] (also used as the shift for eigenvalue solves)
+ dt=1.E-2          ! Time step [s]
  theta=1.0         ! Time centering (1 -> backward Euler)
  nsteps=100        ! Number of time steps to take
  rst_freq=5        ! Restart file frequency

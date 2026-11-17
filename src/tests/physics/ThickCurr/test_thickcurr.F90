@@ -74,8 +74,9 @@ INTEGER(i4) :: order = 2
 INTEGER(i4) :: minlev = -1
 INTEGER(i4) :: nev = 5
 REAL(r8) :: box_size = 1.d0
+REAL(r8) :: eig_shift = -1.d0
 CHARACTER(LEN=8) :: test_case = 'decay'
-NAMELIST/test_thickcurr_options/order,minlev,nev,box_size,test_case
+NAMELIST/test_thickcurr_options/order,minlev,nev,box_size,eig_shift,test_case
 !------------------------------------------------------------------------------
 ! Initialize environment and grid
 !------------------------------------------------------------------------------
@@ -127,6 +128,12 @@ CASE('decay')
   CALL minv%apply(u,v)
   CALL b0%add(0.d0,1.d0,u)
   CALL thickcurr_diag(u,e0)
+  !---Eigenvalue solve with a different shift (time advance operators must be restored)
+  IF(eig_shift>0.d0)THEN
+    ALLOCATE(tau(1))
+    CALL thickcurr_eigs(1,tau,shift=eig_shift)
+    DEALLOCATE(tau)
+  END IF
   !---Advance in time
   CALL thickcurr_run(u,t_final=t_final)
   CALL thickcurr_diag(u,e1)
@@ -147,7 +154,11 @@ CASE('decay')
 !------------------------------------------------------------------------------
 CASE('eigs')
   ALLOCATE(tau(nev))
-  CALL thickcurr_eigs(nev,tau,save_plot=.TRUE.)
+  IF(eig_shift>0.d0)THEN
+    CALL thickcurr_eigs(nev,tau,save_plot=.TRUE.,shift=eig_shift)
+  ELSE
+    CALL thickcurr_eigs(nev,tau,save_plot=.TRUE.)
+  END IF
   IF(oft_env%head_proc)THEN
     OPEN(NEWUNIT=io_unit,FILE='thickcurr.results')
     DO i=1,nev

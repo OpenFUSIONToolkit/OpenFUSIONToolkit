@@ -85,6 +85,7 @@ OFT_IN_TEMPLATE = """
  order={order}
  minlev={minlev}
  nev={nev}
+ eig_shift={eig_shift}
  test_case='{test_case}'
 /
 
@@ -120,7 +121,8 @@ LU_PRE = """<pre type="block_jacobi">
 
 
 def thickcurr_setup(test_case, mesh_file, cond_reg, eta, order=2, nbase=1, nlevels=1, minlev=-1, nev=5,
-                    dt=1.E-3, theta=1.0, nsteps=10, rst_freq=5, direct=True, nproc=1, timeout=180):
+                    dt=1.E-3, theta=1.0, nsteps=10, rst_freq=5, direct=True, nproc=1, timeout=180,
+                    eig_shift=-1.0):
     '''Write input files and run the ThickCurr test program'''
     os.chdir(test_dir)
     for filename in ('thickcurr.results', 'thickcurr.hist'):
@@ -128,7 +130,7 @@ def thickcurr_setup(test_case, mesh_file, cond_reg, eta, order=2, nbase=1, nleve
             os.remove(filename)
     with open('oft.in', 'w+') as fid:
         fid.write(OFT_IN_TEMPLATE.format(nlevels=nlevels, nbase=nbase, mesh_file=mesh_file, order=order,
-                                         minlev=minlev, nev=nev, test_case=test_case, dt=dt, theta=theta,
+                                         minlev=minlev, nev=nev, eig_shift=eig_shift, test_case=test_case, dt=dt, theta=theta,
                                          nsteps=nsteps, rst_freq=rst_freq))
     with open('oft_in.xml', 'w+') as fid:
         fid.write(XML_TEMPLATE.format(cond_reg=cond_reg, eta=eta, pre=(LU_PRE if direct else '')))
