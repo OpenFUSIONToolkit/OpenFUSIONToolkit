@@ -92,7 +92,7 @@ def _shade(ax, window):
 
 def plot_stage1(s1, res, t_lim=(-2.05, 0.5)):
     """Stage-1 traces: coil currents, supply voltages, eddy currents, breakdown-region field, E_phi
-    and Leuer quantity, plasma current and flux."""
+    and Lloyd quantity, plasma current and flux."""
     c, m, t = s1.c, s1.m, res['t']
     bd = s1.scen['breakdown']
     used = np.abs(c.T).sum(axis=1) > 0
@@ -118,7 +118,7 @@ def plot_stage1(s1, res, t_lim=(-2.05, 0.5)):
     ax[4].plot(t[1:], res['E_pts'][1:].min(axis=1), 'C2', label='min $sE_\\phi$ over region [V/m]')
     ax[4].axhline(bd['E_min'], color='C2', ls=':')
     a2 = ax[4].twinx()
-    a2.semilogy(t[1:], np.maximum(res['leuer_pts'][1:].min(axis=1), 1e-1), 'k', lw=1)
+    a2.semilogy(t[1:], np.maximum(res['lloyd_pts'][1:].min(axis=1), 1e-1), 'k', lw=1)
     a2.axhline(bd['margin'] * bd['E_star'], color='k', ls=':')
     a2.set_ylabel('min $E_\\phi B_\\phi / B_p$ [V/m] (black)')
     ax[4].set(ylim=(-0.2, 3), title='breakdown criteria (dotted: required)'); ax[4].legend(fontsize=8, loc='upper left')
@@ -141,7 +141,7 @@ def nodal_flux(model, circuit, x, plasma=None, Ip=0.0):
 
 
 def field_maps(model, circuit, x, xdot, s, R_lim, Z_lim, n=61):
-    """|B_p|, E_phi and the Leuer quantity s E_phi B_phi / |B_p| on an R-Z grid (channel included)."""
+    """|B_p|, E_phi and the Lloyd quantity s E_phi B_phi / |B_p| on an R-Z grid (channel included)."""
     Rg, Zg = np.meshgrid(np.linspace(*R_lim, n), np.linspace(*Z_lim, n))
     pts = np.column_stack([Rg.ravel(), Zg.ravel()])
     f = eval_fields(model.gs, np.vstack([model.psi_u.T @ (circuit.U @ x), model.psi_u.T @ (circuit.U @ xdot)]), pts)
@@ -152,15 +152,15 @@ def field_maps(model, circuit, x, xdot, s, R_lim, Z_lim, n=61):
     Bp = np.hypot(f['Br'][0], f['Bz'][0]).reshape(Rg.shape)
     E = (-f['psi'][1] / pts[:, 0]).reshape(Rg.shape)
     return {'R': Rg, 'Z': Zg, 'Bp': Bp, 'E': E, 'psi': f['psi'][0].reshape(Rg.shape),
-            'leuer': s * E * np.abs(model.Bphi(Rg)) / np.maximum(Bp, 1e-12)}
+            'lloyd': s * E * np.abs(model.Bphi(Rg)) / np.maximum(Bp, 1e-12)}
 
 
 def plot_breakdown_map(ax, mp, g, region, threshold, title=''):
-    """|B_p| (colour, log scale), flux contours (grey) and the contour where the Leuer criterion
+    """|B_p| (colour, log scale), flux contours (grey) and the contour where the Lloyd criterion
     is exactly met (black): inside it the gas breaks down."""
     h = ax.pcolormesh(mp['R'], mp['Z'], mp['Bp'] * 1e3, norm=LogNorm(0.1, 100), cmap='viridis', shading='gouraud')
     ax.contour(mp['R'], mp['Z'], mp['psi'], 15, colors='w', linewidths=0.5, alpha=0.6)
-    ax.contour(mp['R'], mp['Z'], mp['leuer'], [threshold], colors='k', linewidths=2)
+    ax.contour(mp['R'], mp['Z'], mp['lloyd'], [threshold], colors='k', linewidths=2)
     R0, Z0, r = region
     ax.add_patch(plt.Circle((R0, Z0), r, fill=False, ls='--', ec='C3', lw=1.5))
     ax.plot(g.lim[:, 0], g.lim[:, 1], 'k', lw=1)
@@ -218,3 +218,17 @@ def plot_pulse(s1, ramp, res):
         a.set_xlabel('t [s]')
     fig.tight_layout()
     return fig
+
+
+def lcfs_distance(g, psi, psi_lcfs, pts, center):
+    """Distance [m] from each point in pts to the contour psi = psi_lcfs inside the limiter (the last
+    closed flux surface); of several pieces, the one around center (the magnetic axis) is used."""
+    fig, ax = plt.subplots()
+    polys = ax.tricontour(g.tri_in, psi, levels=[psi_lcfs]).get_paths()[0].to_polygons(closed_only=False)
+    plt.close(fig)
+    inside = [q for q in polys if len(q) > 2 and Path(q).contains_point(center)]
+    q = max(inside or polys, key=len)
+    a, b = q[:-1], q[1:]                                 # segments of the contour polyline
+    ab = b - a
+    tt = np.clip(np.einsum('ijk,jk->ij', pts[:, None, :] - a[None], ab) / np.maximum((ab ** 2).sum(axis=1), 1e-30), 0, 1)
+    return np.linalg.norm(pts[:, None, :] - (a[None] + tt[..., None] * ab[None]), axis=2).min(axis=1)

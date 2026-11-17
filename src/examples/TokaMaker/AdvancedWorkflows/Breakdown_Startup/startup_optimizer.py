@@ -190,7 +190,7 @@ class StartupProblem:
 
     def __init__(self, machine, circuit, scen):
         self.m, self.c, self.scen = machine, circuit, scen
-        self.s = float(scen.get('ip_sign', 1.0))
+        self.s = 1.0                                     # sign of I_p and E_phi: positive I_p only
         self.t = time_grid(scen['time'])
         rg = scen['region']
         self.pts = disk_points(rg['R'], rg['Z'], rg['radius'], rg['n_rings'], rg['n_per_ring'])
@@ -251,7 +251,7 @@ class StartupProblem:
         P.le({V: sp.eye(N * nv)}, np.tile(c.V_max, N), tag='V_max')
         P.le({V: -sp.eye(N * nv)}, np.tile(c.V_max, N), tag='V_min')
 
-        # --- breakdown window: E_phi floor and the Leuer criterion at every region point
+        # --- breakdown window: E_phi floor and the Lloyd criterion at every region point
         bd = scen['breakdown']
         w0, w1 = bd['window']
         self.K = [k for k in range(1, N + 1) if t[k - 1] >= w0 - 1e-12 and t[k] <= w1 + 1e-12]
@@ -267,7 +267,7 @@ class StartupProblem:
                 for p in range(np_):
                     a = self.Bphi[p] / (bd['margin'] * bd['E_star'])
                     P.soc({I0: a * Ei[p:p + 1], V: a * Ev[p:p + 1]}, 0.0,
-                          {I0: np.vstack([Bri[p], Bzi[p]]), V: np.vstack([Brv[p], Bzv[p]])}, [0, 0], tag='leuer')
+                          {I0: np.vstack([Bri[p], Bzi[p]]), V: np.vstack([Brv[p], Bzv[p]])}, [0, 0], tag='lloyd')
 
         # --- early plasma channel
         eip = np.zeros((1, nx)); eip[0, c.ip] = 1.0
@@ -277,7 +277,8 @@ class StartupProblem:
                   V: -self.s * eip @ (self.Gv[k] - self.Gv[k - 1])}, [0.0], tag='Ip_mono')
         P.eq({I0: self.s * eip @ self.Gi[N], V: self.s * eip @ self.Gv[N]}, [pl['Ip_target']], tag='Ip_target')
         Rc, a = pl['Rc'], pl['a']
-        kf = MU0 / (4 * np.pi * Rc) * (np.log(8 * Rc / a) + pl['li'] / 2 - 1.5)   # B_v,req = -kf I_p
+        # Shafranov: B_v,req = -kf I_p, kf = mu0/(4 pi Rc) (ln(8 Rc/a) + beta_p + l_i/2 - 3/2)
+        kf = MU0 / (4 * np.pi * Rc) * (np.log(8 * Rc / a) + pl.get('beta_p', 0.0) + pl['li'] / 2 - 1.5)
         fb = pl['force_balance']
         nlo, nhi = pl['decay_index']
         for k in Kp:
@@ -314,6 +315,8 @@ class StartupProblem:
 
     def solve(self):
         st = self.P.solve()
+        if not solved(st):
+            raise RuntimeError(f'stage-1 convex program not solved: {st}')
         self.load(self.P)
         return st
 
@@ -334,7 +337,7 @@ class StartupProblem:
         self.x = np.array([self.Gi[k] @ i0 + self.Gv[k] @ vv for k in range(N + 1)])
 
     def results(self):
-        """Trajectories: currents, voltages, region fields, Leuer quantity, channel quantities."""
+        """Trajectories: currents, voltages, region fields, Lloyd quantity, channel quantities."""
         c, m, t, x = self.c, self.m, self.t, self.x
         xdot = np.zeros_like(x)
         xdot[1:] = np.diff(x, axis=0) / np.diff(t)[:, None]           # interval averages
@@ -344,7 +347,7 @@ class StartupProblem:
                 'I_struct': x[:, c.ncirc:c.ncirc + m.ns], 'Ip': x[:, c.ip], 'Te': self.Te,
                 'flux_ref_Wb': 2 * np.pi * self.s * (self.Cref @ x.T).ravel(),
                 'E_pts': (self.s * E).T, 'B_pts': B.T,
-                'leuer_pts': (self.s * E * self.Bphi[:, None] / np.maximum(B, 1e-12)).T,
+                'lloyd_pts': (self.s * E * self.Bphi[:, None] / np.maximum(B, 1e-12)).T,
                 'Bz_ext_c': (self.Cbz_c @ x.T).ravel(), 'Br_ext_c': (self.Cbr_c @ x.T).ravel(),
                 'n_c': -self.scen['plasma']['Rc'] * (self.Cdbz_c @ x.T).ravel()
                        / np.where(np.abs(self.Cbz_c @ x.T).ravel() > 0, (self.Cbz_c @ x.T).ravel(), np.nan),
@@ -405,7 +408,7 @@ class GSRamp:
         self.t = np.linspace(tc['t_start'], tc['t_end'], n + 1)
         self.Ip = interp_keys(rp['Ip'], self.t).ravel()
         self.shape = interp_keys(rp['shape'], self.t)            # R0, Z0, a, kappa, delta
-        self.s = 1.0                                             # (positive I_p only)
+        self.s = 1.0                                             # positive I_p only, as in stage 1
         if abs(stage1.t[-1] - self.t[0]) > 1e-9 or abs(stage1.s * stage1.x[-1, stage1.c.ip] - self.Ip[0]) > 0.02 * self.Ip[0]:
             raise ValueError('stage 1 must end where the ramp starts (same time and I_p)')
         self.sampler = UnitSampler(machine)
@@ -668,6 +671,22 @@ class GSRamp:
         finally:                                         # leave the TokaMaker instance clean
             gs.set_isoflux_constraints(None)
             gs.set_psi_dt(np.zeros(gs.np), 1.0e9)
+
+    def handoff_jump(self):
+        """Change of the plasma's flux linkage with the coils and structure at the hand-off, where
+        stage 1's uniform ring is replaced by the first TokaMaker equilibrium (same I_p). The ramp
+        does not model this jump. If it happened at once, flux conservation (M dx = -U^T dPhi)
+        would kick the currents by dx; the kicks are returned relative to the coil limits and to
+        the largest structure current at the hand-off."""
+        s1, nc = self.stage1, self.m.nc
+        Phi_ring = s1.plasma.M_u * s1.x[-1, s1.c.ip]
+        Phi_gs = self.sampler.linkage(self.m.gs, self.psi_p[0])
+        dPhi = Phi_gs - Phi_ring
+        dI = self.unit_currents((-self.c.Minv @ (self.c.U.T @ dPhi))[None, :])[0]
+        I0 = self.unit_currents(self.x0[None, :])[0]
+        return {'dPhi_rel': float(np.abs(dPhi).max() / np.abs(Phi_gs).max()),
+                'coil_kick_rel': float((np.abs(dI[:nc]) / np.abs(self.m.coil_lim).max(axis=1)).max()),
+                'struct_kick_rel': float(np.abs(dI[nc:]).max() / np.abs(I0[nc:]).max())}
 
     def summary(self):
         return {'flux_handoff_standalone_Wb': self.joint['flux_star_Wb'],

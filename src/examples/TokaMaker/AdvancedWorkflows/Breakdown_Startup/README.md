@@ -9,7 +9,7 @@ This folder contains an example of tokamak breakdown and start-up design with To
   Walks through the workflow step by step, explaining the code and the physics as it goes:
   1. Machine model: the vacuum vessel and blanket are cut into segments, which TokaMaker treats as coils, so it computes every inductance and field map.
   2. Circuit model, integrated exactly between time steps.
-  3. The start-up scenario: breakdown criteria (toroidal electric field and the Leuer field-line criterion), the early plasma channel, and the hardware limits.
+  3. The start-up scenario: breakdown criteria (toroidal electric field and the Lloyd field-line criterion), the early plasma channel, and the hardware limits.
   4. Stage 1, solved as one convex optimisation problem: premagnetisation, breakdown and the current rise to 100 kA.
   5. A check of the breakdown against the avalanche physics (connection length and Townsend criterion).
   6. Stage 2: a ramp of TokaMaker free-boundary equilibria, coupled to the circuit by Picard iteration and optimised jointly with stage 1.

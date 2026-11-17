@@ -294,7 +294,7 @@ class ChannelPlasma:
         L_p = mu0 Rc (ln(8 Rc/a) - 2 + l_i/2)       self-inductance of a ring
         M_u = 2 pi <psi_u>_channel                  mutual inductance with every coil and segment
         R_p = eta(Te) 2 pi Rc / (pi a^2)            Spitzer resistance,
-        eta = 5.2e-5 Zeff lnL / Te^1.5  [Ohm m, Te in eV]
+        eta = 5.2e-5 Zeff lnL / Te^1.5  [Ohm m, Te in eV]  parallel Spitzer (NRL Plasma Formulary)
     """
 
     def __init__(self, machine, Rc, Zc, a, li=0.5, Zeff=2.0, lnL=LN_LAMBDA):
@@ -348,7 +348,9 @@ def Te_burnthrough(t, t_bd, Te0=5.0, Te1=100.0, tau=0.1):
 
 # ============================================================================ breakdown physics
 TORR = 133.322          # Pa
-TOWNSEND_A = 510.0      # 1/(m Torr)   hydrogen, alpha = A p exp(-B p / E)
+# first Townsend coefficient of H2, alpha = A p exp(-B p / E); close to the values tabulated by
+# Raizer, Gas Discharge Physics (1991), A = 5 /(cm Torr), B = 130 V/(cm Torr)
+TOWNSEND_A = 510.0      # 1/(m Torr)
 TOWNSEND_B = 1.25e4     # V/(m Torr)
 
 
