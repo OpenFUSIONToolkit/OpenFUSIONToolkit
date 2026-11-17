@@ -1,3 +1,7 @@
+# TokaMaker cut-cell quadrature rule test
+oft_add_test( test_gs_cut_cell.F90 )
+configure_file( test_gs_cut_cell.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+
 # TokaMaker tests
 configure_file( tokamaker_testing.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_solovev.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
@@ -5,6 +9,7 @@ configure_file( test_TokaMaker_spheromak.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY
 configure_file( test_TokaMaker_coil.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_ITER.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_ITER_recon.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+configure_file( test_TokaMaker_cut_cells.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_LTX.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_bootstrap.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_bootstrap_internal.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
