@@ -61,7 +61,7 @@ USE multigrid, ONLY: multigrid_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr
 USE oft_deriv_matrices, ONLY: oft_noop_matrix
-USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_native_solvers, ONLY: oft_native_gmres_solver
 USE oft_solver_utils, ONLY: create_mlpre, create_pre_xml, create_diag_pre, &
   create_cg_solver
@@ -156,6 +156,17 @@ CONTAINS
   PROCEDURE :: interp => cond_interp_apply
 END TYPE thickcurr_cond_interp
 !------------------------------------------------------------------------------
+!> Boundary condition object that zeroes constrained DOFs on the current FE level,
+!! used by multigrid preconditioners
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(oft_solver_bc) :: thickcurr_mg_bc
+CONTAINS
+  !> Zero constrained DOFs
+  PROCEDURE :: apply => mg_bc_apply
+  !> Clean-up internal storage
+  PROCEDURE :: delete => mg_bc_delete
+END TYPE thickcurr_mg_bc
+!------------------------------------------------------------------------------
 !> Operator for eigenvalue solves, \f$ M_{\sigma} P \f$, where \f$ P \f$ is the
 !! \f$ M_{\sigma} \f$-orthogonal projection that removes the gradient null space
 !------------------------------------------------------------------------------
@@ -198,6 +209,7 @@ CLASS(oft_matrix), POINTER :: tc_mop => NULL() !< Conductivity weighted mass mat
 TYPE(oft_matrix_ptr), DIMENSION(fem_max_levels) :: tc_lhs !< LHS operator on each level
 CLASS(oft_solver), POINTER :: tc_solver => NULL() !< Linear solver for LHS
 TYPE(oft_ml_hcurl_grad_vecspace), POINTER :: tc_vecspace => NULL() !< ML vector space for MG
+TYPE(thickcurr_mg_bc), TARGET :: tc_mg_bc !< Boundary condition for MG preconditioner
 TYPE(xml_node) :: tc_root_node !< ThickCurr XML node
 TYPE(xml_node) :: tc_pre_node !< Preconditioner XML node
 !---Gradient projection (eigenvalue solves)
@@ -432,7 +444,7 @@ ELSE
   ALLOCATE(tc_vecspace)
   tc_vecspace%ML_FE_rep=>thickcurr_ML_hcurl_grad
   CALL create_mlpre(tc_solver%pre,ml_mats,levels,nlevels=nlevels,ml_vecspace=tc_vecspace, &
-    stype=2,nu=tc_nu(tc_minlev:tc_level),xml_root=tc_pre_node)
+    bc=tc_mg_bc,stype=2,nu=tc_nu(tc_minlev:tc_level),xml_root=tc_pre_node)
   DEALLOCATE(levels,ml_mats)
 END IF
 tc_solver%pre%A=>tc_lhs(tc_level)%m
@@ -773,6 +785,20 @@ CALL a%restore_local(vals,2)
 DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_zerob
+!------------------------------------------------------------------------------
+!> Zero constrained DOFs on the current FE level (for MG preconditioners)
+!------------------------------------------------------------------------------
+SUBROUTINE mg_bc_apply(self,a)
+CLASS(thickcurr_mg_bc), INTENT(inout) :: self !< Boundary condition object
+CLASS(oft_vector), INTENT(inout) :: a !< Vector
+CALL thickcurr_zerob(a)
+END SUBROUTINE mg_bc_apply
+!------------------------------------------------------------------------------
+!> Destroy boundary condition object (no internal storage)
+!------------------------------------------------------------------------------
+SUBROUTINE mg_bc_delete(self)
+CLASS(thickcurr_mg_bc), INTENT(inout) :: self !< Boundary condition object
+END SUBROUTINE mg_bc_delete
 !------------------------------------------------------------------------------
 !> Prepare a vector potential for use in ThickCurr
 !!
