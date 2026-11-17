@@ -23,10 +23,11 @@ oft_in_template = """
 
 &cube_options
  mesh_type=1
+ ref_per={2}
 /
 """
 
-def run_native_la(nprocs):
+def run_native_la(nprocs, ref_per='F,F,F'):
     # Distributed runs decompose the base mesh and refine once more
     nlevels = 3
     nbase = 3
@@ -34,7 +35,7 @@ def run_native_la(nprocs):
         nlevels = 4
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nlevels, nbase))
+        fid.write(oft_in_template.format(nlevels, nbase, ref_per))
     if not run_OFT("./test_native_la", nprocs, 60):
         return False
     with open('native_la.results', 'r') as fid:
@@ -66,3 +67,25 @@ def test_native_la_mpi4():
     copy, maxpy, mdot (real and complex) and boundary condition operators with interface DOFs
     shared between 4 processes.'''
     assert run_native_la(4)
+
+# Periodic meshes hold several images of a shared entry on one process
+periodic_cases = [pytest.param('T,T,T', id='full'), pytest.param('T,F,F', id='partial')]
+
+@pytest.mark.parametrize('ref_per', periodic_cases)
+def test_native_la_periodic(ref_per):
+    '''All native LA checks on a periodic mesh (`ref_per` gives the periodic directions) on a single
+    process, including bitwise consistent summation stitching of periodic images.'''
+    assert run_native_la(1, ref_per)
+
+@pytest.mark.mpi
+@pytest.mark.parametrize('ref_per', periodic_cases)
+def test_native_la_periodic_mpi2(ref_per):
+    '''All native LA checks on a periodic mesh with 2 processes, where entries can have several images
+    on one process and copies on the other.'''
+    assert run_native_la(2, ref_per)
+
+@pytest.mark.mpi
+@pytest.mark.parametrize('ref_per', periodic_cases)
+def test_native_la_periodic_mpi4(ref_per):
+    '''All native LA checks on a periodic mesh with 4 processes.'''
+    assert run_native_la(4, ref_per)
