@@ -240,8 +240,9 @@ CALL a%borrow_local(aloc,OFT_ACCESS_READWRITE)
 !---
 if(this%mesh%igrnd(1)>0)aloc(this%mesh%igrnd(1))=0.d0
 if(this%mesh%igrnd(2)>0)aloc(this%mesh%igrnd(2))=0.d0
-!---The ground node is set on every process that holds it, so no sync is needed
-CALL a%release_local(aloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
+!---Sync even though the ground node is set on every process that holds it: callers (eg. divergence
+!---cleaning) pass vectors whose other shared values may differ by round-off (eg. periodic images)
+CALL a%release_local(aloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !------------------------------------------------------------------------------
