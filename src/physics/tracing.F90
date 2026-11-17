@@ -1531,12 +1531,12 @@ END SUBROUTINE tracer_rk_faces
 !! Each face coordinate (see \ref tracing::tracer_rk_faces "tracer_rk_faces") is extrapolated
 !! linearly, \f$ \lambda_i(t) = \lambda_i + t \nabla \lambda_i \cdot \dot{x} \f$, and the
 !! exit is where the first one reaches \f$ -\delta \f$, so that the point is just past the
-!! face. For faces shared with another domain \f$ \delta \f$ is replaced by `pmargin`.
-!! A point that is already past a face on the boundary of the global mesh is instead allowed
-!! to continue until it is clearly off the mesh (\f$ \lambda_i = -1.5 \f$ `offmesh_tol`), so
-!! that the trace leaves the domain promptly.
+!! face. For faces shared with another domain (`proc_face`) \f$ \delta \f$ is replaced by
+!! `pmargin`. A point that is already past any other face with no neighboring cell (boundary of
+!! the mesh, or periodic face) is instead allowed to continue by \f$ 1.5 \f$ `offmesh_tol` per step,
+!! so that it is clearly off the mesh and the trace leaves the domain promptly.
 !------------------------------------------------------------------------------
-FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin,pmargin) RESULT(texit)
+FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin,pmargin,proc_face) RESULT(texit)
 CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh containing cell
 INTEGER(i4), INTENT(in) :: cell !< Current cell
 REAL(r8), INTENT(in) :: f(4) !< Logical position in cell
@@ -1544,6 +1544,7 @@ REAL(r8), INTENT(in) :: gop(3,4) !< Gradients of logical coordinates
 REAL(r8), INTENT(in) :: dx(3) !< Velocity in physical coordinates
 REAL(r8), INTENT(in) :: margin !< Distance past the face \f$ \delta \f$ in logical coordinates
 REAL(r8), INTENT(in) :: pmargin !< Distance past faces shared with other domains in logical coordinates
+LOGICAL, INTENT(in) :: proc_face(:) !< Is each face shared with another domain? [nf]
 REAL(r8) :: texit !< Estimated exit time (`HUGE` if not leaving)
 INTEGER(i4) :: i,nf
 REAL(r8) :: rate,dist,fb(6),gb(3,6)
@@ -1554,12 +1555,10 @@ DO i=1,nf
   rate=DOT_PRODUCT(gb(:,i),dx)
   IF(rate>=0.d0)CYCLE
   dist=fb(i)
-  IF(mesh%lcc(i,cell)==0)THEN
-    IF(mesh%global%gbf(ABS(mesh%lcf(i,cell))))THEN ! Global boundary
-      IF(dist<=0.d0)dist=dist+1.5d0*offmesh_tol
-    ELSE ! Shared with another domain
-      dist=dist+pmargin-margin
-    END IF
+  IF(proc_face(i))THEN
+    dist=dist+pmargin-margin
+  ELSE IF(mesh%lcc(i,cell)==0)THEN ! Mesh boundary or periodic face
+    IF(dist<=0.d0)dist=1.5d0*offmesh_tol
   END IF
   texit=MIN(texit,(MAX(dist,0.d0)+margin)/(-rate))
 END DO
@@ -1810,12 +1809,17 @@ pmargin=margin
 IF(self%ml_mesh%nbase<self%ml_mesh%mgdim)pmargin=MAX(margin,rk_margin_proc)* &
   MAX(1.d0,self%ml_mesh%meshes(self%ml_mesh%nbase)%hrms/mesh%hrms)
 CALL tracer_rk_faces(mesh,f0,gop0,nf,fb0,gb)
-!---Faces shared with another domain
-DO i=1,nf
-  proc_face(i)=.FALSE.
-  IF(mesh%lcc(i,cell0)==0)proc_face(i)=(.NOT.mesh%global%gbf(ABS(mesh%lcf(i,cell0))))
-END DO
-texit=tracer_rk_texit(mesh,cell0,f0,gop0,dy0(1:3),margin,pmargin)
+!---Faces shared with another domain. Periodic faces are also not on the global boundary, and are
+!---not distinguished from shared faces here, so on periodic meshes all faces without a neighbor
+!---are treated as the mesh boundary (the trace stops at periodic faces and shared faces are
+!---crossed as when leaving the mesh).
+proc_face=.FALSE.
+IF(mesh%periodic%nper==0)THEN
+  DO i=1,nf
+    IF(mesh%lcc(i,cell0)==0)proc_face(i)=(.NOT.mesh%global%gbf(ABS(mesh%lcf(i,cell0))))
+  END DO
+END IF
+texit=tracer_rk_texit(mesh,cell0,f0,gop0,dy0(1:3),margin,pmargin,proc_face(1:nf))
 DO
   !---End the step just past the exit of the current cell
   h=MIN(self%h,texit)

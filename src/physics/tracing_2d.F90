@@ -583,7 +583,8 @@ END SUBROUTINE trace_setup_rk
 !> Advance the tracer by one accepted step of the Bogacki-Shampine 3(2) method
 !!
 !! The step is limited to end just past the point where a straight-line extrapolation
-!! of the current direction leaves the current cell. A step that is rejected by the
+!! of the current direction leaves the current cell. A step starting on a face it is crossing
+!! (within the tolerance of the cell search) starts in the neighboring cell instead. A step that is rejected by the
 !! error test, or whose stages leave the mesh, is retried with a smaller step size.
 !! If no acceptable step can be found the tracer is marked as having left the mesh
 !! (`cell=0`, `status=-4`).
@@ -599,6 +600,31 @@ REAL(r8) :: clip_min
 !---Save state at the start of the step
 cell0=self%cell; f0=self%f; gop0=self%gop; y0=self%y
 v0=self%v; dv0=self%dv
+!---A point on (or just past, within the tolerance of the cell search) a face it is crossing starts
+!---the step in the neighboring cell, so that the step is limited by the faces of that cell
+IF(cell0>0)THEN
+  IF(self%inv)THEN
+    dx(1)=dv0(1)*COS(self%t)-v0(1)*SIN(self%t)
+    dx(2)=dv0(1)*SIN(self%t)+v0(1)*COS(self%t)
+  ELSE
+    dx=dv0(1:2)
+  END IF
+  DO i=1,3
+    IF(f0(i)>0.d0)CYCLE
+    IF(self%mesh%lcc(i,cell0)==0)CYCLE
+    IF(gop0(1,i)*dx(1)+gop0(2,i)*dx(2)>=0.d0)CYCLE
+    self%cell=self%mesh%lcc(i,cell0)
+    CALL trace_rk_eval(self,self%t,v0,ytmp)
+    IF(self%cell==0)THEN ! Not found, continue from the current cell
+      self%cell=cell0; self%f=f0; self%gop=gop0; self%y=y0
+      self%v=v0; self%dv=dv0
+    ELSE
+      cell0=self%cell; f0=self%f; gop0=self%gop; y0=self%y
+      dv0=ytmp
+    END IF
+    EXIT
+  END DO
+END IF
 facmax=5.d0
 nfail=0
 clip_min=MAX(1.d-6,MIN(1.d-3,self%tol)) ! Overshoot past the estimated cell exit, relative to the nominal step
@@ -616,8 +642,8 @@ DO
     END IF
     texit=HUGE(1.d0)
     DO i=1,3
-      ! Faces the point is already on (or just past, within the tolerance of the cell search) are
-      ! crossed at the start of the step, so they do not limit it
+      ! Faces the point is already on (or just past) and not crossing into a neighbor (see above)
+      ! do not limit the step
       IF(f0(i)<=0.d0)CYCLE
       dl=gop0(1,i)*dx(1)+gop0(2,i)*dx(2)
       IF(dl<0.d0)texit=MIN(texit,-f0(i)/dl)

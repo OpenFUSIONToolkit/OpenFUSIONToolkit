@@ -1980,6 +1980,10 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF((settings%trace_type/=1).AND.(settings%trace_type/=3))THEN
+  CALL copy_string('Invalid "trace_type", must be 1 (LSODE) or 3 (Runge-Kutta)',error_str)
+  RETURN
+END IF
 oft_env%pm=settings%pm
 tMaker_obj%device%free=settings%free_boundary
 tMaker_obj%device%target_weights(1)=settings%ffp_target_weight
@@ -1990,10 +1994,6 @@ tMaker_obj%device%rmin=settings%rmin
 tMaker_obj%device%urf=settings%urf
 tMaker_obj%device%maxits=settings%maxits
 tMaker_obj%device%nl_tol=settings%nl_tol
-IF((settings%trace_type/=1).AND.(settings%trace_type/=3))THEN
-  CALL copy_string('Invalid "trace_type", must be 1 (LSODE) or 3 (Runge-Kutta)',error_str)
-  RETURN
-END IF
 tMaker_obj%device%trace_type=settings%trace_type
 tMaker_obj%mode=settings%mode
 IF(ASSOCIATED(tMaker_obj%gs_equil))tMaker_obj%gs_equil%mode=tMaker_obj%mode

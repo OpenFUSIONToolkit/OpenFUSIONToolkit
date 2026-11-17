@@ -33,6 +33,7 @@ oft_in_template = """
  mesh_type={3}
  rscale=2.d0,2.d0,2.d0
  shift=-1.d0,-1.d0,-1.d0
+ ref_per={7}
 /
 
 &test_tracing_options
@@ -44,7 +45,7 @@ oft_in_template = """
 """
 
 # Common setup function and process handling
-def tracing_setup(tracer_type, parallel=False, mesh_type=1, poincare=False, field_jump=0.0, tol=1.E-10):
+def tracing_setup(tracer_type, parallel=False, mesh_type=1, poincare=False, field_jump=0.0, tol=1.E-10, periodic=False):
     # Both give the same final mesh, as the level where the mesh is distributed is not refined
     if parallel:
         nlevels = 4
@@ -57,14 +58,17 @@ def tracing_setup(tracer_type, parallel=False, mesh_type=1, poincare=False, fiel
     poincare_flag = 'F'
     if poincare:
         poincare_flag = 'T'
+    ref_per = 'F,F,F'
+    if periodic:
+        ref_per = 'F,F,T'
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(nlevels, nbase, tracer_type, mesh_type, poincare_flag, field_jump, tol))
+        fid.write(oft_in_template.format(nlevels, nbase, tracer_type, mesh_type, poincare_flag, field_jump, tol, ref_per))
     return run_OFT("./test_tracing", nproc, 120)
 
 
 def jump_trace(parallel, mesh_type, tol):
-    '''Trace a field line with jumps in the axial field between cells and return its points'''
+    '''Trace a field line with jumps in the field strength between cells and return its points'''
     assert tracing_setup(4, parallel, mesh_type, field_jump=0.5, tol=tol)
     with h5py.File('trace_test', 'r') as fid:
         return np.asarray(fid['trace'])
@@ -89,6 +93,17 @@ def test_tracing(tracer_type, parallel, mesh_type):
 def test_poincare(tracer_type, parallel, mesh_type):
     '''Poincare section of several field lines (tracing_poincare), checked against the analytic crossings'''
     assert tracing_setup(tracer_type, parallel, mesh_type, poincare=True)
+
+# Mesh that is periodic in z: field lines are not continued across periodic faces, so the
+# line stops at z=1 as at the mesh boundary
+@pytest.mark.coverage
+@pytest.mark.parametrize("tracer_type", (1,4))
+@pytest.mark.parametrize("parallel", (False,True))
+@pytest.mark.parametrize("mesh_type", (1,2))
+def test_tracing_periodic(tracer_type, parallel, mesh_type):
+    '''Single field line on a mesh that is periodic in z, which stops at the periodic face'''
+    assert tracing_setup(tracer_type, parallel, mesh_type, periodic=True)
+
 
 # Field whose strength jumps at every cell face, as for finite element fields. The field line
 # is still the exact helix (checked by the test program), and the time along it (fourth
