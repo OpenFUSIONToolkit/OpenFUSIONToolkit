@@ -29,7 +29,7 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr, oft_local_mat, &
-  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
@@ -1173,7 +1173,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 real(r8) :: bcc(1),vol,det,goptmp(3,4)
-real(r8), pointer :: xloc(:)
+real(r8), pointer, contiguous :: xloc(:)
 real(r8), allocatable :: rop(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
@@ -1182,7 +1182,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1204,8 +1204,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project
 !------------------------------------------------------------------------------
@@ -1221,7 +1220,7 @@ class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,vol,goptmp(3,4)
-real(r8), pointer :: xloc(:)
+real(r8), pointer, contiguous :: xloc(:)
 real(r8), allocatable :: gop(:,:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1232,7 +1231,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,gop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1254,8 +1253,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,gop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project_div
 !------------------------------------------------------------------------------
@@ -1444,7 +1442,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,goptmp(3,4),vol
 real(r8), pointer, dimension(:,:) :: vectmp
-real(r8), pointer, dimension(:) :: vtmp
+real(r8), pointer, contiguous, dimension(:) :: vtmp
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1455,12 +1453,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 ALLOCATE(vectmp(3,lag_rep%ne))
 call x%set(0.d0)
-vtmp=>vectmp(1,:)
-CALL x%get_local(vtmp,1)
-vtmp=>vectmp(2,:)
-CALL x%get_local(vtmp,2)
-vtmp=>vectmp(3,:)
-CALL x%get_local(vtmp,3)
+vectmp=0.d0
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1487,12 +1480,11 @@ end do
 deallocate(j,rop)
 !$omp end parallel
 CALL lagrange_vector_repack(lag_rep,vectmp)
-vtmp=>vectmp(1,:)
-CALL x%restore_local(vtmp,1,add=.TRUE.,wait=.TRUE.)
-vtmp=>vectmp(2,:)
-CALL x%restore_local(vtmp,2,add=.TRUE.,wait=.TRUE.)
-vtmp=>vectmp(3,:)
-CALL x%restore_local(vtmp,3,add=.TRUE.)
+DO i=1,3
+  CALL x%borrow_local(vtmp,OFT_ACCESS_ACCUMULATE,i)
+  vtmp=vectmp(i,:)
+  CALL x%release_local(vtmp,OFT_ACCESS_ACCUMULATE,(i==3),i) ! Last block completes accumulation
+END DO
 deallocate(vectmp)
 DEBUG_STACK_POP
 end subroutine oft_lag_vproject
