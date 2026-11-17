@@ -21,7 +21,8 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon, qprof_backend, gs_fpol, gs_trace_tol
+  gs_get_qprof, gs_ani_press, gs_epsilon, qprof_backend, gs_fpol, gs_trace_tol, gs_plasma_cell_quad, &
+  gs_cut_cell_maxpts
 use oft_gs_contour, only: gs_fsa_contour
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
@@ -608,8 +609,12 @@ REAL(r8), INTENT(in) :: field_tmp(:) !< Flux function on @p psi_tmp
 INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
 REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
 INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
-INTEGER(i4) :: i,m,extrap_loc
+INTEGER(i4) :: i,m,extrap_loc,nq,ncut_max
 REAL(r8) :: area,psitmp(1),sgop(3,3)
+REAL(r8), ALLOCATABLE, TARGET :: cut_pts(:,:),cut_wts(:)
+REAL(r8), POINTER, DIMENSION(:,:) :: qpts
+REAL(r8), POINTER, DIMENSION(:) :: qwts
+LOGICAL :: cut_cells
 TYPE(gs_prof_interp) :: prof_interp_obj
 ! DEBUG_STACK_PUSH
 !---Setup
@@ -618,18 +623,31 @@ IF(PRESENT(extrap))extrap_loc=extrap
 result=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
-!$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
+cut_cells=self%device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+ncut_max=0
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(self%device%fe_rep%quad%np,self%nx_points)
+!$omp parallel private(m,psitmp,sgop,area,cut_pts,cut_wts,qpts,qwts,nq) reduction(+:result)
+ALLOCATE(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
+!$omp do
 do i=1,self%device%mesh%nc
   IF(self%device%mesh%reg(i)/=1)CYCLE
+  CALL gs_plasma_cell_quad(self,i,cut_cells,prof_interp_obj%psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
   !---Loop over quadrature points
-  do m=1,self%device%fe_rep%quad%np
-    call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
-    call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma (mode 4 gives 0 outside the LCFS or gs_test_bounds)
+  do m=1,nq
+    call self%device%mesh%jacobian(i,qpts(:,m),sgop,area)
+    IF(cut_cells)THEN ! Normalized psi, held at 0 outside the linearized LCFS
+      call prof_interp_obj%psi_eval%interp(i,qpts(:,m),sgop,psitmp)
+      psitmp(1)=MAX(psitmp(1)-self%plasma_bounds(1),0.d0)/(self%plasma_bounds(2)-self%plasma_bounds(1))
+    ELSE
+      call prof_interp_obj%interp(i,qpts(:,m),sgop,psitmp)
+      IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma (mode 4 gives 0 outside the LCFS or gs_test_bounds)
+    END IF
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),extrap_loc)
-    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
+    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*qwts(m)
   end do
 end do
+DEALLOCATE(cut_pts,cut_wts)
+!$omp end parallel
 !---Global reduction and cleanup
 result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
@@ -648,9 +666,13 @@ REAL(r8), INTENT(in) :: fields(nvals,nf) !< Fields on the nodes
 REAL(r8), INTENT(out) :: cum(nvals,nf) !< Integral over psi >= psi_tmp(k) of each field
 INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
 INTEGER(i4), PARAMETER :: nblk_cells=64 !< Cells per block (fixed-order sums, independent of the thread count)
-INTEGER(i4) :: i,m,k,ib,nblk,inds(2),extrap_loc
+INTEGER(i4) :: i,m,k,ib,nblk,inds(2),extrap_loc,nq,ncut_max
 REAL(r8) :: area,psitmp(1),sgop(3,3),facs(2)
 REAL(r8), ALLOCATABLE :: bins(:,:),bblk(:,:,:)
+REAL(r8), ALLOCATABLE, TARGET :: cut_pts(:,:),cut_wts(:)
+REAL(r8), POINTER, DIMENSION(:,:) :: qpts
+REAL(r8), POINTER, DIMENSION(:) :: qwts
+LOGICAL :: cut_cells
 TYPE(gs_prof_interp) :: prof_interp_obj
 extrap_loc=0
 IF(PRESENT(extrap))extrap_loc=extrap
@@ -659,22 +681,35 @@ ALLOCATE(bins(nvals,nf),bblk(nvals,nf,nblk))
 bblk=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
-!$omp parallel do private(i,m,psitmp,sgop,area,inds,facs) schedule(dynamic,1)
+cut_cells=self%device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+ncut_max=0
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(self%device%fe_rep%quad%np,self%nx_points)
+!$omp parallel private(i,m,psitmp,sgop,area,inds,facs,cut_pts,cut_wts,qpts,qwts,nq)
+ALLOCATE(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
+!$omp do schedule(dynamic,1)
 DO ib=1,nblk
   DO i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
     IF(self%device%mesh%reg(i)/=1)CYCLE
-    DO m=1,self%device%fe_rep%quad%np
-      CALL self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
-      CALL prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-      IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
+    CALL gs_plasma_cell_quad(self,i,cut_cells,prof_interp_obj%psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
+    DO m=1,nq
+      CALL self%device%mesh%jacobian(i,qpts(:,m),sgop,area)
+      IF(cut_cells)THEN ! Normalized psi, held at 0 outside the linearized LCFS
+        CALL prof_interp_obj%psi_eval%interp(i,qpts(:,m),sgop,psitmp)
+        psitmp(1)=MAX(psitmp(1)-self%plasma_bounds(1),0.d0)/(self%plasma_bounds(2)-self%plasma_bounds(1))
+      ELSE
+        CALL prof_interp_obj%interp(i,qpts(:,m),sgop,psitmp)
+        IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
+      END IF
       CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,extrap_loc)
       IF(inds(1)<=0)CYCLE
-      area=area*self%device%fe_rep%quad%wts(m)
+      area=area*qwts(m)
       ! Lower node inds(2) is the innermost surface enclosing this point
       bblk(inds(2),:,ib)=bblk(inds(2),:,ib)+(fields(inds(1),:)*facs(1)+fields(inds(2),:)*facs(2))*area
     END DO
   END DO
 END DO
+DEALLOCATE(cut_pts,cut_wts)
+!$omp end parallel
 bins=0.d0
 DO ib=1,nblk
   bins=bins+bblk(:,:,ib)

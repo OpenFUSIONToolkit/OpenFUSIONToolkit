@@ -18,6 +18,7 @@ class tokamaker_settings_cstruct(c_struct):
                 ("limited_only", c_bool),
                 ("dipole_mode", c_bool),
                 ("mirror_mode", c_bool),
+                ("lcfs_cut_cells", c_bool),
                 ("maxits", c_int),
                 ("mode", c_int),
                 ("trace_type", c_int),
