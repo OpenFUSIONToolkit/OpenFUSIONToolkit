@@ -36,8 +36,8 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
   oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
   OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_native_kernels
-USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_local, OFT_SCATTER_INSERT, &
-  OFT_SCATTER_ADD
+USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_delete, scatter_local, &
+  OFT_SCATTER_INSERT, OFT_SCATTER_ADD
 IMPLICIT NONE
 #include "local.h"
 private
@@ -180,6 +180,9 @@ end type native_diag_index
 !! - @ref native_pattern_release drops one reference; the pattern and everything it
 !!   owns are freed when the last reference is released. Deleting a matrix releases
 !!   its reference.
+!! - Reference count updates are atomic, so references may be taken and released from
+!!   different threads (eg. block matrices created in a parallel loop). Only the
+!!   thread releasing the last reference frees the pattern.
 !! - A pattern must not be modified once created; derived data (2-byte column list,
 !!   CSC index, diagonal locations, linkage) is built on first use and is valid for
 !!   the lifetime of the pattern.
@@ -290,7 +293,8 @@ end type oft_native_cmatrix
 !---------------------------------------------------------------------------------
 type, public, extends(oft_native_matrix) :: oft_native_submatrix
   integer(i4) :: slice = -1 !< Slice of parent matrix
-  integer(i4), pointer, dimension(:) :: lcmap => NULL() !< Column list
+  integer(i4), pointer, dimension(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz]
+  type(oft_scatter_plan) :: vplan !< Value gather plan from the parent's full values (built with `lcmap`)
   integer(i4), pointer, dimension(:) :: part => NULL() !< Column list
   class(oft_native_matrix), pointer :: parent => NULL() !< Parent matrix
 contains
@@ -2264,6 +2268,7 @@ END SUBROUTINE native_pattern_create
 SUBROUTINE native_pattern_retain(pattern)
 TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern
 IF(.NOT.ASSOCIATED(pattern))CALL oft_abort('Pattern not associated','native_pattern_retain',__FILE__)
+!$omp atomic update
 pattern%refcount=pattern%refcount+1
 END SUBROUTINE native_pattern_retain
 !---------------------------------------------------------------------------------
@@ -2274,11 +2279,14 @@ END SUBROUTINE native_pattern_retain
 !---------------------------------------------------------------------------------
 SUBROUTINE native_pattern_release(pattern)
 TYPE(oft_native_pattern), POINTER, INTENT(inout) :: pattern !< Pattern
-INTEGER(i4) :: i,j
+INTEGER(i4) :: i,j,nleft
 IF(.NOT.ASSOCIATED(pattern))RETURN
 DEBUG_STACK_PUSH
+!$omp atomic capture
 pattern%refcount=pattern%refcount-1
-IF(pattern%refcount<=0)THEN
+nleft=pattern%refcount
+!$omp end atomic
+IF(nleft<=0)THEN
   IF(ASSOCIATED(pattern%kr))DEALLOCATE(pattern%kr)
   IF(ASSOCIATED(pattern%lc))DEALLOCATE(pattern%lc)
   IF(ASSOCIATED(pattern%lc_small))DEALLOCATE(pattern%lc_small)
@@ -3483,10 +3491,11 @@ IF(.NOT.ASSOCIATED(self%lcmap))THEN
   DEALLOCATE(slice_map)
   CALL native_matrix_adopt_pattern(self)
   ALLOCATE(self%M(self%nnz))
+  CALL scatter_plan_setup_local(self%vplan,self%nnz,self%lcmap)
 END IF
 !---Get values
 CALL matrix_update_slice(parent)
-CALL nk_gather(self%nnz,self%lcmap,parent%Mfull,self%M)
+CALL scatter_local(self%vplan,parent%Mfull,self%M,OFT_SCATTER_INSERT)
 self%full_current=.FALSE.
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
@@ -3499,6 +3508,7 @@ class(oft_native_submatrix), intent(inout) :: self
 DEBUG_STACK_PUSH
 CALL mat_delete(self)
 IF(ASSOCIATED(self%lcmap))DEALLOCATE(self%lcmap)
+CALL scatter_plan_delete(self%vplan)
 IF(ASSOCIATED(self%part))NULLIFY(self%part)
 NULLIFY(self%parent)
 DEBUG_STACK_POP
