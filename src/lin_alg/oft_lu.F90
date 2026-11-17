@@ -84,6 +84,7 @@ TYPE :: superlu_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Col pointer (0-based indices)
   INTEGER(i4), POINTER, DIMENSION(:) :: csc_map => NULL() !< Col pointer (0-based indices)
   REAL(r8), POINTER, DIMENSION(:) :: csc_vals => NULL() !< Col pointer (0-based indices)
+  INTEGER(i4), POINTER, DIMENSION(:) :: lc_orig => NULL() !< Unpermuted copy of `lc` (SuperLU-DIST only)
 END TYPE superlu_struc
 !------------------------------------------------------------------------------
 !> STRUMPACK solver information
@@ -468,13 +469,7 @@ IF(.NOT.self%initialized)THEN
 #endif
     CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
-      ALLOCATE(self%superlu_struct%csc_map(A_native%nnz),self%superlu_struct%csc_vals(A_native%nnz))
-      csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
-      csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
-      CALL convert_csr_to_csc(csr_graph,csc_graph,self%superlu_struct%csc_map)
-      csc_graph%kr=csc_graph%kr-1; csc_graph%lc=csc_graph%lc-1
-      self%superlu_struct%kr=>csc_graph%kr; self%superlu_struct%lc=>csc_graph%lc
-      self%superlu_struct%csc_vals=mat_vals(self%superlu_struct%csc_map)
+      ! CSC graph is built at the first factorization
       mode=1
       nrhs=1
       CALL MPI_Comm_dup(MPI_COMM_SELF,self%superlu_struct%comm,ierr)
@@ -584,10 +579,12 @@ SELECT CASE(TRIM(self%package))
 CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
     IF(self%refactor)THEN
-      mode=3
-      IF(self%update_graph)THEN
-        DEALLOCATE(self%superlu_struct%csc_map,self%superlu_struct%csc_vals)
-        DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+      IF(self%update_graph.OR.(.NOT.ASSOCIATED(self%superlu_struct%lc_orig)))THEN
+        !---Build CSC graph and perform full factorization
+        IF(ASSOCIATED(self%superlu_struct%lc_orig))THEN
+          DEALLOCATE(self%superlu_struct%csc_map,self%superlu_struct%csc_vals)
+          DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc,self%superlu_struct%lc_orig)
+        END IF
         csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
         csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
         ALLOCATE(self%superlu_struct%csc_map(A_native%nnz))
@@ -595,7 +592,14 @@ CASE("superd")
         CALL convert_csr_to_csc(csr_graph,csc_graph,self%superlu_struct%csc_map)
         csc_graph%kr=csc_graph%kr-1; csc_graph%lc=csc_graph%lc-1
         self%superlu_struct%kr=>csc_graph%kr; self%superlu_struct%lc=>csc_graph%lc
+        ALLOCATE(self%superlu_struct%lc_orig(A_native%nnz))
+        self%superlu_struct%lc_orig=self%superlu_struct%lc
         mode=1
+      ELSE
+        !---Restore row indices, which the previous factorization (pdgssvx_ABglobal)
+        !---overwrote with their row-permuted values, and refactor with the same pattern
+        self%superlu_struct%lc=self%superlu_struct%lc_orig
+        mode=3
       END IF
       self%superlu_struct%csc_vals=mat_vals(self%superlu_struct%csc_map)
       !!$omp critical (superlu_solve)
@@ -963,8 +967,10 @@ SELECT CASE(TRIM(self%package))
     CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
     self%superlu_struct%grid_handle=C_NULL_PTR
     CALL MPI_COMM_FREE(self%superlu_struct%comm, ierr)
-    DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
-    DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+    IF(ASSOCIATED(self%superlu_struct%lc_orig))THEN
+      DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
+      DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc,self%superlu_struct%lc_orig)
+    END IF
     self%superlu_struct%comm=MPI_COMM_NULL
 #endif
 #ifdef HAVE_UMFPACK
