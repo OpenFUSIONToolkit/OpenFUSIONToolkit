@@ -19,7 +19,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
-  vector_extrapolate, oft_graph, oft_graph_ptr
+  vector_extrapolate, oft_graph, oft_graph_ptr, OFT_ACCESS_ACCUMULATE
 USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
 USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -550,8 +550,8 @@ type(oft_quad_type), pointer :: quad
 LOGICAL :: cyl_flag, incomp
 INTEGER(i4) :: i
 REAL(r8) :: diag_vals(5), B_0(3), gamma, eta(2)
-REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
-                              n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
+REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights,vtmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: T_res,n_res,psi_res,by_res,velx_res,vely_res,velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
 REAL(r8), POINTER, DIMENSION(:) :: psi_vac_weights
 quad=>oft_blagrange%quad
@@ -580,13 +580,13 @@ incomp = self%parent_sim%incomp
 
 !---Zero result and get storage array
 CALL b%set(0.d0)
-CALL b%get_local(n_res, 1)
-CALL b%get_local(velx_res, 2)
-CALL b%get_local(vely_res, 3)
-CALL b%get_local(velz_res, 4)
-CALL b%get_local(T_res, 5)
-CALL b%get_local(psi_res, 6)
-CALL b%get_local(by_res, 7)
+CALL b%borrow_local(n_res,OFT_ACCESS_ACCUMULATE,1)
+CALL b%borrow_local(velx_res,OFT_ACCESS_ACCUMULATE,2)
+CALL b%borrow_local(vely_res,OFT_ACCESS_ACCUMULATE,3)
+CALL b%borrow_local(velz_res,OFT_ACCESS_ACCUMULATE,4)
+CALL b%borrow_local(T_res,OFT_ACCESS_ACCUMULATE,5)
+CALL b%borrow_local(psi_res,OFT_ACCESS_ACCUMULATE,6)
+CALL b%borrow_local(by_res,OFT_ACCESS_ACCUMULATE,7)
 diag_vals=0.d0
 
 BLOCK
@@ -729,17 +729,16 @@ CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%parent_sim%psi_bc)
 CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%parent_sim%by_bc)
 
 !---Put results into full vector
-CALL b%restore_local(n_res,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(velx_res,2,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(vely_res,3,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(velz_res,4,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(T_res,5,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(psi_res,6,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(by_res,7,add=.TRUE.)
+CALL b%release_local(n_res,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL b%release_local(velx_res,OFT_ACCESS_ACCUMULATE,.FALSE.,2)
+CALL b%release_local(vely_res,OFT_ACCESS_ACCUMULATE,.FALSE.,3)
+CALL b%release_local(velz_res,OFT_ACCESS_ACCUMULATE,.FALSE.,4)
+CALL b%release_local(T_res,OFT_ACCESS_ACCUMULATE,.FALSE.,5)
+CALL b%release_local(psi_res,OFT_ACCESS_ACCUMULATE,.FALSE.,6)
+CALL b%release_local(by_res,OFT_ACCESS_ACCUMULATE,.TRUE.,7) ! Completes accumulation (sum across seams)
 self%diag_vals=oft_mpi_sum(diag_vals,5)
 !---Cleanup remaining storage
-DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
-        n_weights,vel_weights, T_weights, psi_weights, by_weights)
+DEALLOCATE(n_weights,vel_weights, T_weights, psi_weights, by_weights)
 DEALLOCATE(psi_vac_weights)
 end subroutine mfun_apply
 !---------------------------------------------------------------------------
@@ -757,8 +756,8 @@ INTEGER(i4) :: i,l
 REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
 REAL(r8) :: chi, eta(2), nu, D_diff, gamma, diag_vals(5), B_0(3), diag_vec(3)
-REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
-                              n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
+REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights,vtmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: T_res,n_res,psi_res,by_res,velx_res,vely_res,velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
 REAL(r8), POINTER, DIMENSION(:) :: psi_vac_weights
 quad=>oft_blagrange%quad
@@ -787,13 +786,13 @@ incomp = self%parent_sim%incomp
 
 !---Zero result and get storage array
 CALL b%set(0.d0)
-CALL b%get_local(n_res, 1)
-CALL b%get_local(velx_res, 2)
-CALL b%get_local(vely_res, 3)
-CALL b%get_local(velz_res, 4)
-CALL b%get_local(T_res, 5)
-CALL b%get_local(psi_res, 6)
-CALL b%get_local(by_res, 7)
+CALL b%borrow_local(n_res,OFT_ACCESS_ACCUMULATE,1)
+CALL b%borrow_local(velx_res,OFT_ACCESS_ACCUMULATE,2)
+CALL b%borrow_local(vely_res,OFT_ACCESS_ACCUMULATE,3)
+CALL b%borrow_local(velz_res,OFT_ACCESS_ACCUMULATE,4)
+CALL b%borrow_local(T_res,OFT_ACCESS_ACCUMULATE,5)
+CALL b%borrow_local(psi_res,OFT_ACCESS_ACCUMULATE,6)
+CALL b%borrow_local(by_res,OFT_ACCESS_ACCUMULATE,7)
 diag_vals=0.d0
 
 !!$omp parallel reduction(+:diag_vals)
@@ -1112,17 +1111,16 @@ CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%parent_sim%n_bc)
 CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%parent_sim%psi_bc)
 CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%parent_sim%by_bc)
 !---Put results into full vector
-CALL b%restore_local(n_res,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(velx_res,2,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(vely_res,3,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(velz_res,4,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(T_res,5,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(psi_res,6,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(by_res,7,add=.TRUE.)
+CALL b%release_local(n_res,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL b%release_local(velx_res,OFT_ACCESS_ACCUMULATE,.FALSE.,2)
+CALL b%release_local(vely_res,OFT_ACCESS_ACCUMULATE,.FALSE.,3)
+CALL b%release_local(velz_res,OFT_ACCESS_ACCUMULATE,.FALSE.,4)
+CALL b%release_local(T_res,OFT_ACCESS_ACCUMULATE,.FALSE.,5)
+CALL b%release_local(psi_res,OFT_ACCESS_ACCUMULATE,.FALSE.,6)
+CALL b%release_local(by_res,OFT_ACCESS_ACCUMULATE,.TRUE.,7) ! Completes accumulation (sum across seams)
 self%diag_vals=oft_mpi_sum(diag_vals,5)
 !---Cleanup remaining storage
-DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
-        n_weights,vel_weights, T_weights, psi_weights, by_weights)
+DEALLOCATE(n_weights,vel_weights, T_weights, psi_weights, by_weights)
 DEALLOCATE(psi_vac_weights)
 END SUBROUTINE nlfun_apply
 !---------------------------------------------------------------------------
