@@ -21,7 +21,9 @@ USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_map, map_list, &
   oft_matrix, oft_matrix_ptr, oft_cmatrix, oft_cmatrix_ptr, &
   oft_graph, oft_graph_ptr, oft_matrix_map
 USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
-  oft_native_matrix, oft_native_cmatrix, native_cvector_cast
+  oft_native_matrix, oft_native_cmatrix, native_cvector_cast, oft_native_pattern, &
+  native_pattern_create, native_pattern_retain, native_matrix_set_pattern
+USE oft_native_kernels, ONLY: nk_set, nk_scatter
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
   oft_petsc_matrix_cast
@@ -54,6 +56,14 @@ END INTERFACE create_vector
 !! @param[in] row_vec Vector representing matrix rows
 !! @param[in] col_vec Vector representing matrix columns
 !! @param[in] native Force native representation [optional]
+!! @param[in,out] pattern Cache for the non-zero pattern of native matrices [optional]
+!!
+!! When `pattern` is given and the matrix is native, the matrix shares that pattern
+!! if it is associated (`ingraphs` are then only checked for size), otherwise the
+!! pattern of the new matrix is returned in it with a reference held by the caller
+!! (release with @ref oft_native_la::native_pattern_release "native_pattern_release").
+!! The caller must ensure that a cached pattern is only reused with the same graphs
+!! and row/column vector spaces.
 !------------------------------------------------------------------------------
 INTERFACE create_matrix
   MODULE PROCEDURE create_matrix_real
@@ -401,12 +411,13 @@ END SUBROUTINE condense_stitch
 !---------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
 !---------------------------------------------------------------------------------
-SUBROUTINE create_matrix_real(mat,ingraphs,row_vec,col_vec,native)
+SUBROUTINE create_matrix_real(mat,ingraphs,row_vec,col_vec,native,pattern)
 CLASS(oft_matrix), POINTER, INTENT(inout) :: mat !< Resulting matrix
 TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing matix blocks
 CLASS(oft_vector), POINTER, INTENT(in) :: row_vec !< Vector representing matrix rows
 CLASS(oft_vector), POINTER, INTENT(in) :: col_vec !< Vector representing matrix columns
-LOGICAL, OPTIONAL, INTENT(in) :: native
+LOGICAL, OPTIONAL, INTENT(in) :: native !< Force native representation?
+TYPE(oft_native_pattern), POINTER, OPTIONAL, INTENT(inout) :: pattern !< Pattern cache (native only)
 LOGICAL :: force_native
 INTEGER(i4) :: i,j,ni,nj,offset,soffset
 INTEGER(i8) :: offsetg
@@ -491,14 +502,11 @@ CONTAINS
 !
 SUBROUTINE setup_native(this)
 TYPE(oft_native_matrix), INTENT(inout) :: this
-TYPE(oft_graph), POINTER :: outgraph
-CALL condense_graph(ingraphs,outgraph,this%map,row_vec%map,col_vec%map)
-this%nnz=outgraph%nnz
-this%kr=>outgraph%kr
-this%lc=>outgraph%lc
-DEALLOCATE(outgraph)
+TYPE(oft_native_pattern), POINTER :: new_pattern
+CALL native_setup_pattern(ingraphs,row_vec%map,col_vec%map,this%nr,this%nc,new_pattern,pattern)
+CALL native_matrix_set_pattern(this,new_pattern)
 ALLOCATE(this%M(this%nnz))
-this%M=0.d0
+CALL nk_set(this%nnz,0.d0,this%M)
 END SUBROUTINE setup_native
 #ifdef HAVE_PETSC
 SUBROUTINE setup_petsc(this)
@@ -569,12 +577,13 @@ END SUBROUTINE create_matrix_real
 !---------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
 !---------------------------------------------------------------------------------
-SUBROUTINE create_matrix_comp(mat,ingraphs,row_vec,col_vec,native)
+SUBROUTINE create_matrix_comp(mat,ingraphs,row_vec,col_vec,native,pattern)
 CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat !< Resulting matrix
 TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing matix blocks
 CLASS(oft_cvector), POINTER, INTENT(in) :: row_vec !< Vector representing matrix rows
 CLASS(oft_cvector), POINTER, INTENT(in) :: col_vec !< Vector representing matrix columns
-LOGICAL, OPTIONAL, INTENT(in) :: native
+LOGICAL, OPTIONAL, INTENT(in) :: native !< Force native representation?
+TYPE(oft_native_pattern), POINTER, OPTIONAL, INTENT(inout) :: pattern !< Pattern cache (native only)
 LOGICAL :: force_native
 INTEGER(i4) :: i,j,ni,nj,offset,soffset
 INTEGER(i8) :: offsetg
@@ -664,7 +673,7 @@ CONTAINS
 SUBROUTINE setup_native(this)
 TYPE(oft_native_cmatrix), INTENT(inout) :: this
 CLASS(oft_native_cvector), POINTER :: rowv,colv
-TYPE(oft_graph), POINTER :: outgraph
+TYPE(oft_native_pattern), POINTER :: new_pattern
 INTEGER(i4) :: ierr
 INTEGER(i8) :: gsize,gtmp,gmax,gmin
 !---Allocate and setup map structure
@@ -673,17 +682,10 @@ IF(.NOT.native_cvector_cast(rowv,row_vec))CALL oft_abort('"row_vec" is not a nat
 IF(.NOT.native_cvector_cast(colv,col_vec))CALL oft_abort('"col_vec" is not a native vector.', &
   'create_matrix_real',__FILE__)
 !---
-CALL condense_graph(ingraphs,outgraph,this%map,rowv%map,colv%map)
-this%nr=outgraph%nr
-this%nrg=outgraph%nrg
-this%nc=outgraph%nc
-this%ncg=outgraph%ncg
-this%nnz=outgraph%nnz
-this%kr=>outgraph%kr
-this%lc=>outgraph%lc
-DEALLOCATE(outgraph)
+CALL native_setup_pattern(ingraphs,rowv%map,colv%map,this%nr,this%nc,new_pattern,pattern)
+CALL native_matrix_set_pattern(this,new_pattern)
 ALLOCATE(this%M(this%nnz))
-this%M=0.d0
+CALL nk_set(this%nnz,(0.d0,0.d0),this%M)
 gtmp=this%nnz
 IF(rowv%stitch_info%full)THEN
   gsize=gtmp
@@ -700,6 +702,52 @@ ELSE
 END IF
 END SUBROUTINE setup_native
 END SUBROUTINE create_matrix_comp
+!---------------------------------------------------------------------------------
+!> Get the non-zero pattern for a native matrix from graphs, or from a pattern cache
+!!
+!! If `cache` is present and associated it is returned (after checking dimensions),
+!! otherwise a new pattern is built with @ref condense_graph. A new pattern is stored
+!! in `cache`, if present, with a reference held by the cache.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_setup_pattern(ingraphs,row_map,col_map,nr,nc,pattern,cache)
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing submatrices
+TYPE(oft_map), DIMENSION(:), INTENT(in) :: row_map !< Row block maps
+TYPE(oft_map), DIMENSION(:), INTENT(in) :: col_map !< Column block maps
+INTEGER(i4), INTENT(in) :: nr !< Expected number of rows
+INTEGER(i4), INTENT(in) :: nc !< Expected number of columns
+TYPE(oft_native_pattern), POINTER, INTENT(out) :: pattern !< Pattern for new matrix
+TYPE(oft_native_pattern), POINTER, OPTIONAL, INTENT(inout) :: cache !< Pattern cache
+TYPE(oft_graph), POINTER :: outgraph
+TYPE(oft_matrix_map), POINTER :: maps(:,:)
+INTEGER(i4) :: i,j,nnz
+DEBUG_STACK_PUSH
+IF(PRESENT(cache))THEN
+  IF(ASSOCIATED(cache))THEN
+    nnz=0
+    DO i=1,SIZE(ingraphs,DIM=1)
+      DO j=1,SIZE(ingraphs,DIM=2)
+        IF(ASSOCIATED(ingraphs(i,j)%g))nnz=nnz+ingraphs(i,j)%g%nnz
+      END DO
+    END DO
+    IF((cache%nr/=nr).OR.(cache%nc/=nc).OR.(cache%nnz/=nnz))CALL oft_abort( &
+      'Cached pattern does not match graphs','native_setup_pattern',__FILE__)
+    pattern=>cache
+    IF(oft_debug_print(3))WRITE(*,'(4X,A)')'Using cached matrix pattern'
+    DEBUG_STACK_POP
+    RETURN
+  END IF
+END IF
+CALL condense_graph(ingraphs,outgraph,maps,row_map,col_map)
+IF((outgraph%nr/=nr).OR.(outgraph%nc/=nc))CALL oft_abort('Graph size does not match vectors', &
+  'native_setup_pattern',__FILE__)
+CALL native_pattern_create(pattern,outgraph%nr,outgraph%nc,outgraph%kr,outgraph%lc,maps)
+DEALLOCATE(outgraph)
+IF(PRESENT(cache))THEN
+  cache=>pattern
+  CALL native_pattern_retain(cache)
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE native_setup_pattern
 !---------------------------------------------------------------------------------
 !> Remove redundant column indices from a CSR graph
 !---------------------------------------------------------------------------------
@@ -992,20 +1040,17 @@ CONTAINS
 !
 SUBROUTINE combine_native(this)
 TYPE(oft_native_matrix), INTENT(inout) :: this
-INTEGER(i4) :: i,j,ii,jj,jp,jn
-this%M=0.d0
+INTEGER(i4) :: i,j,jn
+CALL nk_set(this%nnz,0.d0,this%M)
 DO i=1,nr
   DO j=1,nc
     IF(.NOT.ASSOCIATED(mats(i,j)%m))CYCLE
     SELECT TYPE(cmat=>mats(i,j)%m)
       TYPE IS(oft_native_matrix)
-        DO ii=1,this%i_map(i)%n
-          jp=this%map(i,j)%kr(ii)
-          jn=this%map(i,j)%kr(ii+1)-1
-          DO jj=jp,jn
-            this%M(this%map(i,j)%lc_map(jj)) = cmat%M(jj)
-          END DO
-        END DO
+        !---Entries of block (i,j) are stored contiguously by row in the sub-matrix
+        jn=this%map(i,j)%kr(this%i_map(i)%n+1)-this%map(i,j)%kr(1)
+        IF(jn>0)CALL nk_scatter(jn,this%map(i,j)%lc_map(this%map(i,j)%kr(1):),cmat%M(this%map(i,j)%kr(1):), &
+          this%M)
     CLASS DEFAULT
       CALL oft_abort("Source matrix of different type","combine_matrices_real",__FILE__)
     END SELECT
@@ -1168,20 +1213,17 @@ CONTAINS
 !
 SUBROUTINE combine_native(this)
 TYPE(oft_native_cmatrix), INTENT(inout) :: this
-INTEGER(i4) :: i,j,ii,jj,jp,jn
-this%M=(0.d0,0.d0)
+INTEGER(i4) :: i,j,jn
+CALL nk_set(this%nnz,(0.d0,0.d0),this%M)
 DO i=1,nr
   DO j=1,nc
     IF(.NOT.ASSOCIATED(mats(i,j)%m))CYCLE
     SELECT TYPE(cmat=>mats(i,j)%m)
       TYPE IS(oft_native_cmatrix)
-        DO ii=1,this%i_map(i)%n
-          jp=this%map(i,j)%kr(ii)
-          jn=this%map(i,j)%kr(ii+1)-1
-          DO jj=jp,jn
-            this%M(this%map(i,j)%lc_map(jj)) = cmat%M(jj)
-          END DO
-        END DO
+        !---Entries of block (i,j) are stored contiguously by row in the sub-matrix
+        jn=this%map(i,j)%kr(this%i_map(i)%n+1)-this%map(i,j)%kr(1)
+        IF(jn>0)CALL nk_scatter(jn,this%map(i,j)%lc_map(this%map(i,j)%kr(1):),cmat%M(this%map(i,j)%kr(1):), &
+          this%M)
     END SELECT
   END DO
 END DO
