@@ -48,6 +48,13 @@ TYPE :: oft_seam
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: recv => NULL() !< Preallocated MPI recv arrays
   TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: csend => NULL() !< Preallocated MPI send arrays
   TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: crecv => NULL() !< Preallocated MPI recv arrays
+  !> Work array for real stitching [nbe] (allocated on first use)
+  !!
+  !! Like the send/recv arrays this is owned by the seam, so a given seam must not be
+  !! stitched concurrently from multiple threads. Allocatable (not pointer) so that a
+  !! copied seam never shares it with the original.
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: rwork
+  COMPLEX(c8), ALLOCATABLE, DIMENSION(:) :: cwork !< Work array for complex stitching [nbe] (see `rwork`)
 END TYPE oft_seam
 !---------------------------------------------------------------------------------
 !> Seam object pointer
@@ -333,12 +340,15 @@ DEBUG_STACK_POP
 end function global_norm1_c8
 !---------------------------------------------------------------------------------
 !> real(r8) implementation of \ref oft_stitching::oft_global_stitch
+!!
+!! Uses the persistent work array `rwork` of the seam, so a given seam must not be
+!! stitched concurrently from multiple threads (as for its send/recv arrays and
+!! MPI requests). Stitching different seams concurrently is safe without MPI.
 !---------------------------------------------------------------------------------
 subroutine global_stitch_r8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: up_method !< Stitching method (0 or 1)
+integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
 real(r8), intent(inout) :: a(:) !< Local data to be stitched
-real(r8), allocatable, dimension(:) :: atmp
 integer(i4) :: i,j,js,jn,elocal,active_procs,ierr
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
@@ -357,21 +367,28 @@ DO j=1,active_procs
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','global_stitch_r8',__FILE__)
 END DO
 #endif
-!---Extract boundary elements
-ALLOCATE(atmp(self%nbe))
-!$omp simd
-DO i=1,self%nbe
-  atmp(i)=a(self%lbe(i))
-END DO
-!---Zero unowned when synchronizing
+!---Extract boundary elements (zero unowned when synchronizing)
+IF(ALLOCATED(self%rwork))THEN
+  IF(SIZE(self%rwork)/=self%nbe)DEALLOCATE(self%rwork)
+END IF
+IF(.NOT.ALLOCATED(self%rwork))ALLOCATE(self%rwork(self%nbe))
 IF(up_method==0)THEN
   !$omp simd
   DO i=1,self%nbe
-    IF(.NOT.self%leo(i))atmp(i)=0.d0
+    IF(self%leo(i))THEN
+      self%rwork(i)=a(self%lbe(i))
+    ELSE
+      self%rwork(i)=0.d0
+    END IF
+  END DO
+ELSE
+  !$omp simd
+  DO i=1,self%nbe
+    self%rwork(i)=a(self%lbe(i))
   END DO
 END IF
-!---Create send arrays
-!$omp parallel private(j,js,jn,i,elocal,ierr)
+!---Fill send arrays (threaded only for large seams)
+!$omp parallel private(j,js,jn,i,elocal) if(self%nle>OFT_OMP_VTHRESH)
 #ifdef HAVE_MPI
 !$omp do
 DO j=1,active_procs
@@ -380,17 +397,8 @@ DO j=1,active_procs
   !$omp simd private(elocal)
   do i=js,jn
     elocal=self%lle(1,i)
-    self%send(j)%v(i-js+1)=atmp(elocal) ! Populate stitching array
+    self%send(j)%v(i-js+1)=self%rwork(elocal) ! Populate stitching array
   enddo
-  !---Start MPI Send
-  IF(self%send(j)%n==0)THEN ! Skip processors with no elements
-    self%send_reqs(j)=MPI_REQUEST_NULL
-  ELSE
-    !$omp critical
-    CALL MPI_ISEND(self%send(j)%v,self%send(j)%n,OFT_MPI_R8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
-    IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_r8',__FILE__)
-    !$omp end critical
-  END IF
 END DO
 !$omp end do nowait
 #endif
@@ -401,12 +409,26 @@ IF(up_method/=2)THEN
   !$omp simd private(elocal)
   do i=js,jn
     elocal=self%lle(1,i)
-    self%send(0)%v(i-js+1)=atmp(elocal) ! Populate stitching array
+    self%send(0)%v(i-js+1)=self%rwork(elocal) ! Populate stitching array
   enddo
 END IF
 !$omp end single
 !$omp end parallel
-atmp=0.d0
+!---Start MPI Sends from the calling thread (MPI is initialized with MPI_THREAD_FUNNELED)
+#ifdef HAVE_MPI
+DO j=1,active_procs
+  IF(self%send(j)%n==0)THEN ! Skip processors with no elements
+    self%send_reqs(j)=MPI_REQUEST_NULL
+  ELSE
+    CALL MPI_ISEND(self%send(j)%v,self%send(j)%n,OFT_MPI_R8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
+    IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_r8',__FILE__)
+  END IF
+END DO
+#endif
+!$omp simd
+DO i=1,self%nbe
+  self%rwork(i)=0.d0
+END DO
 !---Add couplings (always same order)
 #ifdef HAVE_MPI
 IF((active_procs>0).AND.(self%proc_split>0))THEN
@@ -418,7 +440,7 @@ IF((active_procs>0).AND.(self%proc_split>0))THEN
     jn=self%kle(j+1)-1
     do i=js,jn
       elocal=self%lle(1,i)
-      atmp(elocal)=atmp(elocal)+self%recv(j)%v(i-js+1) ! If linked sum values
+      self%rwork(elocal)=self%rwork(elocal)+self%recv(j)%v(i-js+1) ! If linked sum values
     enddo
   END DO
 END IF
@@ -426,12 +448,12 @@ END IF
 IF(up_method==0)THEN
   !$omp simd
   DO i=1,self%nbe
-    IF(self%leo(i))atmp(i)=atmp(i)+a(self%lbe(i))
+    IF(self%leo(i))self%rwork(i)=self%rwork(i)+a(self%lbe(i))
   END DO
 ELSE IF(up_method==1)THEN
   !$omp simd
   DO i=1,self%nbe
-    atmp(i)=atmp(i)+a(self%lbe(i))
+    self%rwork(i)=self%rwork(i)+a(self%lbe(i))
   END DO
 END IF
 !---Process local connectivity (Interaction is reverse)
@@ -440,7 +462,7 @@ IF(up_method/=2)THEN
   jn=self%kle(1)-1
   do i=js,jn
     elocal=self%lle(2,i)
-    atmp(elocal)=atmp(elocal)+self%send(0)%v(i-js+1) ! If linked sum values
+    self%rwork(elocal)=self%rwork(elocal)+self%send(0)%v(i-js+1) ! If linked sum values
   enddo
 END IF
 #ifdef HAVE_MPI
@@ -452,7 +474,7 @@ IF(active_procs>0)THEN
     jn=self%kle(j+1)-1
     do i=js,jn
       elocal=self%lle(1,i)
-      atmp(elocal)=atmp(elocal)+self%recv(j)%v(i-js+1) ! If linked sum values
+      self%rwork(elocal)=self%rwork(elocal)+self%recv(j)%v(i-js+1) ! If linked sum values
     enddo
   END DO
 END IF
@@ -460,9 +482,8 @@ END IF
 !---Move back to full array
 !$omp simd
 DO i=1,self%nbe
-  a(self%lbe(i))=atmp(i)
+  a(self%lbe(i))=self%rwork(i)
 END DO
-DEALLOCATE(atmp)
 !---Wait for all sends to complete
 #ifdef HAVE_MPI
 IF(active_procs>0)THEN
@@ -474,12 +495,15 @@ DEBUG_STACK_POP
 end subroutine global_stitch_r8
 !---------------------------------------------------------------------------------
 !> complex(c8) implementation of \ref oft_stitching::oft_global_stitch
+!!
+!! Uses the persistent work array `cwork` of the seam, so a given seam must not be
+!! stitched concurrently from multiple threads (as for its send/recv arrays and
+!! MPI requests). Stitching different seams concurrently is safe without MPI.
 !---------------------------------------------------------------------------------
 subroutine global_stitch_c8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: up_method !< Stitching method (0 or 1)
+integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
 COMPLEX(c8), intent(inout) :: a(:) !< Local data to be stitched
-COMPLEX(c8), allocatable, dimension(:) :: atmp
 integer(i4) :: i,j,js,jn,elocal,active_procs,ierr
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
@@ -498,21 +522,28 @@ DO j=1,active_procs
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','global_stitch_c8',__FILE__)
 END DO
 #endif
-!---Extract boundary elements
-ALLOCATE(atmp(self%nbe))
-!$omp simd
-DO i=1,self%nbe
-  atmp(i)=a(self%lbe(i))
-END DO
-!---Zero unowned when synchronizing
+!---Extract boundary elements (zero unowned when synchronizing)
+IF(ALLOCATED(self%cwork))THEN
+  IF(SIZE(self%cwork)/=self%nbe)DEALLOCATE(self%cwork)
+END IF
+IF(.NOT.ALLOCATED(self%cwork))ALLOCATE(self%cwork(self%nbe))
 IF(up_method==0)THEN
   !$omp simd
   DO i=1,self%nbe
-    IF(.NOT.self%leo(i))atmp(i)=0.d0
+    IF(self%leo(i))THEN
+      self%cwork(i)=a(self%lbe(i))
+    ELSE
+      self%cwork(i)=(0.d0,0.d0)
+    END IF
+  END DO
+ELSE
+  !$omp simd
+  DO i=1,self%nbe
+    self%cwork(i)=a(self%lbe(i))
   END DO
 END IF
-!---Create send arrays
-!$omp parallel private(j,js,jn,i,elocal,ierr)
+!---Fill send arrays (threaded only for large seams)
+!$omp parallel private(j,js,jn,i,elocal) if(self%nle>OFT_OMP_VTHRESH)
 #ifdef HAVE_MPI
 !$omp do
 DO j=1,active_procs
@@ -521,17 +552,8 @@ DO j=1,active_procs
   !$omp simd private(elocal)
   do i=js,jn
     elocal=self%lle(1,i)
-    self%csend(j)%v(i-js+1)=atmp(elocal) ! Populate stitching array
+    self%csend(j)%v(i-js+1)=self%cwork(elocal) ! Populate stitching array
   enddo
-  !---Start MPI Send
-  IF(self%csend(j)%n==0)THEN ! Skip processors with no elements
-    self%send_reqs(j)=MPI_REQUEST_NULL
-  ELSE
-    !$omp critical
-    CALL MPI_ISEND(self%csend(j)%v,self%csend(j)%n,OFT_MPI_C8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
-    IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_c8',__FILE__)
-    !$omp end critical
-  END IF
 END DO
 !$omp end do nowait
 #endif
@@ -542,12 +564,26 @@ IF(up_method/=2)THEN
   !$omp simd private(elocal)
   do i=js,jn
     elocal=self%lle(1,i)
-    self%csend(0)%v(i-js+1)=atmp(elocal) ! Populate stitching array
+    self%csend(0)%v(i-js+1)=self%cwork(elocal) ! Populate stitching array
   enddo
 END IF
 !$omp end single
 !$omp end parallel
-atmp=0.d0
+!---Start MPI Sends from the calling thread (MPI is initialized with MPI_THREAD_FUNNELED)
+#ifdef HAVE_MPI
+DO j=1,active_procs
+  IF(self%csend(j)%n==0)THEN ! Skip processors with no elements
+    self%send_reqs(j)=MPI_REQUEST_NULL
+  ELSE
+    CALL MPI_ISEND(self%csend(j)%v,self%csend(j)%n,OFT_MPI_C8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
+    IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_c8',__FILE__)
+  END IF
+END DO
+#endif
+!$omp simd
+DO i=1,self%nbe
+  self%cwork(i)=(0.d0,0.d0)
+END DO
 !---Add couplings (always same order)
 #ifdef HAVE_MPI
 IF((active_procs>0).AND.(self%proc_split>0))THEN
@@ -559,7 +595,7 @@ IF((active_procs>0).AND.(self%proc_split>0))THEN
     jn=self%kle(j+1)-1
     do i=js,jn
       elocal=self%lle(1,i)
-      atmp(elocal)=atmp(elocal)+self%crecv(j)%v(i-js+1) ! If linked sum values
+      self%cwork(elocal)=self%cwork(elocal)+self%crecv(j)%v(i-js+1) ! If linked sum values
     enddo
   END DO
 END IF
@@ -567,12 +603,12 @@ END IF
 IF(up_method==0)THEN
   !$omp simd
   DO i=1,self%nbe
-    IF(self%leo(i))atmp(i)=atmp(i)+a(self%lbe(i))
+    IF(self%leo(i))self%cwork(i)=self%cwork(i)+a(self%lbe(i))
   END DO
 ELSE IF(up_method==1)THEN
   !$omp simd
   DO i=1,self%nbe
-    atmp(i)=atmp(i)+a(self%lbe(i))
+    self%cwork(i)=self%cwork(i)+a(self%lbe(i))
   END DO
 END IF
 !---Process local connectivity (Interaction is reverse)
@@ -581,7 +617,7 @@ IF(up_method/=2)THEN
   jn=self%kle(1)-1
   do i=js,jn
     elocal=self%lle(2,i)
-    atmp(elocal)=atmp(elocal)+self%csend(0)%v(i-js+1) ! If linked sum values
+    self%cwork(elocal)=self%cwork(elocal)+self%csend(0)%v(i-js+1) ! If linked sum values
   enddo
 END IF
 #ifdef HAVE_MPI
@@ -593,7 +629,7 @@ IF(active_procs>0)THEN
     jn=self%kle(j+1)-1
     do i=js,jn
       elocal=self%lle(1,i)
-      atmp(elocal)=atmp(elocal)+self%crecv(j)%v(i-js+1) ! If linked sum values
+      self%cwork(elocal)=self%cwork(elocal)+self%crecv(j)%v(i-js+1) ! If linked sum values
     enddo
   END DO
 END IF
@@ -601,9 +637,8 @@ END IF
 !---Move back to full array
 !$omp simd
 DO i=1,self%nbe
-  a(self%lbe(i))=atmp(i)
+  a(self%lbe(i))=self%cwork(i)
 END DO
-DEALLOCATE(atmp)
 !---Wait for all sends to complete
 #ifdef HAVE_MPI
 IF(active_procs>0)THEN
@@ -813,6 +848,8 @@ IF(ASSOCIATED(self%csend))THEN
   END DO
   DEALLOCATE(self%csend,self%crecv)
 END IF
+IF(ALLOCATED(self%rwork))DEALLOCATE(self%rwork)
+IF(ALLOCATED(self%cwork))DEALLOCATE(self%cwork)
 DEBUG_STACK_POP
 end subroutine destory_seam
 end module oft_stitching
