@@ -1700,6 +1700,61 @@ end select
 DEBUG_STACK_POP
 end FUNCTION native_matrix_cast
 !---------------------------------------------------------------------------------
+!> Get the first row of one part of a non-zero balanced, contiguous row partition
+!!
+!! Rows are split into `nparts` contiguous ranges that each contain approximately
+!! the same number of non-zeros. Part `ipart` covers rows
+!! `native_row_split(kr,nr,ipart,nparts)` to `native_row_split(kr,nr,ipart+1,nparts)-1`,
+!! so the parts are disjoint and together cover all rows.
+!---------------------------------------------------------------------------------
+PURE FUNCTION native_row_split(kr,nr,ipart,nparts) RESULT(irow)
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
+INTEGER(i4), INTENT(in) :: ipart !< Part index (0-based, 0 <= ipart <= nparts)
+INTEGER(i4), INTENT(in) :: nparts !< Number of parts
+INTEGER(i4) :: irow !< First row in part (`nr+1` when `ipart>=nparts`)
+INTEGER(i4) :: ilow,ihigh,imid
+INTEGER(i8) :: nnz_target
+IF(ipart<=0)THEN
+  irow=1
+  RETURN
+ELSE IF(ipart>=nparts)THEN
+  irow=nr+1
+  RETURN
+END IF
+nnz_target=INT(kr(1),i8)+(INT(kr(nr+1)-kr(1),i8)*INT(ipart,i8))/INT(nparts,i8)
+!---First row whose entries start at or after the target
+ilow=1
+ihigh=nr+1
+DO WHILE(ilow<ihigh)
+  imid=(ilow+ihigh)/2
+  IF(INT(kr(imid),i8)<nnz_target)THEN
+    ilow=imid+1
+  ELSE
+    ihigh=imid
+  END IF
+END DO
+irow=ilow
+END FUNCTION native_row_split
+!---------------------------------------------------------------------------------
+!> Get the range of rows to be processed by the calling OpenMP thread
+!!
+!! Uses @ref native_row_split with one part per thread in the current team, so each
+!! thread processes a contiguous block of rows with a similar number of non-zeros.
+!! Outside of an active parallel region all rows are returned.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_thread_rows(kr,nr,ifirst,ilast)
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
+INTEGER(i4), INTENT(out) :: ifirst !< First row for this thread
+INTEGER(i4), INTENT(out) :: ilast !< Last row for this thread (`ilast<ifirst` if none)
+INTEGER(i4) :: ithread,nthreads
+ithread=omp_get_thread_num()
+nthreads=omp_get_num_threads()
+ifirst=native_row_split(kr,nr,ithread,nthreads)
+ilast=native_row_split(kr,nr,ithread+1,nthreads)-1
+END SUBROUTINE native_thread_rows
+!---------------------------------------------------------------------------------
 !> Compute matrix-vector product
 !!
 !! b = self * a
@@ -1709,7 +1764,7 @@ class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source vector
 class(oft_vector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j
+integer(i4) :: i,j,ifirst,ilast
 real(r8) :: tmp
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
@@ -1733,11 +1788,11 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=0.d0
+!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
+!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
 IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=0.d0
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
@@ -1745,8 +1800,7 @@ IF(ASSOCIATED(self%lc_small))THEN
     btmp(i)=tmp
   end do
 ELSE
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-   do i=1,self%nr
+  do i=ifirst,ilast
     tmp=0.d0
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(self%lc(j))
@@ -1754,6 +1808,7 @@ ELSE
     btmp(i)=tmp
   end do
 END IF
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -1772,7 +1827,7 @@ class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j
+integer(i4) :: i,j,ifirst,ilast
 complex(c8) :: tmp
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
@@ -1796,11 +1851,11 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=(0.d0,0.d0)
+!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
+!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
 IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
@@ -1808,8 +1863,7 @@ IF(ASSOCIATED(self%lc_small))THEN
     btmp(i)=tmp
   end do
 ELSE
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(self%lc(j))
@@ -1817,6 +1871,7 @@ ELSE
     btmp(i)=tmp
   end do
 END IF
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -2976,7 +3031,7 @@ class(oft_native_cmatrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j
+integer(i4) :: i,j,ifirst,ilast
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 complex(c8) :: tmp
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
@@ -3001,11 +3056,11 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=(0.d0,0.d0)
+!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
+!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
 IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
@@ -3013,8 +3068,7 @@ IF(ASSOCIATED(self%lc_small))THEN
     btmp(i)=tmp
   end do
 ELSE
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(self%lc(j))
@@ -3022,6 +3076,7 @@ ELSE
     btmp(i)=tmp
   end do
 END IF
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
@@ -3040,7 +3095,7 @@ class(oft_native_cmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
-integer(i4) :: i,j
+integer(i4) :: i,j,ifirst,ilast
 complex(c8) :: tmp
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
@@ -3064,11 +3119,11 @@ CLASS DEFAULT
   CALL b%get_local(btmp)
   dealloc_flags(2)=.TRUE.
 END SELECT
-!---Apply operator
-btmp=(0.d0,0.d0)
+!---Apply operator (every row of btmp is overwritten, so no zeroing is needed)
+!$omp parallel private(i,j,tmp,ifirst,ilast) if(self%nnz>OFT_OMP_VTHRESH)
+CALL native_thread_rows(self%kr,self%nr,ifirst,ilast)
 IF(ASSOCIATED(self%lc_small))THEN
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(INT(self%lc_small(j),4)+lc_offset)
@@ -3076,8 +3131,7 @@ IF(ASSOCIATED(self%lc_small))THEN
     btmp(i)=tmp
   end do
 ELSE
-  !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-  do i=1,self%nr
+  do i=ifirst,ilast
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(self%lc(j))
@@ -3085,6 +3139,7 @@ ELSE
     btmp(i)=tmp
   end do
 END IF
+!$omp end parallel
 IF(dealloc_flags(1))DEALLOCATE(atmp)
 IF(dealloc_flags(2))THEN
   CALL b%restore_local(btmp,wait=.TRUE.)
