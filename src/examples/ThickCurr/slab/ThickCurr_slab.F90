@@ -214,14 +214,17 @@ END IF
 !!\subsubsection doc_thickcurr_slab_ex_driver_ic Initial conditions
 !!
 !! For the time-dependent run we use the usual projection times mass inverse method to map our
-!! initial condition onto the H(Curl) + Grad(H^1) basis. The redundant vertex Grad(H^1) DOFs are
-!! zeroed before solving. As the perfectly conducting walls hold the tangential components of
-!! \f$ A \f$ on the boundary fixed in time, these components are also zeroed after the projection.
-!! Otherwise small projection errors on the boundary would support a (small) static field.
+!! initial condition onto the H(Curl) + Grad(H^1) basis. As the perfectly conducting walls hold the
+!! tangential components of \f$ A \f$ on the boundary fixed in time, the mass matrix is constructed
+!! with the `"zerob"` boundary condition so that these components are zero in the projected field.
+!! Otherwise small projection errors on the boundary would support a (small) static field. With this
+!! boundary condition (and also with `"none"`) the redundant vertex Grad(H^1) DOFs are also removed
+!! from the mass matrix, so both the boundary and vertex Grad(H^1) components of the RHS must be zeroed
+!! before solving.
 IF(run_td)THEN
   !---Generate mass matrix
   NULLIFY(mop) ! Ensure the matrix is unallocated (pointer is NULL)
-  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"none") ! Construct mass matrix with "none" BC
+  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"zerob") ! Construct mass matrix with "zerob" BC
   !---Setup linear solver
   CALL create_cg_solver(minv)
   minv%A=>mop ! Set matrix to be solved
@@ -234,10 +237,10 @@ IF(run_td)THEN
   init_field%mesh=>mg_mesh%mesh
   init_field%B0=B0
   CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,init_field,v)
+  CALL hcurl_grad_zerob%apply(v) ! Zero tangential components on boundary
   CALL hcurl_grad_gzerop%apply(v) ! Zero out redundant vertex degrees of freedom
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
-  CALL hcurl_grad_zerob%apply(u) ! Zero tangential components on boundary
   !---Cleanup objects used for projection
   CALL v%delete
   CALL mop%delete

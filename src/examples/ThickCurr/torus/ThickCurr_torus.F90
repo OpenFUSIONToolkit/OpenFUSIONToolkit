@@ -292,14 +292,16 @@ END IF
 !! The initial uniform vertical field is projected onto the H(Curl) + Grad(H^1) basis. Note that
 !! this field has a non-zero tangential vector potential (and normal magnetic field) on the outer
 !! boundary, which would be held fixed by the perfectly conducting wall, representing an externally
-!! applied field. Instead, these components are zeroed after the projection, which corresponds to the
-!! external field being switched off at \f$ t = 0 \f$. The field in the vacuum region then relaxes
+!! applied field. Instead, the mass matrix is constructed with the `"zerob"` boundary condition so that
+!! these components are zero in the projected field, which corresponds to the external field being
+!! switched off at \f$ t = 0 \f$. As in \ref doc_thickcurr_slab_ex, both the boundary and vertex Grad(H^1)
+!! components of the RHS must be zeroed before solving. The field in the vacuum region then relaxes
 !! rapidly, while the flux linked by the torus is initially conserved by the eddy currents induced in
 !! the torus, which then decay.
 IF(run_td)THEN
   !---Generate mass matrix
   NULLIFY(mop)
-  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"none")
+  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"zerob")
   !---Setup linear solver
   CALL create_cg_solver(minv)
   minv%A=>mop
@@ -312,10 +314,10 @@ IF(run_td)THEN
   init_field%mesh=>mg_mesh%mesh
   init_field%B0=B0
   CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,init_field,v)
+  CALL hcurl_grad_zerob%apply(v) ! Remove external field (zero tangential components on boundary)
   CALL hcurl_grad_gzerop%apply(v) ! Zero out redundant vertex degrees of freedom
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
-  CALL hcurl_grad_zerob%apply(u) ! Remove external field (zero tangential components on boundary)
   !---Cleanup objects used for projection
   CALL v%delete
   CALL mop%delete

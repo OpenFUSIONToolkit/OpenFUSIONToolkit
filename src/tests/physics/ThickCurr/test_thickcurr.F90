@@ -50,7 +50,7 @@ USE oft_h1_operators, ONLY: h1_setup_interp
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, &
-  oft_hcurl_grad_project, oft_hcurl_grad_gzerop
+  oft_hcurl_grad_project, oft_hcurl_grad_gzerop, oft_hcurl_grad_zerob
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE thick_wall, ONLY: thickcurr_ML_hcurl, thickcurr_ML_H1grad, thickcurr_ML_hcurl_grad, &
@@ -62,6 +62,7 @@ TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_H1,ML_H1grad,ML_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 TYPE(oft_hcurl_grad_gzerop) :: gzerop
+TYPE(oft_hcurl_grad_zerob) :: zerob
 TYPE(box_mode) :: init_field
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
@@ -109,7 +110,7 @@ SELECT CASE(TRIM(test_case))
 !------------------------------------------------------------------------------
 CASE('decay')
   NULLIFY(mop)
-  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"none")
+  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"zerob")
   CALL create_cg_solver(minv)
   minv%A=>mop
   minv%its=-3
@@ -118,11 +119,13 @@ CASE('decay')
   CALL ML_hcurl_grad%vec_create(u)
   CALL ML_hcurl_grad%vec_create(v)
   CALL ML_hcurl_grad%vec_create(b0)
-  !---Project initial mode (tangential component on boundary is zero to projection error)
+  !---Project initial mode (tangential component on boundary is zero)
   init_field%mesh=>mg_mesh%mesh
   init_field%L=box_size
   gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
+  zerob%ML_hcurl_grad_rep=>ML_hcurl_grad
   CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,init_field,v)
+  CALL zerob%apply(v)
   CALL gzerop%apply(v)
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
