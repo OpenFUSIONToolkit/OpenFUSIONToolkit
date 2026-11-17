@@ -30,7 +30,7 @@ USE oft_local
 USE oft_base
 USE oft_sort, ONLY: search_array, sort_array
 USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
-  oft_global_reduction, oft_global_norm1, oft_stitch_check
+  oft_global_reduction, oft_global_norm1, oft_stitch_check, seam_free_plan
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
@@ -2179,14 +2179,7 @@ IF(pattern%refcount<=0)THEN
     DEALLOCATE(pattern%map)
   END IF
   IF(ASSOCIATED(pattern%linkage))THEN
-    IF(ASSOCIATED(pattern%linkage%send))THEN
-      DO i=0,pattern%linkage%nproc_con
-        IF(ASSOCIATED(pattern%linkage%send(i)%v))DEALLOCATE(pattern%linkage%send(i)%v,pattern%linkage%recv(i)%v)
-        IF(ASSOCIATED(pattern%linkage%csend(i)%v))DEALLOCATE(pattern%linkage%csend(i)%v,pattern%linkage%crecv(i)%v)
-      END DO
-      DEALLOCATE(pattern%linkage%send,pattern%linkage%recv)
-      DEALLOCATE(pattern%linkage%csend,pattern%linkage%crecv)
-    END IF
+    CALL seam_free_plan(pattern%linkage)
     IF(ASSOCIATED(pattern%linkage%kle))DEALLOCATE(pattern%linkage%kle)
     IF(ASSOCIATED(pattern%linkage%lbe))DEALLOCATE(pattern%linkage%lbe)
     IF(ASSOCIATED(pattern%linkage%lle))DEALLOCATE(pattern%linkage%lle)
@@ -3160,8 +3153,6 @@ if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','native_mat
 __FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
-allocate(self%linkage%csend(0:self%linkage%nproc_con),self%linkage%crecv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
@@ -3189,13 +3180,6 @@ do i=0,self%linkage%nproc_con
       (/lrmaps(i)%le(lrmaps(i)%linktmp(2,isort(m+1))),-1/)
     END DO
   END IF
-  !---Allocate permanent stitching arrays
-  self%linkage%send(i)%n=ncon(i); self%linkage%recv(i)%n=ncon(i)
-  allocate(self%linkage%send(i)%v(self%linkage%send(i)%n))
-  allocate(self%linkage%recv(i)%v(self%linkage%recv(i)%n))
-  self%linkage%csend(i)%n=ncon(i); self%linkage%crecv(i)%n=ncon(i)
-  allocate(self%linkage%csend(i)%v(self%linkage%csend(i)%n))
-  allocate(self%linkage%crecv(i)%v(self%linkage%crecv(i)%n))
 end do
 DEALLOCATE(lsort,isort)
 !$omp end parallel

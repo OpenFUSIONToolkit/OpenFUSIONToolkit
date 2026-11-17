@@ -1270,7 +1270,6 @@ end do
 if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','fem_global_linkage',__FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
@@ -1292,10 +1291,6 @@ do i=0,self%linkage%nproc_con
     self%linkage%lle(:,m+self%linkage%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Allocate permanent stitching arrays
-  self%linkage%send(i)%n=j; self%linkage%recv(i)%n=j
-  allocate(self%linkage%send(i)%v(self%linkage%send(i)%n))
-  allocate(self%linkage%recv(i)%v(self%linkage%recv(i)%n))
 end do
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -2041,12 +2036,6 @@ CALL oft_abort("Distributed linkage requires MPI","bfem_global_linkage",__FILE__
   end do
   !---
   if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count(skip)','bfem_global_linkage',__FILE__)
-  !---
-  allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
-  do i=0,self%linkage%nproc_con
-    !---Allocate permanent stitching arrays
-    self%linkage%send(i)%n=0; self%linkage%recv(i)%n=0
-  end do
   IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
     CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
@@ -2258,7 +2247,6 @@ end do
 if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','bfem_global_linkage',__FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
@@ -2280,10 +2268,6 @@ do i=0,self%linkage%nproc_con
     self%linkage%lle(:,m+self%linkage%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Allocate permanent stitching arrays
-  self%linkage%send(i)%n=ncon(i); self%linkage%recv(i)%n=ncon(i)
-  allocate(self%linkage%send(i)%v(self%linkage%send(i)%n))
-  allocate(self%linkage%recv(i)%v(self%linkage%recv(i)%n))
 end do
 DEALLOCATE(lsort,isort)
 !$omp end parallel

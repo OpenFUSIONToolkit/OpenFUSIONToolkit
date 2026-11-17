@@ -13,6 +13,7 @@
 !---------------------------------------------------------------------------------
 MODULE oft_stitching
 USE oft_base
+USE oft_scatter
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------------
@@ -44,28 +45,30 @@ TYPE :: oft_seam
   INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send requests
   INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv requests
 #endif
-  TYPE(oft_1d_real), POINTER, DIMENSION(:) :: send => NULL() !< Preallocated MPI send arrays
-  TYPE(oft_1d_real), POINTER, DIMENSION(:) :: recv => NULL() !< Preallocated MPI recv arrays
-  TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: csend => NULL() !< Preallocated MPI send arrays
-  TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: crecv => NULL() !< Preallocated MPI recv arrays
-  !> Work array for real stitching [nbe] (allocated on first use)
+  !> Scatter plan for stitching (built on first use by \ref oft_stitching::seam_setup_plan
+  !! "seam_setup_plan"; owns the flat send/receive buffers and the MPI requests)
   !!
-  !! Like the send/recv arrays this is owned by the seam, so a given seam must not be
-  !! stitched concurrently from multiple threads. Allocatable (not pointer) so that a
-  !! copied seam never shares it with the original.
-  REAL(r8), ALLOCATABLE, DIMENSION(:) :: rwork
-  COMPLEX(c8), ALLOCATABLE, DIMENSION(:) :: cwork !< Work array for complex stitching [nbe] (see `rwork`)
-  !> Number of boundary elements with three or more contributions in summation stitching
-  !! (-1 until built on first use by \ref oft_stitching::seam_setup_multi)
+  !! A given seam must not be stitched concurrently from multiple threads. The plan
+  !! and the arrays below are allocatable components, so a copied seam never shares
+  !! them with the original.
+  TYPE(oft_scatter_plan) :: plan
+  INTEGER(i4) :: plan_nbe = -1 !< Value of `nbe` when the plan was built
+  INTEGER(i4) :: plan_nle = -1 !< Value of `nle` when the plan was built
+  LOGICAL :: plan_full = .FALSE. !< Value of `full` when the plan was built
+  LOGICAL, ALLOCATABLE, DIMENSION(:) :: smask !< Ownership of each packed plan entry
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kcon !< Pointer to contributions of each boundary element [nbe+1]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kloc !< First local-link contribution of each boundary element [nbe]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: icon !< Position of each contribution in the plan receive buffer
+  INTEGER(i4) :: nsingle = 0 !< Number of boundary elements with exactly one contribution
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lsingle !< Location in full vector of elements with one contribution [nsingle]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: isingle !< Position of their contribution in the plan receive buffer [nsingle]
+  !> Number of boundary elements with three or more values (own plus two or more
+  !! contributions), summed in ascending order (-1 until the plan is built)
   INTEGER(i4) :: nmulti = -1
-  INTEGER(i4) :: multi_max = 0 !< Maximum number of contributions to a boundary element
-  INTEGER(i4) :: multi_nbe = 0 !< Value of `nbe` when the contribution lists were built
-  INTEGER(i4) :: multi_nle = 0 !< Value of `nle` when the contribution lists were built
-  LOGICAL :: multi_full = .FALSE. !< Value of `full` when the contribution lists were built
-  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lmulti !< Boundary elements with three or more contributions [nmulti]
-  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kmulti !< Pointer to contribution lists [nmulti+1]
-  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: imulti !< Linkage index of each contribution
-  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: jmulti !< Linkage block (0 for local, otherwise processor) of each contribution
+  INTEGER(i4) :: multi_max = 0 !< Maximum number of values of a boundary element
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lmulti !< Boundary elements with three or more values [nmulti]
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: rscratch !< Persistent scratch for real sorted sums [multi_max]
+  COMPLEX(c8), ALLOCATABLE, DIMENSION(:) :: cscratch !< Persistent scratch for complex sorted sums [multi_max]
 END TYPE oft_seam
 !---------------------------------------------------------------------------------
 !> Seam object pointer
@@ -356,604 +359,319 @@ IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_norm1_c8
 !---------------------------------------------------------------------------------
+!> Build the scatter plan and combination lists used by global stitching
+!!
+!! The plan (tag @ref oft_scatter_base::oft_tag_stitch "OFT_TAG_STITCH") sends the
+!! values of all linked boundary elements to each neighbour (`lsend`=`lrecv`, in
+!! linkage order) and holds the local (periodic) links as its local part, so after
+!! the exchange every contribution to a boundary element is in the plan's receive
+!! buffer. The contributions to each boundary element are listed by element (`kcon`,
+!! `icon`): remote contributions in neighbour order, then local links (from `kloc`).
+!! Elements with exactly one contribution are also listed in `lsingle`/`isingle`
+!! and elements with two or more (three or more values including their own) in
+!! `lmulti`. Rebuilt automatically when `nbe`, `nle` or `full` change.
+!---------------------------------------------------------------------------------
+subroutine seam_setup_plan(self)
+type(oft_seam), intent(inout) :: self !< Seam structure
+integer(i4) :: i,j,k,e,p,active_procs,nsend,nloc
+integer(i4), allocatable :: ksend(:),lsend(:),lsrc(:),ldst(:),bpos(:),kfill(:),kfill_loc(:),nrem(:)
+DEBUG_STACK_PUSH
+CALL seam_free_plan(self)
+active_procs=self%nproc_con
+IF(self%full)active_procs=0
+nsend=self%kle(active_procs+1)-self%kle(1)
+nloc=self%kle(1)-self%kle(0)
+!---Remote entries in linkage order, local links as local part
+ALLOCATE(ksend(active_procs+1),lsend(MAX(1,nsend)),lsrc(MAX(1,nloc)),ldst(MAX(1,nloc)))
+ALLOCATE(bpos(self%nle),self%smask(nsend+nloc))
+DO j=1,active_procs+1
+  ksend(j)=self%kle(j)-self%kle(1)+1
+END DO
+DO i=self%kle(1),self%kle(active_procs+1)-1
+  p=i-self%kle(1)+1
+  lsend(p)=self%lbe(self%lle(1,i))
+  bpos(i)=p
+END DO
+DO i=self%kle(0),self%kle(1)-1
+  k=i-self%kle(0)+1
+  lsrc(k)=self%lbe(self%lle(1,i))
+  ldst(k)=self%lbe(self%lle(2,i))
+  bpos(i)=nsend+k
+END DO
+!---Ownership of packed entries (synchronization by ownership sends zero for unowned)
+IF(ASSOCIATED(self%leo))THEN
+  DO i=self%kle(0),self%kle(active_procs+1)-1
+    self%smask(bpos(i))=self%leo(self%lle(1,i))
+  END DO
+ELSE
+  self%smask=.TRUE.
+END IF
+CALL scatter_plan_setup(self%plan,active_procs,self%proc_con(1:active_procs),ksend,lsend,ksend,lsend, &
+  nloc,lsrc,ldst,tag=OFT_TAG_STITCH)
+!---Contributions to each boundary element (remote in neighbour order, then local links)
+ALLOCATE(self%kcon(self%nbe+1),self%kloc(self%nbe),nrem(self%nbe))
+self%kcon=0
+nrem=0
+DO i=self%kle(1),self%kle(active_procs+1)-1
+  e=self%lle(1,i)
+  nrem(e)=nrem(e)+1
+  self%kcon(e+1)=self%kcon(e+1)+1
+END DO
+DO i=self%kle(0),self%kle(1)-1
+  e=self%lle(2,i) ! Local linkage is applied in reverse
+  self%kcon(e+1)=self%kcon(e+1)+1
+END DO
+self%kcon(1)=1
+DO e=1,self%nbe
+  self%kcon(e+1)=self%kcon(e+1)+self%kcon(e)
+  self%kloc(e)=self%kcon(e)+nrem(e)
+END DO
+ALLOCATE(self%icon(MAX(1,self%kcon(self%nbe+1)-1)),kfill(self%nbe),kfill_loc(self%nbe))
+kfill=self%kcon(1:self%nbe)
+kfill_loc=self%kloc
+DO i=self%kle(1),self%kle(active_procs+1)-1
+  e=self%lle(1,i)
+  self%icon(kfill(e))=bpos(i)
+  kfill(e)=kfill(e)+1
+END DO
+DO i=self%kle(0),self%kle(1)-1
+  e=self%lle(2,i)
+  self%icon(kfill_loc(e))=bpos(i)
+  kfill_loc(e)=kfill_loc(e)+1
+END DO
+!---Elements with one contribution and with two or more
+self%nsingle=0
+self%nmulti=0
+self%multi_max=0
+DO e=1,self%nbe
+  k=self%kcon(e+1)-self%kcon(e)
+  IF(k==1)self%nsingle=self%nsingle+1
+  IF(k>=2)self%nmulti=self%nmulti+1
+  self%multi_max=MAX(self%multi_max,k+1)
+END DO
+ALLOCATE(self%lsingle(MAX(1,self%nsingle)),self%isingle(MAX(1,self%nsingle)),self%lmulti(MAX(1,self%nmulti)))
+self%nsingle=0
+self%nmulti=0
+DO e=1,self%nbe
+  k=self%kcon(e+1)-self%kcon(e)
+  IF(k==1)THEN
+    self%nsingle=self%nsingle+1
+    self%lsingle(self%nsingle)=self%lbe(e)
+    self%isingle(self%nsingle)=self%icon(self%kcon(e))
+  ELSE IF(k>=2)THEN
+    self%nmulti=self%nmulti+1
+    self%lmulti(self%nmulti)=e
+  END IF
+END DO
+DEALLOCATE(ksend,lsend,lsrc,ldst,bpos,kfill,kfill_loc,nrem)
+self%plan_nbe=self%nbe
+self%plan_nle=self%nle
+self%plan_full=self%full
+DEBUG_STACK_POP
+end subroutine seam_setup_plan
+!---------------------------------------------------------------------------------
+!> Release the scatter plan and combination lists of a seam (rebuilt on next stitch)
+!---------------------------------------------------------------------------------
+subroutine seam_free_plan(self)
+type(oft_seam), intent(inout) :: self !< Seam structure
+CALL scatter_plan_delete(self%plan)
+IF(ALLOCATED(self%smask))DEALLOCATE(self%smask)
+IF(ALLOCATED(self%kcon))DEALLOCATE(self%kcon)
+IF(ALLOCATED(self%kloc))DEALLOCATE(self%kloc)
+IF(ALLOCATED(self%icon))DEALLOCATE(self%icon)
+IF(ALLOCATED(self%lsingle))DEALLOCATE(self%lsingle)
+IF(ALLOCATED(self%isingle))DEALLOCATE(self%isingle)
+IF(ALLOCATED(self%lmulti))DEALLOCATE(self%lmulti)
+IF(ALLOCATED(self%rscratch))DEALLOCATE(self%rscratch)
+IF(ALLOCATED(self%cscratch))DEALLOCATE(self%cscratch)
+self%nsingle=0
+self%nmulti=-1
+self%multi_max=0
+self%plan_nbe=-1
+end subroutine seam_free_plan
+!---------------------------------------------------------------------------------
+!> Check that the stitching plan of a seam is current, building it if needed
+!---------------------------------------------------------------------------------
+subroutine seam_check_plan(self)
+type(oft_seam), intent(inout) :: self !< Seam structure
+IF((.NOT.self%plan%setup).OR.(self%plan_nbe/=self%nbe).OR.(self%plan_nle/=self%nle) &
+  .OR.(self%plan_full.NEQV.self%full))CALL seam_setup_plan(self)
+end subroutine seam_check_plan
+!---------------------------------------------------------------------------------
 !> real(r8) implementation of \ref oft_stitching::oft_global_stitch
 !!
-!! Uses the persistent work array `rwork` of the seam, so a given seam must not be
-!! stitched concurrently from multiple threads (as for its send/recv arrays and
-!! MPI requests). Stitching different seams concurrently is safe without MPI.
+!! Values are exchanged with the seam's scatter plan (see @ref seam_setup_plan) and
+!! combined in place by boundary element:
+!! - method 0: unowned elements are set to the sum of the contributions, in which
+!!   only the owner's value is non-zero;
+!! - method 1: each element is incremented by its contribution if it has one, and
+!!   elements with three or more values (own plus two or more contributions) are set
+!!   to the sum of all values in ascending order, which every copy computes
+!!   identically;
+!! - method 2: each element is set to the sum of its remote contributions (local
+!!   links and its own value are not included), in neighbour order.
+!!
+!! The plan, its buffers and the sorted-sum scratch belong to the seam, so a given
+!! seam must not be stitched concurrently; MPI calls are made from the calling
+!! thread only.
 !---------------------------------------------------------------------------------
 subroutine global_stitch_r8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
 integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
 real(r8), intent(inout) :: a(:) !< Local data to be stitched
-integer(i4) :: i,j,js,jn,elocal,active_procs,ierr
+integer(i4) :: i,k,l,m,n,e
+real(r8) :: tmp
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
 if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_r8',__FILE__)
-active_procs=self%nproc_con
-IF(self%full)active_procs=0
-!---Create Recv calls
-#ifdef HAVE_MPI
-DO j=1,active_procs
-  !---Skip processors with no elements
-  IF(self%send(j)%n==0)THEN
-    self%recv_reqs(j)=MPI_REQUEST_NULL
-    CYCLE
-  END IF
-  CALL MPI_IRECV(self%recv(j)%v,self%recv(j)%n,OFT_MPI_R8,self%proc_con(j),1,oft_env%comm,self%recv_reqs(j),ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','global_stitch_r8',__FILE__)
-END DO
-#endif
-!---Extract boundary elements (zero unowned when synchronizing)
-IF(ALLOCATED(self%rwork))THEN
-  IF(SIZE(self%rwork)/=self%nbe)DEALLOCATE(self%rwork)
-END IF
-IF(.NOT.ALLOCATED(self%rwork))ALLOCATE(self%rwork(self%nbe))
+CALL seam_check_plan(self)
 IF(up_method==0)THEN
-  !$omp simd
-  DO i=1,self%nbe
-    IF(self%leo(i))THEN
-      self%rwork(i)=a(self%lbe(i))
-    ELSE
-      self%rwork(i)=0.d0
-    END IF
-  END DO
+  IF(.NOT.ASSOCIATED(self%leo))CALL oft_abort('Synchronization requires ownership','global_stitch_r8',__FILE__)
+  CALL scatter_begin(self%plan,a,mask=self%smask)
 ELSE
-  !$omp simd
-  DO i=1,self%nbe
-    self%rwork(i)=a(self%lbe(i))
+  CALL scatter_begin(self%plan,a,nolocal=(up_method==2))
+END IF
+CALL scatter_wait_recv(self%plan,a)
+ASSOCIATE(buf=>self%plan%rrbuf)
+SELECT CASE(up_method)
+CASE(0)
+  !$omp parallel do private(k,tmp) if(self%nbe>OFT_OMP_VTHRESH)
+  DO e=1,self%nbe
+    IF(self%leo(e))CYCLE
+    tmp=0.d0
+    DO k=self%kcon(e),self%kcon(e+1)-1
+      tmp=tmp+buf(self%icon(k))
+    END DO
+    a(self%lbe(e))=tmp
   END DO
-END IF
-!---Fill send arrays (threaded only for large seams)
-!$omp parallel private(j,js,jn,i,elocal) if(self%nle>OFT_OMP_VTHRESH)
-#ifdef HAVE_MPI
-!$omp do
-DO j=1,active_procs
-  js=self%kle(j)
-  jn=self%kle(j+1)-1
-  !$omp simd private(elocal)
-  do i=js,jn
-    elocal=self%lle(1,i)
-    self%send(j)%v(i-js+1)=self%rwork(elocal) ! Populate stitching array
-  enddo
-END DO
-!$omp end do nowait
-#endif
-!$omp single
-IF(up_method/=2)THEN
-  js=self%kle(0)
-  jn=self%kle(1)-1
-  !$omp simd private(elocal)
-  do i=js,jn
-    elocal=self%lle(1,i)
-    self%send(0)%v(i-js+1)=self%rwork(elocal) ! Populate stitching array
-  enddo
-END IF
-!$omp end single
-!$omp end parallel
-!---Start MPI Sends from the calling thread (MPI is initialized with MPI_THREAD_FUNNELED)
-#ifdef HAVE_MPI
-DO j=1,active_procs
-  IF(self%send(j)%n==0)THEN ! Skip processors with no elements
-    self%send_reqs(j)=MPI_REQUEST_NULL
-  ELSE
-    CALL MPI_ISEND(self%send(j)%v,self%send(j)%n,OFT_MPI_R8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
-    IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_r8',__FILE__)
+CASE(1)
+  !$omp parallel do simd if(self%nsingle>OFT_OMP_VTHRESH)
+  DO i=1,self%nsingle
+    a(self%lsingle(i))=a(self%lsingle(i))+buf(self%isingle(i))
+  END DO
+  !---Elements with three or more values: sum in ascending order
+  IF(self%nmulti>0)THEN
+    IF(.NOT.ALLOCATED(self%rscratch))ALLOCATE(self%rscratch(self%multi_max))
+    DO m=1,self%nmulti
+      e=self%lmulti(m)
+      n=1
+      self%rscratch(1)=a(self%lbe(e))
+      DO k=self%kcon(e),self%kcon(e+1)-1
+        n=n+1
+        self%rscratch(n)=buf(self%icon(k))
+      END DO
+      !---Insertion sort (lists are short)
+      DO k=2,n
+        tmp=self%rscratch(k)
+        DO l=k-1,1,-1
+          IF(self%rscratch(l)<=tmp)EXIT
+          self%rscratch(l+1)=self%rscratch(l)
+        END DO
+        self%rscratch(l+1)=tmp
+      END DO
+      tmp=0.d0
+      DO k=1,n
+        tmp=tmp+self%rscratch(k)
+      END DO
+      a(self%lbe(e))=tmp
+    END DO
   END IF
-END DO
-#endif
-!$omp simd
-DO i=1,self%nbe
-  self%rwork(i)=0.d0
-END DO
-!---Add couplings (always same order)
-#ifdef HAVE_MPI
-IF((active_procs>0).AND.(self%proc_split>0))THEN
-  !---Wait for all Recvs to complete
-  CALL oft_mpi_waitall(self%proc_split,self%recv_reqs(1:self%proc_split),ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_r8',__FILE__)
-  DO j=1,self%proc_split
-    js=self%kle(j)
-    jn=self%kle(j+1)-1
-    do i=js,jn
-      elocal=self%lle(1,i)
-      self%rwork(elocal)=self%rwork(elocal)+self%recv(j)%v(i-js+1) ! If linked sum values
-    enddo
+CASE(2)
+  !$omp parallel do private(k,tmp) if(self%nbe>OFT_OMP_VTHRESH)
+  DO e=1,self%nbe
+    tmp=0.d0
+    DO k=self%kcon(e),self%kloc(e)-1
+      tmp=tmp+buf(self%icon(k))
+    END DO
+    a(self%lbe(e))=tmp
   END DO
-END IF
-#endif
-IF(up_method==0)THEN
-  !$omp simd
-  DO i=1,self%nbe
-    IF(self%leo(i))self%rwork(i)=self%rwork(i)+a(self%lbe(i))
-  END DO
-ELSE IF(up_method==1)THEN
-  !$omp simd
-  DO i=1,self%nbe
-    self%rwork(i)=self%rwork(i)+a(self%lbe(i))
-  END DO
-END IF
-!---Process local connectivity (Interaction is reverse)
-IF(up_method/=2)THEN
-  js=self%kle(0)
-  jn=self%kle(1)-1
-  do i=js,jn
-    elocal=self%lle(2,i)
-    self%rwork(elocal)=self%rwork(elocal)+self%send(0)%v(i-js+1) ! If linked sum values
-  enddo
-END IF
-#ifdef HAVE_MPI
-IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_r8',__FILE__)
-  DO j=self%proc_split+1,active_procs
-    js=self%kle(j)
-    jn=self%kle(j+1)-1
-    do i=js,jn
-      elocal=self%lle(1,i)
-      self%rwork(elocal)=self%rwork(elocal)+self%recv(j)%v(i-js+1) ! If linked sum values
-    enddo
-  END DO
-END IF
-#endif
-!---Sum elements with three or more contributions in canonical order
-IF(up_method==1)CALL stitch_multi_r8(self,a)
-!---Move back to full array
-!$omp simd
-DO i=1,self%nbe
-  a(self%lbe(i))=self%rwork(i)
-END DO
-!---Wait for all sends to complete
-#ifdef HAVE_MPI
-IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_r8',__FILE__)
-END IF
-#endif
+END SELECT
+END ASSOCIATE
+CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
 end subroutine global_stitch_r8
 !---------------------------------------------------------------------------------
 !> complex(c8) implementation of \ref oft_stitching::oft_global_stitch
 !!
-!! Uses the persistent work array `cwork` of the seam, so a given seam must not be
-!! stitched concurrently from multiple threads (as for its send/recv arrays and
-!! MPI requests). Stitching different seams concurrently is safe without MPI.
+!! See @ref global_stitch_r8. Values with three or more contributions are summed in
+!! ascending order of real part, then imaginary part.
 !---------------------------------------------------------------------------------
 subroutine global_stitch_c8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
 integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
-COMPLEX(c8), intent(inout) :: a(:) !< Local data to be stitched
-integer(i4) :: i,j,js,jn,elocal,active_procs,ierr
+complex(c8), intent(inout) :: a(:) !< Local data to be stitched
+integer(i4) :: i,k,l,m,n,e
+complex(c8) :: tmp
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
 if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_c8',__FILE__)
-active_procs=self%nproc_con
-IF(self%full)active_procs=0
-!---Create Recv calls
-#ifdef HAVE_MPI
-DO j=1,active_procs
-  !---Skip processors with no elements
-  IF(self%csend(j)%n==0)THEN
-    self%recv_reqs(j)=MPI_REQUEST_NULL
-    CYCLE
-  END IF
-  CALL MPI_IRECV(self%crecv(j)%v,self%crecv(j)%n,OFT_MPI_C8,self%proc_con(j),1,oft_env%comm,self%recv_reqs(j),ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','global_stitch_c8',__FILE__)
-END DO
-#endif
-!---Extract boundary elements (zero unowned when synchronizing)
-IF(ALLOCATED(self%cwork))THEN
-  IF(SIZE(self%cwork)/=self%nbe)DEALLOCATE(self%cwork)
-END IF
-IF(.NOT.ALLOCATED(self%cwork))ALLOCATE(self%cwork(self%nbe))
+CALL seam_check_plan(self)
 IF(up_method==0)THEN
-  !$omp simd
-  DO i=1,self%nbe
-    IF(self%leo(i))THEN
-      self%cwork(i)=a(self%lbe(i))
-    ELSE
-      self%cwork(i)=(0.d0,0.d0)
-    END IF
-  END DO
+  IF(.NOT.ASSOCIATED(self%leo))CALL oft_abort('Synchronization requires ownership','global_stitch_c8',__FILE__)
+  CALL scatter_begin(self%plan,a,mask=self%smask)
 ELSE
-  !$omp simd
-  DO i=1,self%nbe
-    self%cwork(i)=a(self%lbe(i))
+  CALL scatter_begin(self%plan,a,nolocal=(up_method==2))
+END IF
+CALL scatter_wait_recv(self%plan,a)
+ASSOCIATE(buf=>self%plan%crbuf)
+SELECT CASE(up_method)
+CASE(0)
+  !$omp parallel do private(k,tmp) if(self%nbe>OFT_OMP_VTHRESH)
+  DO e=1,self%nbe
+    IF(self%leo(e))CYCLE
+    tmp=(0.d0,0.d0)
+    DO k=self%kcon(e),self%kcon(e+1)-1
+      tmp=tmp+buf(self%icon(k))
+    END DO
+    a(self%lbe(e))=tmp
   END DO
-END IF
-!---Fill send arrays (threaded only for large seams)
-!$omp parallel private(j,js,jn,i,elocal) if(self%nle>OFT_OMP_VTHRESH)
-#ifdef HAVE_MPI
-!$omp do
-DO j=1,active_procs
-  js=self%kle(j)
-  jn=self%kle(j+1)-1
-  !$omp simd private(elocal)
-  do i=js,jn
-    elocal=self%lle(1,i)
-    self%csend(j)%v(i-js+1)=self%cwork(elocal) ! Populate stitching array
-  enddo
-END DO
-!$omp end do nowait
-#endif
-!$omp single
-IF(up_method/=2)THEN
-  js=self%kle(0)
-  jn=self%kle(1)-1
-  !$omp simd private(elocal)
-  do i=js,jn
-    elocal=self%lle(1,i)
-    self%csend(0)%v(i-js+1)=self%cwork(elocal) ! Populate stitching array
-  enddo
-END IF
-!$omp end single
-!$omp end parallel
-!---Start MPI Sends from the calling thread (MPI is initialized with MPI_THREAD_FUNNELED)
-#ifdef HAVE_MPI
-DO j=1,active_procs
-  IF(self%csend(j)%n==0)THEN ! Skip processors with no elements
-    self%send_reqs(j)=MPI_REQUEST_NULL
-  ELSE
-    CALL MPI_ISEND(self%csend(j)%v,self%csend(j)%n,OFT_MPI_C8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
-    IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_c8',__FILE__)
+CASE(1)
+  !$omp parallel do simd if(self%nsingle>OFT_OMP_VTHRESH)
+  DO i=1,self%nsingle
+    a(self%lsingle(i))=a(self%lsingle(i))+buf(self%isingle(i))
+  END DO
+  !---Elements with three or more values: sum in ascending order
+  IF(self%nmulti>0)THEN
+    IF(.NOT.ALLOCATED(self%cscratch))ALLOCATE(self%cscratch(self%multi_max))
+    DO m=1,self%nmulti
+      e=self%lmulti(m)
+      n=1
+      self%cscratch(1)=a(self%lbe(e))
+      DO k=self%kcon(e),self%kcon(e+1)-1
+        n=n+1
+        self%cscratch(n)=buf(self%icon(k))
+      END DO
+      !---Insertion sort (lists are short)
+      DO k=2,n
+        tmp=self%cscratch(k)
+        DO l=k-1,1,-1
+          IF(REAL(self%cscratch(l),r8)<REAL(tmp,r8))EXIT
+          IF((REAL(self%cscratch(l),r8)==REAL(tmp,r8)).AND.(AIMAG(self%cscratch(l))<=AIMAG(tmp)))EXIT
+          self%cscratch(l+1)=self%cscratch(l)
+        END DO
+        self%cscratch(l+1)=tmp
+      END DO
+      tmp=(0.d0,0.d0)
+      DO k=1,n
+        tmp=tmp+self%cscratch(k)
+      END DO
+      a(self%lbe(e))=tmp
+    END DO
   END IF
-END DO
-#endif
-!$omp simd
-DO i=1,self%nbe
-  self%cwork(i)=(0.d0,0.d0)
-END DO
-!---Add couplings (always same order)
-#ifdef HAVE_MPI
-IF((active_procs>0).AND.(self%proc_split>0))THEN
-  !---Wait for all Recvs to complete
-  CALL oft_mpi_waitall(self%proc_split,self%recv_reqs(1:self%proc_split),ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_c8',__FILE__)
-  DO j=1,self%proc_split
-    js=self%kle(j)
-    jn=self%kle(j+1)-1
-    do i=js,jn
-      elocal=self%lle(1,i)
-      self%cwork(elocal)=self%cwork(elocal)+self%crecv(j)%v(i-js+1) ! If linked sum values
-    enddo
+CASE(2)
+  !$omp parallel do private(k,tmp) if(self%nbe>OFT_OMP_VTHRESH)
+  DO e=1,self%nbe
+    tmp=(0.d0,0.d0)
+    DO k=self%kcon(e),self%kloc(e)-1
+      tmp=tmp+buf(self%icon(k))
+    END DO
+    a(self%lbe(e))=tmp
   END DO
-END IF
-#endif
-IF(up_method==0)THEN
-  !$omp simd
-  DO i=1,self%nbe
-    IF(self%leo(i))self%cwork(i)=self%cwork(i)+a(self%lbe(i))
-  END DO
-ELSE IF(up_method==1)THEN
-  !$omp simd
-  DO i=1,self%nbe
-    self%cwork(i)=self%cwork(i)+a(self%lbe(i))
-  END DO
-END IF
-!---Process local connectivity (Interaction is reverse)
-IF(up_method/=2)THEN
-  js=self%kle(0)
-  jn=self%kle(1)-1
-  do i=js,jn
-    elocal=self%lle(2,i)
-    self%cwork(elocal)=self%cwork(elocal)+self%csend(0)%v(i-js+1) ! If linked sum values
-  enddo
-END IF
-#ifdef HAVE_MPI
-IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_c8',__FILE__)
-  DO j=self%proc_split+1,active_procs
-    js=self%kle(j)
-    jn=self%kle(j+1)-1
-    do i=js,jn
-      elocal=self%lle(1,i)
-      self%cwork(elocal)=self%cwork(elocal)+self%crecv(j)%v(i-js+1) ! If linked sum values
-    enddo
-  END DO
-END IF
-#endif
-!---Sum elements with three or more contributions in canonical order
-IF(up_method==1)CALL stitch_multi_c8(self,a)
-!---Move back to full array
-!$omp simd
-DO i=1,self%nbe
-  a(self%lbe(i))=self%cwork(i)
-END DO
-!---Wait for all sends to complete
-#ifdef HAVE_MPI
-IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
-  IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_c8',__FILE__)
-END IF
-#endif
+END SELECT
+END ASSOCIATE
+CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
 end subroutine global_stitch_c8
-! !---------------------------------------------------------------------------------
-! !> Begin stitch operation and return while transfers complete
-! !!
-! !! @param[in,out] self Stitching information
-! !! @param[in,out] a Local point data to be stitched
-! !! @param[in] up_method Stitching method (0 or 1)
-! !---------------------------------------------------------------------------------
-! subroutine oft_global_stitch_begin(self,a,up_method)
-! type(oft_seam), intent(inout) :: self
-! integer(i4), intent(in) :: up_method
-! real(r8), intent(inout) :: a(:)
-! real(r8), pointer, dimension(:) :: leout
-! integer(i4) :: i,j,js,jn,elocal,ierr
-! DEBUG_STACK_PUSH
-! IF(self%full.OR.self%skip)THEN
-!   DEBUG_STACK_POP
-!   RETURN
-! END IF
-
-! if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','oft_global_stitch',__FILE__)
-! !---
-! if(up_method==1)then ! Sum values on each processor
-!   DO j=1,oft_env%nproc_con
-!     leout=>self%send(j)%v
-!     js=self%kle(j)
-!     jn=self%kle(j+1)-1
-!     do i=js,jn
-!       elocal=self%lle(1,i)
-!       leout(i-js+1)=a(self%lbe(elocal)) ! Populate stitching array
-!     enddo
-!   END DO
-! else if(up_method==0)then ! Sync values by ownership
-!   DO j=1,oft_env%nproc_con
-!     leout=>self%send(j)%v
-!     js=self%kle(j)
-!     jn=self%kle(j+1)-1
-!     do i=js,jn
-!       elocal=self%lle(1,i)
-!       if(self%leo(elocal))then
-!         leout(i-js+1)=a(self%lbe(elocal)) ! If point is owned populate stitching array
-!       else
-!         leout(i-js+1)=0.d0
-!       end if
-!     enddo
-!   END DO
-!   DO i=1,self%nbe
-!     IF(self%leo(i))CYCLE
-!     a(self%lbe(i))=0.d0
-!   END DO
-! else if(up_method==2)then ! Sync values by ownership
-!   DO j=1,oft_env%nproc_con
-!     leout=>self%send(j)%v
-!     js=self%kle(j)
-!     jn=self%kle(j+1)-1
-!     do i=js,jn
-!       elocal=self%lle(1,i)
-!       leout(i-js+1)=a(self%lbe(elocal))
-!       a(self%lbe(elocal))=0.d0
-!     enddo
-!   END DO
-! endif
-! !---Create Send and Recv calls
-! #ifdef HAVE_MPI
-! do j=1,oft_env%nproc_con
-!   !---Skip processors with no elements
-!   IF(self%send(j)%n==0)THEN
-!     oft_env%send(j)=MPI_REQUEST_NULL
-!     oft_env%recv(j)=MPI_REQUEST_NULL
-!     CYCLE
-!   END IF
-!   call MPI_ISEND(self%send(j)%v,self%send(j)%n,OFT_MPI_R8,oft_env%proc_con(j),1,oft_env%comm,oft_env%send(j),ierr)
-!   call MPI_IRECV(self%recv(j)%v,self%recv(j)%n,OFT_MPI_R8,oft_env%proc_con(j),1,oft_env%comm,oft_env%recv(j),ierr)
-! enddo
-! #endif
-! DEBUG_STACK_POP
-! end subroutine oft_global_stitch_begin
-! !---------------------------------------------------------------------------------
-! !> Complete stitch operation by processing transfers
-! !!
-! !! @param[in,out] self Stitching information
-! !! @param[in,out] a Local point data to be stitched
-! !! @param[in] up_method Stitching method (0 or 1)
-! !---------------------------------------------------------------------------------
-! subroutine oft_global_stitch_end(self,a,up_method)
-! type(oft_seam), intent(inout) :: self
-! integer(i4), intent(in) :: up_method
-! real(r8), intent(inout) :: a(:)
-! real(r8), pointer, dimension(:) :: letmp
-! integer(i4) :: i,j,js,jn,elocal,eremote,ierr
-! DEBUG_STACK_PUSH
-! IF(self%full.OR.self%skip)THEN
-!   DEBUG_STACK_POP
-!   RETURN
-! END IF
-! if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','oft_global_stitch',__FILE__)
-! !---Loop over each connected processor
-! #ifdef HAVE_MPI
-! do while(.TRUE.)
-!   if(all(oft_env%recv==MPI_REQUEST_NULL))exit ! All recieves have been processed
-!   CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
-!   letmp=>self%recv(j)%v ! Point dummy input array to current Recv array
-!   js=self%kle(j)
-!   jn=self%kle(j+1)-1
-!   if(up_method==1)then ! Sum values on each processor
-!     do i=js,jn
-!       elocal=self%lle(1,i)
-!       eremote=i-js+1
-!       a(self%lbe(elocal))=a(self%lbe(elocal))+letmp(eremote) ! If linked sum values
-!     enddo
-!   endif
-!   if(up_method==0.OR.up_method==2)then ! Sync values by ownership
-!     do i=js,jn
-!       elocal=self%lle(1,i)
-!       eremote=i-js+1
-!       a(self%lbe(elocal))=a(self%lbe(elocal))+letmp(eremote) ! If contibution exists sync value
-!     enddo
-!   endif
-! end do
-! CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
-! #endif
-! DEBUG_STACK_POP
-! end subroutine oft_global_stitch_end
-!---------------------------------------------------------------------------------
-!> Build the contribution lists for boundary elements with three or more contributions
-!!
-!! Used by summation stitching (method 1). Contributions are the element's own value,
-!! local linked values and, unless the local mesh is complete, values from other
-!! processes.
-!---------------------------------------------------------------------------------
-subroutine seam_setup_multi(self)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4) :: i,j,m,elocal,active_procs
-integer(i4), allocatable :: ncon(:),imap(:),kfill(:)
-DEBUG_STACK_PUSH
-active_procs=self%nproc_con
-IF(self%full)active_procs=0
-IF(ALLOCATED(self%lmulti))DEALLOCATE(self%lmulti,self%kmulti,self%imulti,self%jmulti)
-!---Count contributions to each boundary element
-ALLOCATE(ncon(self%nbe))
-ncon=1
-DO j=0,active_procs
-  DO i=self%kle(j),self%kle(j+1)-1
-    elocal=self%lle(1,i)
-    IF(j==0)elocal=self%lle(2,i) ! Local linkage is applied in reverse
-    ncon(elocal)=ncon(elocal)+1
-  END DO
-END DO
-self%nmulti=COUNT(ncon>=3)
-self%multi_max=MAXVAL(ncon)
-!---Build contribution lists
-ALLOCATE(self%lmulti(self%nmulti),self%kmulti(self%nmulti+1),imap(self%nbe))
-imap=0
-m=0
-self%kmulti(1)=1
-DO i=1,self%nbe
-  IF(ncon(i)<3)CYCLE
-  m=m+1
-  self%lmulti(m)=i
-  imap(i)=m
-  self%kmulti(m+1)=self%kmulti(m)+ncon(i)-1
-END DO
-ALLOCATE(self%imulti(self%kmulti(self%nmulti+1)-1),self%jmulti(self%kmulti(self%nmulti+1)-1))
-ALLOCATE(kfill(self%nmulti))
-kfill=self%kmulti(1:self%nmulti)
-DO j=0,active_procs
-  DO i=self%kle(j),self%kle(j+1)-1
-    elocal=self%lle(1,i)
-    IF(j==0)elocal=self%lle(2,i)
-    m=imap(elocal)
-    IF(m==0)CYCLE
-    self%imulti(kfill(m))=i
-    self%jmulti(kfill(m))=j
-    kfill(m)=kfill(m)+1
-  END DO
-END DO
-DEALLOCATE(ncon,imap,kfill)
-self%multi_nbe=self%nbe
-self%multi_nle=self%nle
-self%multi_full=self%full
-DEBUG_STACK_POP
-end subroutine seam_setup_multi
-!---------------------------------------------------------------------------------
-!> Sum real(r8) contributions to boundary elements with three or more contributions in
-!! ascending order of value, so every copy of an element gets the same result
-!!
-!! Called by \ref oft_stitching::global_stitch_r8 after all contributions have arrived;
-!! overwrites the corresponding entries of `rwork`.
-!---------------------------------------------------------------------------------
-subroutine stitch_multi_r8(self,a)
-type(oft_seam), intent(inout) :: self !< Seam structure
-real(r8), intent(in) :: a(:) !< Local data being stitched (own contributions)
-real(r8), allocatable :: vals(:)
-real(r8) :: tmp
-integer(i4) :: m,k,l,n,i,j
-IF(self%nmulti<0.OR.self%multi_nbe/=self%nbe.OR.self%multi_nle/=self%nle &
-  .OR.(self%multi_full.NEQV.self%full))CALL seam_setup_multi(self)
-IF(self%nmulti==0)RETURN
-DEBUG_STACK_PUSH
-ALLOCATE(vals(self%multi_max))
-DO m=1,self%nmulti
-  !---Gather contributions
-  n=1
-  vals(1)=a(self%lbe(self%lmulti(m)))
-  DO k=self%kmulti(m),self%kmulti(m+1)-1
-    i=self%imulti(k)
-    j=self%jmulti(k)
-    n=n+1
-    IF(j==0)THEN
-      vals(n)=self%send(0)%v(i-self%kle(0)+1)
-    ELSE
-      vals(n)=self%recv(j)%v(i-self%kle(j)+1)
-    END IF
-  END DO
-  !---Insertion sort (lists are short)
-  DO k=2,n
-    tmp=vals(k)
-    DO l=k-1,1,-1
-      IF(vals(l)<=tmp)EXIT
-      vals(l+1)=vals(l)
-    END DO
-    vals(l+1)=tmp
-  END DO
-  !---Sum in sorted order
-  tmp=0.d0
-  DO k=1,n
-    tmp=tmp+vals(k)
-  END DO
-  self%rwork(self%lmulti(m))=tmp
-END DO
-DEALLOCATE(vals)
-DEBUG_STACK_POP
-end subroutine stitch_multi_r8
-!---------------------------------------------------------------------------------
-!> Sum complex(c8) contributions to boundary elements with three or more contributions in
-!! ascending order of value (real part, then imaginary part), so every copy of an element
-!! gets the same result
-!!
-!! Called by \ref oft_stitching::global_stitch_c8 after all contributions have arrived;
-!! overwrites the corresponding entries of `cwork`.
-!---------------------------------------------------------------------------------
-subroutine stitch_multi_c8(self,a)
-type(oft_seam), intent(inout) :: self !< Seam structure
-complex(c8), intent(in) :: a(:) !< Local data being stitched (own contributions)
-complex(c8), allocatable :: vals(:)
-complex(c8) :: tmp
-integer(i4) :: m,k,l,n,i,j
-IF(self%nmulti<0.OR.self%multi_nbe/=self%nbe.OR.self%multi_nle/=self%nle &
-  .OR.(self%multi_full.NEQV.self%full))CALL seam_setup_multi(self)
-IF(self%nmulti==0)RETURN
-DEBUG_STACK_PUSH
-ALLOCATE(vals(self%multi_max))
-DO m=1,self%nmulti
-  !---Gather contributions
-  n=1
-  vals(1)=a(self%lbe(self%lmulti(m)))
-  DO k=self%kmulti(m),self%kmulti(m+1)-1
-    i=self%imulti(k)
-    j=self%jmulti(k)
-    n=n+1
-    IF(j==0)THEN
-      vals(n)=self%csend(0)%v(i-self%kle(0)+1)
-    ELSE
-      vals(n)=self%crecv(j)%v(i-self%kle(j)+1)
-    END IF
-  END DO
-  !---Insertion sort (lists are short)
-  DO k=2,n
-    tmp=vals(k)
-    DO l=k-1,1,-1
-      IF(REAL(vals(l),r8)<REAL(tmp,r8))EXIT
-      IF((REAL(vals(l),r8)==REAL(tmp,r8)).AND.(AIMAG(vals(l))<=AIMAG(tmp)))EXIT
-      vals(l+1)=vals(l)
-    END DO
-    vals(l+1)=tmp
-  END DO
-  !---Sum in sorted order
-  tmp=(0.d0,0.d0)
-  DO k=1,n
-    tmp=tmp+vals(k)
-  END DO
-  self%cwork(self%lmulti(m))=tmp
-END DO
-DEALLOCATE(vals)
-DEBUG_STACK_POP
-end subroutine stitch_multi_c8
 !---------------------------------------------------------------------------------
 !> Validate stitching structure
 !---------------------------------------------------------------------------------
@@ -972,17 +690,11 @@ IF(ANY(self%kle>self%nle+1))THEN
   WRITE(*,*)'ERROR: ',oft_env%rank,MAXVAL(self%kle),MAXLOC(self%kle),self%nle
   CALL oft_abort('BAD LINKAGE PTR','oft_stitch_check',__FILE__)
 END IF
-!---Check local sizes
-DO j=1,self%nproc_con
-  IF(self%send(j)%n==0.OR.self%recv(j)%n==0)CYCLE
-  IF(SIZE(self%send(j)%v)/=self%send(j)%n)CALL oft_abort('BAD SEND ARRAY','oft_stitch_check',__FILE__)
-  IF(SIZE(self%recv(j)%v)/=self%recv(j)%n)CALL oft_abort('BAD RECV ARRAY','oft_stitch_check',__FILE__)
-END DO
 !---Check matching transfer sizes
 #ifdef HAVE_MPI
 ALLOCATE(le_size(2,self%nproc_con),le_out(2,self%nproc_con))
 DO j=1,self%nproc_con
-  le_out(:,j)=[self%send(j)%n,self%recv(j)%n]
+  le_out(:,j)=self%kle(j+1)-self%kle(j)
   CALL MPI_ISEND(le_out(:,j),2,OFT_MPI_I4,self%proc_con(j),2,oft_env%comm,self%send_reqs(j),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','oft_stitch_check',__FILE__)
   CALL MPI_IRECV(le_size(:,j),2,OFT_MPI_I4,self%proc_con(j),2,oft_env%comm,self%recv_reqs(j),ierr)
@@ -991,8 +703,8 @@ END DO
 CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
 CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
 DO j=1,self%nproc_con
-  IF((le_size(1,j)/=self%recv(j)%n).OR.(le_size(2,j)/=self%send(j)%n))THEN
-    WRITE(*,*)'STITCH ERROR: ',[self%send(j)%n,self%recv(j)%n],le_size(:,j)
+  IF(ANY(le_size(:,j)/=le_out(:,j)))THEN
+    WRITE(*,*)'STITCH ERROR: ',le_out(:,j),le_size(:,j)
     CALL oft_abort('BAD ARRAY SIZE MATCH','oft_stitch_check',__FILE__)
   END IF
 END DO
@@ -1001,11 +713,10 @@ DEALLOCATE(le_size,le_out)
 DEBUG_STACK_POP
 end subroutine oft_stitch_check
 !---------------------------------------------------------------------------------
-!> Validate stitching structure
+!> Release the index data and stitching plan of a seam
 !---------------------------------------------------------------------------------
 subroutine destory_seam(self)
 type(oft_seam), intent(inout) :: self
-integer(i4) :: i
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%leo))DEALLOCATE(self%leo)
 IF(ASSOCIATED(self%be))DEALLOCATE(self%be)
@@ -1013,29 +724,7 @@ IF(ASSOCIATED(self%lbe))DEALLOCATE(self%lbe)
 IF(ASSOCIATED(self%lie))DEALLOCATE(self%lie)
 IF(ASSOCIATED(self%kle))DEALLOCATE(self%kle)
 IF(ASSOCIATED(self%lle))DEALLOCATE(self%lle)
-!---
-IF(ASSOCIATED(self%send))THEN
-  DO i=0,self%nproc_con
-    IF(ASSOCIATED(self%send(i)%v))THEN
-      DEALLOCATE(self%send(i)%v)
-      DEALLOCATE(self%recv(i)%v)
-    END IF
-  END DO
-  DEALLOCATE(self%send,self%recv)
-END IF
-IF(ASSOCIATED(self%csend))THEN
-  DO i=0,self%nproc_con
-    IF(ASSOCIATED(self%csend(i)%v))THEN
-      DEALLOCATE(self%csend(i)%v)
-      DEALLOCATE(self%crecv(i)%v)
-    END IF
-  END DO
-  DEALLOCATE(self%csend,self%crecv)
-END IF
-IF(ALLOCATED(self%rwork))DEALLOCATE(self%rwork)
-IF(ALLOCATED(self%cwork))DEALLOCATE(self%cwork)
-IF(ALLOCATED(self%lmulti))DEALLOCATE(self%lmulti,self%kmulti,self%imulti,self%jmulti)
-self%nmulti=-1
+CALL seam_free_plan(self)
 DEBUG_STACK_POP
 end subroutine destory_seam
 end module oft_stitching

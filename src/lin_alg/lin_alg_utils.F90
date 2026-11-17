@@ -370,7 +370,6 @@ end do
 if(stitcher%kle(0)/=1)call oft_abort('Bad element linkage count','fem_global_linkage',__FILE__)
 !---Construct seam lists
 allocate(stitcher%lle(2,stitcher%nle))
-allocate(stitcher%send(0:stitcher%nproc_con),stitcher%recv(0:stitcher%nproc_con))
 DO j=1,stitcher%nproc_con
   m=stitcher%kle(j)
   offset1=0
@@ -383,10 +382,6 @@ DO j=1,stitcher%nproc_con
     offset1=offset1+stitch_info(i)%s%nbe
     stitcher%nbemax=stitcher%nbemax+stitch_info(i)%s%nbemax
   END DO
-  !---Allocate permanent stitching arrays
-  stitcher%send(j)%n=m-stitcher%kle(j); stitcher%recv(j)%n=m-stitcher%kle(j)
-  allocate(stitcher%send(j)%v(stitcher%send(j)%n))
-  allocate(stitcher%recv(j)%v(stitcher%recv(j)%n))
 END DO
 !---Construct self-linkage
 m=stitcher%kle(0)
@@ -400,10 +395,6 @@ DO i=1,nblocks
   offset1=offset1+stitch_info(i)%s%nbe
   stitcher%nbemax=stitcher%nbemax+stitch_info(i)%s%nbemax
 END DO
-!---Allocate permanent stitching arrays
-stitcher%send(0)%n=m-stitcher%kle(0); stitcher%recv(0)%n=m-stitcher%kle(0)
-allocate(stitcher%send(0)%v(stitcher%send(0)%n))
-allocate(stitcher%recv(0)%v(stitcher%recv(0)%n))
 !---Verify stitching structure
 CALL oft_stitch_check(stitcher)
 DEBUG_STACK_POP
