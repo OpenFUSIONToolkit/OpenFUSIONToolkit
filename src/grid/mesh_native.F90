@@ -1034,21 +1034,20 @@ CONTAINS
 SUBROUTINE periodic_face_normal(face,norm)
 INTEGER(i4), INTENT(in) :: face !< Boundary face index
 REAL(r8), INTENT(out) :: norm(3) !< Outward unit normal
-INTEGER(i4) :: cface
-REAL(r8) :: fcoords(mesh%cell_nf)
-!---Face centers in hex logical coordinates (face ordering of hex_fc in oft_hexmesh_type)
-REAL(r8), PARAMETER :: hex_fcenter(3,6) = RESHAPE([0.5d0,0.5d0,0.d0, 0.5d0,0.d0,0.5d0, &
-  1.d0,0.5d0,0.5d0, 0.5d0,1.d0,0.5d0, 0.d0,0.5d0,0.5d0, 0.5d0,0.5d0,1.d0],[3,6])
+INTEGER(i4) :: cface,k
+REAL(r8) :: fcoords(mesh%cell_nf),ftmp(mesh%cell_nf)
 DO cface=1,mesh%cell_nf
-    IF(ABS(mesh%lcf(cface,mesh%lfc(1,face)))==face)EXIT
+    IF(mesh%lcf(cface,mesh%lfc(1,face))==face)EXIT
 END DO
-!---Evaluate on the face (its center), where the logical-coordinate gradient is normal to it
-SELECT TYPE(mesh)
-CLASS IS(oft_hexmesh)
-    fcoords=0.d0; fcoords(1:3)=hex_fcenter(:,cface)
-CLASS DEFAULT
-    fcoords=1.d0/3.d0; fcoords(cface)=0.d0
-END SELECT
+!---Evaluate at the face center (average of its corners in logical coordinates), where the
+!---logical-coordinate gradient is normal to the face for any cell type
+fcoords=0.d0
+DO k=1,mesh%face_np
+    ftmp=0.d0
+    CALL mesh%vlog(mesh%cell_fc(k,cface),ftmp)
+    fcoords=fcoords+ftmp
+END DO
+fcoords=fcoords/REAL(mesh%face_np,r8)
 CALL mesh%snormal(mesh%lfc(1,face),cface,fcoords,norm)
 END SUBROUTINE periodic_face_normal
 !> Abort if a periodic face is not normal to z and its plane does not contain the x-axis
