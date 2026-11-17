@@ -15,7 +15,7 @@ import h5py
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
-from oft_testing import run_OFT, run_command
+from oft_testing import run_OFT
 
 # Basic template for input file
 oft_in_template = """
@@ -129,7 +129,7 @@ def write_mesh(filename, mapping, cell_type):
         h5_file.create_dataset('mesh/periodicity/nodes', data=per_nodes+1, dtype='i4')
 
 
-def periodic_setup(mesh_type, cell_type, order=1, nbase=1, nlevels=1, nproc=1, expect_abort=False):
+def periodic_setup(mesh_type, cell_type, order=1, nbase=1, nlevels=1, nproc=1, expect_abort=None):
     mappings = {'x_wedge': x_wedge, 'y_wedge': y_wedge, 'z_slab': z_slab}
     os.chdir(test_dir)
     mesh_file = 'periodic_{0}_{1}.h5'.format(mesh_type, cell_type)
@@ -138,30 +138,51 @@ def periodic_setup(mesh_type, cell_type, order=1, nbase=1, nlevels=1, nproc=1, e
         fid.write(oft_in_template.format(nbase, nlevels, mesh_file, order))
     if os.path.exists('periodic.results'):
         os.remove('periodic.results')
-    if expect_abort:
-        # oft_abort reports on stderr, which run_OFT does not return
-        outs, errs, errcode = run_command("./test_vlag_periodic")
-        print(outs.decode())
-        print(errs.decode())
-        return errcode, errs.decode()
-    return run_OFT("./test_vlag_periodic", nproc, 60)
+    return run_OFT("./test_vlag_periodic", nproc, 60, expect_abort=expect_abort)
 
 
+def refine_counts(counts, cell_type):
+    '''Global (point, edge, face, cell) counts after one uniform refinement (each cell split into 8)'''
+    np, ne, nf, nc = counts
+    if cell_type == 'hex':
+        return [np + ne + nf + nc, 2*ne + 4*nf + 6*nc, 4*nf + 12*nc, 8*nc]
+    return [np + ne, 2*ne + 3*nf + nc, 4*nf + 8*nc, 8*nc]
 
-def check_results(revolved, nper):
+
+def check_results(revolved, nper, cell_type, nbase=1, nlevels=1):
     with open('periodic.results', 'r') as fid:
-        revolved_test = int(fid.readline()) == 1
+        revolved_test = [int(val) == 1 for val in fid.readline().split()]
         nper_test = [int(val) for val in fid.readline().split()]
+        local_counts = [int(val) for val in fid.readline().split()]
+        base_counts = [int(val) for val in fid.readline().split()]
+        fine_counts = [int(val) for val in fid.readline().split()]
         err_good = float(fid.readline())
         err_bad = float(fid.readline())
     retval = True
-    if revolved_test != revolved:
-        print("FAILED: Incorrect periodicity type (revolved = {0})".format(revolved_test))
+    if revolved_test != [revolved, revolved]:
+        print("FAILED: Incorrect periodicity type (revolved on base, finest level = {0})".format(revolved_test))
         retval = False
     if nper_test != nper:
         print("FAILED: Incorrect periodic (point, edge, face) counts")
         print("  Expected = {0}".format(nper))
         print("  Actual =   {0}".format(nper_test))
+        retval = False
+    # Periodic entities must be merged with their parents in the base level's global indexing
+    if [local_counts[i] - base_counts[i] for i in range(3)] != nper_test:
+        print("FAILED: Periodic entities not merged in base level global indexing")
+        print("  Local (point, edge, face) counts =  {0}".format(local_counts))
+        print("  Global (point, edge, face) counts = {0}".format(base_counts[:3]))
+        retval = False
+    # Refinement and distribution must keep periodic entities merged on the finest level. Levels up to
+    # nbase are refined, level nbase+1 is the distributed copy of level nbase, and later levels are refined
+    nrefine = (nbase - 1) + max(nlevels - nbase - 1, 0)
+    fine_expected = base_counts
+    for _ in range(nrefine):
+        fine_expected = refine_counts(fine_expected, cell_type)
+    if fine_counts != fine_expected:
+        print("FAILED: Incorrect global (point, edge, face, cell) counts on the finest level")
+        print("  Expected = {0}".format(fine_expected))
+        print("  Actual =   {0}".format(fine_counts))
         retval = False
     # A compatible linear field is in the FE space, so only solver error remains
     if err_good > 1.E-8:
@@ -199,22 +220,30 @@ def test_revolved(order, cell_type):
     across the periodic boundary, while a non-compatible field is not.
     '''
     assert periodic_setup('x_wedge', cell_type, order=order)
-    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)])
+    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)], cell_type)
 
 
 @pytest.mark.parametrize("cell_type", ('tet', 'hex'))
 def test_revolved_refined(cell_type):
-    '''Revolved periodicity is carried through uniform refinement (same checks as `test_revolved`)'''
+    '''Revolved periodicity is carried through uniform refinement
+
+    Same checks as `test_revolved`, with the projection done on the refined level. The periodic counts
+    are for the base level; on the refined level, periodic entities are only visible through the global
+    indexing, so its global counts are checked against those expected from refining the base level.
+    '''
     assert periodic_setup('x_wedge', cell_type, nbase=2, nlevels=2)
-    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)])
+    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)], cell_type, nbase=2, nlevels=2)
 
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("cell_type", ('tet', 'hex'))
 def test_revolved_mpi(cell_type):
-    '''Revolved periodicity on a distributed mesh (same checks as `test_revolved`)'''
-    assert periodic_setup('x_wedge', cell_type, nbase=1, nlevels=2, nproc=2)
-    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)])
+    '''Revolved periodicity on a distributed mesh, refined after distribution
+
+    Same checks as `test_revolved_refined`, with the projection done on the distributed, refined level.
+    '''
+    assert periodic_setup('x_wedge', cell_type, nbase=1, nlevels=3, nproc=2)
+    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)], cell_type, nbase=1, nlevels=3)
 
 
 @pytest.mark.coverage
@@ -228,14 +257,12 @@ def test_planar(cell_type):
     is not.
     '''
     assert periodic_setup('z_slab', cell_type)
-    assert check_results(False, EXPECTED_COUNTS[('z_slab', cell_type)])
+    assert check_results(False, EXPECTED_COUNTS[('z_slab', cell_type)], cell_type)
 
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("cell_type", ('tet', 'hex'))
 def test_revolved_bad_axis(cell_type):
     '''Revolved periodicity about the y-axis is rejected with an error by native_set_periodic'''
-    errcode, std_err = periodic_setup('y_wedge', cell_type, expect_abort=True)
-    assert errcode != 0
-    assert std_err.find('Revolved periodic planes must contain the x-axis') > -1
+    assert periodic_setup('y_wedge', cell_type, expect_abort='Revolved periodic planes must contain the x-axis')
     assert not os.path.exists('periodic.results')

@@ -37,7 +37,14 @@ def kill_process_group(pid):
         pass
 
 
-def run_OFT(command, nproc, timeout, return_stdout=False):
+def run_OFT(command, nproc, timeout, return_stdout=False, expect_abort=None):
+    '''Run OFT `command` on `nproc` processes with a `timeout` (in seconds) and check that it succeeded
+
+    Returns `True` if the run succeeded (and its standard output if `return_stdout`). A run fails if it times
+    out, exits with a non-zero error code, or reports an error or warning. If `expect_abort` is given, the run
+    must instead exit with a non-zero error code and report `expect_abort` in its error output (eg. from
+    `oft_abort`).
+    '''
     if nproc > 1:
         if env_flag('OFT_HAVE_MPI'):
             command = "mpirun --map-by :OVERSUBSCRIBE -np {0} {1}".format(nproc, command)
@@ -84,6 +91,18 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
             return True, std_out
         else:
             return True
+    if expect_abort is not None:
+        result = True
+        if errcode == 0:
+            print("FAILED: OFT exited normally, but an error was expected!")
+            result = False
+        elif std_err.find(expect_abort) < 0:
+            print("FAILED: expected OFT error not found!")
+            result = False
+        if return_stdout:
+            return result, std_out
+        else:
+            return result
     if errcode != 0:
         if (errcode == 143) or (errcode == 15):
             warnings.warn("WARNING: OFT exited with error code 143 (external SIGTERM)")

@@ -7,8 +7,11 @@
 !
 !> Regression tests for periodic native meshes and vector Lagrange elements on them.
 !!
-!! A native (tet or hex) mesh is loaded with reflection and periodicity enabled, and the periodic
-!! point, edge and face counts and periodicity type are written out. Two analytic
+!! A native (tet or hex) mesh is loaded with reflection and periodicity enabled, and the
+!! periodicity type on the base and finest levels, the periodic point, edge and face counts on
+!! the base level, and the global entity counts on the base and finest levels are written out.
+!! Periodicity on the finest (refined and/or distributed) level is carried by merged global
+!! indices, so its global counts must follow from the base-level ones by uniform refinement. Two analytic
 !! vector fields are then projected onto vector Lagrange elements (mass matrix inverse)
 !! and the L2 errors are written out:
 !! - A field compatible with the mesh periodicity, which a linear field reproduces
@@ -78,6 +81,7 @@ USE test_vlag_periodic_fields, ONLY: periodic_field
 IMPLICIT NONE
 INTEGER(i4) :: order=1,ierr,io_unit,good_field
 INTEGER(i4) :: nper(3)
+INTEGER(i8) :: base_counts(4),fine_counts(4)
 REAL(r8) :: err_good,err_bad
 CLASS(oft_mesh), POINTER :: base_mesh
 TYPE(multigrid_mesh) :: mg_mesh
@@ -99,6 +103,9 @@ nper=0
 IF(ASSOCIATED(base_mesh%periodic%lp))nper(1)=COUNT(base_mesh%periodic%lp>0)
 IF(ASSOCIATED(base_mesh%periodic%le))nper(2)=COUNT(base_mesh%periodic%le>0)
 IF(ASSOCIATED(base_mesh%periodic%lf))nper(3)=COUNT(base_mesh%periodic%lf>0)
+!---Global counts (periodic entities merged) on the base and finest levels
+base_counts=[base_mesh%global%np,base_mesh%global%ne,base_mesh%global%nf,base_mesh%global%nc]
+fine_counts=[mg_mesh%mesh%global%np,mg_mesh%mesh%global%ne,mg_mesh%mesh%global%nf,mg_mesh%mesh%global%nc]
 !---Project fields on the finest level
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
 good_field=2
@@ -107,8 +114,11 @@ err_good=project_error(good_field)
 err_bad=project_error(3)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='periodic.results')
-  WRITE(io_unit,*)MERGE(1,0,base_mesh%periodic%revolved)
+  WRITE(io_unit,*)MERGE(1,0,base_mesh%periodic%revolved),MERGE(1,0,mg_mesh%mesh%periodic%revolved)
   WRITE(io_unit,*)nper
+  WRITE(io_unit,*)base_mesh%np,base_mesh%ne,base_mesh%nf
+  WRITE(io_unit,*)base_counts
+  WRITE(io_unit,*)fine_counts
   WRITE(io_unit,*)err_good
   WRITE(io_unit,*)err_bad
   CLOSE(io_unit)
