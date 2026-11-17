@@ -43,7 +43,6 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob, oft_vlag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,nfail
-LOGICAL :: cstitch
 REAL(r8), PARAMETER :: tol=1.d-12
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
@@ -54,8 +53,6 @@ CALL oft_init
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 CALL oft_lag_setup(mg_mesh,2,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
-!---Complex stitching needs no linked copies on a process (serial, non-periodic meshes)
-cstitch=(oft_env%nprocs==1).AND.(mg_mesh%mesh%periodic%nper==0)
 !---Run tests
 nfail=0
 CALL test_ops()
@@ -232,46 +229,46 @@ END DO
 DEALLOCATE(vals)
 CALL check('1-norm',w%norm(1),oft_mpi_sum(v1))
 CALL check('Inf-norm',w%norm(3),oft_mpi_max(v2))
-!---Complex vectors (complex stitching is only supported for local vectors)
-IF(cstitch)THEN
-  CALL x%new(cx)
-  CALL x%new(cz)
-  NULLIFY(xr,xi,cvals)
-  CALL x%get_local(xr)
-  CALL y%get_local(xi)
-  ALLOCATE(cvals(x%n))
-  cvals=CMPLX(xr,xi,c8)
-  CALL cx%restore_local(cvals)
-  !---Transpose product matches real and imaginary parts applied separately
-  CALL lop%applyt(cx,cz)
-  CALL cz%get_local(cvals)
-  CALL lop%applyt(x,z)
-  CALL lop%applyt(y,w)
-  CALL z%get_local(xr)
-  CALL w%get_local(xi)
-  CALL check('Re(A^T cx)',MAXVAL(ABS(REAL(cvals,r8)-xr)),0.d0)
-  CALL check('Im(A^T cx)',MAXVAL(ABS(AIMAG(cvals)-xi)),0.d0)
-  !---Mixed real/complex dot products
-  c1=x%dot(cz)
-  c2=cz%dot(x)
-  CALL check('Re(x.cz)',REAL(c1,r8),x%dot(z))
-  CALL check('Im(x.cz)',AIMAG(c1),x%dot(w))
-  CALL check('Re(cz.x)',REAL(c2,r8),x%dot(z))
-  CALL check('Im(cz.x)',AIMAG(c2),-x%dot(w))
-  !---Complex norms
-  v1=0.d0
-  v2=0.d0
-  DO i=1,cz%n
-    v1=v1+ABS(cvals(i))
-    v2=MAX(v2,ABS(cvals(i)))
-  END DO
-  CALL check('Complex 1-norm',cz%norm(1),v1)
-  CALL check('Complex inf-norm',cz%norm(3),v2)
-  DEALLOCATE(xr,xi,cvals)
-  CALL cx%delete
-  CALL cz%delete
-  DEALLOCATE(cx,cz)
-END IF
+!---Complex vectors
+CALL x%new(cx)
+CALL x%new(cz)
+NULLIFY(xr,xi,cvals)
+CALL x%get_local(xr)
+CALL y%get_local(xi)
+ALLOCATE(cvals(x%n))
+cvals=CMPLX(xr,xi,c8)
+CALL cx%restore_local(cvals)
+!---Transpose product matches real and imaginary parts applied separately
+CALL lop%applyt(cx,cz)
+CALL cz%get_local(cvals)
+CALL lop%applyt(x,z)
+CALL lop%applyt(y,w)
+CALL z%get_local(xr)
+CALL w%get_local(xi)
+CALL check('Re(A^T cx)',MAXVAL(ABS(REAL(cvals,r8)-xr)),0.d0)
+CALL check('Im(A^T cx)',MAXVAL(ABS(AIMAG(cvals)-xi)),0.d0)
+!---Mixed real/complex dot products
+c1=x%dot(cz)
+c2=cz%dot(x)
+CALL check('Re(x.cz)',REAL(c1,r8),x%dot(z))
+CALL check('Im(x.cz)',AIMAG(c1),x%dot(w))
+CALL check('Re(cz.x)',REAL(c2,r8),x%dot(z))
+CALL check('Im(cz.x)',AIMAG(c2),-x%dot(w))
+!---Complex norms (owned values only)
+DEALLOCATE(cvals)
+CALL cz%get_slice(cvals)
+v1=0.d0
+v2=0.d0
+DO i=1,cz%nslice
+  v1=v1+ABS(cvals(i))
+  v2=MAX(v2,ABS(cvals(i)))
+END DO
+CALL check('Complex 1-norm',cz%norm(1),oft_mpi_sum(v1))
+CALL check('Complex inf-norm',cz%norm(3),oft_mpi_max(v2))
+DEALLOCATE(xr,xi,cvals)
+CALL cx%delete
+CALL cz%delete
+DEALLOCATE(cx,cz)
 !---Cleanup
 CALL x%delete
 CALL y%delete
@@ -547,9 +544,9 @@ END SUBROUTINE test_bc
 ! the same value, bit for bit, and conserves the global sum. Run on periodic meshes this covers
 ! several images of an entry on one process.
 SUBROUTINE test_stitch()
-INTEGER(i4) :: i
-REAL(r8) :: s_raw,s_sum
-CLASS(oft_vector), POINTER :: x,ones
+INTEGER(i4) :: i,m
+REAL(r8) :: s_raw,s_sum,d
+CLASS(oft_vector), POINTER :: x,y,ones
 CLASS(oft_cvector), POINTER :: cx,cy
 !---Real
 CALL ML_oft_lagrange%vec_create(x)
@@ -570,30 +567,73 @@ CALL x%stitch(1)
 CALL check_exact('Summation stitch consistent',inconsistency(x),0.d0)
 s_sum=x%dot(ones)
 CALL check('Summation stitch conserves sum',s_sum,s_raw)
-!---Complex (complex seams are not supported with linked copies on a process)
-IF(cstitch)THEN
-  CALL x%new(cx)
-  CALL x%new(cy)
+!---Complex: summation is consistent across copies and each stitching method matches
+!---stitching the real and imaginary parts separately
+CALL x%new(cx)
+CALL x%new(cy)
+CALL x%new(y)
+DO m=0,2
+  CALL cfill_raw(cx)
   SELECT TYPE(cx)
   TYPE IS(oft_native_cvector)
-    DO i=1,cx%n
-      cx%v(i)=CMPLX(gval(INT(i,i8),0.71d0,0.1d0),gval(INT(i,i8),0.53d0,-0.2d0),c8)/3.d0
-    END DO
-  CLASS DEFAULT
-    CALL oft_abort('Native complex vector expected','test_stitch',__FILE__)
+    SELECT TYPE(x)
+    TYPE IS(oft_native_vector)
+      SELECT TYPE(y)
+      TYPE IS(oft_native_vector)
+        x%v=REAL(cx%v,r8)
+        y%v=AIMAG(cx%v)
+        CALL cx%stitch(m)
+        CALL x%stitch(m)
+        CALL y%stitch(m)
+        IF(m==1)THEN
+          ! Elements with three or more contributions are summed in a different order
+          d=MAXVAL(ABS(cx%v-CMPLX(x%v,y%v,c8)))
+          CALL check('Complex stitch(1) matches real/imaginary parts',oft_mpi_max(d),0.d0)
+          CALL cy%add((0.d0,0.d0),(1.d0,0.d0),cx)
+          CALL cy%stitch(0)
+          CALL check_exact('Complex summation stitch consistent',cmaxdiff(cx,cy),0.d0)
+        ELSE
+          d=MAXVAL(ABS(cx%v-CMPLX(x%v,y%v,c8)))
+          CALL check_exact('Complex stitch('//CHAR(48+m)//') matches real/imaginary parts',oft_mpi_max(d),0.d0)
+        END IF
+      END SELECT
+    END SELECT
   END SELECT
-  CALL cx%stitch(1)
-  CALL cy%add((0.d0,0.d0),(1.d0,0.d0),cx)
-  CALL cy%stitch(0)
-  CALL check_exact('Complex summation stitch consistent',cmaxdiff(cx,cy),0.d0)
-  CALL cx%delete
-  CALL cy%delete
-  DEALLOCATE(cx,cy)
-END IF
+END DO
+!---Complex summation of a uniform field counts every copy once
+CALL cx%set((1.d0,-2.d0))
+CALL cx%stitch(1)
+CALL ones%set(1.d0)
+CALL ones%stitch(1)
+SELECT TYPE(cx)
+TYPE IS(oft_native_cvector)
+  SELECT TYPE(ones)
+  TYPE IS(oft_native_vector)
+    CALL check_exact('Complex summation multiplicity',oft_mpi_max(MAXVAL(ABS(cx%v-CMPLX(1.d0,-2.d0,c8)*ones%v))),0.d0)
+  END SELECT
+END SELECT
+CALL cx%delete
+CALL cy%delete
+CALL y%delete
+DEALLOCATE(cx,cy,y)
 CALL x%delete
 CALL ones%delete
 DEALLOCATE(x,ones)
 END SUBROUTINE test_stitch
+! Distinct values on every copy of an entry (local index and rank dependent)
+SUBROUTINE cfill_raw(c)
+CLASS(oft_cvector), INTENT(inout) :: c
+INTEGER(i4) :: i
+SELECT TYPE(c)
+TYPE IS(oft_native_cvector)
+  DO i=1,c%n
+    c%v(i)=CMPLX(gval(INT(i+1000*oft_env%rank,i8),0.71d0,0.1d0), &
+      gval(INT(i+1000*oft_env%rank,i8),0.53d0,-0.2d0),c8)/3.d0
+  END DO
+CLASS DEFAULT
+  CALL oft_abort('Native complex vector expected','cfill_raw',__FILE__)
+END SELECT
+END SUBROUTINE cfill_raw
 ! Shared non-zero patterns of native CRS matrices
 SUBROUTINE test_pattern()
 INTEGER(i4) :: i,nlive0,nlive1,refs0
@@ -693,28 +733,28 @@ CLASS DEFAULT
 END SELECT
 CALL check_exact('Complex share uses real pattern',MERGE(1.d0,0.d0,ASSOCIATED(C%pattern,B%pattern)),1.d0)
 C%M=CMPLX(B%M,0.d0,c8)
-IF(cstitch)THEN ! Complex vector stitching is only supported without linked copies
-  CALL x%new(cx)
-  CALL x%new(cz)
-  NULLIFY(xr,xi,cvals)
-  CALL x%get_local(xr)
-  CALL y%get_local(xi)
-  ALLOCATE(cvals(x%n))
-  cvals=CMPLX(xr,xi,c8)
-  CALL cx%restore_local(cvals)
-  CALL cshared%apply(cx,cz)
-  CALL cz%get_local(cvals)
-  CALL shared%apply(x,z)
-  CALL shared%apply(y,w)
-  CALL z%get_local(xr)
-  CALL w%get_local(xi)
-  CALL check_exact('Re(complex shared A cx)',MAXVAL(ABS(REAL(cvals,r8)-xr)),0.d0)
-  CALL check_exact('Im(complex shared A cx)',MAXVAL(ABS(AIMAG(cvals)-xi)),0.d0)
-  DEALLOCATE(xr,xi,cvals)
-  CALL cx%delete
-  CALL cz%delete
-  DEALLOCATE(cx,cz)
-END IF
+CALL x%new(cx)
+CALL x%new(cz)
+NULLIFY(xr,xi,cvals)
+CALL x%get_local(xr)
+CALL y%get_local(xi)
+ALLOCATE(cvals(x%n))
+cvals=CMPLX(xr,xi,c8)
+CALL cx%restore_local(cvals)
+CALL cshared%apply(cx,cz)
+CALL cz%get_local(cvals)
+CALL shared%apply(x,z)
+CALL shared%apply(y,w)
+CALL z%get_local(xr)
+CALL w%get_local(xi)
+! Products are bitwise equal before stitching; entries with three or more contributions are
+! summed in ascending order of the complex value, not of each part, so only round-off agrees
+CALL check('Re(complex shared A cx)',oft_mpi_max(MAXVAL(ABS(REAL(cvals,r8)-xr))),0.d0)
+CALL check('Im(complex shared A cx)',oft_mpi_max(MAXVAL(ABS(AIMAG(cvals)-xi))),0.d0)
+DEALLOCATE(xr,xi,cvals)
+CALL cx%delete
+CALL cz%delete
+DEALLOCATE(cx,cz)
 !---Pattern is freed with its last reference
 CALL check_exact('Reference count with three users',REAL(B%pattern%refcount,r8),3.d0)
 CALL shared%delete
