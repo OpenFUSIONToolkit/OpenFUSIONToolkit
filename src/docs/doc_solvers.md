@@ -39,13 +39,22 @@ This method is supported through both the native and PETSc backends through
 \ref oft_petsc_solvers::oft_petsc_direct_solver "oft_petsc_direct_solver" for a full solver or
 \ref oft_petsc_solvers::oft_petsc_luprecond "oft_petsc_luprecond" as a PETSc preconditioner.
 
-\warning The native solver currently only supports local solves (ie as a sub-solver to Block Jacobi)
+By default the native solver performs local solves (ie as a sub-solver to Block Jacobi). With the
+`superd` and `mumps` packages, the full distributed system can instead be factored across all MPI
+tasks by setting `distributed` to true and using the solver directly on the global system (not
+as a sub-solver to Block Jacobi). This option has no effect in serial runs or for local systems.
 
 **XML Spec:** `<solver type="lu">`
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
 | `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack}, PETSc {petsc, super, superd, umfpack, mumps} | str | No |
+
+Native only options
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `distributed` | Factor full distributed system across all MPI tasks (`superd`, `mumps`, and `strumpack` only) | bool | No |
 
 Native STRUMPACK options, in a `<strumpack>` group (values of `-1` or omitted use the STRUMPACK defaults)
 

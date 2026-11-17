@@ -10,6 +10,7 @@
 !!
 !! The current test cases are:
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
+!! - Solve the same system with a direct solve of the full distributed system (`dist_lu`)
 !!
 !! @authors Chris Hansen
 !! @date May 2014
@@ -39,7 +40,8 @@ TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1
 LOGICAL :: use_ilu = .FALSE.
-NAMELIST/test_bj_options/nlocal,sol_type,use_ilu
+LOGICAL :: dist_lu = .FALSE.
+NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -111,8 +113,8 @@ TYPE(oft_bjprecond), TARGET :: linv_pre
 TYPE(oft_lusolver), TARGET :: linv_pre_lu
 TYPE(oft_ilusolver), TARGET :: linv_pre_ilu
 !---Local variables
-INTEGER(i4) :: ierr
-REAL(r8) :: uu
+INTEGER(i4) :: i,ierr
+REAL(r8) :: uu,uu_expected,scale
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_native_matrix), POINTER :: lop_native
 CLASS(oft_matrix), POINTER :: lop => NULL()
@@ -130,6 +132,7 @@ linv%its=-3
 linv%itplot=1
 linv%nrits=20
 linv%pre=>linv_pre
+IF(dist_lu)linv%pre=>linv_pre_lu
 !---Setup preconditioner
 IF(nlocal>0)THEN
   linv_pre%nlocal=nlocal
@@ -163,6 +166,7 @@ IF(use_ilu)THEN
   END SELECT
 ELSE
   linv_pre%pre=>linv_pre_lu
+  linv_pre_lu%distributed=dist_lu
   SELECT CASE(sol_type)
     CASE(1)
       linv_pre_lu%package='super'
@@ -187,6 +191,30 @@ CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=SQRT(u%dot(u))
+!---Check refactorization: scale matrix by 2 (same pattern), then restore (new pattern)
+!---(serial runs use the local factorization path)
+IF(dist_lu)THEN
+  uu_expected=uu
+  DO i=1,2
+    scale=2.d0
+    IF(i==2)scale=0.5d0
+    uu_expected=uu_expected/scale
+    SELECT TYPE(this=>lop)
+      CLASS IS(oft_native_matrix)
+        this%M=this%M*scale
+      CLASS DEFAULT
+        CALL oft_abort("Incorrect matrix type","test_lap",__FILE__)
+    END SELECT
+    CALL linv_pre_lu%update(i==2)
+    CALL u%set(1.d0)
+    CALL mop%apply(u,v)
+    CALL lag_zerob%apply(v)
+    CALL u%set(0.d0)
+    CALL linv%apply(u,v)
+    IF(ABS(SQRT(u%dot(u))-uu_expected)>1.d-8*uu_expected)CALL oft_abort( &
+      "Solution incorrect after refactorization","test_lap",__FILE__)
+  END DO
+END IF
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='bjacobi.results')
   WRITE(io_unit,*)linv%cits
