@@ -33,6 +33,8 @@ MODULE oft_native_solvers
 USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
+USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_delete, scatter_local, &
+  OFT_SCATTER_INSERT, OFT_SCATTER_ADD
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
   OFT_ACCESS_READWRITE
@@ -264,6 +266,9 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   TYPE(oft_native_vector), pointer, dimension(:) :: glocs => NULL() !< Local RHS vector for each block
   TYPE(oft_solver_ptr), pointer, dimension(:) :: solvers => NULL() !< Local block solvers
   TYPE(oft_1d_int), pointer, dimension(:) :: parts => NULL() !< Local partition indices
+  !> Gather/scatter plan of each block (rows `parts(i)%v`; with `loverlap`, weights 1 on
+  !! rows assigned to the block and 0 on overlap rows, which are read but not written back)
+  TYPE(oft_scatter_plan), pointer, dimension(:) :: bplans => NULL()
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => bjprecond_apply
@@ -2011,6 +2016,7 @@ INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
@@ -2216,12 +2222,21 @@ IF(.NOT.self%initialized)THEN
       ALLOCATE(self%solvers(i)%s, source=pretmp)
       IF(ASSOCIATED(pretmp%pre))ALLOCATE(self%solvers(i)%s%pre, source=pretmp%pre)
     END DO
+    !---Block gather/scatter plans (restricted write-back on overlap rows)
+    ALLOCATE(self%bplans(self%nlocal))
     IF(self%loverlap.AND.self%nlocal>1)THEN
-      !$omp parallel do private(j)
+      !$omp parallel do private(j,wt)
       DO i=1,self%nlocal
+        ALLOCATE(wt(self%parts(i)%n))
         DO j=1,self%parts(i)%n
-          IF(part(self%parts(i)%v(j))/=i)self%parts(i)%v(j)=-self%parts(i)%v(j)
+          wt(j)=MERGE(1.d0,0.d0,part(self%parts(i)%v(j))==i)
         END DO
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
+        DEALLOCATE(wt)
+      END DO
+    ELSE
+      DO i=1,self%nlocal
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v)
       END DO
     END IF
     DEALLOCATE(part)
@@ -2259,23 +2274,17 @@ IF(self%nlocal>1)THEN
   CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
   CALL g%borrow_local(gvals,OFT_ACCESS_READ)
   !---Each block (and its local vectors) is only accessed by one thread
-  !$omp parallel private(j) if(thread_safe)
+  !$omp parallel if(thread_safe)
   !$omp do schedule(dynamic,1)
   DO i=1,self%nlocal
     !---Get local slice for solve
-    !$omp simd
-    DO j=1,self%parts(i)%n
-      self%glocs(i)%v(j)=gvals(ABS(self%parts(i)%v(j)))
-      self%ulocs(i)%v(j)=uvals(ABS(self%parts(i)%v(j)))
-    END DO
+    CALL scatter_local(self%bplans(i),gvals,self%glocs(i)%v,OFT_SCATTER_INSERT)
+    CALL scatter_local(self%bplans(i),uvals,self%ulocs(i)%v,OFT_SCATTER_INSERT)
     !---Solve sub-system
     self%solvers(i)%s%A=>self%alocals(i)
     CALL self%solvers(i)%s%apply(self%ulocs(i),self%glocs(i))
-    !---Replace local slice into solution
-    !$omp simd
-    DO j=1,self%parts(i)%n
-      IF(self%parts(i)%v(j)>0)uvals(self%parts(i)%v(j))=self%ulocs(i)%v(j)
-    END DO
+    !---Replace local slice into solution (rows with non-zero weight only)
+    CALL scatter_local(self%bplans(i),self%ulocs(i)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
   END DO
   !$omp end parallel
   !---Local solves on shared rows differ between processes, so synchronize from owner
@@ -2446,6 +2455,13 @@ IF(ASSOCIATED(self%alocals))THEN
     CALL self%alocals(i)%delete
   END DO
   DEALLOCATE(self%alocals)
+END IF
+!---Destroy block plans
+IF(ASSOCIATED(self%bplans))THEN
+  DO i=1,SIZE(self%bplans)
+    CALL scatter_plan_delete(self%bplans(i))
+  END DO
+  DEALLOCATE(self%bplans)
 END IF
 !---Destory local partitions
 IF(ASSOCIATED(self%parts))THEN
