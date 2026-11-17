@@ -30,7 +30,7 @@ USE oft_local
 USE oft_base
 USE oft_sort, ONLY: search_array, sort_array
 USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
-  oft_global_reduction, oft_stitch_check
+  oft_global_reduction, oft_global_norm1, oft_stitch_check
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph
@@ -725,18 +725,14 @@ function vec_dot_cvec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
-complex(c8), allocatable, dimension(:) :: vtmp
 DEBUG_STACK_PUSH
-allocate(vtmp(self%n))
-vtmp=(1.d0,0.d0)*self%v
 select type(this=>a)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_dot_cvec',__FILE__)
-    dot=oft_global_dp(self%stitch_info,vtmp,this%v,this%n)
+    dot=oft_global_dp(self%stitch_info,self%v,this%v,this%n)
   class default
     CALL oft_abort('"a" is not a native vector.','vec_dot_cvec',__FILE__)
 end select
-deallocate(vtmp)
 DEBUG_STACK_POP
 end function vec_dot_cvec
 !---------------------------------------------------------------------------------
@@ -770,20 +766,16 @@ integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: i
-complex(c8), allocatable, dimension(:) :: vtmp
 DEBUG_STACK_PUSH
-allocate(vtmp(self%n))
-vtmp=(1.d0,0.d0)*self%v
 DO i=1,n
   select type(this=>a(i)%f)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_mdot_cvec',__FILE__)
-    dots(i)=oft_global_dp(self%stitch_info,vtmp,this%v,this%n,no_reduce=.TRUE.)
+    dots(i)=oft_global_dp(self%stitch_info,self%v,this%v,this%n,no_reduce=.TRUE.)
   class default
     CALL oft_abort('"a" is not a native complex vector.','vec_mdot_cvec',__FILE__)
   end select
 END DO
-deallocate(vtmp)
 IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function vec_mdot_cvec
@@ -806,18 +798,15 @@ integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> In
 real(r8) :: norm !< Specified norm of vector
 integer(i4) :: i
 real(r8) :: nloc
-real(r8), allocatable, dimension(:) :: vtmp
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
-    ALLOCATE(vtmp(self%n))
-    vtmp=ABS(self%v)
-    norm=oft_global_reduction(self%stitch_info,vtmp,self%n)
-    DEALLOCATE(vtmp)
+    norm=oft_global_norm1(self%stitch_info,self%v,self%n)
   CASE(2)
     norm=SQRT(self%dot(self))
   CASE(3)
     nloc=0.d0
+    !$omp parallel do simd reduction(max:nloc) if(self%n>OFT_OMP_VTHRESH)
     DO i=1,self%n
       nloc=MAX(nloc,ABS(self%v(i)))
     END DO
@@ -1558,18 +1547,14 @@ function cvec_dot_vec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
-ALLOCATE(atmp(self%n))
 select type(this=>a)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_dot_vec',__FILE__)
-    atmp=(1.d0,0.d0)*this%v
-    dot=oft_global_dp(self%stitch_info,self%v,atmp,this%n)
+    dot=oft_global_dp(self%stitch_info,self%v,this%v,this%n)
   class default
     CALL oft_abort('"a" is not a native vector.','cvec_dot_vec',__FILE__)
 end select
-DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end function cvec_dot_vec
 !---------------------------------------------------------------------------------
@@ -1598,20 +1583,16 @@ integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: i
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
-ALLOCATE(atmp(self%n))
 DO i=1,n
   select type(this=>a(i)%f)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_mdot_vec',__FILE__)
-    atmp=(1.d0,0.d0)*this%v
-    dots(i)=oft_global_dp(self%stitch_info,self%v,atmp,this%n,no_reduce=.TRUE.)
+    dots(i)=oft_global_dp(self%stitch_info,self%v,this%v,this%n,no_reduce=.TRUE.)
   class default
     CALL oft_abort('"a" is not a native vector.','cvec_mdot_vec',__FILE__)
   end select
 END DO
-DEALLOCATE(atmp)
 dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function cvec_mdot_vec
@@ -1656,20 +1637,15 @@ integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> In
 REAL(r8) :: norm !< Specified norm of vector
 integer(i4) :: i
 REAL(r8) :: nloc
-REAL(r8), allocatable, dimension(:) :: vtmp
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
-    ALLOCATE(vtmp(self%n))
-    DO i=1,self%n
-      vtmp(i)=ABS(self%v(i))
-    END DO
-    norm=oft_global_reduction(self%stitch_info,vtmp,self%n)
-    DEALLOCATE(vtmp)
+    norm=oft_global_norm1(self%stitch_info,self%v,self%n)
   CASE(2)
     norm=SQRT(REAL(self%dot(self),r8))
   CASE(3)
     nloc=0.d0
+    !$omp parallel do simd reduction(max:nloc) if(self%n>OFT_OMP_VTHRESH)
     DO i=1,self%n
       nloc=MAX(nloc,ABS(self%v(i)))
     END DO
