@@ -179,12 +179,12 @@ USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_setup_interp
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
-USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop, oft_hcurl_grad_project, &
-  oft_hcurl_grad_gzerop, oft_hcurl_grad_zerob
+USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, &
+  oft_hcurl_grad_project, oft_hcurl_grad_gzerop, oft_hcurl_grad_zerob
 !---Physics
 USE thick_wall, ONLY: thickcurr_ML_hcurl, thickcurr_ML_H1grad, thickcurr_ML_hcurl_grad, &
-  thickcurr_ML_lagrange, thickcurr_ML_vlagrange, thickcurr_setup, thickcurr_eigs, &
-  thickcurr_run, thickcurr_plot
+  thickcurr_ML_lagrange, thickcurr_ML_vlagrange, thickcurr_minlev, thickcurr_setup, &
+  thickcurr_eigs, thickcurr_run, thickcurr_plot
 !---Self
 USE torus_helpers, ONLY: torus_init_interp, torus_flux_probe
 IMPLICIT NONE
@@ -203,7 +203,7 @@ TYPE(oft_hcurl_grad_zerob) :: hcurl_grad_zerob
 TYPE(torus_init_interp) :: init_field
 TYPE(torus_flux_probe) :: flux_probe
 REAL(8), ALLOCATABLE :: tau(:)
-INTEGER(4) :: i,ierr,io_unit,minlev
+INTEGER(4) :: i,ierr,io_unit,minlev,toplev
 !---Input file options
 INTEGER(4) :: order = 2
 INTEGER(4) :: nev = 4
@@ -221,12 +221,20 @@ READ(io_unit,thickcurr_torus_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
-minlev=mg_mesh%mgmax+order-1 ! Only construct the highest FE level (no multigrid)
 !!\subsubsection doc_thickcurr_torus_ex_driver_fe Build FE structures and setup ThickCurr
 !!
 !! See \ref doc_thickcurr_slab_ex_driver_fe and \ref doc_thickcurr_slab_ex_driver_tw for details.
-!--- Lagrange (for plotting)
-CALL oft_lag_setup(mg_mesh,order,ML_lagrange,ML_vlag_obj=ML_vlagrange,minlev=minlev)
+!! Unlike \ref doc_thickcurr_slab_ex, this example uses a "p-multigrid" preconditioner, where the
+!! linear system for the requested FE order (`order=2`) is preconditioned using a coarse level with
+!! linear (`order=1`) elements on the same mesh. To support this, the FE spaces are constructed
+!! starting from the linear level (`minlev`), the interpolation operators between levels are constructed,
+!! and the lowest level for multigrid is passed to ThickCurr using \ref thick_wall::thickcurr_minlev
+!! "thickcurr_minlev". The preconditioner itself is defined in the XML input file
+!! (see \ref doc_thickcurr_torus_ex_input_xml).
+toplev=mg_mesh%mgmax+order-1 ! Highest FE level (requested order on finest mesh)
+minlev=mg_mesh%mgmax         ! Linear elements on finest mesh (coarse level for p-multigrid)
+!--- Lagrange (for plotting, highest level only)
+CALL oft_lag_setup(mg_mesh,order,ML_lagrange,ML_vlag_obj=ML_vlagrange,minlev=toplev)
 !--- Grad(H^1) subspace
 CALL oft_h1_setup(mg_mesh,order+1,ML_H1,minlev=minlev)
 CALL h1_setup_interp(ML_H1)
@@ -235,6 +243,7 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_hcurl,minlev=minlev)
 CALL hcurl_setup_interp(ML_hcurl)
 !--- Full H(Curl) + Grad(H^1) space
 CALL oft_hcurl_grad_setup(ML_hcurl,ML_H1,ML_hcurl_grad,ML_H1grad,minlev=minlev)
+CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_H1,create_full=.TRUE.)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 hcurl_grad_zerob%ML_hcurl_grad_rep=>ML_hcurl_grad
 !--- Set FE spaces for ThickCurr
@@ -243,6 +252,7 @@ thickcurr_ML_H1grad=>ML_H1grad
 thickcurr_ML_hcurl_grad=>ML_hcurl_grad
 thickcurr_ML_lagrange=>ML_lagrange
 thickcurr_ML_vlagrange=>ML_vlagrange
+thickcurr_minlev=minlev ! Lowest level for multigrid preconditioner
 !---Setup ThickCurr
 CALL thickcurr_setup()
 !!\subsubsection doc_thickcurr_torus_ex_driver_plot Perform post-processing

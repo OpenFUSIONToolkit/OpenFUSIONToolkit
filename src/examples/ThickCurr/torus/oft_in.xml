@@ -4,9 +4,27 @@
       <id>2</id>
       <eta>7.0E-7</eta>
     </region>
-    <pre type="block_jacobi">
-      <nlocal>1</nlocal>
-      <solver type="lu"></solver>
+    <pre type="mg">
+      <smoother direction="both">
+        <solver type="gmres">
+          <its>2</its>
+          <nrits>2</nrits>
+          <pre type="block_jacobi">
+            <nlocal>200</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </smoother>
+      <coarse>
+        <solver type="gmres">
+          <its>1</its>
+          <nrits>1</nrits>
+          <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </coarse>
     </pre>
   </thickcurr>
 </oft>
