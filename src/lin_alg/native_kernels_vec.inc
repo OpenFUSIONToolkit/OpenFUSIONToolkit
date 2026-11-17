@@ -25,6 +25,7 @@ PRIVATE
 PUBLIC :: nk_set, nk_scale, nk_maxpy, nk_norm_inf, nk_owned_sum, nk_owned_norm1
 PUBLIC :: nk_gather, nk_scatter, nk_csr_zero_rows, nk_csr_zero_cols, nk_csr_identity_rows
 PUBLIC :: nk_csr_get_diag, nk_set_at, nk_add_at, nk_atomic_add_at
+PUBLIC :: nk_dense_insert, nk_dense_zero_rows, nk_dense_zero_cols, nk_dense_get_diag
 INTERFACE nk_set
   MODULE PROCEDURE k_set
 END INTERFACE nk_set
@@ -70,6 +71,18 @@ END INTERFACE nk_add_at
 INTERFACE nk_atomic_add_at
   MODULE PROCEDURE k_atomic_add_at
 END INTERFACE nk_atomic_add_at
+INTERFACE nk_dense_insert
+  MODULE PROCEDURE k_dense_insert
+END INTERFACE nk_dense_insert
+INTERFACE nk_dense_zero_rows
+  MODULE PROCEDURE k_dense_zero_rows
+END INTERFACE nk_dense_zero_rows
+INTERFACE nk_dense_zero_cols
+  MODULE PROCEDURE k_dense_zero_cols
+END INTERFACE nk_dense_zero_cols
+INTERFACE nk_dense_get_diag
+  MODULE PROCEDURE k_dense_get_diag
+END INTERFACE nk_dense_get_diag
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set all entries to a scalar, \f$ y_i = \alpha \f$
@@ -358,3 +371,96 @@ DO j=1,m
   END DO
 END DO
 END SUBROUTINE k_atomic_add_at
+!---------------------------------------------------------------------------------
+!> Insert a block of values into a dense (column-major) matrix
+!!
+!! Entry (`ioff+irows(i)`,`joff+jcols(j)`) is set to (`mode=0`), incremented by
+!! (`mode=1`) or atomically incremented by (`mode=2`) `b(i,j)`.
+!---------------------------------------------------------------------------------
+SUBROUTINE k_dense_insert(nr,nc,vals,n,m,irows,jcols,ioff,joff,b,mode)
+INTEGER(i4), INTENT(in) :: nr !< Number of matrix rows
+INTEGER(i4), INTENT(in) :: nc !< Number of matrix columns
+KT, INTENT(inout) :: vals(nr,nc) !< Matrix values [nr,nc]
+INTEGER(i4), INTENT(in) :: n !< Number of rows in block
+INTEGER(i4), INTENT(in) :: m !< Number of columns in block
+INTEGER(i4), INTENT(in) :: irows(n) !< Row indices [n]
+INTEGER(i4), INTENT(in) :: jcols(m) !< Column indices [m]
+INTEGER(i4), INTENT(in) :: ioff !< Offset added to row indices
+INTEGER(i4), INTENT(in) :: joff !< Offset added to column indices
+KT, INTENT(in) :: b(n,m) !< Block values [n,m]
+INTEGER(i4), INTENT(in) :: mode !< Set (0), add (1) or atomically add (2)
+INTEGER(i4) :: i,j,ii,jj
+DO j=1,m
+  jj=joff+jcols(j)
+  DO i=1,n
+    ii=ioff+irows(i)
+    SELECT CASE(mode)
+    CASE(0)
+      vals(ii,jj)=b(i,j)
+    CASE(1)
+      vals(ii,jj)=vals(ii,jj)+b(i,j)
+    CASE DEFAULT
+      !$omp atomic
+      vals(ii,jj)=vals(ii,jj)+b(i,j)
+    END SELECT
+  END DO
+END DO
+END SUBROUTINE k_dense_insert
+!---------------------------------------------------------------------------------
+!> Zero rows `ioff+irows(:)` of a dense (column-major) matrix
+!!
+!! Unless `zero_diag` is set, diagonal entries are kept.
+!---------------------------------------------------------------------------------
+SUBROUTINE k_dense_zero_rows(nr,nc,vals,nrows,irows,ioff,zero_diag)
+INTEGER(i4), INTENT(in) :: nr !< Number of matrix rows
+INTEGER(i4), INTENT(in) :: nc !< Number of matrix columns
+KT, INTENT(inout) :: vals(nr,nc) !< Matrix values [nr,nc]
+INTEGER(i4), INTENT(in) :: nrows !< Number of rows to zero
+INTEGER(i4), INTENT(in) :: irows(nrows) !< Row indices [nrows]
+INTEGER(i4), INTENT(in) :: ioff !< Offset added to row indices
+LOGICAL, INTENT(in) :: zero_diag !< Zero diagonal entries too?
+INTEGER(i4) :: i,j,ir
+!$omp parallel do private(ir,j)
+DO i=1,nrows
+  ir=ioff+irows(i)
+  DO j=1,nc
+    IF(zero_diag.OR.(ir/=j))vals(ir,j)=KZERO
+  END DO
+END DO
+END SUBROUTINE k_dense_zero_rows
+!---------------------------------------------------------------------------------
+!> Zero columns `joff+icols(:)` of a dense (column-major) matrix
+!!
+!! Unless `zero_diag` is set, diagonal entries are kept.
+!---------------------------------------------------------------------------------
+SUBROUTINE k_dense_zero_cols(nr,nc,vals,ncols,icols,joff,zero_diag)
+INTEGER(i4), INTENT(in) :: nr !< Number of matrix rows
+INTEGER(i4), INTENT(in) :: nc !< Number of matrix columns
+KT, INTENT(inout) :: vals(nr,nc) !< Matrix values [nr,nc]
+INTEGER(i4), INTENT(in) :: ncols !< Number of columns to zero
+INTEGER(i4), INTENT(in) :: icols(ncols) !< Column indices [ncols]
+INTEGER(i4), INTENT(in) :: joff !< Offset added to column indices
+LOGICAL, INTENT(in) :: zero_diag !< Zero diagonal entries too?
+INTEGER(i4) :: i,j,ic
+!$omp parallel do private(ic,j)
+DO i=1,ncols
+  ic=joff+icols(i)
+  DO j=1,nr
+    IF(zero_diag.OR.(ic/=j))vals(j,ic)=KZERO
+  END DO
+END DO
+END SUBROUTINE k_dense_zero_cols
+!---------------------------------------------------------------------------------
+!> Extract the diagonal of a dense (column-major) matrix, \f$ d_i = M_{i,i} \f$
+!---------------------------------------------------------------------------------
+SUBROUTINE k_dense_get_diag(nr,nc,vals,d)
+INTEGER(i4), INTENT(in) :: nr !< Number of matrix rows
+INTEGER(i4), INTENT(in) :: nc !< Number of matrix columns
+KT, INTENT(in) :: vals(nr,nc) !< Matrix values [nr,nc]
+KT, INTENT(out) :: d(nr) !< Diagonal entries [nr]
+INTEGER(i4) :: i
+!$omp parallel do
+DO i=1,nr
+  d(i)=vals(i,i)
+END DO
+END SUBROUTINE k_dense_get_diag

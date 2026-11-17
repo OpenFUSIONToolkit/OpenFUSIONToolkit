@@ -3480,126 +3480,91 @@ end subroutine dense_mat_applyt_cvec
 !> Set values of a matrix
 !---------------------------------------------------------------------------------
 subroutine dense_mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
-real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
+real(r8), intent(in) :: b(n,m) !< Values [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: i,j,ii,jj
+integer(i4) :: ioff,joff
 DEBUG_STACK_PUSH
+ioff=0
+joff=0
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  IF(ANY(self%i_map(iblock)%offset+i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  IF(ANY(self%j_map(jblock)%offset+j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  do i=1,n
-    ii=self%i_map(iblock)%offset+i_inds(i)
-    do j=1,m
-      jj=self%j_map(jblock)%offset+j_inds(j)
-      self%M(ii,jj)=b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'mat_set_values',__FILE__)
-  IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  do i=1,n
-    do j=1,m
-      self%M(i_inds(i),j_inds(j))=b(i,j)
-    end do
-  end do
+  ioff=self%i_map(iblock)%offset
+  joff=self%j_map(jblock)%offset
+ELSE IF(PRESENT(iblock).OR.PRESENT(jblock))THEN
+  CALL oft_abort('Only one block index was supplied','dense_mat_set_values',__FILE__)
 END IF
+IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_set_values',__FILE__)
+IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_set_values',__FILE__)
+CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,0)
 DEBUG_STACK_POP
 end subroutine dense_mat_set_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix
 !---------------------------------------------------------------------------------
 subroutine dense_mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
+real(r8), intent(in) :: b(n,m) !< Values [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,ii,jj
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+integer(i4) :: ioff,joff
 DEBUG_STACK_PUSH
+ioff=0
+joff=0
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  IF(ANY(self%i_map(iblock)%offset+i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  IF(ANY(self%j_map(jblock)%offset+j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  do i=1,n
-    ii=self%i_map(iblock)%offset+i_inds(i)
-    do j=1,m
-      jj=self%j_map(jblock)%offset+j_inds(j)
-      self%M(ii,jj)=self%M(ii,jj)+b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'mat_set_values',__FILE__)
-  IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_set_values',__FILE__)
-  do i=1,n
-    do j=1,m
-      self%M(i_inds(i),j_inds(j))=self%M(i_inds(i),j_inds(j))+b(i,j)
-    end do
-  end do
+  ioff=self%i_map(iblock)%offset
+  joff=self%j_map(jblock)%offset
+ELSE IF(PRESENT(iblock).OR.PRESENT(jblock))THEN
+  CALL oft_abort('Only one block index was supplied','dense_mat_add_values',__FILE__)
 END IF
+IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_add_values',__FILE__)
+IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_add_values',__FILE__)
+CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,1)
 DEBUG_STACK_POP
 end subroutine dense_mat_add_values
 !---------------------------------------------------------------------------------
-!> Add values to a matrix
+!> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
 subroutine dense_mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
+real(r8), intent(in) :: b(n,m) !< Values [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,ii,jj
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+integer(i4) :: ioff,joff
 DEBUG_STACK_PUSH
+ioff=0
+joff=0
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  IF(ANY(self%i_map(iblock)%offset+i_inds>self%nr))CALL oft_abort('Index exceeds graph', &
-    'dense_mat_atomic_add_values',__FILE__)
-  IF(ANY(self%j_map(jblock)%offset+j_inds>self%nc))CALL oft_abort('Index exceeds graph', &
-    'dense_mat_atomic_add_values',__FILE__)
-  do i=1,n
-    ii=self%i_map(iblock)%offset+i_inds(i)
-    do j=1,m
-      jj=self%j_map(jblock)%offset+j_inds(j)
-      !$omp atomic
-      self%M(ii,jj)=self%M(ii,jj)+b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'dense_mat_atomic_add_values',__FILE__)
-  IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_atomic_add_values',__FILE__)
-  IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_atomic_add_values',__FILE__)
-  do i=1,n
-    do j=1,m
-      !$omp atomic
-      self%M(i_inds(i),j_inds(j))=self%M(i_inds(i),j_inds(j))+b(i,j)
-    end do
-  end do
+  ioff=self%i_map(iblock)%offset
+  joff=self%j_map(jblock)%offset
+ELSE IF(PRESENT(iblock).OR.PRESENT(jblock))THEN
+  CALL oft_abort('Only one block index was supplied','dense_mat_atomic_add_values',__FILE__)
 END IF
+IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_atomic_add_values',__FILE__)
+IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_atomic_add_values',__FILE__)
+CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,2)
 DEBUG_STACK_POP
 end subroutine dense_mat_atomic_add_values
 !---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !---------------------------------------------------------------------------------
 subroutine dense_mat_assemble(self,diag)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
-integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 if(present(diag))then
@@ -3610,11 +3575,7 @@ if(present(diag))then
   call diag%new(self%D)
   SELECT TYPE(this=>self%D)
   CLASS IS(oft_native_vector)
-    !---Get diagonal matrix values
-    !$omp parallel do
-    do i=1,self%nr ! loop over dof
-      this%v(i)=self%M(i,i)
-    enddo
+    CALL nk_dense_get_diag(self%nr,self%nc,self%M,this%v)
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a native vector.','dense_mat_assemble',__FILE__)
   END SELECT
@@ -3636,70 +3597,38 @@ end subroutine dense_mat_zero
 !> Zero all entries in the specified rows
 !---------------------------------------------------------------------------------
 subroutine dense_mat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: i,j,ir
+integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(iblock))THEN
-  !$omp parallel do private(ir,j)
-  do i=1,nrows
-    ir=self%i_map(iblock)%offset+irows(i)
-    do j=1,self%nc
-      IF(zero_diag.OR.(ir/=j))self%M(ir,j)=0.d0
-    end do
-  end do
-ELSE
-  !$omp parallel do private(ir,j)
-  DO i=1,nrows
-    ir=irows(i)
-    DO j=1,self%nc
-      IF(zero_diag.OR.(ir/=j))self%M(ir,j)=0.d0
-    END DO
-  END DO
-END IF
+offset=0
+IF(PRESENT(iblock))offset=self%i_map(iblock)%offset
+CALL nk_dense_zero_rows(self%nr,self%nc,self%M,nrows,irows,offset,zero_diag)
 DEBUG_STACK_POP
 end subroutine dense_mat_zero_rows
 !---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine dense_mat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_dense_matrix), intent(inout) :: self
+class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
-!---
-integer(i4) :: i,j,ic
 logical :: zero_diag
-!---
+integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(jblock))THEN
-  !$omp parallel do private(ic,j)
-  do i=1,ncols
-    ic=self%j_map(jblock)%offset+icols(i)
-    do j=1,self%nr
-      IF(zero_diag.OR.(ic/=j))self%M(j,ic)=0.d0
-    end do
-  end do
-ELSE
-  !$omp parallel do private(ic,j)
-  DO i=1,ncols
-    ic=icols(i)
-    DO j=1,self%nr
-      IF(zero_diag.OR.(ic/=j))self%M(j,ic)=0.d0
-    END DO
-  END DO
-END IF
+offset=0
+IF(PRESENT(jblock))offset=self%j_map(jblock)%offset
+CALL nk_dense_zero_cols(self%nr,self%nc,self%M,ncols,icols,offset,zero_diag)
 DEBUG_STACK_POP
 end subroutine dense_mat_zero_cols
 !---------------------------------------------------------------------------------
@@ -3797,126 +3726,91 @@ end subroutine dense_cmat_applyt_cvec
 !> Set values of a matrix
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
-complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
+complex(c8), intent(in) :: b(n,m) !< Values [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: i,j,ii,jj
+integer(i4) :: ioff,joff
 DEBUG_STACK_PUSH
+ioff=0
+joff=0
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  IF(ANY(self%i_map(iblock)%offset+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
-  IF(ANY(self%j_map(jblock)%offset+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
-  do i=1,n
-    ii=self%i_map(iblock)%offset+i_inds(i)
-    do j=1,m
-      jj=self%j_map(jblock)%offset+j_inds(j)
-      self%M(ii,jj)=b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'dense_cmat_set_values',__FILE__)
-  IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
-  IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
-  do i=1,n
-    do j=1,m
-      self%M(i_inds(i),j_inds(j))=b(i,j)
-    end do
-  end do
+  ioff=self%i_map(iblock)%offset
+  joff=self%j_map(jblock)%offset
+ELSE IF(PRESENT(iblock).OR.PRESENT(jblock))THEN
+  CALL oft_abort('Only one block index was supplied','dense_cmat_set_values',__FILE__)
 END IF
+IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
+IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
+CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,0)
 DEBUG_STACK_POP
 end subroutine dense_cmat_set_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
+complex(c8), intent(in) :: b(n,m) !< Values [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,ii,jj
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+integer(i4) :: ioff,joff
 DEBUG_STACK_PUSH
+ioff=0
+joff=0
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  IF(ANY(self%i_map(iblock)%offset+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
-  IF(ANY(self%j_map(jblock)%offset+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
-  do i=1,n
-    ii=self%i_map(iblock)%offset+i_inds(i)
-    do j=1,m
-      jj=self%j_map(jblock)%offset+j_inds(j)
-      self%M(ii,jj)=self%M(ii,jj)+b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'dense_cmat_add_values',__FILE__)
-  IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
-  IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
-  do i=1,n
-    do j=1,m
-      self%M(i_inds(i),j_inds(j))=self%M(i_inds(i),j_inds(j))+b(i,j)
-    end do
-  end do
+  ioff=self%i_map(iblock)%offset
+  joff=self%j_map(jblock)%offset
+ELSE IF(PRESENT(iblock).OR.PRESENT(jblock))THEN
+  CALL oft_abort('Only one block index was supplied','dense_cmat_add_values',__FILE__)
 END IF
+IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
+IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
+CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,1)
 DEBUG_STACK_POP
 end subroutine dense_cmat_add_values
 !---------------------------------------------------------------------------------
-!> Add values to a matrix
+!> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
+complex(c8), intent(in) :: b(n,m) !< Values [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: i,j,ii,jj
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+integer(i4) :: ioff,joff
 DEBUG_STACK_PUSH
+ioff=0
+joff=0
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
-  IF(ANY(self%i_map(iblock)%offset+i_inds>self%nr))CALL oft_abort('Index exceeds graph', &
-    'dense_cmat_atomic_add_values',__FILE__)
-  IF(ANY(self%j_map(jblock)%offset+j_inds>self%nc))CALL oft_abort('Index exceeds graph', &
-    'dense_cmat_atomic_add_values',__FILE__)
-  do i=1,n
-    ii=self%i_map(iblock)%offset+i_inds(i)
-    do j=1,m
-      jj=self%j_map(jblock)%offset+j_inds(j)
-      !$omp atomic
-      self%M(ii,jj)=self%M(ii,jj)+b(i,j)
-    end do
-  end do
-ELSE
-  IF(PRESENT(iblock).OR.PRESENT(jblock))CALL oft_abort('Only one block index was supplied', &
-                                                        'dense_cmat_atomic_add_values',__FILE__)
-  IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_atomic_add_values',__FILE__)
-  IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_atomic_add_values',__FILE__)
-  do i=1,n
-    do j=1,m
-      !$omp atomic
-      self%M(i_inds(i),j_inds(j))=self%M(i_inds(i),j_inds(j))+b(i,j)
-    end do
-  end do
+  ioff=self%i_map(iblock)%offset
+  joff=self%j_map(jblock)%offset
+ELSE IF(PRESENT(iblock).OR.PRESENT(jblock))THEN
+  CALL oft_abort('Only one block index was supplied','dense_cmat_atomic_add_values',__FILE__)
 END IF
+IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_atomic_add_values',__FILE__)
+IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_atomic_add_values',__FILE__)
+CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,2)
 DEBUG_STACK_POP
 end subroutine dense_cmat_atomic_add_values
 !---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_assemble(self,diag)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
-integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 if(present(diag))then
@@ -3927,11 +3821,7 @@ if(present(diag))then
   call diag%new(self%D)
   SELECT TYPE(this=>self%D)
   CLASS IS(oft_native_cvector)
-    !---Get diagonal matrix values
-    !$omp parallel do
-    do i=1,self%nr ! loop over dof
-      this%v(i)=self%M(i,i)
-    enddo
+    CALL nk_dense_get_diag(self%nr,self%nc,self%M,this%v)
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a native vector.','dense_cmat_assemble',__FILE__)
   END SELECT
@@ -3953,70 +3843,38 @@ end subroutine dense_cmat_zero
 !> Zero all entries in the specified rows
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: i,j,ir
+integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(iblock))THEN
-  !$omp parallel do private(ir,j)
-  do i=1,nrows
-    ir=self%i_map(iblock)%offset+irows(i)
-    do j=1,self%nc
-      IF(zero_diag.OR.(ir/=j))self%M(ir,j)=(0.d0,0.d0)
-    end do
-  end do
-ELSE
-  !$omp parallel do private(ir,j)
-  DO i=1,nrows
-    ir=irows(i)
-    DO j=1,self%nc
-      IF(zero_diag.OR.(ir/=j))self%M(ir,j)=(0.d0,0.d0)
-    END DO
-  END DO
-END IF
+offset=0
+IF(PRESENT(iblock))offset=self%i_map(iblock)%offset
+CALL nk_dense_zero_rows(self%nr,self%nc,self%M,nrows,irows,offset,zero_diag)
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero_rows
 !---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_dense_cmatrix), intent(inout) :: self
+class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
-!---
-integer(i4) :: i,j,ic
 logical :: zero_diag
-!---
+integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=keep_diag
-!---
-IF(PRESENT(jblock))THEN
-  !$omp parallel do private(ic,j)
-  do i=1,ncols
-    ic=self%j_map(jblock)%offset+icols(i)
-    do j=1,self%nr
-      IF(zero_diag.OR.(ic/=j))self%M(j,ic)=(0.d0,0.d0)
-    end do
-  end do
-ELSE
-  !$omp parallel do private(ic,j)
-  DO i=1,ncols
-    ic=icols(i)
-    DO j=1,self%nr
-      IF(zero_diag.OR.(ic/=j))self%M(j,ic)=(0.d0,0.d0)
-    END DO
-  END DO
-END IF
+offset=0
+IF(PRESENT(jblock))offset=self%j_map(jblock)%offset
+CALL nk_dense_zero_cols(self%nr,self%nc,self%M,ncols,icols,offset,zero_diag)
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero_cols
 !---------------------------------------------------------------------------------
