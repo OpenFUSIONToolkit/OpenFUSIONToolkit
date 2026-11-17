@@ -63,7 +63,9 @@ def write_box_mesh(filename, n, slab=None):
         h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
 
 
-LU_XML = """<oft>
+PRE_XML = {
+    # Direct solve (LU) of the full system
+    'lu': """<oft>
   <thickcurr>
     <pre type="block_jacobi">
       <nlocal>1</nlocal>
@@ -71,7 +73,36 @@ LU_XML = """<oft>
     </pre>
   </thickcurr>
 </oft>
+""",
+    # p-multigrid with GMRES + block Jacobi smoothing and a direct solve on the coarse (linear) level
+    'mg': """<oft>
+  <thickcurr>
+    <pre type="mg">
+      <smoother direction="both">
+        <solver type="gmres">
+          <its>2</its>
+          <nrits>2</nrits>
+          <pre type="block_jacobi">
+            <nlocal>4</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </smoother>
+      <coarse>
+        <solver type="gmres">
+          <its>1</its>
+          <nrits>1</nrits>
+          <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </coarse>
+    </pre>
+  </thickcurr>
+</oft>
 """
+}
 
 
 def run_driver(config, nproc=1, timeout=180):
@@ -81,9 +112,10 @@ def run_driver(config, nproc=1, timeout=180):
     for filename in ('thickcurr_results.json', 'thickcurr.hist', 'floops.hist'):
         if os.path.exists(filename):
             os.remove(filename)
-    if config.get('direct', True):
+    pre = config.get('pre', 'lu')
+    if pre is not None:
         with open('oft_in.xml', 'w+') as fid:
-            fid.write(LU_XML)
+            fid.write(PRE_XML[pre])
         config['xml_filename'] = 'oft_in.xml'
     with open('thickcurr_config.json', 'w+') as fid:
         json.dump(config, fid)

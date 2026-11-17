@@ -12,6 +12,8 @@ from thickcurr_testing import run_driver, write_box_mesh, check_value, box_tau
 
 ETA = 1.256637E-6  # Resistivity [Ohm-m], gives a magnetic diffusivity of ~1 m^2/s
 MESH_FILE = 'thickcurr_box.h5'
+MG_MAX_LITS = 100      # Maximum linear iterations per step with p-multigrid (set from reference runs)
+MG_MAX_LITS_MPI = 100  # Maximum linear iterations per step with p-multigrid on two MPI processes
 
 
 def box_signals():
@@ -27,11 +29,11 @@ def box_signals():
     return [b1[0], b2[1], (b3[0]+b3[1])/math.sqrt(2.0), floop]
 
 
-def run_decay(order, nproc=1, direct=True, eig_shift=None, in_memory=False, pmg=False):
+def run_decay(order, nproc=1, pre='lu', eig_shift=None, in_memory=False, pmg=False, max_lits=None):
     write_box_mesh(MESH_FILE, (4, 4, 4))
     # Crank-Nicolson for second-order time accuracy (no stiff pseudo-vacuum modes here)
     config = {'case': 'decay', 'mesh_file': MESH_FILE, 'eta': [ETA], 'order': order, 'dt': 1.E-3, 'theta': 0.5,
-              'nsteps': 20, 'plot_freq': 10, 'direct': direct, 'eig_shift': eig_shift, 'in_memory': in_memory,
+              'nsteps': 20, 'plot_freq': 10, 'pre': pre, 'eig_shift': eig_shift, 'in_memory': in_memory,
               'pmg': pmg}
     results = run_driver(config, nproc=nproc)
     if results is None:
@@ -57,6 +59,10 @@ def run_decay(order, nproc=1, direct=True, eig_shift=None, in_memory=False, pmg=
     retval &= check_value("History time", results['hist_t1'], t_final, 1.E-10)
     for i, (val, val_exp) in enumerate(zip(results['hist_signals1'], results['signals1'])):
         retval &= check_value("History signal {0}".format(i+1), val, val_exp, 1.E-8)
+    # Check preconditioner effectiveness (number of linear iterations per step)
+    if (max_lits is not None) and (results['max_lits'] > max_lits):
+        print("FAILED: Too many linear iterations ({0} > {1})".format(results['max_lits'], max_lits))
+        retval = False
     return retval
 
 
@@ -90,7 +96,7 @@ def test_decay_mpi():
 
 def test_decay_iterative():
     '''Time advance of a conducting cube eigenmode using the default (diagonal) preconditioner.'''
-    assert run_decay(2, direct=False)
+    assert run_decay(2, pre=None)
 
 
 def test_decay_in_memory():
@@ -100,13 +106,26 @@ def test_decay_in_memory():
 
 def test_decay_pmg():
     '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner (default smoothers).'''
-    assert run_decay(2, direct=False, pmg=True)
+    assert run_decay(2, pre=None, pmg=True)
 
 
 @pytest.mark.mpi
 def test_decay_pmg_mpi():
     '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner on two MPI processes.'''
-    assert run_decay(2, nproc=2, direct=False, pmg=True)
+    assert run_decay(2, nproc=2, pre=None, pmg=True)
+
+
+def test_decay_pmg_xml():
+    '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner defined in XML, checking
+    that the XML definition is used (iteration count).'''
+    assert run_decay(2, pre='mg', pmg=True, max_lits=MG_MAX_LITS)
+
+
+@pytest.mark.mpi
+def test_decay_pmg_xml_mpi():
+    '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner defined in XML on two MPI
+    processes.'''
+    assert run_decay(2, nproc=2, pre='mg', pmg=True, max_lits=MG_MAX_LITS_MPI)
 
 
 def test_decay_after_eigs():

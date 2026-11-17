@@ -79,6 +79,7 @@ def main(config):
         results['signals1'] = tc_model.eval_sensors(sensor_obj).tolist()
         tc_model.plot_td(plot_freq=config.get('plot_freq', 10))
         if myOFT.head_proc:
+            results['max_lits'] = int(max(tc_model.load_history('thickcurr.hist')['lits']))
             sensor_hist = tc_model.load_history('floops.hist')
             results['hist_signals1'] = [float(sensor_hist[name][-1]) for name in sensor_obj['names']]
             results['hist_t1'] = float(sensor_hist['time'][-1])
