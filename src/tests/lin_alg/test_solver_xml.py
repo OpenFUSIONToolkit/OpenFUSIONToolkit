@@ -204,3 +204,25 @@ def test_gmres_petsc_gasm_node_mpi(nlocal, overlap, iteration_count):
     converged_error = 0.6394036978170452
     assert xml_setup(xml_file,petsc=True,nprocs=2,ppn=2)
     assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native overlapping Schwarz selected from XML: blocks within the process grown by one layer
+# (plain additive combination counts overlap rows twice, hence more iterations)
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive"))
+def test_gmres_schwarz(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>4</nlocal>
+            <overlap>1</overlap>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 58, "additive": 102}[schwarz_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False)
+    assert validate_result(iteration_count,converged_error)
