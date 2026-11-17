@@ -951,7 +951,9 @@ end subroutine vector_borrow_local
 !! - `sync=.FALSE.` skips the MPI exchange. Use it only if shared values are
 !!   consistent across processes when the array is released, ie. the vector was
 !!   consistent on borrow and every process sharing a value made the same
-!!   modification (eg. zeroing based on a global boundary flag). Native vectors check
+!!   modification (eg. zeroing based on a global boundary flag). Results of summation
+!!   stitching are not consistent to round-off when one process holds several copies
+!!   of a value (eg. periodic images). Native vectors check
 !!   this in debug builds (`OFT_DEBUG`). To synchronize several blocks once, release
 !!   them all with `sync=.TRUE.` or release the whole vector instead.
 !! Backends that keep a single copy of each shared value (eg. PETSc) only retain
