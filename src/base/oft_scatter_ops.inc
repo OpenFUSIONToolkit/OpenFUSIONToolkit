@@ -188,9 +188,9 @@ END SUBROUTINE s_wait_recv
 !---------------------------------------------------------------------------------
 !> Unpack received (and local) values of the operation in flight into `y`
 !!
-!! Forward: `y(lrecv(i))` and `y(ldst(k))` (times `wt(k)`) are set or incremented.
-!! Reverse: `y(lsend(i))` and `y(lsrc(k))` (times `wt(k)`). Local entries with zero
-!! weight are skipped. Entries are processed in order (deterministic sums) unless
+!! Forward: `y(lrecv(i))` and `y(ldst(k))` are set or incremented. Reverse:
+!! `y(lsend(i))` and `y(lsrc(k))` (times `wt(k)`, skipping local entries with zero
+!! weight). Entries are processed in order (deterministic sums) unless
 !! the destination indices are unique, in which case the loops are threaded. Must
 !! follow @ref s_wait_recv "scatter_wait_recv".
 !---------------------------------------------------------------------------------
@@ -207,7 +207,7 @@ IF(plan%inflight_kind/=SKIND)CALL oft_abort('Value type differs from operation i
 IF(plan%inflight==1)THEN
   par=plan%recv_unique
   CALL unpack_vals(plan%nrecv,plan%lrecv,plan%SRBUF,.FALSE.)
-  IF(doloc)CALL unpack_vals(plan%nloc,plan%ldst,plan%SRBUF(plan%nrecv+1:),.TRUE.)
+  IF(doloc)CALL unpack_vals(plan%nloc,plan%ldst,plan%SRBUF(plan%nrecv+1:),.FALSE.)
 ELSE IF(plan%inflight==-1)THEN
   par=plan%send_unique
   CALL unpack_vals(plan%nsend,plan%lsend,plan%SSBUF,.FALSE.)
@@ -282,9 +282,10 @@ END SUBROUTINE s_end
 !---------------------------------------------------------------------------------
 !> Apply only the local part of a plan, without communication or buffers
 !!
-!! Forward: \f$ y_{ldst(k)} \leftarrow w_k x_{lsrc(k)} \f$. Reverse:
-!! \f$ y_{lsrc(k)} \leftarrow w_k x_{ldst(k)} \f$. Insert or add; entries with zero
-!! weight are skipped. Threaded when the destination indices are unique.
+!! Forward: \f$ y_{ldst(k)} \leftarrow x_{lsrc(k)} \f$. Reverse:
+!! \f$ y_{lsrc(k)} \leftarrow w_k x_{ldst(k)} \f$, skipping entries with zero weight
+!! (weights are optional). Insert or add. Threaded when the destination indices are
+!! unique.
 !---------------------------------------------------------------------------------
 SUBROUTINE s_local(plan,x,y,mode,reverse)
 TYPE(oft_scatter_plan), INTENT(in) :: plan !< Plan
@@ -297,12 +298,8 @@ INTEGER(i4) :: k,n
 rev=.FALSE.
 IF(PRESENT(reverse))rev=reverse
 n=plan%nloc
-IF(ALLOCATED(plan%wt))THEN
-  IF(rev)THEN
-    CALL apply_weighted_gather(n,plan%ldst,plan%lsrc,plan%wt,x,y,mode,plan%send_unique)
-  ELSE
-    CALL apply_weighted_gather(n,plan%lsrc,plan%ldst,plan%wt,x,y,mode,plan%recv_unique)
-  END IF
+IF(rev.AND.ALLOCATED(plan%wt))THEN
+  CALL apply_weighted_gather(n,plan%ldst,plan%lsrc,plan%wt,x,y,mode,plan%send_unique)
   RETURN
 END IF
 IF(rev)THEN

@@ -21,15 +21,17 @@
 !!
 !! Operations (generic over real and complex values, see @ref oft_scatter):
 !! - forward: \f$ y_{lrecv} \leftarrow x_{lsend} \f$ (from neighbours) and
-!!   \f$ y_{ldst} \leftarrow w x_{lsrc} \f$, with insert or add (`OFT_SCATTER_INSERT`,
+!!   \f$ y_{ldst} \leftarrow x_{lsrc} \f$, with insert or add (`OFT_SCATTER_INSERT`,
 !!   `OFT_SCATTER_ADD`);
 !! - reverse: \f$ x_{lsend} \leftarrow y_{lrecv} \f$ (to neighbours) and
 !!   \f$ x_{lsrc} \leftarrow w y_{ldst} \f$, with insert or add (eg. accumulating
 !!   copies on their owner).
 !!
-!! Weights apply to the local part only. With weights, entries whose weight is zero are
-!! skipped (a write mask), so 0/1 weights restrict which destinations are written,
-!! and other weights give weighted (eg. partition of unity) combinations.
+!! Weights apply to the local part in the reverse direction only (\f$ R^T W \f$ for a
+!! restriction \f$ R \f$ given by the forward direction). Entries whose weight is zero
+!! are skipped (a write mask), so 0/1 weights restrict which source entries are written
+!! back (restricted Schwarz), unit weights everywhere give plain additive combinations
+!! and fractional weights partition of unity combinations.
 !!
 !! Communication is split into `scatter_begin` (pack, post receives and sends) and
 !! `scatter_end` (wait, unpack, wait for sends), so work can overlap transfers;
@@ -118,7 +120,7 @@ TYPE, PUBLIC :: oft_scatter_plan
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lrecv !< Destination index of each receive entry [nrecv]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lsrc !< Source index of each local entry [nloc]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ldst !< Destination index of each local entry [nloc]
-  REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt !< Weight of each local entry [nloc] (optional)
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt !< Weight of each local entry in the reverse direction [nloc] (optional)
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: rsbuf !< Real send buffer [nsend+nloc] (allocated on first use)
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: rrbuf !< Real receive buffer [nrecv+nloc] (allocated on first use)
   COMPLEX(c8), ALLOCATABLE, DIMENSION(:) :: csbuf !< Complex send buffer [nsend+nloc] (allocated on first use)
@@ -131,7 +133,7 @@ TYPE, PUBLIC :: oft_scatter_plan
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rreq !< Receive requests [nnbr]
 #endif
 END TYPE oft_scatter_plan
-PUBLIC scatter_plan_setup, scatter_plan_delete, scatter_plan_check, scatter_plan_inflight
+PUBLIC scatter_plan_setup, scatter_plan_setup_local, scatter_plan_delete, scatter_plan_check, scatter_plan_inflight
 PUBLIC index_set_create, index_set_delete, index_set_grow, index_set_map, index_set_contains
 CONTAINS
 !---------------------------------------------------------------------------------
@@ -154,7 +156,7 @@ INTEGER(i4), INTENT(in) :: lrecv(:) !< Destination index of each receive entry [
 INTEGER(i4), INTENT(in) :: nloc !< Number of local entries
 INTEGER(i4), INTENT(in) :: lsrc(:) !< Source index of each local entry [nloc]
 INTEGER(i4), OPTIONAL, INTENT(in) :: ldst(:) !< Destination index of each local entry [nloc] (default: 1..nloc)
-REAL(r8), OPTIONAL, INTENT(in) :: wt(:) !< Weight of each local entry [nloc] (optional)
+REAL(r8), OPTIONAL, INTENT(in) :: wt(:) !< Weight of each local entry in the reverse direction [nloc] (optional)
 INTEGER(i4), OPTIONAL, INTENT(in) :: tag !< MPI tag (default @ref OFT_TAG_SCATTER)
 INTEGER(i4) :: i
 CALL scatter_plan_delete(plan)
@@ -216,6 +218,24 @@ END DO
 DEALLOCATE(seen)
 END FUNCTION lists_unique
 END SUBROUTINE scatter_plan_setup
+!---------------------------------------------------------------------------------
+!> Set up a purely local scatter plan (gather/scatter of a subset with optional weights)
+!!
+!! Equivalent to @ref scatter_plan_setup without neighbours. With `ldst` absent the
+!! plan gathers `x(lsrc(k))` into `y(k)` (and scatters back in reverse).
+!---------------------------------------------------------------------------------
+SUBROUTINE scatter_plan_setup_local(plan,nloc,lsrc,ldst,wt)
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+INTEGER(i4), INTENT(in) :: nloc !< Number of local entries
+INTEGER(i4), INTENT(in) :: lsrc(:) !< Source index of each entry [nloc]
+INTEGER(i4), OPTIONAL, INTENT(in) :: ldst(:) !< Destination index of each entry [nloc] (default: 1..nloc)
+REAL(r8), OPTIONAL, INTENT(in) :: wt(:) !< Weight of each entry in the reverse direction [nloc] (optional)
+INTEGER(i4) :: knull(1),lnull(1),nbr(1)
+knull=1
+lnull=0
+nbr=0
+CALL scatter_plan_setup(plan,0,nbr,knull,lnull,knull,lnull,nloc,lsrc,ldst,wt)
+END SUBROUTINE scatter_plan_setup_local
 !---------------------------------------------------------------------------------
 !> Release all storage of a scatter plan
 !---------------------------------------------------------------------------------
