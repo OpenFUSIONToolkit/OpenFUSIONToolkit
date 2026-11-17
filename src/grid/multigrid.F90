@@ -196,7 +196,7 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
       mesh%bmesh%ho_info%ncp=pmesh%bmesh%ho_info%ncp
       ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
       DO i=1,mesh%bmesh%nc
-        mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne) = pmesh%ho_info%r(:,mesh%bmesh%parent%lf(i)+pmesh%ne)
+        mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne) = mesh%ho_info%r(:,ABS(mesh%bmesh%parent%lf(i))+mesh%ne)
         mesh%bmesh%ho_info%lcp(1,i) = i+mesh%bmesh%ne
       END DO
     END IF
@@ -552,8 +552,8 @@ IF(pmesh%bmesh%ho_info%ncp==1)THEN
   !$omp do
   do i=1,mesh%bmesh%nc
     j=INT(ABS(mesh%bmesh%parent%lf(i)),4)
-    mesh%bmesh%ho_info%lcp(1,i)=i+pmesh%bmesh%ne
-    mesh%bmesh%ho_info%r(:,i+pmesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
+    mesh%bmesh%ho_info%lcp(1,i)=i+mesh%bmesh%ne
+    mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
   enddo
 END IF
 !$omp end parallel

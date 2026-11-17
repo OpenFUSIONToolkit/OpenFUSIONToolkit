@@ -21,6 +21,7 @@ PROGRAM test_cubit
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
+USE oft_mesh_type, ONLY: oft_mesh
 USE oft_mesh_native, ONLY: mesh_native_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
@@ -62,6 +63,7 @@ ELSE
   !---Setup grid
   CALL multigrid_construct(mg_mesh)
   IF(mg_mesh%mesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
+  CALL check_bmesh_ho
   CALL plot_file%setup("Test")
   CALL mg_mesh%mesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='cubit.results')
@@ -76,6 +78,33 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
+! Check that the boundary mesh high-order nodes match the volume mesh on every level
+SUBROUTINE check_bmesh_ho
+INTEGER(i4) :: i,j,level
+REAL(r8) :: max_err
+CLASS(oft_mesh), POINTER :: mesh
+max_err=0._r8
+DO level=1,mg_mesh%mgmax
+  mesh=>mg_mesh%meshes(level)
+  IF(.NOT.ASSOCIATED(mesh%ho_info%r))CYCLE
+  DO i=1,mesh%bmesh%ne
+    j=ABS(mesh%bmesh%parent%le(i))
+    max_err=MAX(max_err,MAXVAL(ABS(mesh%bmesh%ho_info%r(:,mesh%bmesh%ho_info%lep(1,i)) &
+      - mesh%ho_info%r(:,mesh%ho_info%lep(1,j)))))
+  END DO
+  IF(mesh%ho_info%nfp==1)THEN
+    DO i=1,mesh%bmesh%nc
+      j=ABS(mesh%bmesh%parent%lf(i))
+      max_err=MAX(max_err,MAXVAL(ABS(mesh%bmesh%ho_info%r(:,mesh%bmesh%ho_info%lcp(1,i)) &
+        - mesh%ho_info%r(:,mesh%ho_info%lfp(1,j)))))
+    END DO
+  END IF
+END DO
+max_err=oft_mpi_max(max_err)
+IF(oft_env%head_proc)WRITE(*,*)'Max boundary high-order node error =',max_err
+IF(max_err>1.E-12_r8)CALL oft_abort('Boundary high-order nodes do not match volume mesh', &
+  'check_bmesh_ho',__FILE__)
+END SUBROUTINE check_bmesh_ho
 !------------------------------------------------------------------------------
 !> Compute volume of the current mesh and output
 !------------------------------------------------------------------------------
