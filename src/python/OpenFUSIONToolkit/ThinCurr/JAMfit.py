@@ -84,7 +84,8 @@ class JAMfit():
     -------
     >>> jam = JAMfit('model.xml', 'thincurr_mesh.h5', 'tokamaker_mesh.h5', B0=2.0, R0=1.7, nthreads=4)
     >>> jam.initialize_reduced_model('reduced_model.h5')
-    >>> fil, wall, res, Ax, B = jam.run_reconstruction_lstsq(psi, ip, n_coils, coil_currs, ip_weight, sigma, 1e-6, 1e-5)
+    >>> prep = jam.prepare_lstsq(sigma, n_coils, reg_factor_fil=1e-6, reg_factor_wall=1e-5)
+    >>> fil, wall, Ax, diag = jam.solve_lstsq(prep, psi, ip, coil_currs, ip_weight)
     '''
 
     def __init__(self, xml_file, thincurr_meshfile, tokamaker_meshfile, B0, R0, nthreads=None, oft_env=None):
@@ -113,6 +114,7 @@ class JAMfit():
         self.thincurr_meshfile = thincurr_meshfile
         self.tokamaker_meshfile = tokamaker_meshfile
         self.reduced_created_flag = False
+        self._lap_cache = None  # last filament Laplacian built, see _get_filament_laplacian
 
         # --- TokaMaker setup ---
         self.mygs = TokaMaker(self.myOFT)
@@ -211,7 +213,8 @@ class JAMfit():
         hist_file = histfile(os.path.join(self.torus._io_basepath, 'floops.hist'))
         return hist_file
 
-    def create_from_runTD_top_modes(self, num_modes, reduced_filename, coil_currs, dt, nsteps, initial_num_eigs=50, verbose=False, s_freq=10, p_freq=10, axisymmetric_modes=None, freq_response=None):
+    def create_from_runTD_top_modes(self, num_modes, reduced_filename, coil_currs, dt, nsteps, initial_num_eigs=50, plot_modes=False, verbose=False,
+                                    s_freq=10, p_freq=10, axisymmetric_modes=None, freq_response=None):
         '''! Build a reduced model using the dominant eigenmodes from a full run.
         Computes eigenvalues, runs a preliminary reduced model to identify the
         most active modes by current amplitude, then builds a final reduced model
@@ -234,9 +237,13 @@ class JAMfit():
         @param dt float, time step size `[s]`
         @param nsteps int, number of time steps for the preliminary run
         @param initial_num_eigs int, number of eigenmodes to compute initially (default: 50)
-        @param verbose bool, if True, plots mode amplitudes and prints mode info (default: False)
+        @param plot_modes bool, if True, plots |amplitude| of every mode over the preliminary run, selected modes in
+               colour and the rest in grey, on a new figure left open for the caller to label/show (default: False)
+        @param verbose bool, if True, prints the weight of each selected mode and passes verbose on to
+               @ref compute_freq_response_basis (default: False)
         @param s_freq int, print run status every s_freq steps (default: 10)
-        @param p_freq int, save plot output every p_freq steps (default: 10)
+        @param p_freq int, sample the preliminary run's mode currents every p_freq steps; the mode weights are summed
+               over these samples (default: 10)
         @param axisymmetric_modes list or array-like, indices of the axisymmetric modes to allow
                                 (default: None -> allow all computed modes)
         @param freq_response dict, keyword arguments for @ref compute_freq_response_basis (at least
@@ -245,11 +252,18 @@ class JAMfit():
                are stored in `self.freq_vecs` and `self.freq_labels` (default: None -> eigenmodes only)
 
         @result ThinCurr_reduced, the constructed reduced model object
-        @result numpy.ndarray, sensor signals from the preliminary run
-        @result dict, mode currents from the preliminary run (`'time'` `[s]`, `'curr'` shape (ntimes, initial_num_eigs))
-        @result numpy.ndarray, basis of the reduced model `(n_basis, nelems)`: the selected eigenmodes, followed by any frequency-response vectors (if verbose is True)
-        @result list, indices of the selected dominant modes (if verbose is True)
-        @result list, maximum weight amplitudes of the selected dominant modes (if verbose is True)
+        @result dict, details of the mode selection, always returned:
+            - `'sensors'`: dict, sensor signals from the preliminary run (`'time'` `[s]`, `'sensors'` shape (nsteps+1, n_sensors))
+            - `'currents'`: dict, mode currents from the preliminary run (`'time'` `[s]`, `'curr'` shape (ntimes, initial_num_eigs))
+            - `'basis'`: numpy.ndarray, basis of the reduced model, shape (n_basis, nelems): the selected eigenmodes,
+              followed by any frequency-response vectors
+            - `'eig_inds'`: list, indices of the selected eigenmodes, ascending
+            - `'weights'`: list, weight `sum_t |I_i(t)|` of each selected eigenmode, in `eig_inds` order
+
+        Example
+        -------
+        >>> reduced, info = jam.create_from_runTD_top_modes(4, 'reduced.h5', coil_currs, 2.E-4, 150, initial_num_eigs=35, plot_modes=True)
+        >>> print(info['eig_inds'])
         '''
         # --- Eigenmodes of the full model ---
         self.eig_vals, self.eig_vecs = self.torus.get_eigs(initial_num_eigs, False)
@@ -289,14 +303,16 @@ class JAMfit():
         eig_inds = sorted(top_modenum_indices)
         weight_amplitude = [max_weights[i] for i in eig_inds]
 
-        # --- Plot all mode amplitudes, selected modes in colour and the rest in grey ---
         if verbose:
+            for i in eig_inds:
+                print(f'Saved mode {i} has weight {max_weights[i]}')
+
+        # --- Plot all mode amplitudes, selected modes in colour and the rest in grey ---
+        if plot_modes:
             fig, ax = plt.subplots(1, 1)
-            self.torus.build_XDMF()
             for i in range(temp_curr.shape[1]):
                 if i in eig_inds:
                     ax.semilogy(currents['time'], abs(currents['curr'][:, i]), label=f'Mode {i}')
-                    print(f'Saved mode {i} has max weight {max_weights[i]}')
                 else:
                     ax.semilogy(currents['time'], abs(currents['curr'][:, i]), color='gray', alpha=0.3)
 
@@ -314,10 +330,14 @@ class JAMfit():
         self.torus_reduced = self.create_reduced_model(basis, reduced_filename, compute_B=False)
         self.reduced_created_flag = True
 
-        if verbose:
-            return self.torus_reduced, sensors_measurement, currents, basis, eig_inds, weight_amplitude
-        else:
-            return self.torus_reduced, sensors_measurement, currents
+        info = {
+            'sensors': sensors_measurement,
+            'currents': currents,
+            'basis': basis,
+            'eig_inds': eig_inds,
+            'weights': weight_amplitude,
+        }
+        return self.torus_reduced, info
 
     def create_reduced_model(self, eig_vecs, reduced_filename, compute_B=False):
         '''! Build a reduced model from a given set of wall-current basis vectors.
@@ -436,21 +456,161 @@ class JAMfit():
         self.reduced_created_flag = True
         print('Reduced model initialized from file: {0}'.format(reduced_filename))
 
+    # ----------------------------------------------------------
+    # How the three solvers are organized
+    # ----------------------------------------------------------
+    # Every solver fits the unknowns x = [I_wall | filament unknowns] to the rows
+    #   - weighted sensors:   (A_sensor x - B_weighted)       one row per sensor
+    #   - regularization:     (A_reg x - 0)                   Tikhonov and/or Laplacian rows
+    #   - Ip constraint:      c * (r . x - Ip)                one row, r . x = sum of the filament currents
+    # in the least-squares sense. Everything except the Ip row only depends on sigma, the grid and the
+    # regularization weights, so prepare_<solver> builds it once: a QR factorization of the fixed rows (no A^T A is
+    # formed, which would square the condition number) plus the vector g = (A0^T A0)^-1 r^T that adds the Ip row.
+    # solve_<solver> then only builds B_weighted for the slice and adds the Ip row with weight c (which may change
+    # every slice: it depends on Ip, and on the signals when lam is automatic) through the exact one-row update in
+    # _prepare_fixed_rows / _solve_with_ip_row. run_reconstruction_<solver> is prepare + solve in one call, for
+    # sigma or weights that change every slice.
+
+    def _get_filament_laplacian(self, rgrid, zgrid, gaussian=False, sigma_r=1e-1, sigma_z=1e-1, verbose=False):
+        '''! Filament Laplacian for the grid, cached on the object.
+        Only depends on the grid (and on sigma_r, sigma_z for the Gaussian version), so it is rebuilt only when one
+        of those changes. The cache holds the last grid used.
+
+        @param rgrid numpy.ndarray, R coordinates of the filament grid `[m]`, shape (n_fil,)
+        @param zgrid numpy.ndarray, Z coordinates of the filament grid `[m]`, shape (n_fil,)
+        @param gaussian bool, if True uses @ref get_gaussian_lap_mat, else @ref get_laplace_matrix (default: False)
+        @param sigma_r float, R width of the Gaussian weighting `[m]`, only used if gaussian is True (default: 1e-1)
+        @param sigma_z float, Z width of the Gaussian weighting `[m]`, only used if gaussian is True (default: 1e-1)
+        @param verbose bool, passed to @ref get_laplace_matrix (default: False)
+        @result numpy.ndarray, Laplacian matrix, shape (n_fil, n_fil)
+        '''
+        rgrid = numpy.asarray(rgrid, dtype=float)
+        zgrid = numpy.asarray(zgrid, dtype=float)
+        widths = (float(sigma_r), float(sigma_z)) if gaussian else None
+        cache = getattr(self, '_lap_cache', None)
+        if cache is not None:
+            same_grid = (cache['gaussian'] == gaussian and cache['widths'] == widths
+                         and cache['rgrid'].shape == rgrid.shape
+                         and numpy.array_equal(cache['rgrid'], rgrid) and numpy.array_equal(cache['zgrid'], zgrid))
+            if same_grid:
+                return cache['lap_mat']
+        if gaussian:
+            lap_mat, _ = get_gaussian_lap_mat(rgrid, zgrid, sigma_r, sigma_z)
+        else:
+            lap_mat, _ = get_laplace_matrix(rgrid, zgrid, verbose=verbose)
+        self._lap_cache = {'rgrid': rgrid.copy(), 'zgrid': zgrid.copy(), 'gaussian': gaussian, 'widths': widths,
+                           'lap_mat': lap_mat}
+        return lap_mat
+
+    def _weighted_sensor_matrices(self, sigma, num_non_fil_coils, num_sensors):
+        '''! Sensor matrices of the reduced model divided by the sensor noise.
+        Dividing by sigma puts every sensor in units of its own noise, so no single sensor dominates the fit.
+
+        @param sigma numpy.ndarray, noise on each sensor, same units as the sensor signals, shape (num_sensors,)
+        @param num_non_fil_coils int, number of non-filament coils before the filaments in the Icoil list
+        @param num_sensors int, number of (real) sensors to use (the first num_sensors sensors)
+        @result numpy.ndarray, `Ms / sigma`, shape (n_wall, num_sensors)
+        @result numpy.ndarray, `Msc_coils / sigma` (non-filament coils), shape (num_non_fil_coils, num_sensors)
+        @result numpy.ndarray, `Msc_fil / sigma` (filaments), shape (n_fil, num_sensors)
+        '''
+        if not self.reduced_created_flag:
+            raise ValueError("Reduced model has not been created yet. Please create or initialize a reduced model before running reconstruction.")
+        sigma = numpy.asarray(sigma, dtype=float)
+        if sigma.shape != (num_sensors,):
+            raise ValueError("sigma has shape {0}, expected ({1},) (one value per sensor)".format(sigma.shape, num_sensors))
+        Ms_weighted = self.torus_reduced.Ms[:, :num_sensors] / sigma                      # (n_wall, n_sensors)
+        Msc_weighted = self.torus_reduced.Msc[:, :num_sensors] / sigma                    # (n_coils_total, n_sensors)
+        return Ms_weighted, Msc_weighted[:num_non_fil_coils, :], Msc_weighted[num_non_fil_coils:, :]
+
+    def prepare_lstsq(self, sigma, num_non_fil_coils, reg_factor_fil, reg_factor_wall, num_sensors=None):
+        '''! Build everything for @ref solve_lstsq that does not change between time slices.
+        Call once for a fixed `sigma` and fixed regularization; call again if any of them changes (or use
+        @ref run_reconstruction_lstsq, which does both steps in one call).
+
+        Unknowns `x = [I_wall | I_fil]` (wall basis amplitudes, then filament currents). Fixed rows:
+          - sensors: `(Ms^T I_wall + Msc_fil^T I_fil) / sigma = Psi / sigma - (Msc_coils^T I_coils) / sigma`
+          - Tikhonov: `reg_factor_wall * I_wall = 0` and `reg_factor_fil * I_fil = 0`
+        The Ip row is added per slice in @ref solve_lstsq.
+
+        @param sigma numpy.ndarray, noise on each sensor, same units as the sensor signals, shape (num_sensors,)
+        @param num_non_fil_coils int, number of non-filament coils before the filaments in the Icoil list
+        @param reg_factor_fil float, Tikhonov regularization factor for the filament currents
+        @param reg_factor_wall float, Tikhonov regularization factor for the wall basis amplitudes
+        @param num_sensors int or None, number of (real) sensors to use; None uses all sensors in the reduced model (default: None)
+        @result dict, prepared matrices to pass to @ref solve_lstsq
+
+        Example
+        -------
+        >>> prep = jam.prepare_lstsq(sigma, num_non_fil_coils, reg_factor_fil=4e-4, reg_factor_wall=1e-6, num_sensors=117)
+        >>> for t in range(len(times)):
+        ...     fil, wall, Ax, diag = jam.solve_lstsq(prep, psi[t], ip[t], coils[t], ip_weight=4e2)
+        '''
+        if num_sensors is None:
+            num_sensors = self.torus_reduced.Ms.shape[1]
+        Ms_weighted, Msc_coils_weighted, Msc_fil_weighted = self._weighted_sensor_matrices(sigma, num_non_fil_coils, num_sensors)
+        num_Ms = Ms_weighted.shape[0]
+        n_fil = Msc_fil_weighted.shape[0]
+
+        # --- Fixed rows: sensors, then Tikhonov on the wall and on the filaments ---
+        A_sensor = numpy.hstack([Ms_weighted.T, Msc_fil_weighted.T])                       # (n_sensors, n_wall + n_fil)
+        A_reg = numpy.diag(numpy.concatenate([numpy.full(num_Ms, float(reg_factor_wall)),
+                                              numpy.full(n_fil, float(reg_factor_fil))]))  # (n_wall + n_fil, n_wall + n_fil)
+
+        # --- Ip row: r . x = sum(I_fil) ---
+        ip_row = numpy.concatenate([numpy.zeros(num_Ms), numpy.ones(n_fil)])
+
+        prep = _prepare_fixed_rows(A_sensor, A_reg, ip_row)
+        prep.update({
+            'method': 'lstsq',
+            'sigma': numpy.array(sigma, dtype=float),
+            'num_sensors': num_sensors,
+            'num_non_fil_coils': num_non_fil_coils,
+            'num_Ms': num_Ms,
+            'Msc_coils_weighted': Msc_coils_weighted,
+            'reg_factor_fil': reg_factor_fil,
+            'reg_factor_wall': reg_factor_wall,
+        })
+        return prep
+
+    def solve_lstsq(self, prep, psi_at_time, ip_at_time, coil_curr_at_time, ip_weight, ip_norm_floor=1.E3):
+        '''! Solve one time slice with the lstsq method, using matrices from @ref prepare_lstsq.
+
+        The Ip row is `(ip_weight / ip_norm) * (sum(I_fil) - ip_at_time)`, with `ip_norm = max(|ip_at_time|, ip_norm_floor)`.
+        For normal currents this is the relative Ip error; the floor stops a divide-by-zero when Ip passes through
+        zero (e.g. at the end of a current quench), where the row becomes the absolute Ip error in units of
+        `ip_norm_floor`.
+
+        @param prep dict, from @ref prepare_lstsq
+        @param psi_at_time numpy.ndarray, sensor signals at this time (e.g. flux `[Wb]`), shape (num_sensors,)
+        @param ip_at_time float, total plasma current measurement at time `[A]`
+        @param coil_curr_at_time numpy.ndarray, currents in the non-filament coils at time `[A]`, shape (num_non_fil_coils,)
+        @param ip_weight float, weight of the Ip constraint row relative to the (sigma-weighted) sensor rows
+        @param ip_norm_floor float, smallest current used to normalize the Ip constraint row and `ip_error_pct` `[A]` (default: 1.E3)
+        @result numpy.ndarray, filament currents `[A]`, shape (n_fil,)
+        @result numpy.ndarray, wall basis amplitudes, shape (n_wall,)
+        @result numpy.ndarray, `A x` for the sensor rows only (fitted weighted signals), shape (num_sensors,)
+        @result dict, diagnostics, see @ref _reconstruction_diagnostics; also `ip_weight`, `reg_factor_fil`, `reg_factor_wall`
+        '''
+        _check_prep(prep, 'lstsq', 'prepare_lstsq')
+        num_Ms = prep['num_Ms']
+        B_weighted = psi_at_time / prep['sigma'] - coil_curr_at_time @ prep['Msc_coils_weighted']
+
+        ip_norm = max(abs(ip_at_time), ip_norm_floor)
+        solution, Ax, total_residual = _solve_with_ip_row(prep, B_weighted, ip_weight / ip_norm, ip_at_time)
+        curr_wall = solution[:num_Ms]
+        curr_fil = solution[num_Ms:]
+
+        diagnostics = _reconstruction_diagnostics(curr_fil, ip_at_time, ip_norm_floor, Ax, B_weighted, total_residual, solution)
+        diagnostics.update({'ip_weight': ip_weight, 'reg_factor_fil': prep['reg_factor_fil'],
+                            'reg_factor_wall': prep['reg_factor_wall']})
+        return curr_fil, curr_wall, Ax, diagnostics
+
     def run_reconstruction_lstsq(self, psi_at_time, ip_at_time, num_non_fil_coils, coil_curr_at_time, ip_weight, sigma, reg_factor_fil, reg_factor_wall, num_sensors=None,
                                  ip_norm_floor=1.E3):
-        '''! Run the filament current reconstruction with the lstsq method.
-
-        Solves, in the least-squares sense, for `x = [I_wall | I_fil]` (wall basis amplitudes, then filament
-        currents) with the rows
-          - sensors: `(Ms^T I_wall + Msc_fil^T I_fil) / sigma = Psi / sigma - (Msc_coils^T I_coils) / sigma`
-          - Ip:      `(ip_weight / ip_norm) * sum(I_fil) = (ip_weight / ip_norm) * ip_at_time`
-          - Tikhonov: `reg_factor_wall * I_wall = 0` and `reg_factor_fil * I_fil = 0`
-        through the normal equations `A^T A x = A^T B`.
-
-        The Ip constraint row is `(ip_weight / ip_norm) * (sum(I_fil) - ip_at_time)`, with
-        `ip_norm = max(|ip_at_time|, ip_norm_floor)`. For normal currents this is the relative Ip error; the floor
-        stops a divide-by-zero when Ip passes through zero (e.g. at the end of a current quench), where the row
-        becomes the absolute Ip error in units of `ip_norm_floor`.
+        '''! Run the filament current reconstruction with the lstsq method for one time slice.
+        Same as @ref prepare_lstsq followed by @ref solve_lstsq. Use this when `sigma` or the regularization change
+        every slice; for fixed ones, call @ref prepare_lstsq once and @ref solve_lstsq in the time loop (faster).
+        See those two methods for the rows of the fit.
 
         @param psi_at_time numpy.ndarray, sensor signals at this time (e.g. flux `[Wb]`), shape (num_sensors,)
         @param ip_at_time float, total plasma current measurement at time `[A]`
@@ -464,72 +624,22 @@ class JAMfit():
         @param ip_norm_floor float, smallest current used to normalize the Ip constraint row `[A]` (default: 1.E3)
         @result numpy.ndarray, filament currents `[A]`, shape (n_fil,)
         @result numpy.ndarray, wall basis amplitudes, shape (n_wall,)
-        @result float, norm of `B - A x` over all rows (sensor, Ip and regularization)
-        @result numpy.ndarray, `A x`, all rows
-        @result numpy.ndarray, `B`, all rows (weighted sensor signals, Ip row, zeros for the regularization rows)
+        @result numpy.ndarray, `A x` for the sensor rows only (fitted weighted signals), shape (num_sensors,)
+        @result dict, diagnostics, see @ref solve_lstsq
         '''
-        if not self.reduced_created_flag:
-            raise ValueError("Reduced model has not been created yet. Please create or initialize a reduced model before running reconstruction.")
-        if num_sensors is None:
-            num_sensors = self.torus_reduced.Ms.shape[1]
+        prep = self.prepare_lstsq(sigma, num_non_fil_coils, reg_factor_fil, reg_factor_wall, num_sensors)
+        return self.solve_lstsq(prep, psi_at_time, ip_at_time, coil_curr_at_time, ip_weight, ip_norm_floor)
 
-        # --- Weighted sensor matrices ---
-        # dividing by sigma normalizes each sensor by its noise, so no single sensor dominates the fit
-        Ms_weighted = self.torus_reduced.Ms[:, :num_sensors]/sigma[:]               # (n_wall, n_sensors)
-        Msc_weighted = self.torus_reduced.Msc[:, :num_sensors]/sigma[:]             # (n_coils_total, n_sensors)
-        Msc_fil_weighted = Msc_weighted[num_non_fil_coils:, :]                      # (n_fil, n_sensors)
-        Msc_coils_weighted = Msc_weighted[:num_non_fil_coils, :]                    # (n_shaping_coils, n_sensors)
-        num_Ms = Ms_weighted.shape[0]
-
-        # --- Ip constraint row ---
-        # scales the total Ip row so it has a comparable influence on the least-squares solution as the
-        # magnetic measurements, based on ip_weight and the magnitude of ip_at_time;
-        # the floor avoids a divide-by-zero when Ip crosses zero (see docstring)
-        ip_row_norm = max(abs(ip_at_time), ip_norm_floor)
-        ip_col_wall = numpy.zeros((num_Ms, 1))
-        ip_col_fil = numpy.ones((Msc_fil_weighted.shape[0], 1)) * (ip_weight / ip_row_norm)
-
-        # appending the Ip constraint as an extra sensor column, then transposing to [sensors + Ip] x [wall | fil]
-        Ms_with_ip = numpy.append(Ms_weighted, ip_col_wall, axis=1)                 # (n_wall, n_sensors + 1)
-        Msc_fil_with_ip = numpy.append(Msc_fil_weighted, ip_col_fil, axis=1)        # (n_fil, n_sensors + 1)
-        A_meas = numpy.vstack((Ms_with_ip, Msc_fil_with_ip)).T                      # (n_sensors + 1, n_wall + n_fil)
-
-        # --- Right-hand side: sensors minus the non-filament coil contribution, then the Ip row ---
-        B_weighted = (psi_at_time)/sigma[:] - coil_curr_at_time @ Msc_coils_weighted
-        # for |Ip| >= ip_norm_floor, ip_at_time/ip_row_norm reduces to sign(ip_at_time); the magnitude is in the A-side column
-        B_weighted = numpy.append(B_weighted, [ip_at_time * ip_weight/ip_row_norm])
-
-        # --- Tikhonov regularization rows ---
-        # one identity row per unknown: the first num_Ms rows are the wall amplitudes, the rest the filament currents
-        # matching zero rows are added to B
-        n_unknowns = Ms_with_ip.shape[0] + Msc_fil_with_ip.shape[0]
-        reg_identity = numpy.eye(n_unknowns)
-        A = numpy.vstack([
-            A_meas,                                                                 # sensors + Ip
-            reg_factor_wall * reg_identity[0:num_Ms, :],                            # wall Tikhonov
-            reg_factor_fil * reg_identity[num_Ms:, :],                              # filament Tikhonov
-        ])
-        B = numpy.concatenate([B_weighted, numpy.zeros(A.shape[1])])
-
-        # --- Solve the normal equations A^T A x = A^T B ---
-        AtA = A.T @ A
-        AtB = A.T @ B
-        solution = numpy.linalg.solve(AtA, AtB)
-        Ax = numpy.dot(A, solution)
-        residual = numpy.sqrt(numpy.sum((B - Ax)**2))
-        solution_wall = solution[:num_Ms]
-        solution_fil = solution[num_Ms:]
-
-        return solution_fil, solution_wall, residual, Ax, B
-
-    def prepare_tsvd_laplace(self, sigma, num_non_fil_coils, num_sensors, rgrid, zgrid, num_modes, verbose=False):
-        '''! Prepare matrices and projections for the svd + laplacian reconstruction method.
-        These only depend on the model and sensors, not on the time slice, so compute them once and pass them
-        to @ref run_reconstruction_tsvd_laplace for every time slice.
+    def prepare_tsvd_laplace(self, sigma, num_non_fil_coils, num_sensors, rgrid, zgrid, num_modes, lap_lam=1e-8, reg_wall=1e-5, verbose=False):
+        '''! Build everything for @ref solve_tsvd_laplace that does not change between time slices.
+        Call once for a fixed `sigma` and fixed regularization; call again if any of them changes (or use
+        @ref run_reconstruction_tsvd_laplace, which does both steps in one call).
 
         The SVD is taken of the weighted filament-to-sensor matrix `Msc_fil / sigma` `(n_fil, n_sensors)`. The
         filament currents are then written as `I_fil = U_trun @ w`, with `U_trun = U[:, :num_modes]` and `w` the
         `num_modes` unknown TSVD weights ("TSVD space"). This keeps only the filament patterns the sensors can see.
+        Unknowns are `[I_wall | w]`. Fixed rows: weighted sensors, Tikhonov on the wall (`reg_wall`) and the
+        filament Laplacian acting on `U_trun @ w` (`lap_lam`). The Ip row is added per slice in @ref solve_tsvd_laplace.
 
         @param sigma numpy.ndarray, noise on each sensor, same units as the sensor signals, shape (num_sensors,)
         @param num_non_fil_coils int, number of non-filament coils before the filaments in the Icoil list
@@ -537,46 +647,35 @@ class JAMfit():
         @param rgrid numpy.ndarray, R coordinates of the filament grid `[m]`, shape (n_fil,)
         @param zgrid numpy.ndarray, Z coordinates of the filament grid `[m]`, shape (n_fil,)
         @param num_modes int, number of SVD modes to truncate to
+        @param lap_lam float, Laplacian regularization weight (default: 1e-8)
+        @param reg_wall float, Tikhonov regularization weight on the wall amplitudes (default: 1e-5)
         @param verbose bool, if True, plots singular values (default: False)
-        @result numpy.ndarray, `Msc_coils_weighted`, weighted non-filament coil matrix, shape (num_non_fil_coils, num_sensors)
-        @result numpy.ndarray, `Ms_weighted`, weighted wall matrix, shape (n_wall, num_sensors)
-        @result numpy.ndarray, `U_trun`, truncated left singular vectors, shape (n_fil, num_modes)
-        @result numpy.ndarray, `ls_mat`, sensor rows of the system matrix `[wall | TSVD]`, shape (num_sensors, n_wall + num_modes)
-        @result numpy.ndarray, `ls_mat_fil`, TSVD part of ls_mat, shape (num_sensors, num_modes)
-        @result numpy.ndarray, `lap_proj`, filament Laplacian acting on the TSVD weights, shape (n_fil, num_modes)
-        @result numpy.ndarray, `ip_row`, unit-norm Ip constraint row, shape (1, n_wall + num_modes)
-        @result int, `N`, number of filaments
+        @result dict, prepared matrices to pass to @ref solve_tsvd_laplace (includes `U_trun`, shape (n_fil, num_modes))
+
+        Example
+        -------
+        >>> prep = jam.prepare_tsvd_laplace(sigma, num_non_fil_coils, 117, rgrid, zgrid, num_modes=38, lap_lam=1e-6, reg_wall=1e-3)
+        >>> for t in range(len(times)):
+        ...     fil, wall, Ax, diag = jam.solve_tsvd_laplace(prep, psi[t], ip[t], coils[t], lam=1e-3)
         '''
-
-        # --- Filament Laplacian (for smoothing) ---
-        lap_mat, N = get_laplace_matrix(rgrid, zgrid, verbose)
-        num_Ms = self.torus_reduced.Ms.shape[0]
-
-        # --- Weighted sensor matrices ---
-        # dividing by sigma normalizes each sensor by its noise, so no single sensor dominates the fit
-        Msc_fil_weighted = self.torus_reduced.Msc[num_non_fil_coils:, :num_sensors]/sigma[:]     # (n_fil, n_sensors)
-        Msc_coils_weighted = self.torus_reduced.Msc[:num_non_fil_coils, :num_sensors]/sigma[:]   # (n_shaping_coils, n_sensors)
-        Ms_weighted = self.torus_reduced.Ms[:, :num_sensors]/sigma[:]                            # (n_wall, n_sensors)
+        Ms_weighted, Msc_coils_weighted, Msc_fil_weighted = self._weighted_sensor_matrices(sigma, num_non_fil_coils, num_sensors)
+        num_Ms = Ms_weighted.shape[0]
+        lap_mat = self._get_filament_laplacian(rgrid, zgrid, verbose=verbose)
 
         # --- Truncated SVD of the filament part ---
         # only the filaments are decomposed (the shaping coil currents are known, not solved for)
         U, S, Vh = numpy.linalg.svd(Msc_fil_weighted, full_matrices=False)
-        U_trun = U[:, :num_modes]                                                   # (n_fil, num_modes)
+        U_trun = U[:, :num_modes]                                                          # (n_fil, num_modes)
 
-        # --- Sensor rows of the system matrix: [wall | TSVD weights] ---
-        ls_mat_fil = Msc_fil_weighted.T @ U_trun                                    # (n_sensors, num_modes)
-        ls_mat_wall = Ms_weighted.T                                                 # (n_sensors, n_wall)
-        ls_mat = numpy.hstack([ls_mat_wall, ls_mat_fil])
+        # --- Fixed rows: sensors [wall | TSVD weights], wall Tikhonov, filament Laplacian in TSVD space ---
+        A_sensor = numpy.hstack([Ms_weighted.T, Msc_fil_weighted.T @ U_trun])              # (n_sensors, n_wall + num_modes)
+        A_reg = numpy.vstack([
+            numpy.hstack([reg_wall * numpy.eye(num_Ms), numpy.zeros((num_Ms, num_modes))]),  # wall Tikhonov
+            numpy.hstack([numpy.zeros((lap_mat.shape[0], num_Ms)), lap_lam * (lap_mat @ U_trun)]),  # fil Laplacian
+        ])
 
-        # --- Laplacian projected onto the TSVD space ---
-        # a regularization term in the TSVD weights that smooths in the physical filament space
-        lap_proj = lap_mat @ U_trun                                                 # (n_fil, num_modes)
-
-        # --- Ip constraint row in the TSVD space ---
-        # sum(I_fil) = sum(U_trun @ w) = (column sums of U_trun) . w ; the row is scaled to unit norm
-        ip_row_fil = U_trun.sum(axis=0, keepdims=True)
-        ip_row_fil_norm = numpy.linalg.norm(ip_row_fil)
-        ip_row = numpy.hstack([numpy.zeros((1, num_Ms)), ip_row_fil/ip_row_fil_norm])
+        # --- Ip row: sum(I_fil) = sum(U_trun @ w) = (column sums of U_trun) . w ---
+        ip_row = numpy.concatenate([numpy.zeros(num_Ms), U_trun.sum(axis=0)])
 
         if verbose:
             plt.figure(figsize=(8, 5))
@@ -586,16 +685,28 @@ class JAMfit():
             plt.ylabel('Singular Value (log scale)')
             plt.grid(True)
             plt.show()
-        return Msc_coils_weighted, Ms_weighted, U_trun, ls_mat, ls_mat_fil, lap_proj, ip_row, N
 
-    def run_reconstruction_tsvd_laplace(self, psi_at_time, ip_at_time, coil_curr_at_time, Msc_coils, Ms, U_trun, ls_mat, ls_mat_fil, lap_proj, ip_row, N, sigma, lam=None, lap_lam=1e-8, reg_wall=1e-5,
-                                        ip_norm_floor=1.E3):
-        '''! Run the filament current reconstruction with the svd + laplacian method.
-        Unknowns are `[I_wall | w]`, wall basis amplitudes and TSVD weights (see @ref prepare_tsvd_laplace);
-        the filament currents are `U_trun @ w`. Rows: weighted sensors, the Ip constraint (weight `lam`),
-        Tikhonov on the wall (`reg_wall`) and the filament Laplacian (`lap_lam`), solved through the normal
-        equations.
+        prep = _prepare_fixed_rows(A_sensor, A_reg, ip_row)
+        prep.update({
+            'method': 'tsvd_laplace',
+            'sigma': numpy.array(sigma, dtype=float),
+            'num_sensors': num_sensors,
+            'num_non_fil_coils': num_non_fil_coils,
+            'num_Ms': num_Ms,
+            'Msc_coils_weighted': Msc_coils_weighted,
+            'U_trun': U_trun,
+            # norm of the Ip row; lam is defined for the unit-norm row, so the row weight is lam / ip_row_norm
+            'ip_row_norm': numpy.linalg.norm(ip_row),
+            'lap_lam': lap_lam,
+            'reg_wall': reg_wall,
+        })
+        return prep
 
+    def solve_tsvd_laplace(self, prep, psi_at_time, ip_at_time, coil_curr_at_time, lam=None, ip_norm_floor=1.E3):
+        '''! Solve one time slice with the svd + laplacian method, using matrices from @ref prepare_tsvd_laplace.
+        The filament currents are `U_trun @ w`.
+
+        The Ip row is `lam * (r . x - Ip) / |r|`, with `r . x = sum(I_fil)`, i.e. weight `lam` on the unit-norm row.
         If `lam` is None it is set from the ratio of the typical weighted sensor signal to Ip,
         `lam = 100 * 10**floor(log10(mean(|B|) / ip_norm))` with `ip_norm = max(|Ip|, ip_norm_floor)`, so the
         Ip row is on the same order as the sensor rows (the factor 100 gives the single Ip row more weight
@@ -603,99 +714,165 @@ class JAMfit():
         end of a current quench). `ip_error_pct` is normalized by the same `ip_norm`, so below the floor it is
         the absolute Ip error in percent of `ip_norm_floor`.
 
+        @param prep dict, from @ref prepare_tsvd_laplace
         @param psi_at_time numpy.ndarray, sensor signals at this time (e.g. flux `[Wb]`), shape (num_sensors,)
         @param ip_at_time float, total plasma current measurement at time `[A]`
         @param coil_curr_at_time numpy.ndarray, non-filament coil currents at time `[A]`, shape (num_non_fil_coils,)
-        @param Msc_coils numpy.ndarray, weighted non-filament coil matrix from @ref prepare_tsvd_laplace
-        @param Ms numpy.ndarray, weighted wall matrix from @ref prepare_tsvd_laplace, shape (n_wall, num_sensors)
-        @param U_trun numpy.ndarray, truncated singular vectors from @ref prepare_tsvd_laplace, shape (n_fil, num_modes)
-        @param ls_mat numpy.ndarray, sensor rows of the system matrix from @ref prepare_tsvd_laplace
-        @param ls_mat_fil numpy.ndarray, TSVD part of ls_mat from @ref prepare_tsvd_laplace
-        @param lap_proj numpy.ndarray, Laplacian in TSVD space from @ref prepare_tsvd_laplace
-        @param ip_row numpy.ndarray, unit-norm Ip constraint row from @ref prepare_tsvd_laplace
-        @param N int, number of filaments
-        @param sigma numpy.ndarray, noise on each sensor, same units as psi_at_time, shape (num_sensors,)
         @param lam float, Ip constraint weight; None sets it automatically (see above) (default: None)
+        @param ip_norm_floor float, smallest current used for the automatic `lam` and for `ip_error_pct` `[A]` (default: 1.E3)
+        @result numpy.ndarray, filament currents `[A]`, shape (n_fil,)
+        @result numpy.ndarray, wall basis amplitudes, shape (n_wall,)
+        @result numpy.ndarray, `A x` for the sensor rows only (fitted weighted signals), shape (num_sensors,)
+        @result dict, diagnostics, see @ref _reconstruction_diagnostics (`solution` is `[I_wall | w]`); also `lam`, `lap_lam`, `reg_wall`
+        '''
+        _check_prep(prep, 'tsvd_laplace', 'prepare_tsvd_laplace')
+        num_Ms = prep['num_Ms']
+        B_weighted = psi_at_time / prep['sigma'] - coil_curr_at_time @ prep['Msc_coils_weighted']
+        if lam is None:
+            lam = _auto_ip_weight(B_weighted, ip_at_time, ip_norm_floor)
+
+        solution, Ax, total_residual = _solve_with_ip_row(prep, B_weighted, lam / prep['ip_row_norm'], ip_at_time)
+        curr_wall = solution[:num_Ms]
+        curr_fil = prep['U_trun'] @ solution[num_Ms:]   # map the TSVD weights back to filament currents
+
+        diagnostics = _reconstruction_diagnostics(curr_fil, ip_at_time, ip_norm_floor, Ax, B_weighted, total_residual, solution)
+        diagnostics.update({'lam': lam, 'lap_lam': prep['lap_lam'], 'reg_wall': prep['reg_wall']})
+        return curr_fil, curr_wall, Ax, diagnostics
+
+    def run_reconstruction_tsvd_laplace(self, psi_at_time, ip_at_time, coil_curr_at_time, sigma, num_non_fil_coils, num_sensors, rgrid, zgrid, num_modes,
+                                        lam=None, lap_lam=1e-8, reg_wall=1e-5, ip_norm_floor=1.E3):
+        '''! Run the filament current reconstruction with the svd + laplacian method for one time slice.
+        Same as @ref prepare_tsvd_laplace followed by @ref solve_tsvd_laplace, so the SVD is redone on every call.
+        Use this when `sigma` or the regularization change every slice; for fixed ones, call
+        @ref prepare_tsvd_laplace once and @ref solve_tsvd_laplace in the time loop (much faster).
+
+        @param psi_at_time numpy.ndarray, sensor signals at this time (e.g. flux `[Wb]`), shape (num_sensors,)
+        @param ip_at_time float, total plasma current measurement at time `[A]`
+        @param coil_curr_at_time numpy.ndarray, non-filament coil currents at time `[A]`, shape (num_non_fil_coils,)
+        @param sigma numpy.ndarray, noise on each sensor, same units as psi_at_time, shape (num_sensors,)
+        @param num_non_fil_coils int, number of non-filament coils before the filaments in the Icoil list
+        @param num_sensors int, number of real sensors in the system
+        @param rgrid numpy.ndarray, R coordinates of the filament grid `[m]`, shape (n_fil,)
+        @param zgrid numpy.ndarray, Z coordinates of the filament grid `[m]`, shape (n_fil,)
+        @param num_modes int, number of SVD modes to truncate to
+        @param lam float, Ip constraint weight; None sets it automatically (see @ref solve_tsvd_laplace) (default: None)
         @param lap_lam float, Laplacian regularization weight (default: 1e-8)
         @param reg_wall float, Tikhonov regularization weight on the wall amplitudes (default: 1e-5)
         @param ip_norm_floor float, smallest current used for the automatic `lam` and for `ip_error_pct` `[A]` (default: 1.E3)
         @result numpy.ndarray, filament currents `[A]`, shape (n_fil,)
         @result numpy.ndarray, wall basis amplitudes, shape (n_wall,)
-        @result numpy.ndarray, `A x` for the sensor rows only, shape (num_sensors,)
-        @result dict, diagnostics: `lam`, `lap_lam`, `ip_reconstructed` `[A]`, `ip_actual` `[A]`, `ip_error_pct`,
-            `fit_residual` (norm of the weighted sensor misfit), `fit_residual_nonorm` (the misfit vector),
-            `curr_weights` (full solution `[I_wall | w]`), `ip_row`
+        @result numpy.ndarray, `A x` for the sensor rows only (fitted weighted signals), shape (num_sensors,)
+        @result dict, diagnostics, see @ref solve_tsvd_laplace
         '''
-        num_Ms = Ms.shape[0]
+        prep = self.prepare_tsvd_laplace(sigma, num_non_fil_coils, num_sensors, rgrid, zgrid, num_modes, lap_lam, reg_wall)
+        return self.solve_tsvd_laplace(prep, psi_at_time, ip_at_time, coil_curr_at_time, lam, ip_norm_floor)
 
-        # --- Right-hand side: sensors minus the non-filament coil contribution ---
-        B_weighted = (psi_at_time)/sigma[:] - coil_curr_at_time @ Msc_coils
+    def prepare_laplace(self, sigma, num_non_fil_coils, num_real_sensors, rgrid, zgrid, lap_lam=1e-6, reg_wall=1e-5,
+                        sigma_r=1e-1, sigma_z=1e-1, gaussian=False, verbose=False):
+        '''! Build everything for @ref solve_laplace that does not change between time slices.
+        Call once for a fixed `sigma` and fixed regularization; call again if any of them changes (or use
+        @ref run_reconstruction_laplace, which does both steps in one call). The filament Laplacian itself is
+        cached on the object and only rebuilt when the grid changes.
 
-        # --- Ip constraint weight ---
+        Solves directly in the physical filament space (no SVD projection). Unknowns are `[I_wall | I_fil]`.
+        Fixed rows: weighted sensors, Tikhonov on the wall (`reg_wall`) and the filament Laplacian (`lap_lam`).
+        The Ip row is added per slice in @ref solve_laplace.
+
+        @param sigma numpy.ndarray, noise on each sensor, same units as the sensor signals, shape (num_real_sensors,)
+        @param num_non_fil_coils int, number of non-filament coils before the filaments in the Icoil list
+        @param num_real_sensors int, number of real sensors (the first num_real_sensors sensors are used)
+        @param rgrid numpy.ndarray, R coordinates of the filament grid `[m]`, shape (n_fil,)
+        @param zgrid numpy.ndarray, Z coordinates of the filament grid `[m]`, shape (n_fil,)
+        @param lap_lam float, Laplacian regularization weight (default: 1e-6)
+        @param reg_wall float, Tikhonov regularization weight on the wall amplitudes (default: 1e-5)
+        @param sigma_r float, R width of the Gaussian weighting `[m]`, only used if gaussian is True (default: 1e-1)
+        @param sigma_z float, Z width of the Gaussian weighting `[m]`, only used if gaussian is True (default: 1e-1)
+        @param gaussian bool, if True uses the experimental Gaussian-weighted Laplacian (@ref get_gaussian_lap_mat)
+            instead of the finite-difference one (@ref get_laplace_matrix) (default: False)
+        @param verbose bool, if True prints grid information while building the Laplacian (default: False)
+        @result dict, prepared matrices to pass to @ref solve_laplace
+
+        Example
+        -------
+        >>> prep = jam.prepare_laplace(sigma, num_non_fil_coils, 117, rgrid, zgrid, lap_lam=1e-6, reg_wall=1e-5)
+        >>> for t in range(len(times)):
+        ...     fil, wall, Ax, diag = jam.solve_laplace(prep, psi[t], ip[t], coils[t], lam=None)
+        '''
+        Ms_weighted, Msc_coils_weighted, Msc_fil_weighted = self._weighted_sensor_matrices(sigma, num_non_fil_coils, num_real_sensors)
+        num_Ms = Ms_weighted.shape[0]
+        n_fil = Msc_fil_weighted.shape[0]
+        lap_mat = self._get_filament_laplacian(rgrid, zgrid, gaussian, sigma_r, sigma_z, verbose)
+
+        # --- Fixed rows: sensors [wall | filament], wall Tikhonov, filament Laplacian ---
+        A_sensor = numpy.hstack([Ms_weighted.T, Msc_fil_weighted.T])                       # (n_sensors, n_wall + n_fil)
+        A_reg = numpy.vstack([
+            numpy.hstack([reg_wall * numpy.eye(num_Ms), numpy.zeros((num_Ms, n_fil))]),    # wall Tikhonov
+            numpy.hstack([numpy.zeros((n_fil, num_Ms)), lap_lam * lap_mat]),               # fil Laplacian
+        ])
+
+        # --- Ip row: r . x = sum(I_fil) ---
+        ip_row = numpy.concatenate([numpy.zeros(num_Ms), numpy.ones(n_fil)])
+
+        prep = _prepare_fixed_rows(A_sensor, A_reg, ip_row)
+        prep.update({
+            'method': 'laplace',
+            'sigma': numpy.array(sigma, dtype=float),
+            'num_sensors': num_real_sensors,
+            'num_non_fil_coils': num_non_fil_coils,
+            'num_Ms': num_Ms,
+            'Msc_coils_weighted': Msc_coils_weighted,
+            # norm of the Ip row (sqrt(n_fil)); lam is defined for the unit-norm row, so the row weight is lam / ip_row_norm
+            'ip_row_norm': numpy.linalg.norm(ip_row),
+            'lap_lam': lap_lam,
+            'reg_wall': reg_wall,
+        })
+        return prep
+
+    def solve_laplace(self, prep, psi_at_time, ip_at_time, coil_curr_at_time, lam=None, verbose=False, ip_norm_floor=1.E3):
+        '''! Solve one time slice with direct Laplacian regularization, using matrices from @ref prepare_laplace.
+        The Ip row and the automatic `lam` (when `lam` is None) are as in @ref solve_tsvd_laplace, including the
+        `ip_norm_floor` used there for the automatic `lam` and for `ip_error_pct`.
+
+        @param prep dict, from @ref prepare_laplace
+        @param psi_at_time numpy.ndarray, sensor signals at this time (e.g. flux `[Wb]`), shape (num_real_sensors,)
+        @param ip_at_time float, total plasma current measurement at time `[A]`
+        @param coil_curr_at_time numpy.ndarray, non-filament coil currents at time `[A]`, shape (num_non_fil_coils,)
+        @param lam float, Ip constraint weight; None sets it automatically (default: None)
+        @param verbose bool, if True prints the weights, Ip error and residual (default: False)
+        @param ip_norm_floor float, smallest current used for the automatic `lam` and for `ip_error_pct` `[A]` (default: 1.E3)
+        @result numpy.ndarray, filament currents `[A]`, shape (n_fil,)
+        @result numpy.ndarray, wall basis amplitudes, shape (n_wall,)
+        @result numpy.ndarray, `A x` for the sensor rows only (fitted weighted signals), shape (num_real_sensors,)
+        @result dict, diagnostics, see @ref _reconstruction_diagnostics; also `lam`, `lap_lam`, `reg_wall`
+        '''
+        _check_prep(prep, 'laplace', 'prepare_laplace')
+        num_Ms = prep['num_Ms']
+        B_weighted = psi_at_time / prep['sigma'] - coil_curr_at_time @ prep['Msc_coils_weighted']
         if lam is None:
             lam = _auto_ip_weight(B_weighted, ip_at_time, ip_norm_floor)
 
-        # ip_row has unit norm, so the B-side Ip value is scaled by the same norm
-        ip_scale = numpy.linalg.norm(U_trun.sum(axis=0))
+        solution, Ax, total_residual = _solve_with_ip_row(prep, B_weighted, lam / prep['ip_row_norm'], ip_at_time)
+        curr_wall = solution[:num_Ms]
+        curr_fil = solution[num_Ms:]
 
-        # --- System matrix: measurements, Ip row, and the regularization rows ---
-        reg_mat = numpy.vstack([
-            ls_mat,                                                                                    # measurements
-            lam * ip_row,                                                                              # Ip constraint
-            numpy.hstack([reg_wall * numpy.eye(num_Ms), numpy.zeros((num_Ms, ls_mat_fil.shape[1]))]),  # wall Tikhonov
-            numpy.hstack([numpy.zeros((N, num_Ms)), lap_lam * lap_proj])                               # fil Laplacian
-        ])
+        diagnostics = _reconstruction_diagnostics(curr_fil, ip_at_time, ip_norm_floor, Ax, B_weighted, total_residual, solution)
+        diagnostics.update({'lam': lam, 'lap_lam': prep['lap_lam'], 'reg_wall': prep['reg_wall']})
 
-        # --- Right-hand side for all rows: measurements, Ip constraint, zeros for the regularization rows ---
-        psi_reg = numpy.concatenate([
-            B_weighted,
-            numpy.array([lam * ip_at_time / ip_scale]),
-            numpy.zeros(num_Ms),
-            numpy.zeros(N)
-        ])
+        if verbose:
+            print(f"lam = {lam:.3e}, lap_lam = {prep['lap_lam']:.3e}, reg_wall = {prep['reg_wall']:.3e}")
+            print(f"Ip reconstructed: {diagnostics['ip_reconstructed']:.3f} A | Ip actual: {ip_at_time:.3f} A | Error: {diagnostics['ip_error_pct']:.2f}%")
+            print(f"Fit residual: {diagnostics['fit_residual']:.4e}")
 
-        # --- Solve the normal equations A^T A x = A^T B ---
-        AtA = reg_mat.T @ reg_mat
-        AtB = reg_mat.T @ psi_reg
-        curr_weights = numpy.linalg.solve(AtA, AtB)
-
-        # --- Map the TSVD weights back to filament currents ---
-        curr_expand = U_trun @ curr_weights[num_Ms:]  # only the filament part contributes to the expansion
-        wall_expand = curr_weights[:num_Ms]  # wall coefficients
-
-        # --- Diagnostics ---
-        Ax = ls_mat @ curr_weights
-        ip_reconstructed = curr_expand.sum()
-        ip_actual        = ip_at_time
-        ip_error_pct     = 100 * numpy.abs(ip_reconstructed - ip_actual) / max(abs(ip_actual), ip_norm_floor)  # floor: see docstring
-        fit_residual     = numpy.linalg.norm(Ax - B_weighted)
-        fit_residual_nonorm = Ax - B_weighted
-
-        diagnostics = {
-            'lam':              lam,
-            'lap_lam':          lap_lam,
-            'ip_reconstructed': ip_reconstructed,
-            'ip_actual':        ip_actual,
-            'ip_error_pct':     ip_error_pct,
-            'fit_residual':     fit_residual,
-            'curr_weights':     curr_weights,
-            'fit_residual_nonorm': fit_residual_nonorm,
-            'ip_row':           ip_row,
-        }
-
-        return curr_expand, wall_expand, Ax, diagnostics
+        return curr_fil, curr_wall, Ax, diagnostics
 
     def run_reconstruction_laplace(self, psi_at_time, ip_at_time, coil_curr_at_time, sigma,
                                     num_non_fil_coils, num_real_sensors, rgrid, zgrid,
                                     lam=None, lap_lam=1e-6, reg_wall=1e-5, sigma_r=1e-1, sigma_z=1e-1, gaussian=False, verbose=False,
                                     ip_norm_floor=1.E3):
-        '''! Run filament current reconstruction using direct Laplacian regularization.
-        Solves directly in the physical filament space (no SVD projection), applying
-        Laplacian smoothing to filaments and Tikhonov regularization to wall currents.
-        Unknowns are `[I_wall | I_fil]`; rows: weighted sensors, the Ip constraint (weight `lam`), Tikhonov on
-        the wall (`reg_wall`) and the filament Laplacian (`lap_lam`), solved through the normal equations.
-        If `lam` is None it is set as in @ref run_reconstruction_tsvd_laplace, including the `ip_norm_floor`
-        used there for the automatic `lam` and for `ip_error_pct`.
+        '''! Run filament current reconstruction using direct Laplacian regularization for one time slice.
+        Same as @ref prepare_laplace followed by @ref solve_laplace. Use this when `sigma` or the regularization
+        change every slice; for fixed ones, call @ref prepare_laplace once and @ref solve_laplace in the time loop
+        (faster). The filament Laplacian is cached either way.
 
         @param psi_at_time numpy.ndarray, sensor signals at this time (e.g. flux `[Wb]`), shape (num_real_sensors,)
         @param ip_at_time float, total plasma current measurement at time `[A]`
@@ -716,100 +893,99 @@ class JAMfit():
         @param ip_norm_floor float, smallest current used for the automatic `lam` and for `ip_error_pct` `[A]` (default: 1.E3)
         @result numpy.ndarray, filament currents `[A]`, shape (n_fil,)
         @result numpy.ndarray, wall basis amplitudes, shape (n_wall,)
-        @result numpy.ndarray, `A x` for the sensor rows only, shape (num_real_sensors,)
-        @result dict, diagnostics: `lam`, `lap_lam`, `reg_wall`, `ip_reconstructed` `[A]`, `ip_actual` `[A]`,
-            `ip_error_pct`, `fit_residual` (norm of the weighted sensor misfit), `fit_residual_nonorm` (the misfit
-            vector), `solution` (full solution `[I_wall | I_fil]`)
+        @result numpy.ndarray, `A x` for the sensor rows only (fitted weighted signals), shape (num_real_sensors,)
+        @result dict, diagnostics, see @ref solve_laplace
         '''
+        prep = self.prepare_laplace(sigma, num_non_fil_coils, num_real_sensors, rgrid, zgrid, lap_lam, reg_wall,
+                                    sigma_r, sigma_z, gaussian)
+        return self.solve_laplace(prep, psi_at_time, ip_at_time, coil_curr_at_time, lam, verbose, ip_norm_floor)
 
-        # --- Weighted sensor matrices ---
-        # dividing by sigma normalizes each sensor by its noise, so no single sensor dominates the fit
-        Ms_weighted = self.torus_reduced.Ms[:, :num_real_sensors] / sigma[:]        # (n_wall, n_sensors)
-        Msc_weighted = self.torus_reduced.Msc[:, :num_real_sensors] / sigma[:]      # (n_coils_total, n_sensors)
-        Msc_coils_weighted = Msc_weighted[:num_non_fil_coils, :num_real_sensors]    # (n_shaping_coils, n_sensors)
-        Msc_fil_weighted = Msc_weighted[num_non_fil_coils:, :num_real_sensors]      # (n_fil, n_sensors)
-        n_fil = Msc_fil_weighted.shape[0]
-        num_Ms = Ms_weighted.shape[0]
+    # ==========================================================
+    # Flux probe placement (positions on the TokaMaker mesh of self.mygs)
+    # ==========================================================
 
-        # --- Right-hand side: sensors minus the non-filament coil contribution ---
-        B_weighted = (psi_at_time)/sigma[:] - coil_curr_at_time @ Msc_coils_weighted
+    def get_bbox_grid_pts(self, n_r=10, n_z=10, verbose=False):
+        '''! Uniform rectangular grid over the bounding box of the TokaMaker mesh nodes (`self.mygs`).
+        Used to place the flux probes whose wall psi is later interpolated onto every TokaMaker node
+        (see @ref get_wall_psi_tidx).
 
-        # --- Ip constraint weight and row ---
-        if lam is None:
-            lam = _auto_ip_weight(B_weighted, ip_at_time, ip_norm_floor)
+        @param n_r int, number of points along R (default: 10)
+        @param n_z int, number of points along Z (default: 10)
+        @param verbose bool, if True, plots the grid, the TokaMaker nodes and the limiter contour (default: False)
+        @result numpy.ndarray, bounding-box grid points `[m]`, shape (n_r*n_z, 2) with columns [R, Z]
+        @result numpy.ndarray, R meshgrid `[m]`, shape (n_z, n_r)
+        @result numpy.ndarray, Z meshgrid `[m]`, shape (n_z, n_r)
 
-        # each filament contributes equally to Ip, so the row is all-ones for filaments, zeros for wall
-        ip_row_fil = numpy.ones((1, n_fil))
-        ip_row_norm = numpy.linalg.norm(ip_row_fil)
-        ip_row = numpy.hstack([numpy.zeros((1, num_Ms)), ip_row_fil / ip_row_norm])  # (1, n_wall + n_fil)
+        Example
+        -------
+        >>> jam_obj = JAMfit(xml_file, thincurr_meshfile, tokamaker_meshfile, B0, R0, oft_env=myOFT)
+        >>> probe_pts, R, Z = jam_obj.get_bbox_grid_pts(n_r=10, n_z=20)
+        >>> probes = [circular_flux_loop(r, z, 'psi_grid_{0}'.format(i)) for i, (r, z) in enumerate(probe_pts)]
+        '''
+        r_pts_grid = self.mygs.r[:, 0]
+        z_pts_grid = self.mygs.r[:, 1]
 
-        # --- Filament Laplacian (for smoothing the filament solution in space) ---
-        if gaussian:
-            lap_mat, N = get_gaussian_lap_mat(rgrid, zgrid, sigma_r, sigma_z)        # (n_fil, n_fil)
-        else:
-            lap_mat, N = get_laplace_matrix(rgrid, zgrid, verbose=verbose)          # (n_fil, n_fil)
-
-        # --- System matrix: measurements, Ip row, and the regularization rows ---
-        # measurements corresponding to sensors: [wall | filament] columns
-        meas_block = numpy.hstack([Ms_weighted.T, Msc_fil_weighted.T])              # (n_sensors, n_wall + n_fil)
-
-        # Ip constraint row
-        ip_block = lam * ip_row                                                     # (1, n_wall + n_fil)
-
-        # Tikhonov on wall
-        wall_reg = reg_wall * numpy.hstack([
-            numpy.eye(num_Ms),
-            numpy.zeros((num_Ms, n_fil))
-        ])                                                                          # (n_wall, n_wall + n_fil)
-
-        # Laplacian on filaments
-        fil_lap = lap_lam * numpy.hstack([
-            numpy.zeros((N, num_Ms)),
-            lap_mat
-        ])                                                                          # (n_fil, n_wall + n_fil)
-        A = numpy.vstack([meas_block, ip_block, wall_reg, fil_lap])
-
-        # --- Right-hand side for all rows: measurements, Ip constraint, zeros for the regularization rows ---
-        psi_reg = numpy.concatenate([
-            B_weighted,
-            numpy.array([lam * ip_at_time / ip_row_norm]),
-            numpy.zeros(num_Ms),
-            numpy.zeros(N)
-        ])
-
-        # --- Solve the normal equations A^T A x = A^T B ---
-        AtA = A.T @ A
-        AtB = A.T @ psi_reg
-        solution = numpy.linalg.solve(AtA, AtB)
-        # extracting wall and filament currents from the solution vector
-        curr_wall = solution[:num_Ms]
-        curr_fil = solution[num_Ms:]
-
-        # --- Diagnostics ---
-        Ax = meas_block @ solution
-        ip_reconstructed  = curr_fil.sum()
-        ip_error_pct      = 100 * numpy.abs(ip_reconstructed - ip_at_time) / max(abs(ip_at_time), ip_norm_floor)  # floor: see docstring
-        fit_residual      = numpy.linalg.norm(Ax - B_weighted)
-        fit_residual_nonorm = Ax - B_weighted
-
-        diagnostics = {
-            'lam':                  lam,
-            'lap_lam':              lap_lam,
-            'reg_wall':             reg_wall,
-            'ip_reconstructed':     ip_reconstructed,
-            'ip_actual':            ip_at_time,
-            'ip_error_pct':         ip_error_pct,
-            'fit_residual':         fit_residual,
-            'fit_residual_nonorm':  fit_residual_nonorm,
-            'solution':             solution,
-        }
+        r_vals = numpy.linspace(r_pts_grid.min(), r_pts_grid.max(), n_r)
+        z_vals = numpy.linspace(z_pts_grid.min(), z_pts_grid.max(), n_z)
+        R, Z = numpy.meshgrid(r_vals, z_vals, indexing='xy')
+        bbox_pts = numpy.column_stack([R.ravel(), Z.ravel()])   # row-major: R varies fastest
 
         if verbose:
-            print(f"lam = {lam:.3e}, lap_lam = {lap_lam:.3e}, reg_wall = {reg_wall:.3e}")
-            print(f"Ip reconstructed: {ip_reconstructed:.3f} A | Ip actual: {ip_at_time:.3f} A | Error: {ip_error_pct:.2f}%")
-            print(f"Fit residual: {fit_residual:.4e}")
+            fig, ax = plt.subplots()
+            ax.scatter(r_pts_grid, z_pts_grid, c='lightgray', s=5, alpha=0.5, label='TokaMaker grid')
+            ax.scatter(bbox_pts[:, 0], bbox_pts[:, 1], c='tab:blue', s=15, label='Bbox grid pts')
+            ax.plot(self.mygs.lim_contour[:, 0], self.mygs.lim_contour[:, 1], 'k-', label='Limiter Contour')
+            ax.set_xlabel('R')
+            ax.set_ylabel('Z')
+            ax.set_title(f'Bounding Box Grid ({n_r} x {n_z} points)')
+            ax.legend()
+            plt.tight_layout()
+            plt.gca().set_aspect('equal', adjustable='box')
+            plt.show()
 
-        return curr_fil, curr_wall, Ax, diagnostics
+        return bbox_pts, R, Z
+
+    def get_inside_limiter_pts(self, stride=1, verbose=False):
+        '''! TokaMaker mesh nodes (`self.mygs`) inside the limiter contour, to place flux probes for the wall psi.
+        Every stride-th inside node gets a probe; see @ref get_wall_psi_tidx.
+
+        @param stride int, subsampling stride for the nodes inside the limiter (default: 1)
+        @param verbose bool, if True, plots the nodes with and without a probe and the limiter contour (default: False)
+        @result numpy.ndarray, probe points `[m]`, shape (n_probes, 2) with columns [R, Z]
+        @result numpy.ndarray, bool mask over all nodes, True where a probe is placed, shape (n_nodes,)
+        @result numpy.ndarray, bool mask over all nodes, True inside the limiter, shape (n_nodes,)
+
+        Example
+        -------
+        >>> probe_pts, probe_mask, inside_mask = jam_obj.get_inside_limiter_pts(stride=4)
+        '''
+        node_pts = self.mygs.r[:, :2]
+        lim_path = Path(self.mygs.lim_contour[:, :2])
+
+        inside_mask = lim_path.contains_points(node_pts)   # full inside-limiter mask
+        inside_idx = numpy.where(inside_mask)[0]
+
+        # subsample the indices that actually get a flux loop
+        sparse_idx = inside_idx[::stride]
+        sparse_mask = numpy.zeros_like(inside_mask)
+        sparse_mask[sparse_idx] = True
+
+        inside_lim_pts = node_pts[sparse_idx, :].copy()   # copy: mygs.r is a view on TokaMaker memory
+
+        if verbose:
+            fig, ax = plt.subplots()
+            ax.scatter(node_pts[:, 0], node_pts[:, 1], c=sparse_mask, cmap='RdYlGn', s=10, alpha=0.7)
+            ax.plot(self.mygs.lim_contour[:, 0], self.mygs.lim_contour[:, 1], 'k-', label='Limiter Contour')
+            ax.set_xlabel('R')
+            ax.set_ylabel('Z')
+            ax.set_title(f'Grid Points With Flux Loops (stride={stride})')
+            ax.legend()
+            plt.colorbar(ax.collections[0], ax=ax, label='Has flux loop')
+            plt.tight_layout()
+            plt.gca().set_aspect('equal', adjustable='box')
+            plt.show()
+
+        return inside_lim_pts, sparse_mask, inside_mask
 
     # ==========================================================
     # Post-processing and visualization methods
@@ -818,8 +994,8 @@ class JAMfit():
     def get_wall_psi_tidx(self, num_sensors, solution_wall_at_time):
         '''! Compute the wall contribution to the flux at a given time index.
         Uses the fitted wall basis amplitudes and the wall-to-sensor matrix `Ms` to evaluate the wall flux on
-        the extra sensors after the first num_sensors (the in-vessel flux probes, e.g. placed with
-        @ref get_inside_limiter_pts). The division by `2 pi` converts flux `[Wb]` to TokaMaker psi `[Wb/rad]`.
+        the extra sensors after the first num_sensors (the flux probes, placed with @ref get_bbox_grid_pts
+        or @ref get_inside_limiter_pts). The division by `2 pi` converts flux `[Wb]` to TokaMaker psi `[Wb/rad]`.
         Before @ref post_process_tidx the result must be put on every TokaMaker node (the reconstruct example
         fills the nodes without a probe by interpolation).
 
@@ -830,23 +1006,23 @@ class JAMfit():
         wall_psi_at_time = solution_wall_at_time @ wall_psi_probes
         return wall_psi_at_time
 
-    def compute_psi_basis(self, rgrid, zgrid, disk_radius=0.3):
+    def compute_psi_basis(self, rgrid, zgrid, disk_radius=0.1):
         '''! Plasma psi per unit current of each filament, for reuse in post_process_tidx (psi_basis).
 
         Each filament is represented by a TokaMaker init_psi disk of radius disk_radius centred on (r, z), exactly
         as in post_process_tidx. init_psi is linear in Ip (checked to 2e-16 relative), so the plasma psi of any
         filament current vector is psi_basis @ I_fil. This avoids repeating the init_psi loop for every time slice,
-        which matters for grids with thousands of filaments (e.g. the M3D-C1 projection).
-
+        which matters for grids with thousands of filaments.
+        
         @param rgrid numpy.ndarray, R coordinates of the filament mesh `[m]`, shape (n_fil,)
         @param zgrid numpy.ndarray, Z coordinates of the filament mesh `[m]`, shape (n_fil,)
-        @param disk_radius float, radius of the init_psi disk per filament `[m]` (default: 0.3)
+        @param disk_radius float, radius of the init_psi disk per filament `[m]` (default: 0.1, see @ref post_process_tidx)
         @result numpy.ndarray, psi per amp on the TokaMaker nodes `[Wb/rad per A]`, shape (n_nodes, n_fil)
 
         Example
         -------
-        >>> psi_basis = jamfit.compute_psi_basis(rgrid, zgrid, disk_radius=0.2)
-        >>> out = jamfit.post_process_tidx(fil, wall_psi, coils, rgrid, zgrid, disk_radius=0.2, psi_basis=psi_basis)
+        >>> psi_basis = jamfit.compute_psi_basis(rgrid, zgrid, disk_radius=0.1)
+        >>> out = jamfit.post_process_tidx(fil, wall_psi, coils, rgrid, zgrid, disk_radius=0.1, psi_basis=psi_basis)
         '''
         psi_basis = []
         for r, z in zip(rgrid, zgrid):
@@ -857,15 +1033,20 @@ class JAMfit():
         return numpy.array(psi_basis).T
 
     def post_process_tidx(self, filaments_at_time, wall_psi, coil_curr_dict, rgrid, zgrid, verbose=False, include_negative_encl=True,
-                          disk_radius=0.3, psi_basis=None, touch_tol=0.0005):
+                          disk_radius=0.1, psi_basis=None, touch_tol=0.0005):
         '''! Post-process the results at a given time index to compute plasma parameters and visualize.
 
         The plasma psi is the sum over positive filaments of a TokaMaker init_psi disk of radius disk_radius centred
         on each filament. Negative filaments are left out on purpose: TokaMaker init_psi cannot represent a negative
         plasma current, and negative toroidal current is unphysical here (a well-tuned reconstruction should have
         essentially none). Where the total current is needed (li), it is the current enclosed by the LCFS, see
-        include_negative_encl; the current centroid uses all filaments, negatives included. Smaller disks are more accurate
-        but need a fine enough filament grid for trace_surf to find an LCFS.
+        include_negative_encl; the current centroid uses all filaments, negatives included.
+
+        Choosing disk_radius: each disk spreads its filament's current over the area around it, so the natural size is
+        about one filament grid cell (radius = spacing / sqrt(pi), 0.085 m for the 0.15 m DIII-D example grid; the
+        default 0.1 m is close to that). Much larger disks stick out past the limiter; that part is dropped, which moves
+        the filament's current inward (about 100 mm at 0.3 m). Much smaller disks behave like point filaments and leave
+        saddle points between neighbours that are taken as X-points (seen at 0.05 m). Scale disk_radius with the grid spacing.
 
         The internal inductance uses the 'std' normalisation of TokaMaker get_stats,
         li = (int B_p^2 dV / V) / (mu0 Ip / L_LCFS)^2, where the B_p^2 integral and V only cover the region inside
@@ -882,12 +1063,13 @@ class JAMfit():
         @param include_negative_encl bool, if True, negative filaments inside the LCFS count towards the enclosed Ip
             used for li; if False only positive filaments are summed, consistent with the psi used here (negative
             filaments are left out of psi) (default: True)
-        @param disk_radius float, radius of the init_psi disk per filament `[m]` (default: 0.3, the old hard-coded value)
+        @param disk_radius float, radius of the init_psi disk per filament `[m]`; about one filament grid cell, see above (default: 0.1)
         @param psi_basis numpy.ndarray or None, psi per amp of each filament, shape (n_nodes, n_fil), from
             compute_psi_basis with the same disk_radius; if None the init_psi loop is run here (default: None)
         @param touch_tol float, largest LCFS-limiter distance that counts as touching, passed to
             @ref find_limiting_point `[m]` (default: 0.0005)
-        @result numpy.ndarray or None, LCFS points `[m]`, shape (n_pts, 2) (traced at psi_N = 1, or 0.99 if that fails; None if both fail)
+        @result numpy.ndarray or None, LCFS points `[m]`, shape (n_pts, 2), traced at psi_N = 0.99 if the plasma is diverted and
+            at psi_N = 1 if it is limited (None if the trace fails)
         @result tuple or None, `(R, Z)` `[m]` of the point where the LCFS touches the limiter (see
             @ref find_limiting_point); None if the LCFS does not touch the limiter or there is no LCFS
         @result float or None, psi at the traced LCFS `[Wb/rad]`
@@ -895,13 +1077,25 @@ class JAMfit():
         @result numpy.ndarray or None, safety factor q on TokaMaker's default psi_N sampling
         @result float, q95 (nan if there is no LCFS)
         @result float, internal inductance li, 'std' normalisation (nan if there is no LCFS or Ip_encl <= 0)
-        @result tuple, current centroid `(R_c, Z_c)` `[m]` from all filaments (see @ref calc_current_centroid)
+        @result tuple, current centroid `(R_c, Z_c)` `[m]` from all filaments (see @ref calc_current_centroid);
+            `(nan, nan)` if the net current is zero or the centroid falls outside the limiter
         @result tuple or float, geometric LCFS centroid `(R_c, Z_c)` `[m]` (nan if there is no LCFS)
         @result float, area enclosed by the LCFS `[m^2]` (nan if there is no LCFS)'''
         # reset mygs in case there are left over coil currents from previous runs
         self.mygs.set_coil_currents()
         limiter = self.mygs.lim_contour
-        current_cent = calc_current_centroid(rgrid, zgrid, filaments_at_time)
+
+        # --- Current centroid (signed weights), NaN if it is not meaningful ---
+        # R_c = sum(I R) / sum(I). With mixed-sign currents and a small net current (e.g. at the end of a current
+        # quench) the division by sum(I) can put the centroid far outside the vessel, and it is undefined at
+        # sum(I) = 0. Both cases are returned as (nan, nan); a centroid outside the limiter cannot be the centre of
+        # a plasma current, so no tuned current threshold is needed.
+        net_curr = numpy.sum(filaments_at_time)
+        current_cent = (numpy.nan, numpy.nan)
+        if net_curr != 0.0:
+            centroid = calc_current_centroid(rgrid, zgrid, filaments_at_time)
+            if Path(limiter[:, :2]).contains_point(centroid):
+                current_cent = centroid
 
         # --- Filament (plasma) psi ---
         if psi_basis is not None:
@@ -918,13 +1112,6 @@ class JAMfit():
                     psi_fil.append(self.mygs.get_psi(False))
             psi_fil = numpy.array(psi_fil)
             psi_total_fil = numpy.sum(psi_fil, axis=0)
-        # Throw-away init_psi at the current centroid. If the last init_psi before set_psi has its disk (mostly)
-        # outside the plasma region, get_q returns NaN at every psi while trace_surf and li look fine. set_psi below
-        # overwrites psi, so this only resets TokaMaker's internal state.
-        self.mygs.set_coil_currents()
-        self.mygs.set_targets(Ip=1.0)
-        self.mygs.init_psi(current_cent[0], current_cent[1], disk_radius, 1.0, 0.0)
-
         # --- Coil psi (vacuum solve with the coil currents) ---
         self.mygs.set_coil_currents(coil_curr_dict)
         psi_coils_obj = self.mygs.vac_solve()
@@ -934,13 +1121,13 @@ class JAMfit():
         total_psi = psi_total_fil + psi_coils + wall_psi
         self.mygs.set_psi(total_psi, update_bounds=True)
 
-        # trace the LCFS at psi_N = 1; if that fails, fall back to psi_N = 0.99
-        lcfs_points = self.mygs.trace_surf(1)
-        if lcfs_points is not None:
-            psiatlcfs = self.mygs.psinorm_to_absolute(1)
-        else:
-            lcfs_points = self.mygs.trace_surf(0.99)
-            psiatlcfs = self.mygs.psinorm_to_absolute(0.99)
+        # --- Trace the LCFS ---
+        # Diverted: psi_N = 1 is the separatrix, which passes through the X-point, so tracing exactly there succeeds or
+        # fails on round-off (and changes the area by a few % when it does succeed). Trace just inside it, at 0.99, as
+        # TokaMaker get_stats does by default (lcfs_pad). Limited: psi_N = 1 touches the limiter and traces cleanly.
+        psi_n_lcfs = 0.99 if self.mygs.diverted else 1.0
+        lcfs_points = self.mygs.trace_surf(psi_n_lcfs)
+        psiatlcfs = self.mygs.psinorm_to_absolute(psi_n_lcfs)
 
         # --- q, li and LCFS geometry (defaults if there is no LCFS) ---
         limiting_pt = None
@@ -996,6 +1183,92 @@ class JAMfit():
 # JAMfit Helper Functions
 # ==========================================================
 
+def _prepare_fixed_rows(A_sensor, A_reg, ip_row):
+    '''! Factor the rows of a reconstruction that do not change between time slices (see the solver notes in JAMfit).
+    The fixed system is `A0 = [A_sensor; A_reg]` with right-hand side `[B_weighted; 0]`. A0 is QR factorized
+    (`A0 = Q R`), so the least-squares solution without the Ip row is `x0 = R^-1 Q_sensor^T B_weighted`; the
+    matrix `P = R^-1 Q_sensor^T` is stored so each slice is one matrix-vector product. No `A0^T A0` is formed,
+    which would square the condition number.
+
+    The Ip row `c (r . x - Ip)` is added per slice with the exact one-row least-squares update (Sherman-Morrison):
+    `x = x0 + g c^2 (Ip - r . x0) / (1 + c^2 r . g)`, with `g = (A0^T A0)^-1 r^T = R^-1 R^-T r^T` stored here.
+
+    @param A_sensor numpy.ndarray, sigma-weighted sensor rows, shape (n_sensors, n_unknowns)
+    @param A_reg numpy.ndarray, regularization rows (right-hand side zero), shape (n_reg, n_unknowns)
+    @param ip_row numpy.ndarray, Ip row `r` with `r . x = sum(I_fil)`, shape (n_unknowns,)
+    @result dict, `A_sensor`, `A_reg`, `ip_row`, `P` (n_unknowns, n_sensors), `g` (n_unknowns,), `rg` (`r . g`)
+    '''
+    n_sensors = A_sensor.shape[0]
+    Q, R = numpy.linalg.qr(numpy.vstack([A_sensor, A_reg]))                                # reduced QR
+    diag_R = numpy.abs(numpy.diag(R))
+    if diag_R.min() <= 1.E-14 * diag_R.max():
+        raise ValueError("The sensor and regularization rows do not determine every unknown "
+                         "(rank-deficient system); increase the regularization weights.")
+    P = numpy.linalg.solve(R, Q[:n_sensors, :].T)                                          # (n_unknowns, n_sensors)
+    g = numpy.linalg.solve(R, numpy.linalg.solve(R.T, ip_row))                             # (n_unknowns,)
+    return {'A_sensor': A_sensor, 'A_reg': A_reg, 'ip_row': ip_row, 'P': P, 'g': g, 'rg': float(ip_row @ g)}
+
+
+def _solve_with_ip_row(prep, B_weighted, ip_row_weight, ip_at_time):
+    '''! Least-squares solution of the prepared fixed rows plus the Ip row `ip_row_weight * (r . x - ip_at_time)`.
+    See @ref _prepare_fixed_rows for the method.
+
+    @param prep dict, from @ref _prepare_fixed_rows (or a `prepare_*` method)
+    @param B_weighted numpy.ndarray, weighted sensor right-hand side, shape (n_sensors,)
+    @param ip_row_weight float, weight `c` of the Ip row for this slice
+    @param ip_at_time float, measured plasma current `[A]`
+    @result numpy.ndarray, solution `x`, shape (n_unknowns,)
+    @result numpy.ndarray, `A_sensor @ x` (fitted weighted signals), shape (n_sensors,)
+    @result float, norm of the misfit over all rows (sensors, Ip row and regularization rows)
+    '''
+    c2 = ip_row_weight**2
+    x0 = prep['P'] @ B_weighted                                                            # fit without the Ip row
+    solution = x0 + prep['g'] * (c2 * (ip_at_time - prep['ip_row'] @ x0) / (1.0 + c2 * prep['rg']))
+    Ax = prep['A_sensor'] @ solution
+    total_residual = numpy.sqrt(numpy.sum((Ax - B_weighted)**2)
+                                + numpy.sum((prep['A_reg'] @ solution)**2)
+                                + c2 * (prep['ip_row'] @ solution - ip_at_time)**2)
+    return solution, Ax, total_residual
+
+
+def _check_prep(prep, method, prepare_name):
+    '''! Raise a clear error if `prep` did not come from the matching prepare method.
+
+    @param prep dict, prepared matrices passed to a `solve_*` method
+    @param method str, expected value of `prep['method']`
+    @param prepare_name str, name of the matching prepare method, for the error message
+    '''
+    if not isinstance(prep, dict) or prep.get('method') != method:
+        raise ValueError("prep must come from {0}()".format(prepare_name))
+
+
+def _reconstruction_diagnostics(curr_fil, ip_at_time, ip_norm_floor, Ax, B_weighted, total_residual, solution):
+    '''! Diagnostics shared by all `solve_*` methods.
+
+    @param curr_fil numpy.ndarray, reconstructed filament currents `[A]`, shape (n_fil,)
+    @param ip_at_time float, measured plasma current `[A]`
+    @param ip_norm_floor float, smallest current used to normalize `ip_error_pct` `[A]`
+    @param Ax numpy.ndarray, fitted weighted sensor signals, shape (n_sensors,)
+    @param B_weighted numpy.ndarray, weighted sensor right-hand side, shape (n_sensors,)
+    @param total_residual float, misfit norm over all rows (sensors, Ip and regularization)
+    @param solution numpy.ndarray, full solution vector of the solver's unknowns
+    @result dict, `ip_reconstructed` `[A]`, `ip_actual` `[A]`, `ip_error_pct` (`100 |sum(I_fil) - Ip| / max(|Ip|, ip_norm_floor)`),
+        `fit_residual` (norm of the weighted sensor misfit), `fit_residual_nonorm` (the misfit vector `Ax - B`),
+        `total_residual`, `solution`
+    '''
+    ip_reconstructed = curr_fil.sum()
+    fit_residual_nonorm = Ax - B_weighted
+    return {
+        'ip_reconstructed':     ip_reconstructed,
+        'ip_actual':            ip_at_time,
+        'ip_error_pct':         100 * numpy.abs(ip_reconstructed - ip_at_time) / max(abs(ip_at_time), ip_norm_floor),
+        'fit_residual':         numpy.linalg.norm(fit_residual_nonorm),
+        'fit_residual_nonorm':  fit_residual_nonorm,
+        'total_residual':       total_residual,
+        'solution':             solution,
+    }
+
+
 def _auto_ip_weight(B_weighted, ip_at_time, ip_norm_floor=1.E3):
     '''! Automatic weight of the Ip constraint row in the Laplacian reconstructions.
     Sets the weight from the order-of-magnitude difference between the typical weighted sensor signal and
@@ -1008,14 +1281,21 @@ def _auto_ip_weight(B_weighted, ip_at_time, ip_norm_floor=1.E3):
     @param B_weighted numpy.ndarray, sigma-weighted sensor signals with the coil contribution removed, shape (num_sensors,)
     @param ip_at_time float, total plasma current measurement at time `[A]`
     @param ip_norm_floor float, smallest current used in place of |Ip| `[A]` (default: 1.E3)
-    @result float, Ip constraint weight `lam`
+    @result float, Ip constraint weight `lam` (100 if the mean signal is zero or not finite)
 
     Example
     -------
     >>> _auto_ip_weight(numpy.array([2.0, 4.0]), 1.E6)    # mean |B| = 3, ratio 3e-6 -> 100 * 1e-6 = 1e-4
+    >>> _auto_ip_weight(numpy.zeros(3), 1.E6)              # no signal -> 100
     '''
     ip_norm = max(abs(ip_at_time), ip_norm_floor)
-    magnitude_diff = math.floor(math.log10(numpy.mean(numpy.abs(B_weighted)) / ip_norm))
+    mean_signal = numpy.mean(numpy.abs(B_weighted))
+    # log10 is undefined if the signals are all zero (e.g. t = 0 of a synthetic run with no plasma or wall
+    # current, or every sensor masked); fall back to a magnitude difference of 0, i.e. lam = 100
+    if (not numpy.isfinite(mean_signal)) or (mean_signal <= 0.0):
+        magnitude_diff = 0
+    else:
+        magnitude_diff = math.floor(math.log10(mean_signal / ip_norm))
     return 100 * 10**magnitude_diff
 
 
@@ -1250,111 +1530,6 @@ def calc_current_centroid(R_fil, Z_fil, I_fil):
     Z_centroid = numpy.sum(I_flat * Z_flat) / I_net
 
     return (R_centroid, Z_centroid)
-
-def get_bbox_grid_pts(meshfile_tokamaker, myOFT, n_r=10, n_z=10, verbose=False):
-    '''! Build a uniform rectangular grid spanning the bounding box of the TokaMaker
-    evaluation grid, for later interpolation of measured wall values onto the grid.
-    Creates its own TokaMaker instance (order 2, `F0 = 1`) on myOFT just to read the mesh nodes.
-
-    @param meshfile_tokamaker str, path to the TokaMaker mesh file
-    @param myOFT OFT_env, the Open FUSION Toolkit environment instance
-    @param n_r int, number of points along R (default: 10)
-    @param n_z int, number of points along Z (default: 10)
-    @param verbose bool, if True, plots the bounding box grid and limiter contour (default: False)
-    @result numpy.ndarray, bounding-box grid points `[m]`, shape (n_r*n_z, 2) with columns [R, Z]
-    @result numpy.ndarray, R meshgrid `[m]`, shape (n_z, n_r)
-    @result numpy.ndarray, Z meshgrid `[m]`, shape (n_z, n_r)
-    @result numpy.ndarray, copy of all TokaMaker node coordinates `mygs.r` `[m]`, shape (n_nodes, 3)
-    '''
-    mygs = TokaMaker(myOFT)
-    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(meshfile_tokamaker)
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.setup(order=2, F0=1 * 1)
-
-    r_pts_grid = mygs.r[:, 0]
-    z_pts_grid = mygs.r[:, 1]
-
-    r_min, r_max = r_pts_grid.min(), r_pts_grid.max()
-    z_min, z_max = z_pts_grid.min(), z_pts_grid.max()
-
-    r_vals = numpy.linspace(r_min, r_max, n_r)
-    z_vals = numpy.linspace(z_min, z_max, n_z)
-    R, Z = numpy.meshgrid(r_vals, z_vals, indexing='xy')
-
-    bbox_pts = numpy.column_stack([R.ravel(), Z.ravel()])
-
-    if verbose:
-        fig, ax = plt.subplots()
-        ax.scatter(r_pts_grid, z_pts_grid, c='lightgray', s=5, alpha=0.5, label='TokaMaker grid')
-        ax.scatter(bbox_pts[:, 0], bbox_pts[:, 1], c='tab:blue', s=15, label='Bbox grid pts')
-        r_pts_lim = mygs.lim_contour[:, 0]
-        z_pts_lim = mygs.lim_contour[:, 1]
-        ax.plot(r_pts_lim, z_pts_lim, 'k-', label='Limiter Contour')
-        ax.set_xlabel('R')
-        ax.set_ylabel('Z')
-        ax.set_title(f'Bounding Box Grid ({n_r} x {n_z} points)')
-        ax.legend()
-        plt.tight_layout()
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.show()
-
-    return bbox_pts, R, Z, mygs.r.copy()
-
-
-def get_inside_limiter_pts(meshfile_tokamaker, myOFT, stride=1, verbose=False):
-    '''! Get the TokaMaker mesh nodes inside the limiter contour, to place flux probes for the wall psi.
-    Every stride-th inside node gets a probe; see @ref get_wall_psi_tidx. Creates its own TokaMaker instance
-    (order 2, `F0 = 1`) on myOFT just to read the mesh nodes and limiter.
-
-    @param meshfile_tokamaker str, path to the TokaMaker mesh file
-    @param myOFT OFT_env, the Open FUSION Toolkit environment instance
-    @param stride int, subsampling stride for the points inside the limiter (default: 1)
-    @param verbose bool, if True, plots the grid points and limiter contour (default: False)
-    @result numpy.ndarray, probe points `[m]`, shape (n_probes, 2) with columns [R, Z]
-    @result numpy.ndarray, bool mask over all nodes, True where a probe is placed, shape (n_nodes,)
-    @result numpy.ndarray, bool mask over all nodes, True inside the limiter, shape (n_nodes,)
-    @result numpy.ndarray, copy of all TokaMaker node coordinates `mygs.r` `[m]`, shape (n_nodes, 3)
-    '''
-
-    mygs = TokaMaker(myOFT)
-    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(meshfile_tokamaker)
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.setup(order=2, F0=1 * 1)
-
-    r_pts_grid = mygs.r[:, 0]
-    z_pts_grid = mygs.r[:, 1]
-    r_pts_lim = mygs.lim_contour[:, 0]
-    z_pts_lim = mygs.lim_contour[:, 1]
-    lim_path = Path(numpy.column_stack([r_pts_lim, z_pts_lim]))
-    all_pts = numpy.column_stack([r_pts_grid, z_pts_grid])
-
-    inside_mask = lim_path.contains_points(all_pts)  # full inside-limiter mask
-    inside_idx = numpy.where(inside_mask)[0]
-
-    # subsample the indices that actually get a flux loop
-    sparse_idx = inside_idx[::stride]
-    sparse_mask = numpy.zeros_like(inside_mask)
-    sparse_mask[sparse_idx] = True
-
-    inside_lim_pts = numpy.column_stack((mygs.r[sparse_idx, 0], mygs.r[sparse_idx, 1]))
-
-    if verbose:
-        fig, ax = plt.subplots()
-        ax.scatter(r_pts_grid, z_pts_grid, c=sparse_mask, cmap='RdYlGn', s=10, alpha=0.7)
-        ax.plot(r_pts_lim, z_pts_lim, 'k-', label='Limiter Contour')
-        ax.set_xlabel('R')
-        ax.set_ylabel('Z')
-        ax.set_title(f'Grid Points With Flux Loops (stride={stride})')
-        ax.legend()
-        plt.colorbar(ax.collections[0], ax=ax, label='Has flux loop')
-        plt.tight_layout()
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.show()
-
-    return inside_lim_pts, sparse_mask, inside_mask, mygs.r.copy()  # copy: mygs.r is a view on TokaMaker memory, freed with this local mygs
-
 
 def get_gaussian_lap_mat(rgrid, zgrid, sigma_r=8e-2, sigma_z=8e-2):
     '''! Construct a Gaussian-weighted Laplacian regularization matrix for the filament grid (Experimental).
