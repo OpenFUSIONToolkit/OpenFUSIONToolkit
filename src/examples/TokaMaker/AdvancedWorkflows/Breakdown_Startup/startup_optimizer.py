@@ -1,3 +1,8 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 """Optimisation of a tokamak start-up: breakdown and early plasma (stage 1), then a ramp of
 TokaMaker free-boundary equilibria (stage 2), optimised together.
 
@@ -164,6 +169,13 @@ class ConicProblem:
 
     def value(self, var):
         return self._x[var.sl] * var.scale
+
+    def linear_terms(self):
+        """The linear objective as {Var: coefficient row [1, n]}, in physical units."""
+        lin = {}
+        for v, q in self._lin:
+            lin[v] = lin.get(v, 0) + q[None, :]
+        return lin
 
 
 # ============================================================================ stage 1
@@ -414,14 +426,14 @@ class GSRamp:
         self.sampler = UnitSampler(machine)
         from OpenFUSIONToolkit.TokaMaker.util import create_isoflux
         self.iso = [create_isoflux(rp['n_iso'], *sh) for sh in self.shape]
+        # flux at each slice's target points per unit current: fixed, so computed once
+        self.G_iso = [circuit.output_matrix(eval_fields(machine.gs, machine.psi_u, iso)['psi'].T) for iso in self.iso]
         self.Bu = circuit.U.T                    # plasma forcing enters as unit 'voltages'
         self._zoh = {}
         # joint optimisation with stage 1
         self.stage1 = stage1
         F_star = stage1.flux_handoff()
-        lin = {}
-        for v, q in stage1.P._lin:
-            lin[v] = lin.get(v, 0) + q[None, :]
+        lin = stage1.P.linear_terms()
         L_star = float(sum((q @ stage1.P.value(v)).sum() for v, q in lin.items()))
         self.joint = {'P0': stage1.P.clone(objective=False), 'flux_star_Wb': F_star, 'lin': lin,
                       'L_cap': L_star + rp['joint']['flux_slack_Wb'] / (2 * np.pi),
@@ -481,6 +493,8 @@ class GSRamp:
                     break
                 except Exception as e:
                     err = e
+            if ok and attempt > 0:
+                self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s) solved only with the coil pin loosened {1 / wfac:.0f}x')
             if not ok:
                 nfail += 1
                 self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s) failed: {err}')
@@ -499,7 +513,7 @@ class GSRamp:
             self.tm_info[k] = {'psi_bounds': [float(x) for x in gs.psi_bounds], 'Ip': float(st['Ip']),
                                'li3': float(st['l_i']), 'o_point': [float(v) for v in gs.o_point],
                                'L_i': float(MU0 * gs.o_point[0] * st['l_i'] / 2),
-                               'ext_dev_rel': self.rel_change(Itm - Ik, Ik)}
+                               'ext_dev_rel': self.rel_change(Itm - Ik, Ik), 'pin_factor': wfac}
         self.dpsi_rel = float(max(dpsi)) if dpsi and not nfail else np.inf
         return nfail
 
@@ -510,7 +524,7 @@ class GSRamp:
         rp = self.scen['ramp']
         Phi = np.array([self.sampler.linkage(m.gs, p) for p in self.psi_p])        # [N+1, nu]
         isoA = [eval_fields(m.gs, self.psi_p[k][None, :], self.iso[k])['psi'][0] for k in range(N + 1)]
-        G_iso = [c.output_matrix(eval_fields(m.gs, m.psi_u, self.iso[k])['psi'].T) for k in range(N + 1)]
+        G_iso = self.G_iso
         P = J['P0'].clone()                              # stage 1's variables and constraints
         V = P.var('V_ramp', N * nv, np.tile(c.V_max, N))
         Fb = P.var('Fb', N + 1, 1.0)                     # boundary flux per slice [Wb/rad]
@@ -644,6 +658,7 @@ class GSRamp:
         I_prev = self.unit_currents(np.repeat(self.x0[None, :], n, axis=0))
         self.history = []
         gs = self.m.gs
+        maxits0 = gs.settings.maxits
         try:
             self.tm_update(I_prev, w_pin=rp['seed_weight'], first=True)
             for it in range(max_iter):
@@ -668,9 +683,15 @@ class GSRamp:
                 if nf == 0 and dI < tol and dev < 5 * tol and self.dpsi_rel < 5 * tol:
                     return True
             return False
-        finally:                                         # leave the TokaMaker instance clean
+        finally:
+            # undo the ramp's settings: constraints, targets, coil bounds, time step, iteration limit
+            # (the coil regularisation cannot be cleared through the API; the next user sets their own)
             gs.set_isoflux_constraints(None)
+            gs.set_targets()
+            gs.set_coil_bounds(None)
             gs.set_psi_dt(np.zeros(gs.np), 1.0e9)
+            gs.settings.maxits = maxits0
+            gs.update_settings()
 
     def handoff_jump(self):
         """Change of the plasma's flux linkage with the coils and structure at the hand-off, where

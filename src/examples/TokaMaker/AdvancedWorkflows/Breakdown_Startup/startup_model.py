@@ -1,3 +1,8 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 """Machine, circuit and early-plasma models for breakdown and start-up design with TokaMaker.
 
 Contents
@@ -36,20 +41,16 @@ def eval_fields(gs, psi_vecs, pts, second=False, h=5.0e-3):
     out = {k: np.zeros((nv, npt)) for k in ('psi', 'Br', 'Bz')}
     if second:
         out['dBz_dR'] = np.zeros((nv, npt))
-
-    def B_at(fg, x):
-        g = fg.eval(x)[:2]
-        return -g[1] / x[0], g[0] / x[0]
-
-    for i in range(nv):
+    R = pts[:, 0]
+    dR = np.array([h, 0.0])
+    for i in range(nv):                                  # one interpolator call per vector, all points at once
         psi_i = np.ascontiguousarray(psi_vecs[i])
         fe, fg = gs.get_field_eval('eval', values=psi_i), gs.get_field_eval('grad', values=psi_i)
-        for j in range(npt):
-            x = pts[j]
-            out['psi'][i, j] = fe.eval(x)[0]
-            out['Br'][i, j], out['Bz'][i, j] = B_at(fg, x)
-            if second:
-                out['dBz_dR'][i, j] = (B_at(fg, x + [h, 0.0])[1] - B_at(fg, x - [h, 0.0])[1]) / (2 * h)
+        g = fg.eval(pts)
+        out['psi'][i] = fe.eval(pts)[:, 0]
+        out['Br'][i], out['Bz'][i] = -g[:, 1] / R, g[:, 0] / R
+        if second:
+            out['dBz_dR'][i] = (fg.eval(pts + dR)[:, 0] / (R + h) - fg.eval(pts - dR)[:, 0] / (R - h)) / (2 * h)
     return out
 
 

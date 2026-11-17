@@ -1,3 +1,8 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 """Figures for the breakdown / start-up example (machine, traces, breakdown maps, equilibria)."""
 import numpy as np
 import matplotlib.pyplot as plt
