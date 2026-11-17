@@ -47,8 +47,8 @@
 !! 12180 cells) is included with this example.
 !!
 !! \note With the p-multigrid preconditioner used in this example (see \ref doc_thickcurr_torus_ex_input_xml)
-!! the example requires approximately 2.5 GB of memory and takes approximately XXRUNTIMEXX minutes to run in
-!! serial with SuperLU, of which approximately XXEIGTIMEXX minutes are spent in the eigenvalue solve.
+!! the example requires approximately 2.7 GB of memory and takes approximately 20 minutes to run in
+!! serial with SuperLU, of which approximately 13 minutes are spent in the eigenvalue solve.
 !!
 !!\section doc_thickcurr_torus_ex_code Code Walk Through
 !!
@@ -274,7 +274,7 @@ END IF
 !! comparable to the slowest decay time, a separate shift (`eig_shift`) is passed here. The LHS matrices
 !! and preconditioner are rebuilt for the eigenvalue solve and restored afterward for the time-dependent
 !! simulation. For this example, using `eig_shift=0.1` instead of the time step (`dt=1.E-2`) reduces the
-!! cost of the eigenvalue solve by approximately a factor of XXSPEEDUPXX.
+!! cost of the eigenvalue solve by more than a factor of two.
 IF(run_eigs)THEN
   ALLOCATE(tau(nev))
   CALL thickcurr_eigs(nev,tau,save_plot=.TRUE.,shift=eig_shift)
@@ -395,7 +395,7 @@ END PROGRAM ThickCurr_torus
 !! (`nlocal=1`) is used, which corresponds to a direct solve of the full coarse system. Compared to a direct
 !! solve of the full system, this approach greatly reduces the required memory and allows larger meshes
 !! to be used (eg. a direct solve on a 6337 cell mesh required ~6 GB, while the included mesh with p-multigrid
-!! requires ~2.5 GB). Typically, 7-15 GMRES iterations are required per time step.
+!! requires ~2.7 GB). Typically, 7-15 GMRES iterations are required per time step.
 !!
 !!\verbatim
 !!~$ ./ThickCurr_torus oft.in oft_in.xml
