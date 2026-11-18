@@ -250,6 +250,7 @@ class ThickCurr():
             thickcurr_f_free_mesh(self._mesh_ptr)
             self._mesh_ptr = c_void_p()
             self._tc_ptr = c_void_p()
+            self._xml_ptr = c_void_p() # Note: Parsed XML documents are not freed (no free routine available)
             self.nregs = -1
             raise
         ThickCurr._active = True
@@ -330,7 +331,7 @@ class ThickCurr():
         self._check_error(error_string)
         return energy.value
 
-    def get_eigs(self,neigs,shift=None,save_plot=False):
+    def get_eigs(self,neigs,shift=None,save_plot=False,max_its=None):
         r'''! Compute the slowest decaying eigenmodes (L/R time constants) of the model
 
         The eigenvalue problem is solved using a shift, which by default is the (effective) time step
@@ -340,6 +341,7 @@ class ThickCurr():
         @param neigs Number of eigenvalues to compute
         @param shift Shift for eigenvalue solve [s] (default: time step)
         @param save_plot Save eigenmodes to plot files (`eigs` subdirectory, mode index as "time")
+        @param max_its Maximum number of eigensolver iterations (default: 1000)
         @result Decay times (slowest first) [s] `(nconv)`, where `nconv <= neigs` is the number of converged modes
         '''
         self._check_setup()
@@ -347,7 +349,7 @@ class ThickCurr():
         nconv = c_int()
         error_string = self._oft_env.get_c_errorbuff()
         thickcurr_f_eigs(self._tc_ptr,c_int(neigs),tau,c_double(-1.0 if shift is None else shift),c_bool(save_plot),
-                         ctypes.byref(nconv),error_string)
+                         c_int(-1 if max_its is None else max_its),ctypes.byref(nconv),error_string)
         self._check_error(error_string)
         if nconv.value < neigs:
             warnings.warn('Only {0} of {1} eigenvalues converged, returning converged values only'.format(nconv.value,neigs),

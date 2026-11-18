@@ -1004,15 +1004,28 @@ END FUNCTION thickcurr_rst_name
 !!
 !! Called when a new (non-restart) run is started so that restart files from an
 !! earlier, longer run are not mixed with those of the new run (eg. in
-!! @ref thick_wall::thickcurr_plot "thickcurr_plot").
+!! @ref thick_wall::thickcurr_plot "thickcurr_plot"). As for
+!! @ref thick_wall::thickcurr_plot "thickcurr_plot", files are checked at the current
+!! restart frequency (`rst_freq`) starting from index 0 until a file is missing.
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_remove_rst()
-INTEGER(i4) :: ierr
+INTEGER(i4) :: i,ierr,io_unit
+CHARACTER(LEN=OFT_PATH_SLEN) :: rst_file
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc)THEN
-  CALL execute_command_line('rm -f thickcurr_'//REPEAT('[0-9]',THICKCURR_RST_LEN)//'.rst', &
-    exitstat=ierr)
-  IF(ierr/=0)CALL oft_warn('Failed to remove restart files from previous run')
+  !---Remove files at the current restart frequency until one is missing (matches thickcurr_plot)
+  i=0
+  DO
+    rst_file=thickcurr_rst_name(i)
+    IF(.NOT.oft_file_exist(TRIM(rst_file)))EXIT
+    OPEN(NEWUNIT=io_unit,FILE=TRIM(rst_file),STATUS='OLD',IOSTAT=ierr)
+    IF(ierr==0)CLOSE(io_unit,STATUS='DELETE',IOSTAT=ierr)
+    IF(ierr/=0)THEN
+      CALL oft_warn('Failed to remove restart file "'//TRIM(rst_file)//'" from previous run')
+      EXIT
+    END IF
+    i=i+tc_rst_freq
+  END DO
 END IF
 CALL oft_mpi_barrier(ierr)
 DEBUG_STACK_POP
@@ -1387,7 +1400,7 @@ END SUBROUTINE eig_amat_apply
 !! If only some modes converge a warning is printed, only the converged modes are
 !! saved, and the decay times of the remaining modes are set to zero (see `nconv`).
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift,nconv)
+SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift,nconv,max_its)
 INTEGER(i4), INTENT(in) :: nev !< Number of eigenvalues to compute
 REAL(r8), INTENT(out) :: tau(nev) !< Decay times for each mode (largest first) [s]
 TYPE(oft_vector_ptr), OPTIONAL, INTENT(inout) :: vecs(nev) !< Eigenvectors (optional, created if not associated)
@@ -1395,6 +1408,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: save_plot !< Save modes to plot file? (optional
 REAL(r8), OPTIONAL, INTENT(in) :: tol !< Eigensolver tolerance (optional)
 REAL(r8), OPTIONAL, INTENT(in) :: shift !< Shift [s] (optional, default: \f$ \theta \Delta t \f$)
 INTEGER(i4), OPTIONAL, INTENT(out) :: nconv !< Number of converged modes (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: max_its !< Maximum number of eigensolver iterations (optional, default: 1000)
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i,nconv_l
 CHARACTER(LEN=OFT_SLEN) :: conv_msg
@@ -1436,6 +1450,7 @@ arsolver%which='LA'
 arsolver%nev=nev
 arsolver%ncv=MAX(2*nev+1,20)
 arsolver%its=1000
+IF(PRESENT(max_its))arsolver%its=max_its
 arsolver%tol=1.d-8
 IF(PRESENT(tol))arsolver%tol=tol
 CALL thickcurr_ML_hcurl_grad%vec_create(u)

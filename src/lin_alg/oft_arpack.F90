@@ -701,7 +701,7 @@ CLASS(oft_irlm_eigsolver), intent(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j,comm
-INTEGER(i4) :: ido,nslice,ldv,lworkl,info
+INTEGER(i4) :: ido,nslice,ldv,lworkl,info,nconv
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
 REAL(r8) :: sigma
 REAL(r8), POINTER, DIMENSION(:) :: vslice
@@ -851,8 +851,20 @@ DO
     self%info=info
     IF(oft_env%head_proc)WRITE(*,*)'Error in EV solve ',info
     EXIT
-  ELSE ! Solver has converged
-    self%info=info
+  ELSE ! Solver has converged (or reached the maximum number of iterations)
+    self%info=0
+    nconv=self%nev
+    IF(info==1)THEN ! Maximum number of iterations reached, number of converged values in iparam(5)
+      nconv=iparam(5)
+      IF(oft_env%head_proc)WRITE(*,*)'Only ',nconv,' of ',self%nev,' eigenvalues converged in IRLM solve'
+      IF(nconv<=0)THEN
+        alam=0.d0
+        self%info=-14 ! Matches ARPACK error code for no converged values
+        self%eig_val=0.d0
+        self%eig_vec=0.d0
+        EXIT
+      END IF
+    END IF
     IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Fetching EVs'
     !---Retrieve eigenvalue and eigenvector
     IF(u%ng==u%nslice)THEN
@@ -866,11 +878,18 @@ DO
         resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
     END IF
-    !---Zero non-converged eigenvalues
-    IF(info==1)THEN
-      IF(oft_env%head_proc)WRITE(*,*)'Only ',iparam(5),' of ',self%nev,' eigenvalues converged in IRLM solve'
-      self%info=iparam(5)
-      DO i=self%info+1,self%nev
+    IF(info<0)THEN ! Error in extraction of eigenvalues
+      alam=0.d0
+      self%info=info
+      IF(oft_env%head_proc)WRITE(*,*)'Error in EV extraction ',info
+      self%eig_val=0.d0
+      self%eig_vec=0.d0
+      EXIT
+    END IF
+    !---Zero non-converged eigenvalues (converged values are returned first, in ascending order)
+    IF(nconv<self%nev)THEN
+      self%info=nconv
+      DO i=nconv+1,self%nev
         d(i)=0.d0
         v(:,i)=0.d0
       END DO

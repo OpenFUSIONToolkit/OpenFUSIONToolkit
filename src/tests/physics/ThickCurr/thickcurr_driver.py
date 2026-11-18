@@ -12,6 +12,7 @@ import os
 import gc
 import sys
 import json
+import warnings
 import numpy
 import h5py
 # Start coverage measurement if requested (this driver runs as a separate process)
@@ -68,8 +69,12 @@ def main(config):
     results = {'nprocs': myOFT.nprocs}
     #---Eigenvalue solve
     if config['case'] == 'eigs':
-        tau = tc_model.get_eigs(config.get('nev', 5), shift=config.get('eig_shift', None), save_plot=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            tau = tc_model.get_eigs(config.get('nev', 5), shift=config.get('eig_shift', None), save_plot=True,
+                                    max_its=config.get('max_its', None))
         results['tau'] = tau.tolist()
+        results['warnings'] = [str(w.message) for w in caught]
     #---Time advance of the slowest box mode
     elif config['case'] == 'decay':
         sensors = [Mirnov(pt, norm, 'BP{0}'.format(i+1), dx=None) for i, (pt, norm) in enumerate(BOX_MIRNOVS)]
