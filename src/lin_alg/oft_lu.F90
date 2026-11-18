@@ -354,6 +354,8 @@ DEBUG_STACK_POP
 END SUBROUTINE convert_csr_to_csc
 !------------------------------------------------------------------------------
 !> Solve a linear system using a direct solve
+!!
+!! @note Do not call with `superd`/`mumps` inside an OpenMP parallel region, even an inactive one (can deadlock on macOS)
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE lusolver_apply(self,u,g)
 CLASS(oft_lusolver), INTENT(inout) :: self
