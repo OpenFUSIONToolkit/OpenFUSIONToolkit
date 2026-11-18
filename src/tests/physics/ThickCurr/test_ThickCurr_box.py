@@ -156,6 +156,26 @@ def test_eigs(order):
 
 
 @pytest.mark.coverage
+@pytest.mark.coverage
+def test_eigs_partial():
+    '''Eigenvalue solve that stops before all modes converge (max_its=1), checking that a warning is issued and only
+    converged modes are returned (slowest first).'''
+    write_box_mesh(MESH_FILE, (4, 4, 4))
+    config = {'case': 'eigs', 'mesh_file': MESH_FILE, 'eta': [ETA], 'order': 2, 'dt': 5.E-2, 'nev': 5, 'max_its': 1}
+    results = run_driver(config)
+    assert results is not None
+    tau = results['tau']
+    assert 0 < len(tau) < 5, "Expected partial convergence, got {0} modes".format(len(tau))
+    assert any('converged' in msg for msg in results['warnings']), "No warning for partial convergence"
+    # Converged modes are returned slowest first, the slowest must be found and each value must be a true mode
+    # (converged modes need not be the slowest, eg. one of a degenerate set may not converge)
+    assert all(tau[i] >= tau[i+1] for i in range(len(tau)-1)), "Decay times not sorted"
+    assert check_value("tau_1", tau[0], box_tau(ETA, (1, 1, 0)), 2.E-2)
+    modes = [box_tau(ETA, (1, 1, 0)), box_tau(ETA, (1, 1, 1))]
+    for i, val in enumerate(tau):
+        assert min(abs(val-mode)/mode for mode in modes) < 2.E-2, "tau_{0} = {1} is not a valid mode".format(i+1, val)
+
+
 @pytest.mark.mpi
 def test_eigs_mpi():
     '''Slowest decay times of a conducting cube on two MPI processes, driven from Python.'''
