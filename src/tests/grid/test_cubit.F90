@@ -111,6 +111,7 @@ END SUBROUTINE check_bmesh_ho
 SUBROUTINE check_smesh_ho
 INTEGER(i4) :: i,j,k,l,v,cc,level,porder,sorder
 REAL(r8) :: max_err,f1(4),fc(4,4),fp(4,4),gc(4),gp(4)
+LOGICAL, ALLOCATABLE :: pcurved(:),scurved(:)
 CLASS(oft_bmesh), POINTER :: smesh,pmesh
 max_err=0._r8
 DO level=2,mg_mesh%mgmax
@@ -138,6 +139,11 @@ DO level=2,mg_mesh%mgmax
   sorder=smesh%order
   CALL pmesh%set_order(2)
   CALL smesh%set_order(2)
+  ! Use the quadratic map on every cell of both levels
+  pcurved=pmesh%ho_info%is_curved
+  scurved=smesh%ho_info%is_curved
+  pmesh%ho_info%is_curved=.TRUE.
+  smesh%ho_info%is_curved=.TRUE.
   DO i=1,pmesh%nc
     DO l=1,4
       cc=(i-1)*4+l
@@ -180,6 +186,8 @@ DO level=2,mg_mesh%mgmax
       END IF
     END DO
   END DO
+  pmesh%ho_info%is_curved=pcurved
+  smesh%ho_info%is_curved=scurved
   CALL pmesh%set_order(porder)
   CALL smesh%set_order(sorder)
 END DO
