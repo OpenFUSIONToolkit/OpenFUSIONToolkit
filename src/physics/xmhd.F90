@@ -38,7 +38,7 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
-  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, OFT_ACCESS_ACCUMULATE
+  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ
 USE oft_deriv_matrices, ONLY: oft_mf_matrix, oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -2629,7 +2629,7 @@ end subroutine xmhd_build_ops
 subroutine xmhd_alloc_ops
 integer(i4) :: i,j,level,levelin
 integer(i4), ALLOCATABLE :: j_lag(:)
-REAL(r8), POINTER :: node_flag(:)
+REAL(r8), POINTER, CONTIGUOUS :: node_flag(:)
 CLASS(oft_vector), POINTER :: vectmp
 type(xmhd_ops), pointer :: ops
 DEBUG_STACK_PUSH
@@ -2767,7 +2767,7 @@ DO level=levelin,xmhd_minlev,-1
   oft_xmhd_ops%solid_node=.FALSE.
   CALL xmhd_ML_lagrange%vec_create(vectmp)
   CALL vectmp%set(0.d0)
-  CALL vectmp%get_local(node_flag)
+  CALL vectmp%borrow_local(node_flag,OFT_ACCESS_ACCUMULATE)
   !
   ALLOCATE(j_lag(oft_lagrange%nce))
   DO i=1,mesh%nc
@@ -2777,13 +2777,14 @@ DO level=levelin,xmhd_minlev,-1
     END IF
   END DO
   DEALLOCATE(j_lag)
-  CALL vectmp%restore_local(node_flag,add=.TRUE.)
-  CALL vectmp%get_local(node_flag)
+  CALL vectmp%release_local(node_flag,OFT_ACCESS_ACCUMULATE,.TRUE.) ! Flags summed across processes
+  CALL vectmp%borrow_local(node_flag,OFT_ACCESS_READ)
   DO i=1,oft_lagrange%ne
     IF(node_flag(i)>0.d0)oft_xmhd_ops%solid_node(i)=.TRUE.
   END DO
+  CALL vectmp%release_local(node_flag,OFT_ACCESS_READ,.FALSE.)
   CALL vectmp%delete
-  DEALLOCATE(node_flag,vectmp)
+  DEALLOCATE(vectmp)
   CALL xmhd_set_bc()
 END DO
 call xmhd_set_level(levelin)
