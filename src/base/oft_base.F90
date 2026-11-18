@@ -409,6 +409,11 @@ END SUBROUTINE oft_finalize
 !> "Graceful" abort for Open FUSION Toolkit
 !!
 !! Also calls MPI_ABORT/STOP
+!!
+!! @note The body is a named OpenMP critical section so that only the first of
+!! several threads calling this routine at once prints its error and terminates
+!! the run. Neither MPI_ABORT nor ERROR STOP returns, so the remaining threads
+!! block at the critical section until the process exits.
 !------------------------------------------------------------------------------
 SUBROUTINE oft_abort(error_str,sname,fname)
 CHARACTER(LEN=*), INTENT(in) :: error_str !< Error string
@@ -418,6 +423,7 @@ INTEGER(i4) :: ierr,errcode,outunit
 #ifdef OFT_ABORT_FILES
 CHARACTER(LEN=5) :: proc
 #endif
+!$omp critical (oft_abort_crit)
 outunit=error_unit
 #ifdef OFT_ABORT_FILES
 WRITE(proc,'(I5.5)')oft_env%rank
@@ -453,6 +459,7 @@ CALL MPI_ABORT(oft_env%comm,errcode,ierr)
 ierr=oft_sleep(1)
 #endif
 ERROR STOP errcode
+!$omp end critical (oft_abort_crit)
 END SUBROUTINE oft_abort
 !------------------------------------------------------------------------------
 !> "Graceful" abort for Open FUSION Toolkit with XML exception printing
