@@ -16,6 +16,7 @@ import glob
 import shutil
 import subprocess
 import re
+import json
 #----------------------------------------------------------------
 # Comment seperator template
 #----------------------------------------------------------------
@@ -151,7 +152,7 @@ if __name__ == '__main__':
     for filename in files:
         basename = os.path.basename(filename)
         dirname = os.path.dirname(filename)
-        print(filename,basename)
+        print('  {0}'.format(filename))
         with open(filename,'r') as fid:
             new_file = parse_fortran_file(fid,dirname)
         # Write documentation file to doc folder
@@ -162,10 +163,24 @@ if __name__ == '__main__':
     print()
     print("\n==========================================")
     print("Converting Jupyter notebooks")
-    eq_reg = re.compile(r'\$(.*?)\$')
-    files = glob.glob("examples/*/*/*.ipynb")
+    line_eq_reg = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
+    eq_reg = re.compile(r'\$(.+?)\$')
+    files = glob.glob("examples/**/*.ipynb", recursive=True)
     for filename in files:
-        print(filename)
+        is_doc = False
+        try:
+            with open(filename, 'r') as file:
+                ipy_dict = json.load(file)
+        except Exception as e:
+            print('s {0} (skipped: unable to read notebook, {1})'.format(filename, e))
+            continue
+        cells = ipy_dict.get('cells', [])
+        if (len(cells) > 0) and (cells[0].get('cell_type') == 'markdown'):
+            is_doc = (''.join(cells[0].get('source', [])).find('{#doc_') >= 0)
+        if not is_doc:
+            print('s {0} (skipped: no {{#doc_}} label in first cell)'.format(filename))
+            continue
+        print('  {0}'.format(filename))
         base_path = filename.split('.')[0]
         full_name = os.path.basename(filename)
         file_name, _ = os.path.splitext(full_name)
@@ -186,7 +201,8 @@ if __name__ == '__main__':
         contents_split = contents.split('```')
         for i, content_segment in enumerate(contents_split):
             if (i % 2) == 0:
-                contents_split[i] = re.sub(eq_reg,r'\\f$\1\\f$',content_segment)
+                contents_split[i] = re.sub(line_eq_reg,r'\\f[\1\\f]', content_segment)
+                contents_split[i] = re.sub(eq_reg,r'\\f$\1\\f$',contents_split[i])
         contents = '```'.join(contents_split)
         contents = contents.replace('```python','~~~~~~~~~~~~~{.py}')
         contents = contents.replace('```','~~~~~~~~~~~~~')

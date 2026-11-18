@@ -197,9 +197,10 @@ END SUBROUTINE field_probe_eval
 !------------------------------------------------------------------------------
 !> Setup history file for repeated saves
 !------------------------------------------------------------------------------
-SUBROUTINE field_probe_setup_save(self,filename)
+SUBROUTINE field_probe_setup_save(self,filename,field_name)
 CLASS(field_probe), INTENT(inout) :: self
 CHARACTER(LEN=*), INTENT(in) :: filename !< Filename for history file
+CHARACTER(LEN=*), INTENT(in) :: field_name !< Field name for history file
 !---
 INTEGER(i4) :: i,j,io_unit
 CHARACTER(LEN=4) :: fid
@@ -208,11 +209,11 @@ CHARACTER(LEN=OFT_SLEN) :: desc_str
 self%filename=filename
 !---Setup history file
 IF(oft_env%head_proc)THEN
-100 FORMAT('B-Field? packed(',I2,',',I4,')')
+100 FORMAT('Packed field (',I2,',',I4,')')
   WRITE(desc_str,100)self%dim, self%nprobes
   CALL self%hist_file%setup(filename)
   CALL self%hist_file%add_field('time', 'r8', desc="Simulation time [s]")
-  CALL self%hist_file%add_field('B', 'r8', desc=desc_str, fsize=self%dim*self%nprobes)
+  CALL self%hist_file%add_field(field_name, 'r8', desc=desc_str, fsize=self%dim*self%nprobes)
   CALL self%hist_file%write_header
   CALL self%hist_file%open
   CALL self%hist_file%close

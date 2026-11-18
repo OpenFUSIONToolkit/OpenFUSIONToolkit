@@ -130,9 +130,11 @@ IF(mesh_type==1)THEN
       ni(i)=INT(xtmp)
     END DO
     DO i=1,3
+      xtmp=0.25d0
       DO j=1,ni(i)
-        CALL reflect_tet(i)
+        CALL reflect_tet(i,tol=xtmp)
         mesh%r(i,:)=(mesh%r(i,:)+1.d0)/2.d0
+        xtmp=xtmp/2.d0
       END DO
     END DO
     !---
@@ -207,8 +209,9 @@ call mesh_global_resolution(mesh)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 contains
-subroutine reflect_tet(ref_index)
+subroutine reflect_tet(ref_index,tol)
 integer(i4), intent(in) :: ref_index
+real(r8), intent(in) :: tol
 integer(i4) :: npold,ncold,i,j
 integer(i4), allocatable :: newindex(:),ltemp(:,:)
 real(r8), allocatable :: rtemp(:,:)
@@ -218,7 +221,7 @@ allocate(newindex(2*mesh%np),rtemp(3,2*mesh%np))
 rtemp(:,1:mesh%np)=mesh%r
 deallocate(mesh%r)
 do i=1,npold
-    IF(ABS(rtemp(ref_index,i))<=1.d-1)THEN
+    IF(ABS(rtemp(ref_index,i))<=tol)THEN
         rtemp(ref_index,i)=0.d0
         newindex(i)=i
     ELSE

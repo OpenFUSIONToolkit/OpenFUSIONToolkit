@@ -69,7 +69,7 @@ TYPE(oft_lag_vrinterp), TARGET :: Bfield_lag
 TYPE(oft_hcurl_grad_rinterp), TARGET :: Bfield_HCurl_grad
 TYPE(oft_hcurl_cinterp), TARGET :: Bfield_HCurl
 CLASS(oft_tracer), POINTER :: tracer
-TYPE(multigrid_mesh) :: mg_mesh
+TYPE(multigrid_mesh), TARGET :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
@@ -111,6 +111,7 @@ CALL create_tracer(tracer,tracer_type)
 tracer%tol=tracer_tol
 tracer%maxsteps=INT(tracer_maxsteps)
 tracer%maxtrans=INT(tracer_maxtrans)
+tracer%ml_mesh=>mg_mesh
 !---Setup necessary FE space
 SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
