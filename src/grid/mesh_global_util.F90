@@ -309,6 +309,56 @@ CASE DEFAULT
 END SELECT
 end subroutine mesh_global_set_curved
 !---------------------------------------------------------------------------------
+!> Copy high-order node points from a volume mesh to its boundary mesh
+!!
+!! Boundary edge nodes are copied from the matching volume edges
+!! (`bmesh%parent%le`) and boundary cell nodes from the matching volume faces
+!! (`bmesh%parent%lf`). Any existing high-order arrays on the boundary mesh are
+!! replaced. The order of the boundary mesh's spatial mapping is not changed.
+!!
+!! @note Only quadratic meshes (at most one node per edge and face) are supported
+!---------------------------------------------------------------------------------
+SUBROUTINE bmesh_global_copy_ho(self)
+CLASS(oft_mesh), INTENT(inout) :: self !< Volume mesh whose boundary mesh is updated
+INTEGER(i4) :: i,j
+CLASS(oft_bmesh), POINTER :: bmesh
+DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(self%ho_info%r))THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
+IF(self%ho_info%nep>1.OR.self%ho_info%nfp>1)CALL oft_abort('Only quadratic meshes are supported', &
+  'bmesh_global_copy_ho',__FILE__)
+bmesh=>self%bmesh
+IF(ASSOCIATED(bmesh%ho_info%r))DEALLOCATE(bmesh%ho_info%r)
+IF(ASSOCIATED(bmesh%ho_info%lep))DEALLOCATE(bmesh%ho_info%lep)
+IF(ASSOCIATED(bmesh%ho_info%lcp))DEALLOCATE(bmesh%ho_info%lcp)
+bmesh%ho_info%nep=self%ho_info%nep
+bmesh%ho_info%ncp=self%ho_info%nfp
+ALLOCATE(bmesh%ho_info%r(3,bmesh%ne*bmesh%ho_info%nep+bmesh%nc*bmesh%ho_info%ncp))
+!---Edge centers
+IF(bmesh%ho_info%nep==1)THEN
+  ALLOCATE(bmesh%ho_info%lep(1,bmesh%ne))
+  !$omp parallel do private(j)
+  DO i=1,bmesh%ne
+    j=ABS(bmesh%parent%le(i))
+    bmesh%ho_info%lep(1,i)=i
+    bmesh%ho_info%r(:,i)=self%ho_info%r(:,self%ho_info%lep(1,j))
+  END DO
+END IF
+!---Face centers
+IF(bmesh%ho_info%ncp==1)THEN
+  ALLOCATE(bmesh%ho_info%lcp(1,bmesh%nc))
+  !$omp parallel do private(j)
+  DO i=1,bmesh%nc
+    j=ABS(bmesh%parent%lf(i))
+    bmesh%ho_info%lcp(1,i)=i+bmesh%ne*bmesh%ho_info%nep
+    bmesh%ho_info%r(:,bmesh%ho_info%lcp(1,i))=self%ho_info%r(:,self%ho_info%lfp(1,j))
+  END DO
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE bmesh_global_copy_ho
+!---------------------------------------------------------------------------------
 !> Get I/O scope for current mesh
 !! - Element offsets for each geometric type
 !! - Element span for each geometric type

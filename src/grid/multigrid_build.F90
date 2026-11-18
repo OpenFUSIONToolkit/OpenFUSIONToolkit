@@ -20,7 +20,7 @@ use oft_mesh_global, only: mesh_global_init, mesh_global_link, mesh_global_decom
 use oft_mesh_global_util, only: mesh_global_orient, mesh_global_stats, &
   mesh_global_boundary, mesh_global_save, mesh_global_igrnd, mesh_global_periodic, &
   bmesh_global_boundary, bmesh_global_periodic, bmesh_global_orient, bmesh_global_stats, &
-  mesh_global_set_curved
+  mesh_global_set_curved, bmesh_global_copy_ho
 use oft_stitching, only: oft_global_stitch
 USE oft_tetmesh_type, only: oft_tetmesh
 use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
@@ -186,24 +186,9 @@ select case(mesh%cad_type)
 end select
 CALL multigrid_check_ho(mg_mesh%mesh)
 !---Propogate to boundary mesh
+CALL bmesh_global_copy_ho(mesh)
 CALL mesh%bmesh%set_order(2)
 CALL mesh_global_set_curved(mesh%bmesh,1)
-!---Edge centers
-!!$omp parallel do private(j)
-do i=1,mesh%bmesh%ne
-  mesh%bmesh%ho_info%lep(1,i)=i
-  j=INT(ABS(mesh%bmesh%parent%le(i)),4)
-  mesh%bmesh%ho_info%r(:,i)=mesh%ho_info%r(:,mesh%ho_info%lep(1,j))
-enddo
-IF(mesh%ho_info%nfp==1)THEN
-  !---Face centers
-  !!$omp parallel do private(j)
-  do i=1,mesh%bmesh%nc
-    j=INT(ABS(mesh%bmesh%parent%lf(i)),4)
-    mesh%bmesh%ho_info%lcp(1,i)=i+mesh%bmesh%ne
-    mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
-  enddo
-END IF
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_add_quad

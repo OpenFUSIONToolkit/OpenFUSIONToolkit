@@ -16,7 +16,7 @@ use oft_base
 USE oft_sort, ONLY: sort_array, sort_matrix
 use oft_mesh_type, only: oft_mesh, oft_bmesh, mesh_seam
 use oft_mesh_local_util, only: mesh_local_findedge, mesh_local_findface
-use oft_mesh_global_util, only: mesh_global_set_curved
+use oft_mesh_global_util, only: mesh_global_set_curved, bmesh_global_copy_ho
 implicit none
 #define MOD_NAME "multigrid"
 #include "local.h"
@@ -168,22 +168,12 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
       + mesh%nf*pmesh%ho_info%nfp &
       + mesh%nc*pmesh%ho_info%ncp
     ALLOCATE(mesh%ho_info%r(3,ho_count))
-    ! mesh%bmesh%order=pmesh%bmesh%order
-    ho_count = mesh%bmesh%ne*pmesh%ho_info%nep &
-      + mesh%bmesh%nc*pmesh%ho_info%nfp
-    ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
     IF(pmesh%ho_info%nep==1)THEN
       mesh%ho_info%nep=pmesh%ho_info%nep
       ALLOCATE(mesh%ho_info%lep(mesh%ho_info%nep,mesh%ne))
       DO i=1,mesh%ne
         mesh%ho_info%r(:,i) = pmesh%ho_info%r(:,ABS(mesh%base%le(i)))
         mesh%ho_info%lep(1,i) = i
-      END DO
-      mesh%bmesh%ho_info%nep=pmesh%ho_info%nep
-      ALLOCATE(mesh%bmesh%ho_info%lep(mesh%bmesh%ho_info%nep,mesh%bmesh%ne))
-      DO i=1,mesh%bmesh%ne
-        mesh%bmesh%ho_info%r(:,i) = mesh%ho_info%r(:,ABS(mesh%bmesh%parent%le(i)))
-        mesh%bmesh%ho_info%lep(1,i) = i
       END DO
     END IF
     IF(pmesh%ho_info%nfp==1)THEN
@@ -192,12 +182,6 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
       DO i=1,mesh%nf
         mesh%ho_info%r(:,i+mesh%ne) = pmesh%ho_info%r(:,ABS(mesh%base%lf(i))+pmesh%ne)
         mesh%ho_info%lfp(1,i) = i + mesh%ne
-      END DO
-      mesh%bmesh%ho_info%ncp=pmesh%ho_info%nfp
-      ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
-      DO i=1,mesh%bmesh%nc
-        mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne) = mesh%ho_info%r(:,mesh%ho_info%lfp(1,ABS(mesh%bmesh%parent%lf(i))))
-        mesh%bmesh%ho_info%lcp(1,i) = i+mesh%bmesh%ne
       END DO
     END IF
     IF(pmesh%ho_info%ncp==1)THEN
@@ -208,6 +192,8 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
         mesh%ho_info%lcp(1,i) = i + mesh%ne + mesh%nf
       END DO
     END IF
+    !---Copy to boundary mesh
+    CALL bmesh_global_copy_ho(mesh)
   END IF
   CALL oft_decrease_indent
   DEBUG_STACK_POP
@@ -244,17 +230,11 @@ IF(pmesh%ho_info%nep==1)THEN
   mesh%ho_info%nep=pmesh%ho_info%nep
   ALLOCATE(mesh%ho_info%lep(mesh%ho_info%nep,mesh%ne))
   mesh%ho_info%lep=0
-  mesh%bmesh%ho_info%nep=pmesh%ho_info%nep
-  ALLOCATE(mesh%bmesh%ho_info%lep(mesh%bmesh%ho_info%nep,mesh%bmesh%ne))
-  mesh%bmesh%ho_info%lep=0
 END IF
 IF(pmesh%ho_info%nfp==1)THEN
   mesh%ho_info%nfp=pmesh%ho_info%nfp
   ALLOCATE(mesh%ho_info%lfp(mesh%ho_info%nfp,mesh%nf))
   mesh%ho_info%lfp=0
-  mesh%bmesh%ho_info%ncp=pmesh%ho_info%nfp
-  ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
-  mesh%bmesh%ho_info%lcp=0
 END IF
 IF(pmesh%ho_info%ncp==1)THEN
   mesh%ho_info%ncp=pmesh%ho_info%ncp
@@ -267,11 +247,6 @@ ho_count = mesh%ne*mesh%ho_info%nep &
   + mesh%nc*mesh%ho_info%ncp
 ALLOCATE(mesh%ho_info%r(3,ho_count))
 mesh%ho_info%r=0.d0
-! mesh%bmesh%order=pmesh%bmesh%order
-ho_count = mesh%bmesh%ne*mesh%bmesh%ho_info%nep &
-  + mesh%bmesh%nc*mesh%bmesh%ho_info%ncp
-ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
-mesh%bmesh%ho_info%r=0.d0
 !
 nfde=SIZE(mg_mesh%inter(mg_mesh%level-1)%lfde,DIM=1)
 nfdf=SIZE(mg_mesh%inter(mg_mesh%level-1)%lfdf,DIM=1)
@@ -540,25 +515,9 @@ IF(pmesh%ho_info%ncp==1)THEN
   END DO
   !$omp end do nowait
 END IF
-!$omp barrier
-!---Propogate to boundary mesh
-IF(pmesh%ho_info%nep==1)THEN
-  !$omp do
-  do i=1,mesh%bmesh%ne
-    j=INT(ABS(mesh%bmesh%parent%le(i)),4)
-    mesh%bmesh%ho_info%lep(1,i)=i
-    mesh%bmesh%ho_info%r(:,i)=mesh%ho_info%r(:,mesh%ho_info%lep(1,j))
-  enddo
-END IF
-IF(pmesh%ho_info%nfp==1)THEN
-  !$omp do
-  do i=1,mesh%bmesh%nc
-    j=INT(ABS(mesh%bmesh%parent%lf(i)),4)
-    mesh%bmesh%ho_info%lcp(1,i)=i+mesh%bmesh%ne
-    mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
-  enddo
-END IF
 !$omp end parallel
+!---Propogate to boundary mesh
+CALL bmesh_global_copy_ho(mesh)
 CALL pmesh%set_order(1)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
