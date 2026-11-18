@@ -21,7 +21,7 @@ PROGRAM test_cubit
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: oft_mesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_mesh_native, ONLY: mesh_native_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
@@ -47,6 +47,7 @@ IF(ierr>0)CALL oft_abort('Error parsing "cubit_test_options" in input file.', &
 IF(test_surf)THEN
   CALL multigrid_construct_surf(mg_mesh)
   IF(mg_mesh%smesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
+  CALL check_smesh_ho
   CALL plot_file%setup("Test")
   CALL mg_mesh%smesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)THEN
@@ -105,6 +106,88 @@ IF(oft_env%head_proc)WRITE(*,*)'Max boundary high-order node error =',max_err
 IF(max_err>1.E-12_r8)CALL oft_abort('Boundary high-order nodes do not match volume mesh', &
   'check_bmesh_ho',__FILE__)
 END SUBROUTINE check_bmesh_ho
+! Check that each surface level's high-order nodes match its parent level: copied nodes on the
+! transfer level, and the parent's quadratic mapping at each child cell's nodes on refined levels
+SUBROUTINE check_smesh_ho
+INTEGER(i4) :: i,j,k,l,v,cc,level,porder,sorder
+REAL(r8) :: max_err,f1(4),fc(4,4),fp(4,4),gc(4),gp(4)
+CLASS(oft_bmesh), POINTER :: smesh,pmesh
+max_err=0._r8
+DO level=2,mg_mesh%mgmax
+  smesh=>mg_mesh%smeshes(level)
+  pmesh=>mg_mesh%smeshes(level-1)
+  IF(.NOT.ASSOCIATED(smesh%ho_info%r))CYCLE
+  IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN
+    !---Transfer level: nodes are copied from the parent level
+    DO i=1,smesh%ne
+      j=ABS(smesh%base%le(i))
+      max_err=MAX(max_err,MAXVAL(ABS(smesh%ho_info%r(:,smesh%ho_info%lep(1,i)) &
+        - pmesh%ho_info%r(:,pmesh%ho_info%lep(1,j)))))
+    END DO
+    IF(smesh%ho_info%ncp==1)THEN
+      DO i=1,smesh%nc
+        j=ABS(smesh%base%lc(i))
+        max_err=MAX(max_err,MAXVAL(ABS(smesh%ho_info%r(:,smesh%ho_info%lcp(1,i)) &
+          - pmesh%ho_info%r(:,pmesh%ho_info%lcp(1,j)))))
+      END DO
+    END IF
+    CYCLE
+  END IF
+  !---Refined level: compare the child and parent quadratic mappings at the child's nodes
+  porder=pmesh%order
+  sorder=smesh%order
+  CALL pmesh%set_order(2)
+  CALL smesh%set_order(2)
+  DO i=1,pmesh%nc
+    DO l=1,4
+      cc=(i-1)*4+l
+      !---Logical position of each child corner in the child (fc) and parent (fp) cells
+      fc=0._r8
+      fp=0._r8
+      DO k=1,smesh%cell_np
+        CALL smesh%vlog(k,fc(:,k))
+        v=smesh%lc(k,cc)
+        DO j=1,pmesh%cell_np
+          f1=0._r8
+          CALL pmesh%vlog(j,f1)
+          IF(v<=pmesh%np)THEN
+            ! Parent vertex
+            IF(pmesh%lc(j,i)==v)fp(:,k)=f1
+          ELSE IF(v<=pmesh%np+pmesh%ne)THEN
+            ! Parent edge midpoint
+            IF(ANY(pmesh%lc(j,i)==pmesh%le(:,v-pmesh%np)))fp(:,k)=fp(:,k)+f1/2._r8
+          ELSE
+            ! Parent cell centre
+            fp(:,k)=fp(:,k)+f1/REAL(pmesh%cell_np,8)
+          END IF
+        END DO
+      END DO
+      !---Corners
+      DO k=1,smesh%cell_np
+        max_err=MAX(max_err,MAXVAL(ABS(smesh%log2phys(cc,fc(:,k)) - pmesh%log2phys(i,fp(:,k)))))
+      END DO
+      !---Edge midpoints
+      DO k=1,smesh%cell_ne
+        gc=(fc(:,smesh%cell_ed(1,k))+fc(:,smesh%cell_ed(2,k)))/2._r8
+        gp=(fp(:,smesh%cell_ed(1,k))+fp(:,smesh%cell_ed(2,k)))/2._r8
+        max_err=MAX(max_err,MAXVAL(ABS(smesh%log2phys(cc,gc) - pmesh%log2phys(i,gp))))
+      END DO
+      !---Cell centre
+      IF(smesh%ho_info%ncp==1)THEN
+        gc=SUM(fc,DIM=2)/REAL(smesh%cell_np,8)
+        gp=SUM(fp,DIM=2)/REAL(smesh%cell_np,8)
+        max_err=MAX(max_err,MAXVAL(ABS(smesh%log2phys(cc,gc) - pmesh%log2phys(i,gp))))
+      END IF
+    END DO
+  END DO
+  CALL pmesh%set_order(porder)
+  CALL smesh%set_order(sorder)
+END DO
+max_err=oft_mpi_max(max_err)
+IF(oft_env%head_proc)WRITE(*,*)'Max surface high-order node error =',max_err
+IF(max_err>1.E-12_r8)CALL oft_abort('Surface high-order nodes do not match parent level', &
+  'check_smesh_ho',__FILE__)
+END SUBROUTINE check_smesh_ho
 !------------------------------------------------------------------------------
 !> Compute volume of the current mesh and output
 !------------------------------------------------------------------------------
