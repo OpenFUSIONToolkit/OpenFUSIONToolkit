@@ -228,14 +228,21 @@ IF(ASSOCIATED(self%ML_hcurl))THEN
   CALL self%ML_hcurl%delete()
   DEALLOCATE(self%ML_hcurl)
 END IF
-!---Higher order Grad(H^1) levels are shared with the H^1 space (only free levels it owns)
+!---Higher order Grad(H^1) levels (and their interpolation operators) are shared with
+!---the H^1 space, only free objects it owns
 IF(ASSOCIATED(self%ML_H1grad))THEN
   DO i=self%ML_H1grad%minlev,self%ML_H1grad%nlevels
-    IF(.NOT.ASSOCIATED(self%ML_H1grad%levels(i)%fe))CYCLE
     DO j=self%ML_H1%minlev,self%ML_H1%nlevels
-      IF(ASSOCIATED(self%ML_H1grad%levels(i)%fe,self%ML_H1%levels(j)%fe))THEN
-        NULLIFY(self%ML_H1grad%levels(i)%fe)
-        EXIT
+      IF(ASSOCIATED(self%ML_H1grad%levels(i)%fe))THEN
+        IF(ASSOCIATED(self%ML_H1grad%levels(i)%fe,self%ML_H1%levels(j)%fe))NULLIFY(self%ML_H1grad%levels(i)%fe)
+      END IF
+      IF(ASSOCIATED(self%ML_H1grad%interp_matrices(i)%m))THEN
+        IF(ASSOCIATED(self%ML_H1grad%interp_matrices(i)%m,self%ML_H1%interp_matrices(j)%m)) &
+          NULLIFY(self%ML_H1grad%interp_matrices(i)%m)
+      END IF
+      IF(ASSOCIATED(self%ML_H1grad%interp_graphs(i)%g))THEN
+        IF(ASSOCIATED(self%ML_H1grad%interp_graphs(i)%g,self%ML_H1%interp_graphs(j)%g)) &
+          NULLIFY(self%ML_H1grad%interp_graphs(i)%g)
       END IF
     END DO
   END DO
