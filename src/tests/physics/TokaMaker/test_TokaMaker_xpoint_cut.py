@@ -19,9 +19,7 @@ def run_DIIID_xpoint_pair_case(fe_order,mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('DIIID_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order,F0=2.96)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=2.96)
     mygs.set_coil_vsc({'F9A': 1.0, 'F9B': -1.0})
     mygs.set_targets(Ip=1.19E6,pax=6.0E4)
     # Two lower X-points 9 cm apart, which skews the core axis of the active one by ~45 degrees from O - X
