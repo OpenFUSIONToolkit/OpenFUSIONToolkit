@@ -29,7 +29,8 @@ USE mhd_utils, ONLY: mu0
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_cell_quad, &
-  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol, gs_ffprim_pprime
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol, gs_ffprim_pprime, &
+  gs_trace_tol
 USE oft_gs_contour, ONLY: gs_rays_contour
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
@@ -926,7 +927,9 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
   END IF
 END IF
 !---Update all flux functions now that all fields (F0, targets, kinetics) are loaded; a bootstrap
-!   F*F' restored from the file is kept as saved (an update would recompute it)
+!   F*F' restored from the file is kept as saved (an update would recompute it); the flux map
+!   settles from identity, not from one copied with an earlier equilibrium
+IF(ASSOCIATED(self%torflux))CALL self%torflux%delete()
 CALL torflux_setup(self,resettle=.TRUE.)
 IF(ASSOCIATED(self%torflux))CALL self%torflux%update(self)
 restored=.FALSE.
@@ -1080,7 +1083,7 @@ IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
 END IF
 !---Trace
 IF(.NOT.ALL(cc_done(2:npsi)))THEN
-call set_tracer(1)
+call set_tracer(device%trace_type)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1103,9 +1106,9 @@ do j=2,npsi
   !---------------------------------------------------------------------------
   psi_surf = cout(j,1)
   IF(ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
+    active_tracer%tol=gs_trace_tol(device,1.d-8,1.d-10)
   ELSE
-    active_tracer%tol=1.d-8
+    active_tracer%tol=gs_trace_tol(device,1.d-6,1.d-8)
   END IF
   pt=pt_last
   !$omp critical
@@ -1429,7 +1432,7 @@ IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
 END IF
 !---Trace
 IF(.NOT.ALL(cc_done))THEN
-call set_tracer(1)
+call set_tracer(device%trace_type)
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1453,9 +1456,9 @@ do j=1,nr
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
   IF((psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
+    active_tracer%tol=gs_trace_tol(device,1.d-8,1.d-10)
   ELSE
-    active_tracer%tol=1.d-8
+    active_tracer%tol=gs_trace_tol(device,1.d-6,1.d-8)
   END IF
   IF(j>1)THEN
     pt=pt_last

@@ -21,6 +21,20 @@ in the `native_mesh_options` group. The options available in this group are list
 | `reflect=F`    | Reflect mesh about xy-plane? | bool |
 | `ref_periodic=F` | Make mesh periodic in z-direction following reflection? | int |
 | `zstretch=1.`  | Scale for z-direction | float |
+| `cyl_mesh=F`   | Project refined and high-order nodes onto cylinders about the z-axis | bool |
+| `cyl_rmin=0.`  | Only project nodes with radius above this value when `cyl_mesh=T` | float |
+| `reflect_copy_reg=T` | Keep region numbers for reflected cells (otherwise they are offset) | bool |
+
+\subsection doc_mesh_native_periodic Periodicity
+
+Periodicity information is read from the mesh file (see the conversion scripts below). Two types of
+periodicity are supported:
+ - **Planar**: the periodic planes are normal to the z-axis, and points are matched by translation in z.
+ - **Revolved**: the domain is a wedge and points are matched by rotation. The axis of rotation **must be
+   the x-axis**, so every periodic plane must contain it. Physics modules that support revolved domains
+   assume this (eg. vector fields are rotated across periodic boundaries, and the axis is detected from
+   \f$ y^2 + z^2 = 0 \f$). The mesh setup aborts if a periodic plane is neither normal to z nor contains
+   the x-axis.
 
 \section doc_mesh_native_conv Converting Meshes
 

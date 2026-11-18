@@ -484,66 +484,7 @@ END PROGRAM MUG_slab_recon
 !! more information on the available options in the `xmhd_options` group see
 !! \ref xmhd::xmhd_run "xmhd_run".
 !!
-!!\verbatim
-!!&runtime_options
-!! ppn=1               ! Number of processors/tasks per node (used for heirarchical domain decomposition)
-!! debug=0             ! Debug level (0-3)
-!!/
-!!
-!!&mesh_options
-!! meshname='slab'     ! Meshname (unused at present)
-!! cad_type=1          ! Mesh format type (1 -> native)
-!! nlevels=2           ! Number of total grid levels (see docs for more information)
-!! nbase=1             ! Number grid levels before domain decomposition (see docs for more information)
-!! part_meth=2         ! Partition "uniformly" along x-axis
-!!/
-!!
-!!&t3d_options
-!! filename='slab_gem.t3d'
-!! inpname='slab_gem.inp'
-!! reflect='xyz'       ! Reflect input grid in all directions
-!! ref_per=T,T,F       ! Make grid periodic in the X,Y directions
-!!/
-!!
-!!&slab_recon_options
-!! order=2             ! FE order
-!! minlev=2            ! Minimum level for MG preconditioning
-!! linear=F            ! Perform linear simulation?
-!! view_ic=F           ! View initial conditions but do not run simulation
-!! plot_run=F          ! Run plotting instead of simulation
-!! pm=F                ! View extended linear and non-linear iteration output?
-!!/
-!!
-!!&xmhd_options
-!! mu_ion=1.           ! Ion mass (atomic units)
-!! xmhd_ohmic=T        ! Include Ohmic heating
-!! xmhd_visc_heat=T    ! Include viscous heating
-!! xmhd_hall=F         ! Include Hall terms?
-!! bbc='bc'            ! Perfectly-conducting BC for B-field
-!! vbc='all'           ! Zero-flow BC for velocity
-!! nbc='n'             ! Neumann BC for density
-!! tbc='n'             ! Neumann BC for temperature
-!! dt=8.e-7            ! Maximum time step
-!! eta=742.6           ! Constant resistivity
-!!! eta_hyper=50.0      ! Hyper-resistivity
-!!! me_factor=73.446    ! M_e/M_i = 25.0 (as per GEM challenge paper)
-!! visc_type='iso'     ! Use isotropic viscosity tensor
-!! nu_par=7425.9       ! Fluid viscosity
-!! d_dens=50.          ! Density diffusion
-!! kappa_par=2943.4    ! Parallel thermal conduction (fixed)
-!! kappa_perp=2943.4   ! Perpendicular thermal conduction (fixed)
-!! nsteps=1000         ! Number of time steps to take
-!! rst_ind=0           ! Index of file to restart from (0 -> use subroutine arguments)
-!! rst_freq=10         ! Restart file frequency
-!! xmhd_mfnk=T         ! Use matrix-free method
-!! lin_tol=1.E-8       ! Linear solver tolerance
-!! nl_tol=1.E-6        ! Non-linear solver tolerance
-!! ittarget=30         ! Target for # of linear iterations per time step
-!! xmhd_prefreq=20     ! Preconditioner update frequency
-!! xmhd_nparts=0,20,40 ! Number of parts for local matrix decomposition
-!! nl_update=3         ! # of NL iterations that causes preconditioner update
-!!/
-!!\endverbatim
+! OFT_DOC_INCLUDE: oft.in
 !!
 !!\subsection doc_mug_recon_ex_input_solver Solver specification
 !!
@@ -559,24 +500,7 @@ END PROGRAM MUG_slab_recon
 !!~$ ./MUG_slab_recon oft.in oft_in.xml
 !!\endverbatim
 !!
-!!```xml
-!!<oft>
-!!  <xmhd>
-!!    <pre type="mg">
-!!      <smoother direction="up">
-!!        <solver type="gmres">
-!!          <its>2</its>
-!!          <nrits>2</nrits>
-!!          <pre type="block_jacobi">
-!!            <nlocal>2</nlocal>
-!!            <solver type="lu"></solver>
-!!          </pre>
-!!        </solver>
-!!      </smoother>
-!!    </pre>
-!!  </xmhd>
-!!</oft>
-!!```
+! OFT_DOC_INCLUDE: oft_in.xml
 !!
 !!\section doc_mug_recon_ex_post Post-Processing options
 !!

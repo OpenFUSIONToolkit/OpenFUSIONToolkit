@@ -21,7 +21,7 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon, gs_cell_quad, qprof_backend, gs_fpol
+  gs_get_qprof, gs_ani_press, gs_epsilon, gs_cell_quad, qprof_backend, gs_fpol, gs_trace_tol
 use oft_gs_contour, only: gs_fsa_contour
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
@@ -253,7 +253,7 @@ DO j=1,100
 END DO
 IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
 !---Trace
-call set_tracer(1)
+call set_tracer(gseq%device%trace_type)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 field%u=>gseq%psi
@@ -261,7 +261,7 @@ CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
-active_tracer%tol=1.d-9
+active_tracer%tol=gs_trace_tol(gseq%device,1.d-7,1.d-9)
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
@@ -970,7 +970,7 @@ DO j=1,100
 END DO
 IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmin = ',rmax
 !---Trace
-call set_tracer(1)
+call set_tracer(gseq%device%trace_type)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 ALLOCATE(field)
@@ -979,7 +979,7 @@ CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=2
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
-active_tracer%tol=1.d-9
+active_tracer%tol=gs_trace_tol(gseq%device,1.d-7,1.d-9)
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.

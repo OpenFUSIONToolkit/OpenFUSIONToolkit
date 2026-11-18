@@ -30,13 +30,15 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
+ - \subpage doc_tCurr_fourier
+ - \subpage doc_tCurr_xml
  - \subpage doc_tCurr_junctions
 
 \section doc_tw_main_settings ThinCurr settings groups
 
 \subsection doc_tw_main_settings_xml XML input settings
 Settings for ThinCurr runs are contained in the `oft->thincurr` element, with the following elements:
-  * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
+  * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
   * `sens_mask`: Comma separated integer mask for removing regions from sensor signals (optional; default: 0 for all regions)
   * `icoils`: Definition of coils with fixed current for \ref thincurr_td and \ref thincurr_fr (see \ref doc_tw_main_filament_def)
   * `vcoils`: Definition of coils with fixed voltage (see \ref doc_tw_main_filament_def)
@@ -333,4 +335,9 @@ Setting `pre_coarse=T` (`pre_coarse=True` in
 \f$ \textrm{Z} (\textrm{Z}^T \textrm{A} \textrm{Z})^{-1} \textrm{Z}^T \f$ (two-level preconditioner). The coarse space
 \f$ \textrm{Z} \f$ holds, on each diagonal block, a constant and linear functions of position, plus one vector for each
 hole and V-coil. This usually reduces the number of iterations substantially, but setting it up costs one HODLR
-matrix-vector product per coarse vector, so it is off by default.
+matrix-vector product per coarse vector, so it is off by default. With `pre_coarse=T`, setting `pre_neigs` to a positive
+value (`pre_neigs=N` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") also adds the `pre_neigs`
+slowest \f$ \textrm{L}/\textrm{R} \f$ eigenmodes to the coarse space for time-dependent runs, which targets the slowly
+decaying current patterns that limit convergence on large models. The eigenmodes are computed with ARPACK on the first
+run and reused by later runs on the same model while the resistivity is unchanged.

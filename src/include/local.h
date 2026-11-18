@@ -23,4 +23,6 @@
 #define OFT_PATH_SLEN @OFT_PATH_SLEN@
 #define OFT_ERROR_SLEN @OFT_ERROR_SLEN@
 
+#define OFT_HDF5_WAIT @OFT_HDF5_WAIT@
+
 #endif

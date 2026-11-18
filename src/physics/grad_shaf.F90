@@ -34,7 +34,7 @@ USE oft_lu, ONLY: oft_lusolver, lapack_matinv
 !
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
 USE fem_utils, ONLY: bfem_interp, bfem_map_flag
-USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_geval, &
+USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_eval_all, oft_blag_geval, &
   oft_blag_npos, oft_blag_d2eval, oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
   oft_lag_bg2interp, oft_blag_zerob, oft_blag_zerogrnd, oft_blag_getmop, &
@@ -47,7 +47,8 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof and the Sauter factors,
+!! applied as is to the selected tracer type (`trace_type`), <0 for default (testing only)
 !> Flux-surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`, the averages,
 !! the toroidal flux map and the Sauter factors: 0 contour where supported, 1 field-line tracer (testing only;
 !! the sawtooth reset needs the contour and is skipped)
@@ -181,6 +182,8 @@ TYPE :: gs_factory
   INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
   INTEGER(i4) :: nl_its = 0 !< Number of nonlinear iterations to converge most recent solve
   INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
+  INTEGER(i4) :: trace_type = 3 !< Field-line tracer for flux surface tracing, when the contour method is not used
+  !! (1: LSODE, 3: Runge-Kutta with steps limited at cell boundaries; see @ref tracing_2d::set_tracer "set_tracer")
   INTEGER(i4) :: ncoils = 0 !< Number of coils in device
   INTEGER(i4) :: ncoils_ext = 0 !< Number of external (non-meshed) coils in device
   INTEGER(i4) :: ncoil_regs = 0 !< Number of meshed coil regions in device
@@ -292,7 +295,7 @@ TYPE :: gs_equil
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
   LOGICAL :: skip_targets = .FALSE. !< Skip toroidal current target in non-linear solve?
   LOGICAL :: prof_failed = .FALSE. !< A flux function update failed (set by the profile, ends @ref gs_solve)
-  INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
+  INTEGER(i4) :: mode = 0 !< F definition mode, sets the meaning of `self%I%fp` (0 -> F', 1 -> F*F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
   INTEGER(i4) :: isoflux_ntargets = 0 !< Number of isoflux target locations
@@ -3554,9 +3557,7 @@ do j=1,device%fe_rep%mesh%nc
   do m=1,quad%np
     if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
     det=v*quad%wts(m)
-    DO l=1,device%fe_rep%nce
-      CALL oft_blag_eval(device%fe_rep,j,l,quad%pts(:,m),rop(l))
-    END DO
+    CALL oft_blag_eval_all(device%fe_rep,j,quad%pts(:,m),rop)
     ffp=0.d0
     pt=device%fe_rep%mesh%log2phys(j,quad%pts(:,m))
     IF(gs_test_bounds(self,pt))THEN
@@ -4771,7 +4772,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(gseq%device%trace_type)
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
 !$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
 NULLIFY(ptout)
@@ -4806,9 +4807,9 @@ do j=1,nr
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
   IF(psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
+    active_tracer%tol=gs_trace_tol(gseq%device,1.d-8,1.d-10)
   ELSE
-    active_tracer%tol=1.d-8
+    active_tracer%tol=gs_trace_tol(gseq%device,1.d-6,1.d-8)
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<=0.02d0)
   !
@@ -4844,27 +4845,25 @@ do j=1,nr
     CYCLE
   end if
   !------------------------------------------------------------------------------
-  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters
+  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters.
   !------------------------------------------------------------------------------
   IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
-    IF(active_tracer%nsteps>nlcfs)THEN
-      !---Allocate and fit spline
-      CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
-      lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
-      CALL spline_fit(lcfs_rz,"periodic")
-      !---Resample trace
-      DO i=0,nlcfs-1
-        CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
-        ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
-        ptout(2,i+1)=lcfs_rz%f(1)
-        ptout(3,i+1)=lcfs_rz%f(2)
-      END DO
-      !---Destroy Spline
-      CALL spline_dealloc(lcfs_rz)
-      active_tracer%nsteps=nlcfs
-    END IF
+    !---Allocate and fit spline
+    CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+    lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+    CALL spline_fit(lcfs_rz,"periodic")
+    !---Resample trace
+    DO i=0,nlcfs-1
+      CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+      ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+      ptout(2,i+1)=lcfs_rz%f(1)
+      ptout(3,i+1)=lcfs_rz%f(2)
+    END DO
+    !---Destroy Spline
+    CALL spline_dealloc(lcfs_rz)
+    active_tracer%nsteps=nlcfs
     !---Per-surface extrema, used for elongation and triangularity
     IF(PRESENT(shape_geo))THEN
       imin_r=1; imax_r=1; imin_z=1; imax_z=1
@@ -4934,6 +4933,24 @@ DEALLOCATE(field)
 CALL psi_int%delete()
 end subroutine gs_get_qprof
 !------------------------------------------------------------------------------
+!> Get the tolerance for flux surface tracing with the selected field-line tracer
+!!
+!! The error of the Runge-Kutta tracer (`trace_type=3`) tracks the requested tolerance on
+!! finite element fields, while the error of LSODE (`trace_type=1`) is typically 100-600
+!! times larger, so each use of the tracer sets a tolerance for each type.
+!------------------------------------------------------------------------------
+PURE FUNCTION gs_trace_tol(device,tol_rk,tol_lsode) RESULT(tol)
+CLASS(gs_factory), INTENT(in) :: device !< TokaMaker device (`trace_type`)
+REAL(r8), INTENT(in) :: tol_rk !< Tolerance for the Runge-Kutta tracer
+REAL(r8), INTENT(in) :: tol_lsode !< Tolerance for LSODE
+REAL(r8) :: tol !< Tolerance for the selected tracer
+IF(device%trace_type==1)THEN
+  tol=tol_lsode
+ELSE
+  tol=tol_rk
+END IF
+END FUNCTION gs_trace_tol
+!------------------------------------------------------------------------------
 !> Points on one flux surface: 1000 contour points at uniform polar angle about the O-point
 !! (field-line tracer if the contour backend is off or fails)
 !------------------------------------------------------------------------------
@@ -4994,17 +5011,17 @@ pt_last=[rmax,zaxis,0.d0]
 !   CALL oft_decrease_indent
 ! END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(gseq%device%trace_type)
 !!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
-IF(gseq%diverted.AND.psi_in<0.02d0)THEN ! Use higher tracing tolerance near divertor
-  active_tracer%tol=1.d-10
+IF(psi_in<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS (as in @ref gs_get_qprof)
+  active_tracer%tol=gs_trace_tol(gseq%device,1.d-8,1.d-10)
 ELSE
-  active_tracer%tol=1.d-8
+  active_tracer%tol=gs_trace_tol(gseq%device,1.d-6,1.d-8)
 END IF
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
