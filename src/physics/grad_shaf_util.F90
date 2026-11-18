@@ -254,7 +254,7 @@ tflux = 0.d0
 bp_vol = 0.d0
 cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 ncut_max=0
-IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,fpsi,Btor,Bpol,bcross_kappa,pani,cut_pts,cut_wts,qpts,qwts,nq) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
@@ -367,7 +367,7 @@ itor = 0.d0
 vloop = 0.d0
 cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 nq=0
-IF(cut_cells)nq=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)nq=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 ALLOCATE(cut_pts(3,nq),cut_wts(nq)) ! Empty without cut cells
 !!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc) &
 !!$omp reduction(+:itor) reduction(+:vol) &

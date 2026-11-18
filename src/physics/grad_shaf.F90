@@ -1882,7 +1882,7 @@ mutual=0.d0
 itor=0.d0
 cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 ncut_max=0
-IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc,pani,bcross_kappa,gpsitmp) reduction(+:mutual) &
 !$omp private(cut_pts,cut_wts,qpts,qwts,nq) reduction(+:itor)
 allocate(rop(device%fe_rep%nce))
@@ -3553,7 +3553,7 @@ dflux_ffp=0.d0
 !---Cut-cell quadrature at the LCFS (see gs_plasma_cell_rule)
 cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 ncut_max=0
-IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp,fpsi,ppsi) &
 !$omp private(cut_pts,cut_wts,qpts,qwts,nq,in_plasma) &
 !$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
@@ -3662,8 +3662,9 @@ end subroutine gs_source
 !!
 !! The plasma part of a plasma-region cell is the part where the linear interpolant of
 !! \f$ \psi - \psi_{LCFS} \f$ on the cell's vertices is positive, restricted to the plasma side of the
-!! X-point half-planes of @ref gs_test_bounds (whose functions are also interpolated linearly from the
-!! vertices; the spatial bounds of that test enclose every plasma-region vertex and never cut a cell).
+!! X-point half-planes of @ref gs_test_bounds, including the second cut at the active X-point when it is set
+!! (all functions are interpolated linearly from the vertices; the spatial bounds of that test enclose every
+!! plasma-region vertex and never cut a cell). Point arrays are sized for `nx_points+1` half-planes.
 !! Points and weights are those of @ref gs_cut_cell_rule, so integrals over the plasma part are continuous
 !! functions of the nodal \f$ \psi \f$, of \f$ \psi_{LCFS} \f$ and of the X-point locations. Integrands
 !! are evaluated at \f$ \max(\psi,\psi_{LCFS}) \f$ (the linear boundary differs from the contour by
@@ -3678,7 +3679,7 @@ REAL(r8), INTENT(inout) :: pts(:,:) !< Points in logical coordinates [3,:] (size
 REAL(r8), INTENT(inout) :: wts(:) !< Weights, as fractions of the cell (may be negative in cells cut by a half-plane)
 LOGICAL, INTENT(out) :: whole !< Whole cell is plasma: use the cell's standard rule
 INTEGER(i4) :: i,k,nplanes
-REAL(r8) :: dv(3),hv(3,max_xpoints),htmp(3)
+REAL(r8) :: dv(3),hv(3,max_xpoints+1),htmp(3)
 CLASS(oft_bmesh), POINTER :: smesh
 smesh=>self%device%fe_rep%mesh
 npts=0
@@ -3696,6 +3697,17 @@ DO i=1,self%nx_points
   nplanes=nplanes+1
   hv(:,nplanes)=htmp
 END DO
+!---Second cut at the active X-point (same condition as in gs_test_bounds)
+IF((self%nx_points>0).AND.ANY(self%x_cut/=0.d0))THEN
+  DO k=1,3
+    htmp(k)=DOT_PRODUCT(smesh%r(1:2,smesh%lc(k,cell))-self%x_points(:,self%nx_points),self%x_cut)
+  END DO
+  IF(ALL(htmp<=0.d0))RETURN ! Cell on the excluded side
+  IF(.NOT.ALL(htmp>0.d0))THEN
+    nplanes=nplanes+1
+    hv(:,nplanes)=htmp
+  END IF
+END IF
 IF(ALL(dv>0.d0).AND.(nplanes==0))THEN
   whole=.TRUE.
   RETURN
@@ -4032,7 +4044,7 @@ itor=0.d0
 curr_cent=0.d0
 cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 nq=0
-IF(cut_cells)nq=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)nq=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 ALLOCATE(cut_pts(3,nq),cut_wts(nq)) ! Empty without cut cells
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
@@ -4757,7 +4769,7 @@ CALL psi_eval%setup(device%fe_rep)
 dflux=0.d0
 cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 ncut_max=0
-IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(m,pt,goptmp,v,psitmp,Btor,cut_pts,cut_wts,qpts,qwts,nq) reduction(+:dflux)
 allocate(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
 !$omp do

@@ -81,14 +81,16 @@ linear interpolant of \f$ \psi - \psi_{LCFS} \f$ on the cell's vertices is posit
 half-planes); the cell's quadrature rule is mapped onto triangles covering that part, and the flux functions are
 evaluated at \f$ \max(\psi, \psi_{LCFS}) \f$. A cell wholly inside the LCFS gets its standard rule, which the clipped
 rule reduces to exactly, so these integrals are continuous functions of the nodal \f$ \psi \f$, of \f$ \psi_{LCFS} \f$
-and of the X-point locations. The same quadrature is used for the right-hand side and the target rows of the solve,
+and of the X-point locations. The half-planes are those of the point test: the cut at every X-point and the second
+cut across the core axis of the active X-point, so both quadratures integrate over the same plasma region. The same
+quadrature is used for the right-hand side and the target rows of the solve,
 the reported global quantities (`get_stats`, `get_globals`), the plasma current and diamagnetic flux fit constraints,
 the `jphi-linterp` current normalization, the bootstrap current integrals, the plasma-coil mutual inductances and the
 loop voltage, so the reported plasma current equals the current of the solved source.
 
 The continuum problem is unchanged; only the integration over the cells crossed by the LCFS differs, by the mesh's own
 boundary discretization error. Converged results therefore change slightly when the setting is switched on (on the
-meshes tested 1e-5 to 1e-3 relative in stored energy and q, up to about 1e-2 in q95 on coarse boundary meshes), which
+meshes tested 1e-5 to 1e-3 relative in stored energy and q; in q95 a median of 2e-4 and up to 5e-3), which
 is why it is off by default. Not changed: the time-dependent and linear-stability operators (`setup_td`,
 `compute_linear_stability`), point evaluations of fields and profiles (`get_field_eval`, `get_jtor_plasma`) and the
 pointwise pressure fit constraint. Changes of the plasma topology remain discontinuous with either quadrature: an

@@ -625,7 +625,7 @@ prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
 cut_cells=self%device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 ncut_max=0
-IF(cut_cells)ncut_max=gs_cut_cell_maxpts(self%device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(self%device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(m,psitmp,sgop,area,cut_pts,cut_wts,qpts,qwts,nq) reduction(+:result)
 ALLOCATE(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
 !$omp do
@@ -683,7 +683,7 @@ prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
 cut_cells=self%device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
 ncut_max=0
-IF(cut_cells)ncut_max=gs_cut_cell_maxpts(self%device%fe_rep%quad%np,self%nx_points)
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(self%device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(i,m,psitmp,sgop,area,inds,facs,cut_pts,cut_wts,qpts,qwts,nq)
 ALLOCATE(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
 !$omp do schedule(dynamic,1)
