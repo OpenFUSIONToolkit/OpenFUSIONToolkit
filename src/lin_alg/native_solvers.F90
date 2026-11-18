@@ -2273,34 +2273,18 @@ IF(self%nlocal>1)THEN
   NULLIFY(uvals,gvals)
   CALL u%get_local(uvals)
   CALL g%get_local(gvals)
-  !$omp parallel private(j,uloc,gloc) if(thread_safe)
-  NULLIFY(gloc%local_tmp,uloc%local_tmp)
-  !$omp do schedule(dynamic,1)
-  DO i=1,self%nlocal
-    !---Setup local vectors
-    gloc%n=self%parts(i)%n; uloc%n=self%parts(i)%n
-    gloc%ng=self%parts(i)%n; uloc%ng=self%parts(i)%n
-    gloc%nslice=self%parts(i)%n; uloc%nslice=self%parts(i)%n
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    gloc%stitch_info=>self%local_stitch(i)
-    uloc%stitch_info=>self%local_stitch(i)
-    !---Get local slice for solve
-    !$omp simd
-    DO j=1,self%parts(i)%n
-      gloc%v(j)=gvals(ABS(self%parts(i)%v(j)))
-      uloc%v(j)=uvals(ABS(self%parts(i)%v(j)))
-    END DO
-    !---Solve sub-system
-    self%solvers(i)%s%A=>self%alocals(i)
-    CALL self%solvers(i)%s%apply(uloc,gloc)
-    !---Replace local slice into solution
-    !$omp simd
-    DO j=1,self%parts(i)%n
-      IF(self%parts(i)%v(j)>0)uvals(self%parts(i)%v(j))=uloc%v(j)
-    END DO
-    DEALLOCATE(gloc%v,uloc%v)
-  END DO
-  !$omp end parallel
+  !---Only open a parallel region if the sub-solver is thread safe. Sub-solvers
+  !   that are not (eg. SuperLU-DIST, MUMPS) may use OpenMP internally, and even
+  !   an inactive outer region makes their teams nested. On targets where libgomp
+  !   uses its POSIX barrier (eg. macOS) nested teams that create tasks can
+  !   deadlock or release threads early.
+  IF(thread_safe)THEN
+    !$omp parallel
+    CALL apply_parts
+    !$omp end parallel
+  ELSE
+    CALL apply_parts
+  END IF
   CALL u%restore_local(uvals)
   DEALLOCATE(uvals,gvals)
 ELSE
@@ -2349,6 +2333,41 @@ ELSE
 END IF
 self%update_slice=.FALSE.
 DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Solve each local sub-system using an orphaned work-sharing loop, so it can be
+!! called either inside or outside of a parallel region
+!------------------------------------------------------------------------------
+SUBROUTINE apply_parts
+INTEGER(i4) :: ii,jj
+TYPE(oft_native_vector) :: uloc,gloc
+NULLIFY(gloc%local_tmp,uloc%local_tmp)
+!$omp do schedule(dynamic,1)
+DO ii=1,self%nlocal
+  !---Setup local vectors
+  gloc%n=self%parts(ii)%n; uloc%n=self%parts(ii)%n
+  gloc%ng=self%parts(ii)%n; uloc%ng=self%parts(ii)%n
+  gloc%nslice=self%parts(ii)%n; uloc%nslice=self%parts(ii)%n
+  ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
+  gloc%stitch_info=>self%local_stitch(ii)
+  uloc%stitch_info=>self%local_stitch(ii)
+  !---Get local slice for solve
+  !$omp simd
+  DO jj=1,self%parts(ii)%n
+    gloc%v(jj)=gvals(ABS(self%parts(ii)%v(jj)))
+    uloc%v(jj)=uvals(ABS(self%parts(ii)%v(jj)))
+  END DO
+  !---Solve sub-system
+  self%solvers(ii)%s%A=>self%alocals(ii)
+  CALL self%solvers(ii)%s%apply(uloc,gloc)
+  !---Replace local slice into solution
+  !$omp simd
+  DO jj=1,self%parts(ii)%n
+    IF(self%parts(ii)%v(jj)>0)uvals(self%parts(ii)%v(jj))=uloc%v(jj)
+  END DO
+  DEALLOCATE(gloc%v,uloc%v)
+END DO
+END SUBROUTINE apply_parts
 END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
