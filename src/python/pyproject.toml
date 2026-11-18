@@ -3,11 +3,9 @@
 target-version = "py37"
 
 [tool.ruff.lint]
-# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
-# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
-# McCabe complexity (`C901`) by default.
 # Rules are selected explicitly so that changes to Ruff's default rule set in
-# new releases do not change what is checked. The base set matches the
+# new releases do not change what is checked (the Ruff version is also pinned
+# to a tested range in .github/workflows/lint.yaml). The base set matches the
 # historical Ruff defaults, plus a few targeted checks for likely bugs:
 #   W6      - invalid escape sequences (e.g. non-raw docstrings with LaTeX)
 #   B006    - mutable default arguments

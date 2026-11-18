@@ -239,7 +239,8 @@ class gs_Domain:
             self.region_info = input_dict['region_info']
             self.regions = []
             for region in input_dict['regions']:
-                region.append(Region(load_dict=region))
+                self.regions.append(Region(None,load_dict=region))
+            self._extra_reg_defs = input_dict.get('extra_reg_defs', [])
         else:
             self.rextent = rextent
             self.zextents = list(zextents)
@@ -636,11 +637,13 @@ class gs_Domain:
             'boundary_reg': self.boundary_reg,
             'reg_type_counts': self.reg_type_counts,
             'regions': [],
-            'region_info': self.region_info
-
+            'region_info': self.region_info,
+            'extra_reg_defs': [[float(val) for val in point_def[:2]] + [int(point_def[2]), float(point_def[3])] for point_def in self._extra_reg_defs]
         }
         for region in self.regions:
-            output_dict['regions'].append(region.get_dict())
+            region_dict = region.get_json()
+            region_dict['points'] = numpy.asarray(region_dict['points']).tolist()
+            output_dict['regions'].append(region_dict)
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
 
@@ -1084,9 +1087,10 @@ class Region:
         @param sliver_tol Tolerance used for "sliver" region warnings
         @param small_thresh Tolerance used for "small" curve warnings (default: dx/2)
         @param id Region id number (default: 0)
+        @param load_dict Dictionary from `get_json()` to restore region from (optional, `points` is ignored when set)
         '''
         if load_dict is not None:
-            self._points = load_dict['points']
+            self._points = numpy.asarray(load_dict['points'])
             self._segments = load_dict['segments']
             self._id = load_dict['id']
             self._dx_curve = load_dict['dx_curve']

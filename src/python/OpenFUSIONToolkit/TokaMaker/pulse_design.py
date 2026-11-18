@@ -9457,7 +9457,7 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
         # Save a diagnostic figure (machine + coil currents + psi contours) alongside each
         # seed, using the same coil-current colormap idiom as plot_equil. Done for both
         # successful and failed solves so a failure still yields a psi plot to inspect.
-        def _save_seed_fig(ok):
+        def _save_seed_fig(ok, idx=idx, t=t, Ip=Ip, diverted=diverted, name=name):
             try:
                 fig, ax = plt.subplots(1, 1, figsize=(8, 9))
                 cb = mygs.plot_machine(fig, ax, coil_colormap='seismic', coil_symmap=False,
@@ -9468,16 +9468,16 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
                 mygs.plot_constraints(fig, ax)
                 mygs.plot_psi(fig, ax, xpoint_color='r', vacuum_nlevels=4)
                 _status = '' if ok else '  [FAILED -- unconverged psi]'
-                ax.set_title(f"seed {idx:02d}   t = {t:.2f} s   Ip = {Ip/1e6:.2f} MA"  # noqa: B023
-                             f"   ({'diverted' if diverted else 'limited'}){_status}",  # noqa: B023
+                ax.set_title(f"seed {idx:02d}   t = {t:.2f} s   Ip = {Ip/1e6:.2f} MA"
+                             f"   ({'diverted' if diverted else 'limited'}){_status}",
                              fontsize=14, color=('k' if ok else 'darkred'))
                 plt.tight_layout()
                 _suffix = '' if ok else '_FAILED'
-                fig.savefig(os.path.join(save_dir, f"seed_{idx:03d}_{name}{_suffix}.png"),  # noqa: B023
+                fig.savefig(os.path.join(save_dir, f"seed_{idx:03d}_{name}{_suffix}.png"),
                             dpi=150, bbox_inches='tight')
                 plt.close(fig)
             except Exception as fig_err:
-                print(f"  [{run_name}] seed {idx} figure failed: {fig_err}")  # noqa: B023
+                print(f"  [{run_name}] seed {idx} figure failed: {fig_err}")
                 plt.close('all')
 
         try:

@@ -43,10 +43,8 @@ def run_shell_command(command, timeout=10, env_vars=None):
     '''
     # Run shell command
     my_env = os.environ.copy()
-    if env_vars is None:
-        env_vars = {}
-    for key, val in env_vars.items():
-        my_env[key] = val
+    if env_vars is not None:
+        my_env.update(env_vars)
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=my_env)
     # Wait for process to complete or timeout
     try:

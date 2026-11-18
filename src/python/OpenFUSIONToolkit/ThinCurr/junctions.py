@@ -114,11 +114,11 @@ def _fans(lc, ec, jedges):
             continue
         parent = {c: c for c in cells}
 
-        def find(c):
+        def find(c, parent=parent):
             '''! Root of the group of cell c (union-find, with path halving)'''
-            while parent[c] != c:  # noqa: B023
-                parent[c] = parent[parent[c]]  # noqa: B023
-                c = parent[c]  # noqa: B023
+            while parent[c] != c:
+                parent[c] = parent[parent[c]]
+                c = parent[c]
             return c
         for c in cells:
             for w in lc[c]:
