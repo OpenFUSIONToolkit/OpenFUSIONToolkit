@@ -40,9 +40,11 @@ This method is supported through both the native and PETSc backends through
 \ref oft_petsc_solvers::oft_petsc_luprecond "oft_petsc_luprecond" as a PETSc preconditioner.
 
 By default the native solver performs local solves (ie as a sub-solver to Block Jacobi). With the
-`superd` and `mumps` packages, the full distributed system can instead be factored across all MPI
-tasks by setting `distributed` to true and using the solver directly on the global system (not
+`superd`, `mumps`, and `strumpack` packages, the full distributed system can instead be factored across
+all MPI tasks by setting `distributed` to true and using the solver directly on the global system (not
 as a sub-solver to Block Jacobi). This option has no effect in serial runs or for local systems.
+Distributed factorization with `strumpack` requires STRUMPACK built with MPI support (`--strumpack_mpi=1`
+with `build_libs.py`), in which case the STRUMPACK options below also apply.
 
 **XML Spec:** `<solver type="lu">`
 

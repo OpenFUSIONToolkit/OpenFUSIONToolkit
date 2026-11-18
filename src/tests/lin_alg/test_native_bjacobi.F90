@@ -88,6 +88,11 @@ IF(sol_type==6)THEN
   WRITE(*,*)'SKIP TEST: 6'
   CALL oft_finalize
 END IF
+#elif !defined( HAVE_STRUMPACK_MPI )
+IF((sol_type==6).AND.dist_lu.AND.(oft_env%nprocs>1))THEN
+  WRITE(*,*)'SKIP TEST: 6 (distributed)'
+  CALL oft_finalize
+END IF
 #endif
 !---Setup grid
 CALL multigrid_construct(mg_mesh)

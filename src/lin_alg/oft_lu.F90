@@ -14,7 +14,8 @@
 !! - STRUMPACK
 !!
 !! @note Local solves are supported by all packages. Solves of the full distributed
-!! system are supported by SuperLU-DIST and MUMPS (see @ref oft_lusolver::distributed).
+!! system are supported by SuperLU-DIST, MUMPS, and STRUMPACK (if built with MPI support)
+!! (see @ref oft_lusolver::distributed).
 !!
 !! @authors Chris Hansen
 !! @date May 2014
@@ -166,7 +167,7 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
   LOGICAL(kind=c_bool) :: iter_refine = .FALSE. !< Perform iterative refinement
-  !> Factor the full distributed system across all processes ("superd" and "mumps" only).
+  !> Factor the full distributed system across all processes ("superd", "mumps", and "strumpack" only).
   !! Ignored when the system is not distributed (eg. serial runs or local blocks).
   LOGICAL :: distributed = .FALSE.
   INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
@@ -377,6 +378,39 @@ INTERFACE
   INTEGER(c_int), VALUE, INTENT(in) :: verbose !< Print STRUMPACK information (0 -> no, 1 -> yes)
   INTEGER(c_int), INTENT(out) :: info !< Solver return status (0 -> success)
   END SUBROUTINE oft_strumpack_sparse
+#ifdef HAVE_STRUMPACK_MPI
+!------------------------------------------------------------------------------
+!> Interface to distributed sparse (multifrontal) LU factorization from STRUMPACK
+!!
+!! Must be called collectively by all processes, with locally-owned rows in CRS format
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_strumpack_dist(iopt,n,nnz_loc,m_loc,values,colind,rowptr,dist,b, &
+    comm,f_factors,comp_type,rel_tol,abs_tol,leaf_size,max_rank,min_sep_size, &
+    verbose,info) BIND(C,NAME="oft_strumpack_dist_c")
+  IMPORT c_int, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs solve, 3 -> refactor matrix with the
+  !! same non-zero pattern [full factorization if options changed], 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Global number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz_loc !< Number of non-zeros in locally-owned rows
+  INTEGER(c_int), VALUE, INTENT(in) :: m_loc !< Number of locally-owned rows
+  REAL(c_double), DIMENSION(*), INTENT(in) :: values !< Matrix values in CRS format [nnz_loc]
+  INTEGER(c_int), DIMENSION(*), INTENT(in) :: colind !< Global column indices in CRS format (1-based) [nnz_loc]
+  INTEGER(c_int), DIMENSION(*), INTENT(in) :: rowptr !< Local row pointer into colind (1-based) [m_loc+1]
+  INTEGER(c_int), DIMENSION(*), INTENT(in) :: dist !< First global row (0-based) on each process [nprocs+1]
+  REAL(c_double), DIMENSION(*), INTENT(inout) :: b !< Right hand side -> overwritten with solution [m_loc]
+  INTEGER(c_int), INTENT(in) :: comm !< Fortran MPI communicator handle
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to STRUMPACK internal data storage
+  INTEGER(c_int), VALUE, INTENT(in) :: comp_type !< Compression type (0 -> none, 1 -> HSS, 2 -> BLR, -1 -> default)
+  REAL(c_double), VALUE, INTENT(in) :: rel_tol !< Relative compression tolerance (<=0 -> default)
+  REAL(c_double), VALUE, INTENT(in) :: abs_tol !< Absolute compression tolerance (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: leaf_size !< Size of leaf/tile blocks (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: max_rank !< Maximum rank of compressed blocks (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: min_sep_size !< Minimum separator size for compression (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: verbose !< Print STRUMPACK information (0 -> no, 1 -> yes)
+  INTEGER(c_int), INTENT(out) :: info !< Solver return status (0 -> success)
+  END SUBROUTINE oft_strumpack_dist
+#endif
 #endif
 !------------------------------------------------------------------------------
 !> Interface to dgssv from UMFPACK
@@ -1097,8 +1131,8 @@ end subroutine lusolver_delete
 !------------------------------------------------------------------------------
 !> Solve the full distributed linear system using a parallel direct solver
 !!
-!! The system is factored across all processes using SuperLU-DIST or MUMPS
-!! with rows distributed by ownership (see @ref lu_dist_setup).
+!! The system is factored across all processes using SuperLU-DIST, MUMPS, or
+!! STRUMPACK with rows distributed by ownership (see @ref lu_dist_setup).
 !------------------------------------------------------------------------------
 SUBROUTINE lusolver_apply_dist(self,A_native,u,g)
 CLASS(oft_lusolver), INTENT(inout) :: self !< Solver object
@@ -1149,8 +1183,15 @@ IF(.NOT.self%initialized)THEN
 #else
       CALL oft_abort('OFT not compiled with MUMPS','lusolver_apply_dist',__FILE__)
 #endif
+    CASE("strumpack")
+#ifdef HAVE_STRUMPACK_MPI
+      IF(self%iter_refine)CALL oft_abort('Iterative refinement not supported (STRUMPACK)', &
+        'lusolver_apply_dist',__FILE__)
+#else
+      CALL oft_abort('OFT not compiled with MPI support for STRUMPACK','lusolver_apply_dist',__FILE__)
+#endif
     CASE DEFAULT
-      CALL oft_abort('Distributed solves require "superd" or "mumps" package', &
+      CALL oft_abort('Distributed solves require "superd", "mumps", or "strumpack" package', &
         'lusolver_apply_dist',__FILE__)
   END SELECT
   self%initialized=.TRUE.
@@ -1186,6 +1227,13 @@ IF(self%refactor)THEN
       CALL dmumps(self%mumps_struct)
       IF(self%mumps_struct%infog(1)<0)CALL oft_abort('Factorization failed (MUMPS)', &
         'lusolver_apply_dist',__FILE__)
+#endif
+    CASE("strumpack")
+#ifdef HAVE_STRUMPACK_MPI
+      mode=3
+      IF(self%update_graph)mode=1
+      CALL strumpack_dist_call(self,mode,rdummy,ierr)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (STRUMPACK)','lusolver_apply_dist',__FILE__)
 #endif
   END SELECT
   self%refactor=.FALSE.
@@ -1228,6 +1276,12 @@ SELECT CASE(TRIM(self%package))
     NULLIFY(self%mumps_struct%rhs,self%mumps_struct%rhs_loc,self%mumps_struct%irhs_loc)
     DEALLOCATE(xglob)
 #endif
+  CASE("strumpack")
+#ifdef HAVE_STRUMPACK_MPI
+    mode=2
+    CALL strumpack_dist_call(self,mode,bvals,ierr)
+    IF(ierr/=0)CALL oft_abort('Solve failed (STRUMPACK)','lusolver_apply_dist',__FILE__)
+#endif
 END SELECT
 CALL u%restore_slice(bvals)
 DEALLOCATE(bvals)
@@ -1269,6 +1323,13 @@ SELECT CASE(TRIM(self%package))
     CALL dmumps(self%mumps_struct)
     NULLIFY(self%mumps_struct%irn_loc,self%mumps_struct%jcn_loc,self%mumps_struct%a_loc)
 #endif
+#ifdef HAVE_STRUMPACK_MPI
+  CASE("strumpack")
+    IF(C_ASSOCIATED(self%strumpack_struct%f_factors))THEN
+      mode=4
+      CALL strumpack_dist_call(self,mode,rvals,ierr)
+    END IF
+#endif
 END SELECT
 CALL MPI_Comm_free(self%dist%comm,ierr)
 self%dist%comm=MPI_COMM_NULL
@@ -1277,6 +1338,47 @@ self%dist%active=.FALSE.
 DEBUG_STACK_POP
 #endif
 END SUBROUTINE lusolver_delete_dist
+#ifdef HAVE_STRUMPACK_MPI
+!------------------------------------------------------------------------------
+!> Call distributed STRUMPACK interface using stored row distribution and options
+!------------------------------------------------------------------------------
+SUBROUTINE strumpack_dist_call(self,mode,b,info)
+CLASS(oft_lusolver), INTENT(inout) :: self !< Solver object
+INTEGER(i4), INTENT(in) :: mode !< Operation (see @ref oft_strumpack_dist)
+REAL(r8), INTENT(inout) :: b(*) !< Locally-owned rows of RHS -> overwritten with solution (`mode=2`)
+INTEGER(i4), INTENT(out) :: info !< Solver return status (0 -> success)
+INTEGER(i4) :: fcomm
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dist_rows
+DEBUG_STACK_PUSH
+#ifdef OFT_MPI_F08
+fcomm=self%dist%comm%MPI_VAL
+#else
+fcomm=self%dist%comm
+#endif
+!---Row distribution (first row on each process and total)
+ALLOCATE(dist_rows(oft_env%nprocs+1))
+IF(mode==4)THEN
+  dist_rows=0
+ELSE
+  dist_rows(1:oft_env%nprocs)=self%dist%displs
+  dist_rows(oft_env%nprocs+1)=self%dist%ng
+END IF
+IF(mode==4)THEN
+  CALL oft_strumpack_dist(mode,0,0,0,b,dist_rows,dist_rows,dist_rows,b,fcomm, &
+    self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
+    self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
+    self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
+ELSE
+  CALL oft_strumpack_dist(mode,self%dist%ng,self%dist%nnz,self%dist%nloc,self%dist%vals, &
+    self%dist%lc,self%dist%kr,dist_rows,b,fcomm, &
+    self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
+    self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
+    self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
+END IF
+DEALLOCATE(dist_rows)
+DEBUG_STACK_POP
+END SUBROUTINE strumpack_dist_call
+#endif
 !------------------------------------------------------------------------------
 !> Setup row-distributed representation of a native matrix
 !!

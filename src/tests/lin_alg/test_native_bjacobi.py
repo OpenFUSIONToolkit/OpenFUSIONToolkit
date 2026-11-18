@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import run_OFT
 
 LU_solvers = (1,2,3,4,5,6)
-dist_LU_solvers = (2,3)
+dist_LU_solvers = (2,3,6)
 ILU_solvers = (0,5)
 
 # Basic template for input file
