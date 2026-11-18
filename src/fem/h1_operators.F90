@@ -24,7 +24,7 @@ USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr, &
   oft_graph, &
-  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix
@@ -524,7 +524,7 @@ class(fem_interp), intent(inout) :: field
 class(oft_vector), intent(inout) :: x
 !---
 real(r8) :: bcc(1),det,goptmp(3,4),vol
-real(r8), pointer :: xloc(:)
+real(r8), pointer, contiguous :: xloc(:)
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -535,7 +535,7 @@ IF(.NOT.oft_3D_h1_cast(h1_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h1
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 allocate(j(h1_rep%nce),rop(h1_rep%nce))
@@ -556,8 +556,7 @@ do i=1,h1_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_h1_project
 !------------------------------------------------------------------------------

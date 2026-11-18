@@ -33,7 +33,7 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
   oft_graph_ptr, oft_graph, &
-  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 #ifdef HAVE_ARPACK
@@ -275,7 +275,7 @@ class(oft_afem_type), intent(inout) :: lag_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: aloc
-real(r8), pointer, dimension(:) :: bloc
+real(r8), pointer, contiguous, dimension(:) :: bloc
 integer(i4) :: i,jr,jc,m
 integer(i4), allocatable :: j_curl(:),j_grad(:)
 real(r8) :: goptmp(3,4)
@@ -295,7 +295,7 @@ NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
 !---Zero output and get aliases
 CALL b%set(0.d0)
-CALL b%get_local(bloc)
+CALL b%borrow_local(bloc,OFT_ACCESS_ACCUMULATE)
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -335,8 +335,8 @@ end do
 deallocate(j_curl,j_grad)
 deallocate(rop_curl,rop_grad,btmp)
 !$omp end parallel
-CALL b%restore_local(bloc,add=.TRUE.)
-deallocate(aloc,bloc)
+CALL b%release_local(bloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+deallocate(aloc)
 DEBUG_STACK_POP
 end subroutine hcurl_div
 !------------------------------------------------------------------------------
@@ -377,7 +377,8 @@ subroutine hcurl_gradtp(hcurl_fe,a,b)
 class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_vector), intent(inout) :: a !< Input field
 class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
-real(r8), pointer, dimension(:) :: aloc,bloc
+real(r8), pointer, dimension(:) :: aloc
+real(r8), pointer, contiguous, dimension(:) :: bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer :: i,j,k
 class(oft_mesh), pointer :: mesh
@@ -387,14 +388,13 @@ IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_fe))CALL oft_abort("Incorrect HCurl FE
 !---Get local values
 NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
-CALL b%get_local(bloc)
+CALL b%borrow_local(bloc,OFT_ACCESS_ACCUMULATE)
 !---
 mesh=>hcurl_rep%mesh
 allocate(emap(mesh%ne))
 CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
 !$omp parallel do private(j,k)
 do i=1,mesh%np
-  bloc(i)=0.d0
   do j=mesh%kpe(i),mesh%kpe(i+1)-1
     k=mesh%lpe(j)
     if(.NOT.mesh%fullmesh)then
@@ -411,8 +411,8 @@ do i=1,mesh%np
   enddo
 enddo
 deallocate(emap)
-CALL b%restore_local(bloc,add=.TRUE.)
-DEALLOCATE(aloc,bloc)
+CALL b%release_local(bloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine hcurl_gradtp
 !------------------------------------------------------------------------------
@@ -886,7 +886,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto H(Curl) basis
 integer(i4) :: i,jc,m
 integer(i4), allocatable, dimension(:) :: j
 real(r8) :: det,vol,bcc(3),goptmp(3,4)
-real(r8), pointer, dimension(:) :: xloc
+real(r8), pointer, contiguous, dimension(:) :: xloc
 real(r8), allocatable, dimension(:,:) :: rop
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
@@ -895,7 +895,7 @@ IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel default(firstprivate) shared(xloc,field) private(curved,det)
 allocate(j(hcurl_rep%nce),rop(3,hcurl_rep%nce))
@@ -916,8 +916,7 @@ do i=1,hcurl_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_project
 !---------------------------------------------------------------------------------
@@ -933,7 +932,7 @@ CLASS(oft_vector), INTENT(inout) :: x
 INTEGER(i4) :: i,m,k,jc,cell,ptmap(3)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4)
-REAL(r8), POINTER, DIMENSION(:) :: xloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: xloc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 CLASS(oft_hcurl_bfem), POINTER :: bhcurl_rep
@@ -947,7 +946,7 @@ smesh=>bhcurl_rep%mesh
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Operator integration loop
 det=0.d0
 !$omp parallel private(j,rop,m,vol,sgop,vgop,norm,cell,ptmap,flog,etmp,det)
@@ -975,8 +974,7 @@ do i=1,smesh%nc
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_bcurl
 !------------------------------------------------------------------------------
