@@ -285,11 +285,11 @@ def test_surf_circle_1ref(mesh_type,levels):
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.coverage
 @pytest.mark.parametrize("mesh_type", ("tri6", "quad9"))
-@pytest.mark.parametrize("top_lev", (1, 2))
-def test_surf_circle_quad(mesh_type,top_lev):
+@pytest.mark.parametrize("levels", ((1, 1), (1, 2), (2, 2), (2, 3), (1, 3)))
+def test_surf_circle_quad(mesh_type,levels):
     volume_cubit = pytest.approx(0.0, abs=1.E-4)
     area_cubit = pytest.approx(3.14160, abs=1.E-3)
-    assert cubit_setup(1,top_lev,'circle_{0}_test'.format(mesh_type),test_2d='T',grid_order=2)
+    assert cubit_setup(levels[0],levels[1],'circle_{0}_test'.format(mesh_type),test_2d='T',grid_order=2)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("mesh_type", ("tri3", "quad4"))
 @pytest.mark.parametrize("top_lev", (1, 2))
@@ -308,9 +308,9 @@ def test_surf_sphere_1ref(mesh_type,levels):
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.coverage
 @pytest.mark.parametrize("mesh_type", ("tri6", "quad9"))
-@pytest.mark.parametrize("top_lev", (1, 2))
-def test_surf_sphere_quad(mesh_type,top_lev):
+@pytest.mark.parametrize("levels", ((1, 1), (1, 2), (2, 2), (2, 3), (1, 3)))
+def test_surf_sphere_quad(mesh_type,levels):
     volume_cubit = pytest.approx(0.0, abs=1.E-4)
     area_cubit = pytest.approx(12.5664, abs=1.E-3)
-    assert cubit_setup(1,top_lev,'sphere_{0}_test'.format(mesh_type),test_2d='T',grid_order=2)
+    assert cubit_setup(levels[0],levels[1],'sphere_{0}_test'.format(mesh_type),test_2d='T',grid_order=2)
     assert check_result(volume_cubit, area_cubit)

@@ -642,7 +642,9 @@ IF(pmesh%ho_info%ncp==1)THEN
   smesh%ho_info%lcp=-1
 END IF
 CALL pmesh%set_order(2)
-CALL mesh_global_set_curved(pmesh,2)
+!---Use the quadratic map on every parent cell to place the child nodes, since
+!---imported meshes may be curved away from the boundary
+CALL mesh_global_set_curved(pmesh,1)
 !---Create new high order nodes
 ncde=SIZE(mg_mesh%sinter(mg_mesh%level-1)%lcde,DIM=1)
 !$omp parallel private(cell,k,j,l,ep,fp,f1,f2,ftmp,ed,ed2,cc)
@@ -716,11 +718,11 @@ IF(smesh%ho_info%ncp==1)THEN
       CALL pmesh%vlog(k,f1)
       f2=f2+f1/REAL(smesh%cell_np,8)
     END DO
-    !---Loop over edges
+    !---Loop over child cells
     DO l=1,4
       cc = (i-1)*4+l
       ftmp=0.d0
-      DO j=1,2
+      DO j=1,smesh%cell_np
         IF(smesh%lc(j,cc)>pmesh%np+pmesh%ne)THEN
           ftmp=ftmp+f2
         ELSE IF((smesh%lc(j,cc)>pmesh%np).AND.(smesh%lc(j,cc)<=pmesh%np+pmesh%ne))THEN
