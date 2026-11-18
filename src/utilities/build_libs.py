@@ -2065,6 +2065,8 @@ class PETSC(package):
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
         self.mpi_f08 = mpi_f08
+        # Building PETSc with external solvers (eg. MUMPS, SuperLU-DIST) can exceed the default timeout
+        self.build_timeout = 60
 
     def detect_version(self):
         print("  Testing PETSc version")
@@ -2196,7 +2198,11 @@ class PETSC(package):
         else:
             options += ['--with-debugging=no']
             if config_dict['CC_VENDOR'] == 'gnu':
-                options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
+                # GCC 15+ defaults to C23, which breaks K&R-style declarations in some PETSc dependencies (eg. SuperLU-DIST)
+                if int(config_dict['CC_VERSION'].split(".")[0]) >= 15:
+                    options += ['--COPTFLAGS="-O2 -std=gnu17"', '--FOPTFLAGS=-O2']
+                else:
+                    options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
             elif config_dict['CC_VENDOR'] == 'intel':
                 options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
