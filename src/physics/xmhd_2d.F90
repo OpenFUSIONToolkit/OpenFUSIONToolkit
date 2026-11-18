@@ -670,7 +670,7 @@ DO i=1,mesh%nc
     btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
 
     diag_vals(1) = diag_vals(1) + DOT_PRODUCT(btmp,btmp)*int_factor
-    diag_vals(2) = diag_vals(2) + 0.5d0*self%parent_sim%m_i(i)*n*DOT_PRODUCT(vel,vel)*int_factor
+    diag_vals(2) = diag_vals(2) + 0.5d0*self%parent_sim%m_i(mesh%reg(i))*n*DOT_PRODUCT(vel,vel)*int_factor
     diag_vals(3) = diag_vals(3) + n*int_factor
     diag_vals(4) = diag_vals(4) + T*int_factor
     diag_vals(5) = diag_vals(5) + int_factor !total volume

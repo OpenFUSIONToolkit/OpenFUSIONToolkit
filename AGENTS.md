@@ -25,7 +25,7 @@ src/
 ├── base/           # Core runtime (I/O, XML, sorting, stitching)
 ├── grid/           # Mesh types, readers (Cubit, Gmsh, native, T3D), multigrid
 ├── fem/            # Finite element basis functions and operators (H1, Hcurl, Lagrange)
-├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK)
+├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK, STRUMPACK)
 ├── physics/        # Physics modules (Grad-Shafranov, thin-wall, Taylor, xMHD, tracing)
 ├── bin/            # Standalone Fortran executables
 ├── python/
