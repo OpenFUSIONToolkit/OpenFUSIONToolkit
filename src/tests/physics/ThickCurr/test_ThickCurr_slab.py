@@ -31,6 +31,7 @@ def run_slab_eigs(order, nproc=1):
 
 
 @pytest.mark.parametrize("order", (2, 3))
+@pytest.mark.coverage
 def test_slab_eigs(order):
     '''Slowest decay time of a conducting slab surrounded by pseudo-vacuum (thickcurr_eigs), compared with the
     analytic solution from matching potential fields in the vacuum layers to the slab eigenmode.'''

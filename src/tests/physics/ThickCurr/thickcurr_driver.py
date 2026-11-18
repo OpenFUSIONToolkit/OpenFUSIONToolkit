@@ -13,6 +13,12 @@ import sys
 import json
 import numpy
 import h5py
+# Start coverage measurement if requested (this driver runs as a separate process)
+try:
+    import coverage
+    coverage.process_startup()
+except ImportError:
+    pass
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 import oft_testing  # noqa: F401 (sets up path to OFT python package)

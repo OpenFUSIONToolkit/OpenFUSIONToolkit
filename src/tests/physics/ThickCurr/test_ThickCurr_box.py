@@ -87,28 +87,33 @@ def run_eigs(order, nproc=1, dt=5.E-2, eig_shift=None):
 
 
 @pytest.mark.parametrize("order", (2, 3))
+@pytest.mark.coverage
 def test_decay(order):
     '''Time advance of the slowest diffusion eigenmode of a conducting cube, checking the decay rate and sensor
     signals (point Mirnov probes and a flux loop) against analytic values.'''
     assert run_decay(order)
 
 
+@pytest.mark.coverage
 @pytest.mark.mpi
 def test_decay_mpi():
     '''Time advance of a conducting cube eigenmode on two MPI processes, driven from Python.'''
     assert run_decay(2, nproc=2)
 
 
+@pytest.mark.coverage
 def test_decay_iterative():
     '''Time advance of a conducting cube eigenmode using the default (diagonal) preconditioner.'''
     assert run_decay(2, pre=None)
 
 
+@pytest.mark.coverage
 def test_decay_in_memory():
     '''Time advance of a conducting cube eigenmode with the mesh passed from Python as arrays.'''
     assert run_decay(2, in_memory=True)
 
 
+@pytest.mark.coverage
 def test_decay_pmg():
     '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner (default smoothers).'''
     assert run_decay(2, pre=None, pmg=True)
@@ -120,6 +125,7 @@ def test_decay_pmg_mpi():
     assert run_decay(2, nproc=2, pre=None, pmg=True)
 
 
+@pytest.mark.coverage
 def test_decay_pmg_xml():
     '''Time advance of a conducting cube eigenmode using a p-multigrid preconditioner defined in XML, checking
     that the XML definition is used (iteration count). The XML is passed directly to ThickCurr from Python, so
@@ -134,6 +140,7 @@ def test_decay_pmg_xml_mpi():
     assert run_decay(2, nproc=2, pre='mg', pmg=True, lits_range=MG_LITS_RANGE_MPI)
 
 
+@pytest.mark.coverage
 def test_decay_after_eigs():
     '''Time advance of a conducting cube eigenmode after an eigenvalue solve with a different shift, checking
     that the time advance operators are restored.'''
@@ -141,18 +148,21 @@ def test_decay_after_eigs():
 
 
 @pytest.mark.parametrize("order", (2, 3))
+@pytest.mark.coverage
 def test_eigs(order):
     '''Slowest decay times of a conducting cube from the eigenvalue solver, compared with the analytic diffusion
     eigenvalues including their degeneracy.'''
     assert run_eigs(order)
 
 
+@pytest.mark.coverage
 @pytest.mark.mpi
 def test_eigs_mpi():
     '''Slowest decay times of a conducting cube on two MPI processes, driven from Python.'''
     assert run_eigs(2, nproc=2)
 
 
+@pytest.mark.coverage
 def test_eigs_shift():
     '''Slowest decay times of a conducting cube using a shift for the eigenvalue solve that differs from the
     time step (requires rebuilding the LHS matrices and updating the preconditioner).'''

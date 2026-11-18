@@ -108,6 +108,10 @@ PRE_XML = {
 def run_driver(config, nproc=1, timeout=180):
     '''Run the Python ThickCurr driver (`thickcurr_driver.py`) with the given configuration, using MPI if
     `nproc > 1`, and return the results written by the driver (None on failure)'''
+    # Coverage configuration path is relative to the root test directory, make absolute for the driver process
+    cov_config = os.environ.get('COVERAGE_PROCESS_START', None)
+    if (cov_config is not None) and (not os.path.isabs(cov_config)):
+        os.environ['COVERAGE_PROCESS_START'] = os.path.abspath(cov_config)
     os.chdir(test_dir)
     for filename in ('thickcurr_results.json', 'thickcurr.hist', 'floops.hist'):
         if os.path.exists(filename):
