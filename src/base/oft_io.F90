@@ -1132,12 +1132,12 @@ offset=rst_info%offset
 data=>rst_info%data
 !---Initialize HDF5 interface
 call h5open_f(error)
-!---Wait up to 30 seconds for file to be available
-DO i=1,11
+!---Wait up to OFT_HDF5_WAIT seconds for file to be available
+DO i=1,OFT_HDF5_WAIT
   IF(oft_file_exist(filename))EXIT
   error=oft_sleep(1)
 END DO
-IF(i>10)CALL oft_abort("Exceeded timeout waiting for output file", "hdf5_write_rst", __FILE__)
+IF(i>OFT_HDF5_WAIT)CALL oft_abort("Exceeded timeout waiting for output file", "hdf5_write_rst", __FILE__)
 !---Save to file
 if(rst_info%full)then
   IF(oft_env%rank==0)THEN
@@ -1585,12 +1585,12 @@ CALL oft_mpi_barrier(error)
 !---Set access flag
 access_flag=H5F_ACC_RDONLY_F
 if(oft_debug_print(2))write(*,'(2X,2A)')'Reading field from restart file: ',TRIM(filename)
-!---Wait up to 30 seconds for file to be available
-DO i=1,31
+!---Wait up to OFT_HDF5_WAIT seconds for file to be available
+DO i=1,OFT_HDF5_WAIT
   IF(oft_file_exist(filename))EXIT
   error=oft_sleep(1)
 END DO
-IF(i>30)CALL oft_abort("Exceeded timeout waiting for output file", "hdf5_read_rst", __FILE__)
+IF(i>OFT_HDF5_WAIT)CALL oft_abort("Exceeded timeout waiting for output file", "hdf5_read_rst", __FILE__)
 !---Read data
 if(rst_info%full)then
   !---Initialize HDF5 and open vector dump file

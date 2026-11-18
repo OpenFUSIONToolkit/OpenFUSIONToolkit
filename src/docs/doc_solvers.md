@@ -45,7 +45,25 @@ This method is supported through both the native and PETSc backends through
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `package`  | Solver package to use {super, superd, mumps} | str | No |
+| `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack}, PETSc {petsc, super, superd, umfpack, mumps} | str | No |
+
+Native STRUMPACK options, in a `<strumpack>` group (values of `-1` or omitted use the STRUMPACK defaults)
+
+| Group          | Description | Type      | List |
+|----------------|-------------|-----------|------|
+| `comp_type`    | Compression of frontal matrices {none, hss, blr} (default: none) | str | No |
+| `comp_rel_tol` | Relative compression tolerance | float | No |
+| `comp_abs_tol` | Absolute compression tolerance | float | No |
+| `leaf_size`    | Size of leaf/tile blocks for compression | int | No |
+| `max_rank`     | Maximum rank of compressed blocks | int | No |
+| `min_sep_size` | Minimum separator size for compression | int | No |
+| `verbose`      | Print STRUMPACK information | bool | No |
+
+\note With compression the STRUMPACK factorization is approximate, which is intended for use as a
+preconditioner (eg. Block Jacobi sub-solver). STRUMPACK's iterative refinement is not supported. A
+refactorization with an unchanged non-zero pattern reuses the reordering and MC64 matching/scaling from the
+last full factorization; STRUMPACK only pivots within each front, so a full factorization may be needed after
+large changes in matrix values.
 
 PETSc only options
 

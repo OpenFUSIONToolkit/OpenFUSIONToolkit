@@ -214,6 +214,7 @@ end type oft_jblock_precond
 !------------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_ml_precond
   logical :: symmetric = .FALSE. !< Symmetric flag
+  integer(i4) :: report_err = 0 !< Report errors after each cycle (0: no, 1: total, 2: block-wise)
   integer(i4) :: level !< Current level in ML context
   integer(i4) :: minlevel !< Lowest level
   real(r8) :: timings(4) = 0.d0 !< Timing for each stage
@@ -1809,11 +1810,15 @@ IF(.NOT.self%initialized)THEN
   CALL solver_setup(self)
 END IF
 call self%r%add(0.d0,1.d0,g)
+!---Report input residual
+IF(self%report_err>0)CALL print_residual('In:')
 !---Apply down smoother
 if(associated(self%smooth_down))then
   CALL mytimer%tick
   call self%smooth_down%apply(u,g)
   self%timings(1)=self%timings(1)+mytimer%tock()
+  !---Report down residual
+  IF(self%report_err>0)CALL print_residual('Down:')
 end if
 if(associated(self%base_solve))then
   CALL mytimer%tick
@@ -1839,14 +1844,57 @@ end if
 call g%add(0.d0,1.d0,self%r)
 !---Apply up smoother
 if(associated(self%smooth_up))then
+  !---Report up residual
+  IF((self%report_err>0).AND.associated(self%base_solve))THEN
+    CALL self%smooth_up%A%apply(u,g)
+    CALL g%add(1.d0,-1.d0,self%r)
+    CALL print_residual('Up:')
+    call g%add(0.d0,1.d0,self%r)
+  END IF
+  !
   CALL mytimer%tick
-  self%smooth_up%full_residual=.FALSE.
+  IF(self%report_err==0)self%smooth_up%full_residual=.FALSE.
   call self%smooth_up%apply(u,g)
   self%smooth_up%full_residual=.TRUE.
   self%timings(1)=self%timings(1)+mytimer%tock()
 end if
+!---Report down residual
+IF(self%report_err>0)CALL print_residual('Out:')
 !---Complete
 DEBUG_STACK_POP
+contains
+subroutine print_residual(stage)
+character(LEN=*), intent(in) :: stage
+class(oft_vector), pointer :: gtmp
+INTEGER(i4) :: i
+REAL(r8) :: uu,res
+real(r8), pointer :: vals(:)
+IF(oft_env%head_proc)WRITE(*,'(2X,A,A,I4)')'Residual ',stage,self%level
+IF(self%report_err==1)THEN
+  res = SQRT(g%dot(g))
+  uu = SQRT(u%dot(u))
+  IF(oft_env%head_proc)WRITE(*,'(4X,2ES14.6)')uu,res
+ELSE IF(self%report_err==2)THEN
+  CALL u%new(gtmp)
+  ALLOCATE(vals(g%n))
+  DO i=1,g%nblocks
+    CALL gtmp%set(0.d0)
+    vals=0.d0
+    CALL u%get_local(vals,i)
+    CALL gtmp%restore_local(vals,i)
+    uu = SQRT(gtmp%dot(gtmp))
+    CALL gtmp%set(0.d0)
+    vals=0.d0
+    CALL g%get_local(vals,i)
+    CALL gtmp%restore_local(vals,i)
+    res = SQRT(gtmp%dot(gtmp))
+    IF(oft_env%head_proc)WRITE(*,'(4X,2ES14.6)')uu,res
+  END DO
+  CALL gtmp%delete()
+  DEALLOCATE(gtmp,vals)
+END IF
+IF(oft_env%head_proc)WRITE(*,*)
+end subroutine print_residual
 end subroutine ml_precond_apply
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators

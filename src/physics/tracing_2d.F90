@@ -36,6 +36,7 @@ type, abstract :: tracer
   real(r8) :: y(2) = 0.d0 !< Position in real coordinates (eg. X,Y)
   real(r8) :: dy(2) = 0.d0 !< Change in position in real coordinates (eg. X,Y)
   real(r8) :: f(3) = 0.d0 !< Logical position in cell
+  real(r8) :: gop(3,3) = 0.d0 !< Gradients of the logical coordinates at the last field evaluation
   real(r8) :: raxis = 0.d0 !< Radial location of axis for inverse coordinates
   real(r8) :: zaxis = 0.d0 !< Vertical location of axis for inverse coordinates
   real(r8), pointer :: v(:) => NULL() !< Current ODE solution vector
@@ -85,6 +86,24 @@ contains
   procedure :: delete => trace_delete_lsode
 end type tracer_lsode
 !---------------------------------------------------------------------------------
+!> Tracer implementation using an embedded explicit Runge-Kutta method (Bogacki-Shampine 3(2))
+!!
+!! The field interpolated from a finite element representation is only piecewise smooth,
+!! with jumps in the field or its derivatives at cell boundaries. Steps are therefore
+!! limited to end just past the (linearly extrapolated) exit point of the current cell, so
+!! that each step integrates a smooth right-hand side. This one-step method keeps no
+!! history across cell boundaries, so its error estimate remains reliable and the step
+!! size is set by the tolerance instead of by repeated crossings.
+!---------------------------------------------------------------------------------
+type, extends(tracer) :: tracer_rk
+  real(r8) :: h = 0.d0 !< Step size for the next step
+  real(r8), pointer, dimension(:,:) :: k => NULL() !< Stage derivatives [neq,4]
+contains
+  procedure :: setup => trace_setup_rk
+  procedure :: step => trace_advance_rk
+  procedure :: delete => trace_delete_rk
+end type tracer_rk
+!---------------------------------------------------------------------------------
 !> Tracer implementation using a simple forward Euler method as the ODE solver
 !---------------------------------------------------------------------------------
 type, extends(tracer) :: tracer_euler
@@ -104,13 +123,24 @@ type, abstract, extends(bfem_interp) :: cylinv_interp
 end type cylinv_interp
 class(tracer), pointer :: active_tracer => NULL() !< Current tracer for thread (OpenMP)
 !$omp threadprivate(active_tracer)
+!---Bogacki-Shampine 3(2) Runge-Kutta method (FSAL), shared with the 3D tracer in @ref tracing
+REAL(r8), PARAMETER :: bs32_c2 = 0.5d0 !< Time of stage 2, also its coefficient \f$ a_{21} \f$
+REAL(r8), PARAMETER :: bs32_c3 = 0.75d0 !< Time of stage 3, also its coefficient \f$ a_{32} \f$ (\f$ a_{31}=0 \f$)
+REAL(r8), PARAMETER :: bs32_b(3) = (/2.d0/9.d0, 1.d0/3.d0, 4.d0/9.d0/) !< Weights of stages 1-3 for the 3rd order solution
+REAL(r8), PARAMETER :: bs32_e(4) = (/-5.d0/72.d0, 1.d0/12.d0, 1.d0/9.d0, -1.d0/8.d0/) !< Weights of stages 1-4 for
+!! the error estimate (difference between the 3rd and 2nd order solutions)
 ! integer(4), parameter, private :: nlocpts = 2e4
 contains
 !------------------------------------------------------------------------------
 !> Allocate tracer for current thread
+!!
+!! Available types:
+!! - `1`: Adams method using LSODE
+!! - `2`: Forward Euler
+!! - `3`: Bogacki-Shampine 3(2) Runge-Kutta method with steps limited at cell boundaries
 !------------------------------------------------------------------------------
 subroutine set_tracer(type)
-integer(i4), intent(in) :: type !< Desired type (1-> LSODE)
+integer(i4), intent(in) :: type !< Desired type (see above)
 !$omp parallel
 if(associated(active_tracer))then
   call active_tracer%delete
@@ -122,6 +152,9 @@ select case(type)
     active_tracer%status=0
   case(2)
     allocate(tracer_euler::active_tracer)
+    active_tracer%status=0
+  case(3)
+    allocate(tracer_rk::active_tracer)
     active_tracer%status=0
   case default
     call oft_abort('Invalid tracer type.','set_tracer',__FILE__)
@@ -137,7 +170,7 @@ real(8), intent(in) :: pt(2) !< Starting point [2]
 real(8), optional, intent(inout) :: ptout(:,:) !< Points on surface [3,:]
 real(8), optional, intent(inout) :: vout(:,:) !< Leading ODE RHS components at the last evaluation of each step [:,maxsteps]
 real(8) :: z,tp,yp(2)
-integer(4) :: ncross
+integer(4) :: ncross,nstall
 !---
 IF(present(ptout))THEN
   ptout(2:3,1)=pt
@@ -145,6 +178,7 @@ IF(present(ptout))THEN
 END IF
 !---
 ncross=0
+nstall=0
 active_tracer%mesh=>mesh
 call active_tracer%setup(pt)
 z=pt(2)
@@ -167,9 +201,16 @@ do while(active_tracer%nsteps<active_tracer%maxsteps)
         active_tracer%status=1
         exit
     end if
+    !---Stop if the trace stalls; single short steps are allowed, as steps limited at cell
+    !---boundaries can be very short where the trace passes close to a vertex
     if(active_tracer%t-tp<active_tracer%tol*1.d-4)then
+      nstall=nstall+1
+      if(nstall>=10)then
         active_tracer%status=-5
         exit
+      end if
+    else
+      nstall=0
     end if
 end do
 IF(active_tracer%nsteps>=active_tracer%maxsteps)active_tracer%status=-1
@@ -209,6 +250,7 @@ if(active_tracer%cell==0)return
 fmin=minval(active_tracer%f)
 fmax=maxval(active_tracer%f)
 call active_tracer%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+active_tracer%gop=goptmp
 call active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,ydot)
 active_tracer%dy=ydot(1:2)
 active_tracer%dv=ydot
@@ -241,6 +283,7 @@ fmin=minval(active_tracer%f)
 fmax=maxval(active_tracer%f)
 !---
 call active_tracer%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+active_tracer%gop=goptmp
 !---
 SELECT TYPE(this=>active_tracer%B)
 CLASS IS(cylinv_interp)
@@ -403,4 +446,278 @@ IF(ASSOCIATED(self%v))deallocate(self%v)
 IF(ASSOCIATED(self%dv))deallocate(self%dv)
 IF(ASSOCIATED(self%dv_last))deallocate(self%dv_last)
 end subroutine trace_delete_euler
+!------------------------------------------------------------------------------
+!> Step size factor for an embedded 3(2) Runge-Kutta method
+!!
+!! Standard controller \f$ 0.9 \, err^{-1/3} \f$, limited to [0.2,`facmax`]. Used both to
+!! grow accepted steps and to shrink rejected ones (`facmax=1`).
+!------------------------------------------------------------------------------
+PURE FUNCTION rk_step_factor(err,facmax) RESULT(fac)
+REAL(r8), INTENT(in) :: err !< Scaled error estimate of the step
+REAL(r8), INTENT(in) :: facmax !< Maximum factor
+REAL(r8) :: fac !< Factor for the next step size
+IF(err<1.d-10)THEN
+  fac=facmax
+ELSE
+  fac=MIN(facmax,MAX(0.2d0,0.9d0*err**(-1.d0/3.d0)))
+END IF
+END FUNCTION rk_step_factor
+!------------------------------------------------------------------------------
+!> Size of the explicit Euler step used to probe the solution for the initial step size
+!!
+!! First part of the initial step size selection in Hairer, Norsett and Wanner (Solving
+!! ODEs I, Sec. II.4), see \ref tracing_2d::rk_initial_step "rk_initial_step".
+!------------------------------------------------------------------------------
+PURE FUNCTION rk_probe_step(d0,d1) RESULT(h0)
+REAL(r8), INTENT(in) :: d0 !< Scaled RMS norm of the solution
+REAL(r8), INTENT(in) :: d1 !< Scaled RMS norm of the right-hand side
+REAL(r8) :: h0 !< Probe step size
+IF((d0<1.d-5).OR.(d1<1.d-5))THEN
+  h0=1.d-6
+ELSE
+  h0=1.d-2*d0/d1
+END IF
+END FUNCTION rk_probe_step
+!------------------------------------------------------------------------------
+!> Initial step size of a 3rd order method from an explicit Euler probe step
+!!
+!! Second part of the initial step size selection in Hairer, Norsett and Wanner (Solving
+!! ODEs I, Sec. II.4), using the estimated second derivative of the solution.
+!------------------------------------------------------------------------------
+PURE FUNCTION rk_initial_step(h0,d1,d2) RESULT(h)
+REAL(r8), INTENT(in) :: h0 !< Probe step size (from \ref tracing_2d::rk_probe_step "rk_probe_step")
+REAL(r8), INTENT(in) :: d1 !< Scaled RMS norm of the right-hand side
+REAL(r8), INTENT(in) :: d2 !< Scaled RMS norm of the change in the right-hand side over the probe step, divided by `h0`
+REAL(r8) :: h !< Initial step size
+IF(MAX(d1,d2)<=1.d-15)THEN
+  h=MAX(1.d-6,h0*1.d-3)
+ELSE
+  h=(1.d-2/MAX(d1,d2))**(1.d0/4.d0)
+END IF
+h=MIN(1.d2*h0,h)
+END FUNCTION rk_initial_step
+!------------------------------------------------------------------------------
+!> Evaluate the tracing ODE right-hand side for the RK tracer
+!!
+!! Also updates the tracer's current cell, logical position and field.
+!!
+!! @note The evaluation routines work on the thread's `active_tracer`, so `self` must be
+!! that tracer.
+!------------------------------------------------------------------------------
+SUBROUTINE trace_rk_eval(self,t,y,ydot)
+CLASS(tracer_rk), TARGET, INTENT(inout) :: self !< RK tracer object
+REAL(r8), INTENT(in) :: t !< Time (or poloidal angle for inverse coordinates)
+REAL(r8), INTENT(in) :: y(:) !< State vector [neq]
+REAL(r8), INTENT(out) :: ydot(:) !< ODE right-hand side [neq]
+REAL(r8) :: ytmp(self%neq)
+IF(.NOT.ASSOCIATED(active_tracer,self))CALL oft_abort('Tracer is not the active tracer for this thread', &
+  'trace_rk_eval',__FILE__)
+ytmp=y ! Copy as the evaluation routines overwrite `self%v`
+IF(self%inv)THEN
+  CALL tracing_eval_Binv(self%neq,t,ytmp,ydot)
+ELSE
+  CALL tracing_eval_B(self%neq,t,ytmp,ydot)
+END IF
+END SUBROUTINE trace_rk_eval
+!------------------------------------------------------------------------------
+!> Initialize tracer using the Bogacki-Shampine 3(2) Runge-Kutta method
+!------------------------------------------------------------------------------
+SUBROUTINE trace_setup_rk(self,y,cell)
+CLASS(tracer_rk), INTENT(inout) :: self !< RK tracer object
+REAL(8), INTENT(in) :: y(2) !< Initial position
+INTEGER(4), OPTIONAL, INTENT(in) :: cell !< Guess for starting cell
+INTEGER(i4) :: cell0
+REAL(r8) :: pttmp(3),d0,d1,d2,h0,f0(3),gop0(3,3),y0(2),dy0(2)
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: v0,dv0,sc
+IF(self%neq<=0)CALL oft_abort('Invalid number of equations.','trace_setup_rk',__FILE__)
+!---
+IF(.NOT.self%initialized)THEN
+  ALLOCATE(self%v(self%neq),self%dv(self%neq),self%k(self%neq,4))
+END IF
+self%v=0.d0
+self%dv=0.d0
+self%k=0.d0
+!---
+self%t=0.d0
+self%tmax=2.d0*pi
+self%nsteps=0
+!---Find starting point
+self%cell=0
+IF(PRESENT(cell))self%cell=cell
+IF(self%inv)THEN
+  self%v(1)=y(1)-self%raxis
+  self%v(2)=0.d0
+ELSE
+  self%v(1:2)=y
+END IF
+!---
+self%y=y
+self%dy=0.d0
+pttmp=[self%y(1),self%y(2),0.d0]
+CALL bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
+self%initialized=.TRUE.
+self%status=0
+!---Evaluate the first stage at the starting point
+ALLOCATE(v0(self%neq),dv0(self%neq),sc(self%neq))
+v0=self%v
+CALL trace_rk_eval(self,self%t,v0,dv0)
+cell0=self%cell; f0=self%f; gop0=self%gop; y0=self%y; dy0=self%dy
+!---Initial step size (Hairer, Norsett & Wanner, Solving ODEs I, Sec. II.4)
+sc=self%tol*(1.d0+ABS(v0))
+d0=SQRT(SUM((v0/sc)**2)/self%neq)
+d1=SQRT(SUM((dv0/sc)**2)/self%neq)
+h0=MIN(rk_probe_step(d0,d1),self%tmax)
+CALL trace_rk_eval(self,self%t+h0,v0+h0*dv0,self%k(:,2))
+IF(self%cell==0)THEN ! Probe left the mesh, no estimate of the second derivative
+  d2=0.d0
+ELSE
+  d2=SQRT(SUM(((self%k(:,2)-dv0)/sc)**2)/self%neq)/h0
+END IF
+self%h=MIN(rk_initial_step(h0,d1,d2),self%tmax)
+!---Restore the location and field at the starting point (the probe may have left the cell or mesh)
+self%cell=cell0; self%f=f0; self%gop=gop0; self%y=y0; self%dy=dy0
+self%v=v0; self%dv=dv0
+DEALLOCATE(v0,dv0,sc)
+END SUBROUTINE trace_setup_rk
+!------------------------------------------------------------------------------
+!> Advance the tracer by one accepted step of the Bogacki-Shampine 3(2) method
+!!
+!! The step is limited to end just past the point where a straight-line extrapolation
+!! of the current direction leaves the current cell. A step starting on a face it is crossing
+!! (within the tolerance of the cell search) starts in the neighboring cell instead. A step that is rejected by the
+!! error test, or whose stages leave the mesh, is retried with a smaller step size.
+!! If no acceptable step can be found the tracer is marked as having left the mesh
+!! (`cell=0`, `status=-4`).
+!------------------------------------------------------------------------------
+SUBROUTINE trace_advance_rk(self)
+CLASS(tracer_rk), INTENT(inout) :: self !< RK tracer object
+INTEGER(i4) :: i,cell0,nfail
+REAL(r8) :: h,err,fac,facmax,texit,dl,dx(2),f0(3),gop0(3,3),y0(2)
+REAL(r8) :: v0(self%neq),dv0(self%neq),ynew(self%neq),ytmp(self%neq),sc(self%neq)
+LOGICAL :: last,clipped,outside
+REAL(r8), PARAMETER :: clip_rel=1.d-6 !< Overshoot past the estimated cell exit, relative to the distance
+REAL(r8) :: clip_min
+!---Save state at the start of the step
+cell0=self%cell; f0=self%f; gop0=self%gop; y0=self%y
+v0=self%v; dv0=self%dv
+!---A point on (or just past, within the tolerance of the cell search) a face it is crossing starts
+!---the step in the neighboring cell, so that the step is limited by the faces of that cell
+IF(cell0>0)THEN
+  IF(self%inv)THEN
+    dx(1)=dv0(1)*COS(self%t)-v0(1)*SIN(self%t)
+    dx(2)=dv0(1)*SIN(self%t)+v0(1)*COS(self%t)
+  ELSE
+    dx=dv0(1:2)
+  END IF
+  DO i=1,3
+    IF(f0(i)>0.d0)CYCLE
+    IF(self%mesh%lcc(i,cell0)==0)CYCLE
+    IF(gop0(1,i)*dx(1)+gop0(2,i)*dx(2)>=0.d0)CYCLE
+    self%cell=self%mesh%lcc(i,cell0)
+    CALL trace_rk_eval(self,self%t,v0,ytmp)
+    IF(self%cell==0)THEN ! Not found, continue from the current cell
+      self%cell=cell0; self%f=f0; self%gop=gop0; self%y=y0
+      self%v=v0; self%dv=dv0
+    ELSE
+      cell0=self%cell; f0=self%f; gop0=self%gop; y0=self%y
+      dv0=ytmp
+    END IF
+    EXIT
+  END DO
+END IF
+facmax=5.d0
+nfail=0
+clip_min=MAX(1.d-6,MIN(1.d-3,self%tol)) ! Overshoot past the estimated cell exit, relative to the nominal step
+DO
+  h=self%h
+  last=.FALSE.
+  clipped=.FALSE.
+  !---End the step just past the exit of the current cell (linear estimate)
+  IF(cell0>0)THEN
+    IF(self%inv)THEN
+      dx(1)=dv0(1)*COS(self%t)-v0(1)*SIN(self%t)
+      dx(2)=dv0(1)*SIN(self%t)+v0(1)*COS(self%t)
+    ELSE
+      dx=dv0(1:2)
+    END IF
+    texit=HUGE(1.d0)
+    DO i=1,3
+      ! Faces the point is already on (or just past) and not crossing into a neighbor (see above)
+      ! do not limit the step
+      IF(f0(i)<=0.d0)CYCLE
+      dl=gop0(1,i)*dx(1)+gop0(2,i)*dx(2)
+      IF(dl<0.d0)texit=MIN(texit,-f0(i)/dl)
+    END DO
+    texit=MAX(texit,0.d0)*(1.d0+clip_rel)+clip_min*h
+    IF(texit<h)THEN
+      h=texit
+      clipped=.TRUE.
+    END IF
+  END IF
+  IF(self%inv.AND.(self%t+h>=self%tmax))THEN ! Do not pass one full poloidal transit
+    h=self%tmax-self%t
+    last=.TRUE.
+  END IF
+  !---Stages (first same as last)
+  self%k(:,1)=dv0
+  CALL trace_rk_eval(self,self%t+bs32_c2*h,v0+(bs32_c2*h)*self%k(:,1),self%k(:,2))
+  outside=(self%cell==0)
+  IF(.NOT.outside)THEN
+    CALL trace_rk_eval(self,self%t+bs32_c3*h,v0+(bs32_c3*h)*self%k(:,2),self%k(:,3))
+    outside=(self%cell==0)
+  END IF
+  IF(.NOT.outside)THEN
+    ynew=v0+h*(bs32_b(1)*self%k(:,1)+bs32_b(2)*self%k(:,2)+bs32_b(3)*self%k(:,3))
+    CALL trace_rk_eval(self,self%t+h,ynew,self%k(:,4))
+    outside=(self%cell==0)
+  END IF
+  !---Error test
+  IF(outside)THEN
+    err=1.d10
+  ELSE
+    ytmp=h*(bs32_e(1)*self%k(:,1)+bs32_e(2)*self%k(:,2)+bs32_e(3)*self%k(:,3)+bs32_e(4)*self%k(:,4))
+    sc=self%tol*(1.d0+MAX(ABS(v0),ABS(ynew)))
+    err=SQRT(SUM((ytmp/sc)**2)/self%neq)
+  END IF
+  IF(err<=1.d0)THEN
+    self%v=ynew
+    self%dv=self%k(:,4)
+    IF(last)THEN
+      self%t=self%tmax
+    ELSE
+      self%t=self%t+h
+    END IF
+    fac=rk_step_factor(err,facmax)
+    IF(clipped.OR.last)THEN ! Truncated steps should not reduce the nominal step size
+      self%h=MAX(self%h,h*fac)
+    ELSE
+      self%h=h*fac
+    END IF
+    EXIT
+  END IF
+  !---Reject step and restore state at the start of the step
+  nfail=nfail+1
+  self%h=h*rk_step_factor(err,1.d0)
+  facmax=1.d0
+  self%cell=cell0; self%f=f0; self%gop=gop0; self%y=y0
+  self%v=v0; self%dv=dv0
+  IF((self%t+self%h==self%t).OR.(nfail>50))THEN
+    self%cell=0
+    self%status=-4
+    RETURN
+  END IF
+END DO
+self%nsteps=self%nsteps+1
+END SUBROUTINE trace_advance_rk
+!------------------------------------------------------------------------------
+!> Destroy RK tracer and deallocate internal storage
+!------------------------------------------------------------------------------
+SUBROUTINE trace_delete_rk(self)
+CLASS(tracer_rk), INTENT(inout) :: self !< RK tracer object
+self%nsteps=0
+self%initialized=.FALSE.
+IF(ASSOCIATED(self%v))DEALLOCATE(self%v)
+IF(ASSOCIATED(self%dv))DEALLOCATE(self%dv)
+IF(ASSOCIATED(self%k))DEALLOCATE(self%k)
+END SUBROUTINE trace_delete_rk
 end module tracing_2d
