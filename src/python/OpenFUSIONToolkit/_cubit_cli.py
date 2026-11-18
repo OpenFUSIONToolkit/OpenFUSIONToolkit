@@ -239,7 +239,6 @@ def convert_cubit_to_native(in_file, out_file=None, periodic_nodeset=None, ignor
     @param periodic_nodeset Index of periodic nodeset (optional)
     @param ignore_attr Ignore block attributes (optional)
     '''
-    out_file = out_file
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + ".h5"
 
