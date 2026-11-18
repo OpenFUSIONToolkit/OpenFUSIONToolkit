@@ -25,7 +25,7 @@ src/
 ├── base/           # Core runtime (I/O, XML, sorting, stitching)
 ├── grid/           # Mesh types, readers (Cubit, Gmsh, native, T3D), multigrid
 ├── fem/            # Finite element basis functions and operators (H1, Hcurl, Lagrange)
-├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK)
+├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK, STRUMPACK)
 ├── physics/        # Physics modules (Grad-Shafranov, thin-wall, Taylor, xMHD, tracing)
 ├── bin/            # Standalone Fortran executables
 ├── python/
@@ -105,7 +105,7 @@ Python code is linted with **ruff**. Configuration is in `src/python/pyproject.t
 cd src/python && ruff check
 ```
 
-Rules: Pyflakes (`F`) + pycodestyle (`E`) with ignores for `E722`, `F403`, `F405`. Target: Python 3.7.
+Rules: Pyflakes (`F`) + pycodestyle (`E`) with ignores for `E722`, `F403`, `F405`, `E741`. Target: Python 3.7.
 
 ### Fortran stack checking
 
@@ -115,20 +115,21 @@ A custom lint checks Fortran debug stack entries:
 cd src && python utilities/generate_stack.py -l
 ```
 
-This validates that all `SUBROUTINE`/`FUNCTION` entries have matching debug stack annotations. Run from the `src/` directory.
+This checks that no generated debug stack markers (`#define DEBUG_STACK_*` / `#undef DEBUG_STACK_*` lines added by `generate_stack.py` for debug builds) have been committed to the Fortran sources, and exits non-zero if any are found. Run from the `src/` directory.
 
 ## CI Workflows (utilizing GitHub actions)
 
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
-| **CI Build** | `ci_build.yaml` | push to main, PRs | Full matrix build (GCC, Intel, macOS) × (OpenMP, MPICH, OpenMPI) |
+| **CI Build** | `ci_build.yaml` | push to main, ci_debug; PRs — only when `src/**` (excluding `src/docs/**`) or the workflow file changes | Full matrix build (GCC, Intel, macOS) x (OpenMP, MPICH, OpenMPI) |
 | **Lint** | `lint.yaml` | push to main, PRs | ruff check + Fortran stack check |
-| **Coverage** | `cov_build.yaml` | push to main | Build with `--coverage`, upload to Codecov |
-| **CD Build and Deployment** | `cd_combined.yaml` | push to main, pypi_release, PRs | Release and nightly package/PyPI builds (deploy from `pypi_release`) |
-| **Container CD Build and Deployment** | `container_cd.yaml` | push to main, container_release, PRs | Container release builds (deploy from `container_release`) |
-| **GitHub Pages Build** | `website.yml` | push to main, gh-pages, PRs | Documentation/website build (deploy from `gh-pages`) |
-| **Copilot Agent Setup** | `copilot-setup-steps.yml` | manual/PR | Copilot agent environment setup |
-| **Copilot Review Setup** | `copilot-code-review.yml` | manual/PR | Copilot code review agent environment setup |
+| **Coverage** | `cov_build.yaml` | push to main, cov_debug; PRs — only when `src/**` (excluding `src/docs/**`) or the codecov/workflow files change | Build with `--coverage`, upload to Codecov |
+| **CD Build and Deployment** | `cd_combined.yaml` | push to main, pypi_release; manual | Release and nightly package/PyPI builds (deploy from `pypi_release`) |
+| **Container CD Build and Deployment** | `container_cd.yaml` | push to container_release; manual | Container release builds (deploy from `container_release`) |
+| **GitHub Pages Build** | `website.yaml` | push to main, gh-pages, PRs | Documentation/website build (deploy from `gh-pages`) |
+| **Cleanup build caches** | `prune_cache.yaml` | PR closed; manual (with PR number) | Delete the GitHub Actions caches created by a PR's branch |
+| **Copilot Agent Setup** | `copilot-setup-steps.yml` | manual; PRs changing the workflow file or `src/utilities/build_libs.py` | Copilot agent environment setup |
+| **Copilot Review Setup** | `copilot-code-review.yml` | manual; PRs changing the workflow file or `src/utilities/build_libs.py` | Copilot code review agent environment setup |
 
 ### Representative build environment
 

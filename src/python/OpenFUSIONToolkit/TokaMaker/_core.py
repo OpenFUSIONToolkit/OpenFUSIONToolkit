@@ -262,6 +262,8 @@ class tokamaker_settings:
         self.maxits = 40
         ## Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
         self.mode = 1
+        ## Field-line tracer for flux surfaces not handled by the contour method (1 -> LSODE, 3 -> Runge-Kutta with steps limited at cell boundaries)
+        self.trace_type = 3
         ## Under-relaxation factor for NL fixed-point iteration
         self.urf = 0.2
         ## Convergence tolerance for NL solver
@@ -293,6 +295,8 @@ class tokamaker_settings:
             raise ValueError("Both `ffp_target_weight` and `pp_target_weight` must be negative (hard constraint) or positive (soft constraint)")
         if (self.ffp_target_weight <= 0.0) and (self.opoint_target_weight > 0.0):
             raise ValueError("If `opoint_target_weight` is positive, both `ffp_target_weight` and `pp_target_weight` must be positive as well (soft constraint)")
+        if self.trace_type not in (1, 3):
+            raise ValueError("`trace_type` must be 1 (LSODE) or 3 (Runge-Kutta)")
         c_struct_instance = tokamaker_settings_cstruct()
         c_struct_instance.pm = self.pm
         c_struct_instance.free_boundary = self.free_boundary
@@ -301,6 +305,7 @@ class tokamaker_settings:
         c_struct_instance.mirror_mode = self.mirror_mode
         c_struct_instance.maxits = self.maxits
         c_struct_instance.mode = self.mode
+        c_struct_instance.trace_type = self.trace_type
         c_struct_instance.urf = self.urf
         c_struct_instance.nl_tol = self.nl_tol
         c_struct_instance.rmin = self.rmin
@@ -435,8 +440,82 @@ class TokaMaker():
   | | (_) |   < (_| | |  | | (_| |   <  __/ |
   |_|\___/|_|\_\__,_|_|  |_|\__,_|_|\_\___|_|
 ''')
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,cond_dict=None,coil_dict=None,order=2,F0=0.0,full_domain=False,split_nlev=2):
+        r'''! Setup full G-S solver (mesh, regions, and finite element space)
+
+        A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
+        When a region is specified the following ordering should apply:
+          - 1: Plasma region
+          - 2: Vacuum/air regions
+          - 3+: Conducting regions and coils
+
+        @note `cond_dict` and `coil_dict` are modified in place: vacuum entries (those with
+        a `vac_id`) are removed from `cond_dict` and a `name` field is added to each entry of
+        `coil_dict`. Pass copies if the originals are needed unchanged.
+
+        @note If setup fails part way (eg. due to an invalid `reg_id`), the object is reset with
+        \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker.reset "reset()" before the exception is
+        re-raised, so this method can be called again directly once the issue is fixed. Any
+        modified `settings` are retained through this reset.
+
+        @param r Mesh point list [np,2]
+        @param lc Mesh cell list [nc,3] (base zero)
+        @param reg Mesh region list [nc] (base one)
+        @param mesh_file Filename containing mesh to load (native format only)
+        @param cond_dict Dictionary specifying conducting regions
+        @param coil_dict Dictionary specifying coil regions
+        @param order Order of FE representation to use
+        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
+        '''
+        # Check before setup so an existing model is not reset below
+        if (self.nregs != -1) or (self.np != -1):
+            raise ValueError('Model already setup, must call "reset" before calling "setup_model" again')
+        try:
+            self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
+            self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+            self._setup_fe(order=order,F0=F0,full_domain=full_domain,split_nlev=split_nlev)
+        except Exception:
+            # Return to a clean state (keeping user settings) so setup can be retried
+            settings = self.settings
+            try:
+                self.reset()
+            except Exception as reset_err:
+                # Do not replace the original error with one from cleanup
+                warn(
+                    "Failed to reset TokaMaker object after setup error, call `reset()` before retrying: {0}".format(reset_err),
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+            self.settings = settings
+            raise
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
+        '''! Setup mesh for static and time-dependent G-S calculations
+
+        @deprecated Use `setup_model()` instead.
+
+        A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
+        When a region is specified the following ordering should apply:
+          - 1: Plasma region
+          - 2: Vacuum/air regions
+          - 3+: Conducting regions and coils
+
+        @param r Mesh point list [np,2]
+        @param lc Mesh cell list [nc,3] (base zero)
+        @param reg Mesh region list [nc] (base one)
+        @param mesh_file Filename containing mesh to load (native format only)
+        '''
+        warn(
+            "`setup_mesh()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
+
+    def _setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
@@ -446,7 +525,7 @@ class TokaMaker():
           - 3+: Conducting regions and coils
 
         @param r Mesh point list [np,2]
-        @param lc Mesh cell list [nc,3] (base one)
+        @param lc Mesh cell list [nc,3] (base zero)
         @param reg Mesh region list [nc] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         '''
@@ -485,11 +564,33 @@ class TokaMaker():
         self.update_settings()
         self.nregs = nregs.value
 
-    def setup_regions(self,cond_dict={},coil_dict={}):
+    def setup_regions(self,cond_dict=None,coil_dict=None):
         '''! Define mesh regions (coils and conductors)
 
+        @deprecated Use `setup_model()` instead.
+
         @param cond_dict Dictionary specifying conducting regions
+        @param coil_dict Dictionary specifying coil regions
         '''
+        warn(
+            "`setup_regions()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+
+    def _setup_regions(self,cond_dict=None,coil_dict=None):
+        r'''! Define mesh regions (coils and conductors)
+
+        @note `cond_dict` and `coil_dict` are modified in place (see \ref setup_model "setup_model()")
+
+        @param cond_dict Dictionary specifying conducting regions
+        @param coil_dict Dictionary specifying coil regions
+        '''
+        if cond_dict is None:
+            cond_dict = {}
+        if coil_dict is None:
+            coil_dict = {}
         xpoint_mask = numpy.zeros((self.nregs,),dtype=numpy.int32)
         xpoint_mask[0] = 1
         eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
@@ -551,8 +652,27 @@ class TokaMaker():
     def setup(self,order=2,F0=0.0,full_domain=False,split_nlev=2):
         r'''! Setup G-S solver
 
+        @deprecated Use `setup_model()` instead.
+
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
+        '''
+        warn(
+            "`setup()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._setup_fe(order=order,F0=F0,full_domain=full_domain,split_nlev=split_nlev)
+
+    def _setup_fe(self,order=2,F0=0.0,full_domain=False,split_nlev=2):
+        r'''! Setup G-S solver
+
+        @param order Order of FE representation to use
+        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
         @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
         \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
         '''
@@ -1943,7 +2063,7 @@ class TokaMaker():
         '''
         if not plot_tessellated:
             if not self._mesh_ptr:
-                raise ValueError('`plot_mesh()` can only be called after `setup_mesh()`')
+                raise ValueError('`plot_mesh()` can only be called after `setup_model()`')
             # Get "raw" mesh
             ndim_c = c_int()
             np_c = c_int()
@@ -1963,7 +2083,7 @@ class TokaMaker():
             reg_plot = numpy.ctypeslib.as_array(reg_loc,shape=(nc_c.value,))
         else:
             if self.r is None:
-                raise ValueError('`plot_mesh(plot_tessellated=True)` can only be called after `setup()`')
+                raise ValueError('`plot_mesh(plot_tessellated=True)` can only be called after `setup_model()`')
             rz_plot = self.r
             lc_plot = self.lc
             reg_plot = self.reg
@@ -2456,6 +2576,8 @@ class TokaMaker():
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
         '''! Setup the time-dependent G-S solver
 
+        @note Requires at least one conducting region (finite `eta`) or Vcoil (see @ref set_vcoils), otherwise an exception is raised
+
         @param dt Starting time step
         @param lin_tol Tolerance for linear solver
         @param nl_tol Tolerance for non-linear solver
@@ -2546,7 +2668,7 @@ class TokaMaker():
           below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``jphi_saw``
         @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule, bs_interp See ``set_boot_ops()``
 
-        @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
+        @result Dictionary with 1-D numpy array values (A/m^2 unless noted). All current densities, inputs
           included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
@@ -2555,7 +2677,7 @@ class TokaMaker():
           - ``'jphi_bs_raw'`` Field-aligned bootstrap current density from the Redl PoP 2021 formula,
             \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle\f$ [A/m^2]
           - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) current density,
-            \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
+            \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m^2]
           - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed [A/m^2]
           - ``'jphi_bs'`` ``'jphi_bs_raw'``, (optionally) edge-isolated, scaled by ``scale_jbs`` and (optionally) tapered [A/m^2]
           - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not isolated or scaled by ``scale_jbs`` [A/m^2]
@@ -2613,7 +2735,7 @@ class TokaMaker():
         for _prof, _name in ((te_prof, 'te_prof'), (ti_prof, 'ti_prof')):
             if numpy.max(_prof['y']) > 500.0:
                 warn(
-                    f"{_name}: maximum value ({numpy.max(_prof['y']):.1f}) exceeds 500 — "
+                    f"{_name}: maximum value ({numpy.max(_prof['y']):.1f}) exceeds 500 -- "
                     "assuming input is in eV and converting to keV.",
                     UserWarning, stacklevel=2,
                 )
@@ -3205,7 +3327,7 @@ class TokaMaker_equilibrium():
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
         @param taper_edge_jphi Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
-        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
+        @param taper_edge_shape Taper shape: 1=cos^2/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off. (Internal default: 0)
         @param saw_dq Reset regions end where the base q crosses saw_q_s + saw_dq. (Internal default: 0.03)
         @param saw_tol Threshold on relative change in jphi_saw to freeze it. (Internal default: 1e-4)
@@ -3249,9 +3371,9 @@ class TokaMaker_equilibrium():
 
         @result Dictionary of 1-D numpy arrays, keys `_BOOT_PROF_NAMES` (those available), or `None`
           if no profiles have been computed. `'psi_n'` is in standard convention (0 = axis, 1 = LCFS).
-          Current densities are TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ in A/m² (see
+          Current densities are TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ in A/m^2 (see
           doc_tokamaker_current_conventions); `'jdotB_bs_raw'` is the Redl
-          \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m²] behind `'jphi_bs_raw'`. `_raw`: from the last
+          \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m^2] behind `'jphi_bs_raw'`. `_raw`: from the last
           bootstrap evaluation, before scaling, isolation and taper; no suffix: as added into `'jphi_total'`.
           It also holds the sawtooth scalars `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'` (zero without a reset).
         '''
@@ -3801,12 +3923,12 @@ class TokaMaker_equilibrium():
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param return_eps If True, append the local inverse aspect ratio array to the return tuple
         @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
-          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
-          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
-          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
-          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
+          - `psi` [npsi] -- normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] -- circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` dict -- flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
+          - `modb_avgs` [2, npsi] -- flux-surface-averaged magnetic field values:
             row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
-          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+          - `eps` [npsi] *(only when `return_eps=True`)* -- local inverse aspect ratio
             \f$\varepsilon = (R_{\max} - R_{\min}) / (R_{\max} + R_{\min})\f$ (Redl 2021 \f$r/R_0\f$, with the
             surface's major radius \f$R_0 = (R_{\max} + R_{\min})/2\f$, as OMFIT and FUSE), where
             \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius of the surface

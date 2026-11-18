@@ -248,9 +248,13 @@ def convert_cubit_to_native(in_file, out_file=None, periodic_nodeset=None, ignor
 
     # Map periodicity information
     periodic_info = None
+    num_nodesets = len(node_sets)
     if periodic_nodeset is not None:
-        if periodic_nodeset > len(node_sets):
-            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(periodic_nodeset, len(node_sets)))
+        # Negative values count back from the last nodeset (-1 = last)
+        if periodic_nodeset < 0:
+            periodic_nodeset = num_nodesets + 1 + periodic_nodeset
+        if (periodic_nodeset < 1) or (periodic_nodeset > num_nodesets):
+            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(periodic_nodeset, num_nodesets))
         periodic_info = node_sets.pop(periodic_nodeset-1)
 
     # Write output file

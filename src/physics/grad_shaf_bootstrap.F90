@@ -16,7 +16,7 @@
 MODULE grad_shaf_bootstrap
 USE oft_base
 USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
- gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend
+ gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend, gs_trace_tol
 USE oft_gs_profiles, ONLY: torflux_set_bounds, linterp_save_interp, linterp_interp_token, cubic_slopes, hermite_seg
 USE oft_gs_contour, ONLY: gs_sauter_contour
 USE oft_lag_basis, ONLY: oft_blag_geval
@@ -40,7 +40,7 @@ TYPE :: boot_ops
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
   LOGICAL :: taper_edge_jphi = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
-  INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+  INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos^2 (Hann), 2=quintic smoothstep, 3=cubic power
   REAL(r8) :: saw_q_s = 0.0_r8 !< Sawtooth reset q on axis (q_s); 0 = off (see @ref saw_reset_1d)
   REAL(r8) :: saw_dq = 0.03_r8 !< Reset regions end where q_base crosses saw_q_s + saw_dq
   REAL(r8) :: saw_tol = 1.0e-4_r8 !< Rel. change in jphi_saw (vs RMS total) below which jphi_saw is frozen
@@ -88,8 +88,8 @@ TYPE, EXTENDS(jphi_flux_func) :: jphi_bs_flux_func
   REAL(r8) :: djbs_min = HUGE(1.0d0)  !< Running minimum djbs seen so far
   INTEGER(i4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
   REAL(r8) :: dalpha_last = HUGE(1.0d0) !< dalpha of the previous update (stall diagnostic)
-  REAL(r8), ALLOCATABLE :: jphi_bs_last(:) !< Scaled, untapered jphi_bs of the last evaluation (mu0*A/m²)
-  REAL(r8), ALLOCATABLE :: jphi_pd_last(:) !< Its pressure-driven part (mu0*A/m²)
+  REAL(r8), ALLOCATABLE :: jphi_bs_last(:) !< Scaled, untapered jphi_bs of the last evaluation (mu0*A/m^2)
+  REAL(r8), ALLOCATABLE :: jphi_pd_last(:) !< Its pressure-driven part (mu0*A/m^2)
   LOGICAL :: freeze_saw = .FALSE. !< Set .TRUE. once jphi_saw converges or stagnates, after jphi_bs is frozen
   INTEGER(i4) :: djsaw_no_improve = 0 !< Consecutive steps with non-decreasing djsaw
   REAL(r8) :: djsaw_min = HUGE(1.0d0) !< Running minimum djsaw
@@ -507,7 +507,7 @@ END FUNCTION h5_name
 !> Update F*F' profile from the inductive jphi coupled with the bootstrap current.
 !!
 !! Called once per NL iteration (the first iteration of a solve runs @ref jphi_update and resets the
-!! convergence state). Current densities are TokaMaker jphi in mu0*A/m² on the nodes `psi_n`
+!! convergence state). Current densities are TokaMaker jphi in mu0*A/m^2 on the nodes `psi_n`
 !! (LCFS and the profile nodes `xpsi`):
 !!   1. Pressure scale.
 !!   2. jphi_fixed, the input sawtooth current jphi_saw_in and the bootstrap current jphi_bs (here
@@ -726,7 +726,7 @@ ELSE
   jphi_saw = jphi_saw_cur
 END IF
 IF(saw_on)self%jphi_saw_last = jphi_saw
-!--- 5. Total current, profiles (A/m²), F*F' knots
+!--- 5. Total current, profiles (A/m^2), F*F' knots
 jphi_total = alpha * jphi_ind + jphi_bs + jphi_fixed + jphi_saw
 IF(saw_on)self%jphi_total_last = jphi_total
 self%boot_profs%psi_n = psi_n
@@ -1563,7 +1563,7 @@ END DO
 CALL psi_int%delete()
 !---Trace the remaining surfaces
 IF(.NOT.ALL(done))THEN
-CALL set_tracer(1)
+CALL set_tracer(device%trace_type)
 !$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1580,10 +1580,11 @@ ALLOCATE(ptout(3,active_tracer%maxsteps+1),vout(3,active_tracer%maxsteps))
 !$omp do schedule(dynamic,1)
 DO j=1,nr
   IF(done(j))CYCLE
+  ! Tighter than for q alone, as the trapped fraction is a quadrature over the steps
   IF(psi_q(j)<0.02d0)THEN
-    active_tracer%tol=1.d-10
+    active_tracer%tol=gs_trace_tol(device,1.d-9,1.d-10)
   ELSE
-    active_tracer%tol=1.d-8
+    active_tracer%tol=gs_trace_tol(device,1.d-7,1.d-8)
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<0.02d0)
   field%f_surf=fpol(j)
@@ -1658,7 +1659,7 @@ END FUNCTION sauter_hf
 !! @param psi        Normalised psi grid, OFT convention (0=LCFS, 1=axis)
 !! @param arr        Array to taper (modified in-place)
 !! @param psi0       psi (OFT convention) where the taper begins; it acts on psi <= psi0
-!! @param shape      Taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+!! @param shape      Taper shape: 1=cos^2 (Hann), 2=quintic smoothstep, 3=cubic power
 !------------------------------------------------------------------------------
 SUBROUTINE apply_edge_taper(n, psi, arr, psi0, shape)
 INTEGER(i4), INTENT(in)    :: n
@@ -1678,7 +1679,7 @@ DO i = 1, n
   t_taper = (psi0 - psi(i)) / span
   t_taper = MIN(MAX(t_taper, 0.0_r8), 1.0_r8)
   SELECT CASE (shape)
-    CASE (1)  ! cos² / Hann
+    CASE (1)  ! cos^2 / Hann
       w_taper = COS(HALF_PI * t_taper)**2
     CASE (2)  ! quintic smoothstep
       w_taper = 1.0_r8 - t_taper**3*(6.0_r8*t_taper**2 - 15.0_r8*t_taper + 10.0_r8)
@@ -1844,8 +1845,8 @@ DO i = 1, n_psi
   ni(i) = gseq%ni%fp(psi_N(i))
   Zeff(i) = gseq%Zeff%fp(psi_N(i))
 END DO
-IF(MAXVAL(Te) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Te) > 500 keV — profiles should be in keV, not eV')
-IF(MAXVAL(Ti) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Ti) > 500 keV — profiles should be in keV, not eV')
+IF(MAXVAL(Te) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Te) > 500 keV -- profiles should be in keV, not eV')
+IF(MAXVAL(Ti) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Ti) > 500 keV -- profiles should be in keV, not eV')
 ! Get I(psi) = R*Bt = F(psi) profile on the psi_N grid
 DO i = 1, n_psi
   f(i) = gs_fpol(gseq, psi_abs(i))
@@ -1865,8 +1866,8 @@ IF(ierr == 0)CALL gradient_(n_psi, psi_abs, Ti, dT_i_dpsi, ierr, method=self%boo
 IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ne, dn_e_dpsi, ierr, method=self%boot_ops%bs_interp)
 IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ni, dn_i_dpsi, ierr, method=self%boot_ops%bs_interp)
 IF(ierr /= 0)RETURN
-! In the Fortran internal convention psi increases LCFS→axis (opposite to the
-! standard Sauter/Redl derivation where psi increases axis→LCFS).  Negate
+! In the Fortran internal convention psi increases LCFS->axis (opposite to the
+! standard Sauter/Redl derivation where psi increases axis->LCFS).  Negate
 ! all gradients so the bootstrap formula sees the conventional sign.
 dT_e_dpsi = -dT_e_dpsi
 dT_i_dpsi = -dT_i_dpsi
