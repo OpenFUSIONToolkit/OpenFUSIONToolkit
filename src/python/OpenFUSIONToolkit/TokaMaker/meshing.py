@@ -1095,6 +1095,8 @@ class Region:
             self._id = load_dict['id']
             self._dx_curve = load_dict['dx_curve']
             self._dx_vol = load_dict['dx_vol']
+            if small_thresh is None:
+                small_thresh = load_dict.get('small_thresh')
         else:
             if numpy.any(points[:,0] < 0):
                 raise ValueError("Point with negative radial position detected!")
@@ -1254,5 +1256,6 @@ class Region:
             'segments': self._segments,
             'id': self._id,
             'dx_curve': self._dx_curve,
-            'dx_vol': self._dx_vol
+            'dx_vol': self._dx_vol,
+            'small_thresh': self._small_thresh
         }

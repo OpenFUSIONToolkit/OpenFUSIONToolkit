@@ -20,6 +20,7 @@ def build_domain(scale, **kwargs):
     return gs_mesh
 
 
+@pytest.mark.coverage
 def test_default_zextents_not_shared():
     '''Two domains built in one process with default z-extents must each pad their own geometry.
 
@@ -33,6 +34,7 @@ def test_default_zextents_not_shared():
         assert np.allclose(gs_mesh.zextents, [-1.2*0.45*scale, 1.2*0.45*scale])
 
 
+@pytest.mark.coverage
 def test_user_zextents_validated():
     '''User-specified z-extents that do not enclose all regions must raise, for both the lower and upper bound.'''
     with pytest.raises(ValueError, match=r'zextents\[0\]'):
@@ -41,6 +43,7 @@ def test_user_zextents_validated():
         build_domain(1.0, zextents=[-1.0, 0.1]).build_mesh(setup_only=True)
 
 
+@pytest.mark.coverage
 def test_mesh_reg_defs_not_shared():
     '''Region definitions must not accumulate across mesh setups, or leak into the domain's own list.'''
     nreg_defs = []
@@ -52,6 +55,7 @@ def test_mesh_reg_defs_not_shared():
     assert nreg_defs[0] == nreg_defs[1] == 3
 
 
+@pytest.mark.coverage
 def test_json_roundtrip(tmp_path):
     '''A domain saved with `save_json()` (including a region added with `add_enclosed()`) and reloaded
     with `gs_Domain(json_filename=...)` must produce the same extents and region definitions.'''
@@ -59,6 +63,9 @@ def test_json_roundtrip(tmp_path):
     gs_ref = build_domain(1.0)
     gs_ref.define_region('gap',0.1,'vacuum')
     gs_ref.add_enclosed([1.0, 0.4],'gap')
+    # Non-default small-feature threshold (default is dx_curve/2) must also survive the round-trip
+    gs_ref.define_region('coil',0.1,'coil')
+    gs_ref.add_polygon(np.array([[1.6,-0.1],[1.7,-0.1],[1.7,0.1],[1.6,0.1]]),'coil',small_thresh=0.3)
     gs_ref.save_json(str(json_file))
     gs_ref.build_mesh(setup_only=True)
 
@@ -68,3 +75,4 @@ def test_json_roundtrip(tmp_path):
     assert np.allclose(gs_load.zextents, gs_ref.zextents)
     assert np.isclose(gs_load.rextent, gs_ref.rextent)
     assert np.allclose(gs_load.mesh._reg_defs, gs_ref.mesh._reg_defs)
+    assert [region._small_thresh for region in gs_load.regions] == [region._small_thresh for region in gs_ref.regions]
