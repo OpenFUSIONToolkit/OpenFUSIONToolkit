@@ -87,7 +87,8 @@ def test_cut_cell_rule():
     A wholly-inside cell must get the cell's own rule bit for bit; the kept area and the integral of a degree-5
     polynomial must match an independent clipping with a collapsed Gauss rule; and the integral of a smooth
     function must change continuously as the clipping function and half-planes sweep through every transition
-    (a tenfold finer sweep shrinks the largest step change about tenfold, while a jump would not shrink).
+    (a tenfold finer sweep shrinks the largest step change about tenfold, while a jump would not shrink; and at
+    each transition the rule just before and just after it gives the same integrals).
     '''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
@@ -102,7 +103,7 @@ def test_cut_cell_rule():
         # Exactness on the whole cell and the 1000-step sweeps, which pass through every region shape of the
         # 10000-step sweeps (those are used for the continuity check only, which keeps the test fast)
         for row in rows[rows[:, 2] < 2]:
-            npts, nplanes = int(row[3]), int(row[4])
+            nplanes = int(row[4])
             dv, hv = row[9:12], [row[12:15], row[15:18]][:nplanes]
             area, integral = reference(dv, hv)
             # The rule integrates polynomials up to its order exactly over the clipped region
@@ -117,3 +118,11 @@ def test_cut_cell_rule():
                 steps.append(np.max(np.abs(np.diff(sel[:, 8]))))
             assert steps[0] > 0.0
             assert steps[1] < 0.2*steps[0]
+    # Continuity directly at each transition (a change of the point count or of a vertex value's sign, located by
+    # bisection): the sum of the weights and both integrals just before and just after it (parameter -+ 1e-12)
+    jumps = np.loadtxt('gs_cut_cell_jumps.results')
+    for order in (5, 9):
+        for sweep in range(1, 7):
+            sel = jumps[(jumps[:, 0] == order) & (jumps[:, 1] == sweep)]
+            assert len(sel) > 0
+            assert np.max(np.abs(sel[:, 4:7] - sel[:, 8:11])) < 1.0E-10
