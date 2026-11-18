@@ -112,6 +112,14 @@ ABSTRACT INTERFACE
     REAL(r8), INTENT(in) :: y !< Parameter 2
     REAL(r8) :: f !< Function value
   END FUNCTION oft_2d_func
+!------------------------------------------------------------------------------
+!> Generic interface for function of position
+!------------------------------------------------------------------------------
+  FUNCTION oft_poss_func(pt) result(val)
+  IMPORT r8
+  REAL(r8), INTENT(in) :: pt(3) !< Location to evaluate function
+  REAL(r8) :: val !< Value of function
+  END FUNCTION oft_poss_func
 END INTERFACE
 !---------------------------------------------------------------------------------
 !> Simple timer class

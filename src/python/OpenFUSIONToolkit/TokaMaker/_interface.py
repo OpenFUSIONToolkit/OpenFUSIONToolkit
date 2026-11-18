@@ -20,6 +20,7 @@ class tokamaker_settings_cstruct(c_struct):
                 ("mirror_mode", c_bool),
                 ("maxits", c_int),
                 ("mode", c_int),
+                ("trace_type", c_int),
                 ("urf", c_double),
                 ("nl_tol", c_double),
                 ("rmin", c_double),
@@ -38,7 +39,7 @@ class tokamaker_boot_ops_struct(c_struct):
      - `diagnose_bs` Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration?
      - `taper_edge_jphi` Taper all current components to zero at the LCFS (default False)
      - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
-     - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
+     - `taper_edge_shape` Taper shape: 1=cos^2/Hann, 2=quintic smoothstep (default), 3=cubic power
      - `saw_q_s` Sawtooth reset q on axis; 0 = off (default 0)
      - `saw_dq` Reset regions end where the base q crosses saw_q_s + saw_dq (default 0.03)
      - `saw_tol` Threshold on relative change in jphi_saw to freeze it (default 1e-4)
@@ -323,9 +324,9 @@ tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
     [c_void_p, c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
      c_double, c_double, c_bool, c_char_p, c_double, c_int, c_char_p])
 
-# tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
+# tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,axis_pack,error_str)
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
-    [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_char_p])
+    [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_bool, c_bool, c_double, c_char_p])
 
 # tokamaker_save_mug(tMaker_equil_ptr,filename,error_str)
 tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,

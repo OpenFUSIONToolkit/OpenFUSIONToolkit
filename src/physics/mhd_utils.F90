@@ -145,7 +145,7 @@ REAL(r8) :: eta !< \f$ 5.253e-05 \frac{\lambda}{T^{3/2} \mu_0} \f$
 REAL(r8) :: lambda
 lambda=11.d0
 IF(PRESENT(lam))lambda=lam
-eta = 5.253d-5*lambda/((T**1.5d0)*mu0)
+eta = 5.253d-5*lambda/((T**1.5d0)*mu0) ! eta_parallel = eta_perp/1.96
 END FUNCTION eta_spitzer
 !------------------------------------------------------------------------------
 !> Evalute Chodura resistivity

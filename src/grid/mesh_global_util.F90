@@ -169,6 +169,7 @@ DEALLOCATE(gtmp)
 if(oft_debug_print(1))then
   CALL oft_increase_indent
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',mesh%periodic%nper
+  WRITE(*,'(2A,L)') oft_indent,'  Non-planar periodicity? ',mesh%periodic%revolved
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Faces      =',nfp
@@ -289,6 +290,10 @@ subroutine mesh_global_set_curved(self,flag)
 CLASS(oft_amesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: flag !< How to set curvature (1 -> all cells, 2 -> contains boundary edge)
 INTEGER(i4) :: i,k
+SELECT TYPE(this=>self)
+CLASS IS(oft_bmesh)
+  IF(this%skip)RETURN
+END SELECT
 SELECT CASE(flag)
 CASE(1)
   self%ho_info%is_curved=.TRUE.
@@ -802,6 +807,7 @@ DEALLOCATE(gtmp)
 if(oft_debug_print(1))then
   CALL oft_increase_indent
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',self%periodic%nper
+  WRITE(*,'(2A,L)') oft_indent,'  Non-planar periodicity? ',self%periodic%revolved
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
   CALL oft_decrease_indent

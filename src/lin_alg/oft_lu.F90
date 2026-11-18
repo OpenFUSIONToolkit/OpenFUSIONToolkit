@@ -11,6 +11,7 @@
 !! - SuperLU
 !! - MUMPS
 !! - PARDISO (MKL interface)
+!! - STRUMPACK
 !!
 !! @note Currently supports local solves only.
 !!
@@ -51,6 +52,9 @@ IMPLICIT NONE
 #if !defined(DEF_LU_PACK) && defined(HAVE_SUPERLU_DIST)
 #define DEF_LU_PACK "superd"
 #endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_STRUMPACK)
+#define DEF_LU_PACK "strumpack"
+#endif
 #if !defined(DEF_LU_PACK)
 #define DEF_LU_PACK "none"
 #endif
@@ -80,7 +84,37 @@ TYPE :: superlu_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Col pointer (0-based indices)
   INTEGER(i4), POINTER, DIMENSION(:) :: csc_map => NULL() !< Col pointer (0-based indices)
   REAL(r8), POINTER, DIMENSION(:) :: csc_vals => NULL() !< Col pointer (0-based indices)
+  INTEGER(i4), POINTER, DIMENSION(:) :: lc_orig => NULL() !< Unpermuted copy of `lc` (SuperLU-DIST only)
 END TYPE superlu_struc
+!------------------------------------------------------------------------------
+!> STRUMPACK solver information
+!!
+!! Numerical options left at their default values (`-1`) use the STRUMPACK defaults.
+!!
+!! @note When compression is enabled it is applied to the frontal matrices, so the
+!! factorization (and each solve) is approximate. This is intended for use as a
+!! preconditioner (eg. block-Jacobi sub-solver). STRUMPACK's iterative refinement and
+!! Krylov outer solvers are not supported, so `iter_refine` must be `.FALSE.`.
+!!
+!! @note A refactorization with the same non-zero pattern (`update(.FALSE.)`) reuses the
+!! fill-reducing reordering and MC64 matching/scaling computed at the last full
+!! factorization. STRUMPACK only pivots within each front, so a full factorization
+!! (`update(.TRUE.)`) may be needed after large changes in matrix values. A full
+!! factorization is also performed automatically if the non-zero pattern or any of the
+!! options below has changed since the last factorization.
+!------------------------------------------------------------------------------
+TYPE :: strumpack_struc
+  INTEGER(i4) :: comp_type = -1 !< Compression type (0 -> none, 1 -> HSS, 2 -> BLR, -1 -> default [none])
+  INTEGER(i4) :: leaf_size = -1 !< Size of leaf/tile blocks for compression
+  INTEGER(i4) :: max_rank = -1 !< Maximum rank of compressed blocks
+  INTEGER(i4) :: min_sep_size = -1 !< Minimum separator size for compression
+  LOGICAL :: verbose = .FALSE. !< Print STRUMPACK compression/factorization information
+  REAL(r8) :: comp_rel_tol = -1.d0 !< Relative compression tolerance
+  REAL(r8) :: comp_abs_tol = -1.d0 !< Absolute compression tolerance
+  TYPE(C_PTR) :: f_factors = C_NULL_PTR !< STRUMPACK factorization pointer
+  INTEGER(i4), POINTER, DIMENSION(:) :: kr => NULL() !< Row pointer (0-based indices)
+  INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Column indices (0-based indices)
+END TYPE strumpack_struc
 !------------------------------------------------------------------------------
 !> Pardiso solver information
 !------------------------------------------------------------------------------
@@ -103,9 +137,12 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: atmp => NULL() !< Local dense matrix ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
-  CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factorization package
+  CHARACTER(LEN=9) :: package = DEF_LU_PACK !< Factorization package
 #if defined( HAVE_SUPERLU ) || defined( HAVE_SUPERLU_DIST ) || defined( HAVE_UMFPACK )
   TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
+#endif
+#ifdef HAVE_STRUMPACK
+  TYPE(strumpack_struc) :: strumpack_struct !< STRUMPACK solver information
 #endif
 #ifdef HAVE_MKL
   TYPE(pardiso_struc) :: pardiso_struct !< MKL/PARDISO solver information
@@ -250,6 +287,36 @@ INTERFACE
   INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dist_slugrid
 #endif
+#ifdef HAVE_STRUMPACK
+!------------------------------------------------------------------------------
+!> Interface to sparse (multifrontal) LU factorization from STRUMPACK
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_strumpack_sparse(iopt,n,nnz,nrhs,values,colind,rowptr,b,ldb, &
+    f_factors,comp_type,rel_tol,abs_tol,leaf_size,max_rank,min_sep_size, &
+    verbose,info) BIND(C,NAME="oft_strumpack_sparse_c")
+  IMPORT c_int, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs solve, 3 -> refactor matrix with the
+  !! same non-zero pattern [full factorization if options changed], 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format (0-based) [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind (0-based) [n+1]
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
+  REAL(c_double), DIMENSION(ldb,nrhs), INTENT(inout) :: b !< Right hand side -> overwritten with solution [ldb,nrhs]
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to STRUMPACK internal data storage
+  INTEGER(c_int), VALUE, INTENT(in) :: comp_type !< Compression type (0 -> none, 1 -> HSS, 2 -> BLR, -1 -> default)
+  REAL(c_double), VALUE, INTENT(in) :: rel_tol !< Relative compression tolerance (<=0 -> default)
+  REAL(c_double), VALUE, INTENT(in) :: abs_tol !< Absolute compression tolerance (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: leaf_size !< Size of leaf/tile blocks (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: max_rank !< Maximum rank of compressed blocks (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: min_sep_size !< Minimum separator size for compression (<=0 -> default)
+  INTEGER(c_int), VALUE, INTENT(in) :: verbose !< Print STRUMPACK information (0 -> no, 1 -> yes)
+  INTEGER(c_int), INTENT(out) :: info !< Solver return status (0 -> success)
+  END SUBROUTINE oft_strumpack_sparse
+#endif
 !------------------------------------------------------------------------------
 !> Interface to dgssv from UMFPACK
 !------------------------------------------------------------------------------
@@ -361,6 +428,7 @@ CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
+LOGICAL :: graph_changed
 REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
 CLASS(oft_native_matrix), POINTER :: A_native
@@ -401,13 +469,7 @@ IF(.NOT.self%initialized)THEN
 #endif
     CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
-      ALLOCATE(self%superlu_struct%csc_map(A_native%nnz),self%superlu_struct%csc_vals(A_native%nnz))
-      csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
-      csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
-      CALL convert_csr_to_csc(csr_graph,csc_graph,self%superlu_struct%csc_map)
-      csc_graph%kr=csc_graph%kr-1; csc_graph%lc=csc_graph%lc-1
-      self%superlu_struct%kr=>csc_graph%kr; self%superlu_struct%lc=>csc_graph%lc
-      self%superlu_struct%csc_vals=mat_vals(self%superlu_struct%csc_map)
+      ! CSC graph is built at the first factorization
       mode=1
       nrhs=1
       CALL MPI_Comm_dup(MPI_COMM_SELF,self%superlu_struct%comm,ierr)
@@ -423,6 +485,10 @@ IF(.NOT.self%initialized)THEN
       self%superlu_struct%lc=A_native%lc-1
 #else
       CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
+#endif
+    CASE("strumpack")
+#if !defined(HAVE_STRUMPACK)
+      CALL oft_abort('OFT not compiled with STRUMPACK','lusolver_apply',__FILE__)
 #endif
     CASE("mkl")
 #ifdef HAVE_MKL
@@ -513,10 +579,12 @@ SELECT CASE(TRIM(self%package))
 CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
     IF(self%refactor)THEN
-      mode=3
-      IF(self%update_graph)THEN
-        DEALLOCATE(self%superlu_struct%csc_map,self%superlu_struct%csc_vals)
-        DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+      IF(self%update_graph.OR.(.NOT.ASSOCIATED(self%superlu_struct%lc_orig)))THEN
+        !---Build CSC graph and perform full factorization
+        IF(ASSOCIATED(self%superlu_struct%lc_orig))THEN
+          DEALLOCATE(self%superlu_struct%csc_map,self%superlu_struct%csc_vals)
+          DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc,self%superlu_struct%lc_orig)
+        END IF
         csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
         csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
         ALLOCATE(self%superlu_struct%csc_map(A_native%nnz))
@@ -524,7 +592,14 @@ CASE("superd")
         CALL convert_csr_to_csc(csr_graph,csc_graph,self%superlu_struct%csc_map)
         csc_graph%kr=csc_graph%kr-1; csc_graph%lc=csc_graph%lc-1
         self%superlu_struct%kr=>csc_graph%kr; self%superlu_struct%lc=>csc_graph%lc
+        ALLOCATE(self%superlu_struct%lc_orig(A_native%nnz))
+        self%superlu_struct%lc_orig=self%superlu_struct%lc
         mode=1
+      ELSE
+        !---Restore row indices, which the previous factorization (pdgssvx_ABglobal)
+        !---overwrote with their row-permuted values, and refactor with the same pattern
+        self%superlu_struct%lc=self%superlu_struct%lc_orig
+        mode=3
       END IF
       self%superlu_struct%csc_vals=mat_vals(self%superlu_struct%csc_map)
       !!$omp critical (superlu_solve)
@@ -571,6 +646,27 @@ CASE("superd")
     !!$omp end critical (umfpack_solve)
 #else
     CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
+#endif
+  CASE("strumpack")
+#ifdef HAVE_STRUMPACK
+    IF(self%iter_refine)CALL oft_abort('Iterative refinement not supported (STRUMPACK)','lusolver_apply',__FILE__)
+    IF(self%refactor)THEN
+      !---Full factorization if requested or the non-zero pattern has changed
+      CALL strumpack_set_graph(self%strumpack_struct,A_native,graph_changed)
+      mode=3
+      IF(self%update_graph.OR.graph_changed)mode=1
+      CALL strumpack_sparse_call(self%strumpack_struct,mode,A_native%nr,A_native%nnz,nrhs, &
+        mat_vals,vals,ldb,ierr)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (STRUMPACK)','lusolver_apply',__FILE__)
+      self%refactor=.FALSE.
+      self%update_graph=.FALSE.
+    END IF
+    mode=2
+    CALL strumpack_sparse_call(self%strumpack_struct,mode,A_native%nr,A_native%nnz,nrhs, &
+      mat_vals,vals,ldb,ierr)
+    IF(ierr/=0)CALL oft_abort('Solve failed (STRUMPACK)','lusolver_apply',__FILE__)
+#else
+    CALL oft_abort('OFT not compiled with STRUMPACK','lusolver_apply',__FILE__)
 #endif
   CASE("mkl")
 #ifdef HAVE_MKL
@@ -684,16 +780,145 @@ IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_package,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","lusolver_setup_xml",__FILE__)
   IF(ALLOCATED(factor_package))THEN
-    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','lusolver_setup_xml',__FILE__)
+    IF(LEN(factor_package)>LEN(self%package))CALL oft_abort('Factorization package name too long','lusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
+#ifdef HAVE_STRUMPACK
+!---STRUMPACK options
+CALL xml_get_element(solver_node,"strumpack",current_node,ierr)
+IF(ierr==0)CALL strumpack_setup_xml(self%strumpack_struct,current_node)
+#endif
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'LU solver setup:'
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
+#ifdef HAVE_STRUMPACK
+  IF(TRIM(self%package)=='strumpack')THEN
+    WRITE(*,'(2X,A,I4)')     '- Comp type:   ',self%strumpack_struct%comp_type
+    WRITE(*,'(2X,A,ES11.3)') '- Comp rtol:   ',self%strumpack_struct%comp_rel_tol
+    WRITE(*,'(2X,A,ES11.3)') '- Comp atol:   ',self%strumpack_struct%comp_abs_tol
+    WRITE(*,'(2X,A,I6)')     '- Leaf size:   ',self%strumpack_struct%leaf_size
+    WRITE(*,'(2X,A,I6)')     '- Max rank:    ',self%strumpack_struct%max_rank
+    WRITE(*,'(2X,A,I6)')     '- Min sep size:',self%strumpack_struct%min_sep_size
+  END IF
+#endif
 END IF
 DEBUG_STACK_POP
 end subroutine lusolver_setup_xml
+#ifdef HAVE_STRUMPACK
+!------------------------------------------------------------------------------
+!> Read STRUMPACK solver options from XML definition
+!!
+!! Supported elements: `comp_type` {none, hss, blr}, `comp_rel_tol`, `comp_abs_tol`,
+!! `leaf_size`, `max_rank`, `min_sep_size`, `verbose`
+!------------------------------------------------------------------------------
+subroutine strumpack_setup_xml(self,strumpack_node)
+TYPE(strumpack_struc), INTENT(inout) :: self
+TYPE(xml_node), INTENT(in) :: strumpack_node !< XML node containing STRUMPACK options
+!---
+TYPE(xml_node) :: current_node
+CHARACTER(LEN=:), ALLOCATABLE :: comp_type
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+CALL xml_get_element(strumpack_node,"comp_type",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,comp_type,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `comp_type` node","strumpack_setup_xml",__FILE__)
+  SELECT CASE(TRIM(comp_type))
+    CASE("none")
+      self%comp_type=0
+    CASE("hss")
+      self%comp_type=1
+    CASE("blr")
+      self%comp_type=2
+    CASE DEFAULT
+      CALL oft_abort('Unknown compression type, must be one of {none, hss, blr}','strumpack_setup_xml',__FILE__)
+  END SELECT
+END IF
+CALL xml_get_element(strumpack_node,"comp_rel_tol",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%comp_rel_tol,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `comp_rel_tol` node","strumpack_setup_xml",__FILE__)
+END IF
+CALL xml_get_element(strumpack_node,"comp_abs_tol",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%comp_abs_tol,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `comp_abs_tol` node","strumpack_setup_xml",__FILE__)
+END IF
+CALL xml_get_element(strumpack_node,"leaf_size",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%leaf_size,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `leaf_size` node","strumpack_setup_xml",__FILE__)
+END IF
+CALL xml_get_element(strumpack_node,"max_rank",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%max_rank,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `max_rank` node","strumpack_setup_xml",__FILE__)
+END IF
+CALL xml_get_element(strumpack_node,"min_sep_size",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%min_sep_size,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `min_sep_size` node","strumpack_setup_xml",__FILE__)
+END IF
+CALL xml_get_element(strumpack_node,"verbose",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%verbose,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `verbose` node","strumpack_setup_xml",__FILE__)
+END IF
+DEBUG_STACK_POP
+end subroutine strumpack_setup_xml
+!------------------------------------------------------------------------------
+!> Store a 0-based copy of the matrix graph for STRUMPACK
+!------------------------------------------------------------------------------
+SUBROUTINE strumpack_set_graph(self,A,changed)
+TYPE(strumpack_struc), INTENT(inout) :: self
+CLASS(oft_native_matrix), INTENT(in) :: A !< Matrix
+LOGICAL, INTENT(out) :: changed !< Graph differs from the stored copy?
+DEBUG_STACK_PUSH
+changed=.TRUE.
+IF(ASSOCIATED(self%kr))THEN
+  IF((SIZE(self%kr)==A%nr+1).AND.(SIZE(self%lc)==A%nnz))THEN
+    changed=ANY(self%kr/=A%kr(1:A%nr+1)-1)
+    IF(.NOT.changed)changed=ANY(self%lc/=A%lc(1:A%nnz)-1)
+  ELSE
+    DEALLOCATE(self%kr,self%lc)
+  END IF
+END IF
+IF(changed)THEN
+  IF(.NOT.ASSOCIATED(self%kr))ALLOCATE(self%kr(A%nr+1),self%lc(A%nnz))
+  self%kr=A%kr(1:A%nr+1)-1
+  self%lc=A%lc(1:A%nnz)-1
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE strumpack_set_graph
+!------------------------------------------------------------------------------
+!> Call STRUMPACK sparse solver interface using stored graph and options
+!------------------------------------------------------------------------------
+SUBROUTINE strumpack_sparse_call(self,mode,n,nnz,nrhs,values,b,ldb,info)
+TYPE(strumpack_struc), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: mode !< Operation (see @ref oft_strumpack_sparse)
+INTEGER(i4), INTENT(in) :: n !< Number of rows
+INTEGER(i4), INTENT(in) :: nnz !< Number of non-zeros
+INTEGER(i4), INTENT(in) :: nrhs !< Number of RHS
+REAL(r8), INTENT(in) :: values(nnz) !< Matrix values in CRS format [nnz]
+INTEGER(i4), INTENT(in) :: ldb !< Lowest dimension of `b`
+REAL(r8), INTENT(inout) :: b(ldb,nrhs) !< Right hand side -> overwritten with solution [ldb,nrhs]
+INTEGER(i4), INTENT(out) :: info !< Solver return status (0 -> success)
+INTEGER(i4) :: idummy(1)
+DEBUG_STACK_PUSH
+IF(mode==4)THEN
+  idummy=0
+  CALL oft_strumpack_sparse(mode,0,0,0,values,idummy,idummy,b,1,self%f_factors, &
+    self%comp_type,self%comp_rel_tol,self%comp_abs_tol,self%leaf_size,self%max_rank, &
+    self%min_sep_size,MERGE(1,0,self%verbose),info)
+ELSE
+  CALL oft_strumpack_sparse(mode,n,nnz,nrhs,values,self%lc,self%kr,b,ldb,self%f_factors, &
+    self%comp_type,self%comp_rel_tol,self%comp_abs_tol,self%leaf_size,self%max_rank, &
+    self%min_sep_size,MERGE(1,0,self%verbose),info)
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE strumpack_sparse_call
+#endif
 !------------------------------------------------------------------------------
 !> Check for thread safety
 !------------------------------------------------------------------------------
@@ -742,8 +967,10 @@ SELECT CASE(TRIM(self%package))
     CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
     self%superlu_struct%grid_handle=C_NULL_PTR
     CALL MPI_COMM_FREE(self%superlu_struct%comm, ierr)
-    DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
-    DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+    IF(ASSOCIATED(self%superlu_struct%lc_orig))THEN
+      DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
+      DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc,self%superlu_struct%lc_orig)
+    END IF
     self%superlu_struct%comm=MPI_COMM_NULL
 #endif
 #ifdef HAVE_UMFPACK
@@ -753,6 +980,13 @@ SELECT CASE(TRIM(self%package))
       rvals,ldb,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
     self%superlu_struct%f_factors=C_NULL_PTR
+#endif
+#ifdef HAVE_STRUMPACK
+  CASE("strumpack")
+    mode=4
+    CALL strumpack_sparse_call(self%strumpack_struct,mode,nrhs,nrhs,nrhs,rvals,rvals,1,ierr)
+    IF(ASSOCIATED(self%strumpack_struct%kr))DEALLOCATE(self%strumpack_struct%kr,self%strumpack_struct%lc)
+    self%strumpack_struct%f_factors=C_NULL_PTR
 #endif
 #ifdef HAVE_MUMPS
   CASE("mumps")

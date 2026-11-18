@@ -1018,13 +1018,11 @@ SUBROUTINE combine_petsc(this)
 TYPE(oft_petsc_matrix), INTENT(inout) :: this
 TYPE(tmat), ALLOCATABLE :: pmats(:,:)
 INTEGER(i4) :: i,j,ii,jj,ierr,m,n,offset,proc
-INTEGER(i4) :: mcomm,roffset,coffset,rgoffset,cgoffset,ncols,maxcols,rows(1),ncslice
+INTEGER(i4) :: roffset,coffset,rgoffset,cgoffset,ncols,maxcols,rows(1),ncslice
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: goffsets,offsets,tmpoff
 INTEGER(i4), POINTER :: int_tmp(:),cols(:),coltmp(:)
 REAL(r8), POINTER :: real_tmp(:),varray(:)
-mcomm=oft_env%COMM
-IF(this%nr==this%nrg)mcomm=PETSC_COMM_SELF
 CALL MatGetOwnershipRange(this%m,m,n,ierr)
 rgoffset=m
 !---
@@ -1112,24 +1110,32 @@ DO i=1,nr
         ALLOCATE(varray(maxcols),cols(maxcols),coltmp(maxcols))
         cols=0
         m=0
+        NULLIFY(int_tmp,real_tmp)
         DO ii=1,pmat%i_map(1)%nslice
           rows=ii-1
-          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,cols,varray,ierr)
+          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
+          IF(.NOT.ASSOCIATED(real_tmp))THEN
+            CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
+            CYCLE
+          END IF
           proc=1
           DO jj=1,ncols
-            DO WHILE(cols(jj)>=offsets(j,proc+1))
+            DO WHILE(int_tmp(jj)>=offsets(j,proc+1))
               proc=proc+1
-              IF(proc>oft_env%nprocs)WRITE(*,*)proc,cols(jj),offsets(j,proc)
+              IF(proc>oft_env%nprocs)WRITE(*,*)proc,int_tmp(jj),offsets(j,proc)
             END DO
-            coltmp(jj)=cols(jj)-offsets(j,proc)+goffsets(j,proc)
+            coltmp(jj)=int_tmp(jj)-offsets(j,proc)+goffsets(j,proc)
           END DO
-          CALL MatSetValues(this%M,1_i4,rows+rgoffset,ncols, &
-            coltmp,varray,ADD_VALUES,ierr)
-          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,varray,ierr)
+          CALL MatSetValues(this%M,1_i4,rows+rgoffset,ncols,coltmp,real_tmp,ADD_VALUES,ierr)
+          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
         END DO
         IF(ASSOCIATED(varray))DEALLOCATE(varray)
         IF(ASSOCIATED(cols))DEALLOCATE(cols)
-        DEALLOCATE(coltmp)
+        IF(ASSOCIATED(coltmp))DEALLOCATE(coltmp)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<25)
+        IF(ASSOCIATED(int_tmp))DEALLOCATE(int_tmp)
+        IF(ASSOCIATED(real_tmp))DEALLOCATE(real_tmp)
+#endif
     END SELECT
     END IF
     cgoffset=cgoffset+cstart(j)

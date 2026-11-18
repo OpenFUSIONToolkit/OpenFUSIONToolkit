@@ -20,6 +20,43 @@
 !!
 !! As usual, we start with a few module imports for required functionality.
 ! START SOURCE
+MODULE harris_helpers
+USE oft_local
+IMPLICIT NONE
+REAL(r8) :: den_inf = 2.d-1 !< Background density
+REAL(r8) :: lam_n = 2.d0 !< eq density width
+REAL(r8) :: lam_b = 2.d0 !< eq psi perturbation width
+REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
+REAL(r8) :: L_x = 2.d0 !< Box length in x
+REAL(r8) :: L_z = 2.d0 !< Box length in z
+CONTAINS
+!! To set the initial conditions we define a set of functions
+!! 
+!! The non-uniform initial conditions for this case is given by
+!! \f[ n_0 = (cosh(z / \lambda))^{-2} + n_{\infty} \f]
+!! \f[ B_0 = tanh(z / \lambda) \hat{x} \f]
+!!
+!! The perturbation is then given by
+!! \f[ \delta B = -\frac{\pi}{L_z} cos(2 \pi x / L_x) sin(\pi z / L_z) \hat{x} + \frac{2 \pi}{L_x} sin(2 \pi x / L_x) cos(\pi z / L_z) \hat{x} \f]
+! Density equilibrium
+SUBROUTINE dens_harris(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
+END SUBROUTINE dens_harris
+! Flux equilibrium
+SUBROUTINE psi_harris_eq(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = -lam_b*LOG(COSH(pt(2)/lam_b))
+END SUBROUTINE psi_harris_eq
+! Flux perturbation
+SUBROUTINE psi_harris_pert(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
+END SUBROUTINE psi_harris_pert
+END MODULE harris_helpers
 PROGRAM xmhd_tearing
 !---Runtime
 USE oft_base
@@ -35,6 +72,7 @@ USE oft_blag_operators, ONLY: oft_blag_zerob, oft_blag_getmop, oft_blag_project
 USE oft_scalar_inits, ONLY: poss_scalar_bfield
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 USE xmhd_2d
+USE harris_helpers
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
@@ -69,12 +107,6 @@ REAL(r8) :: nu=1.d0 !< viscosity
 REAL(r8) :: gamma=2.d0/3.d0 !< adiabatic index
 REAL(r8) :: D_diff=1.d0 !< Diffusion coefficient
 REAL(r8) :: den_scale=1.d19 !< Density scale factor for normalization of equations (used for post-processing)
-REAL(r8) :: den_inf = 2.d-1 !< Background density
-REAL(r8) :: lam_n = 2.d0 !< eq density width
-REAL(r8) :: lam_b = 2.d0 !< eq psi perturbation width
-REAL(r8) :: L_x = 2.d0 !< Box length in x
-REAL(r8) :: L_z = 2.d0 !< Box length in z
-REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
@@ -248,33 +280,4 @@ END IF
 CALL xmhd_2d_plot(mhd_sim)
 !---Finalize enviroment
 CALL oft_finalize
-CONTAINS
-
-!! To set the initial conditions we define a set of functions
-!!
-!! The non-uniform initial conditions for this case is given by
-!! \f[ n_0 = (cosh(z / \lambda))^{-2} + n_{\infty} \f]
-!! \f[ B_0 = tanh(z / \lambda) \hat{x} \f]
-!!
-!! The perturbation is then given by
-!! \f[ \delta B = -\frac{\pi}{L_z} cos(2 \pi x / L_x) sin(\pi z / L_z) \hat{x} + \frac{2 \pi}{L_x} sin(2 \pi x / L_x) cos(\pi z / L_z) \hat{x} \f]
-
-SUBROUTINE dens_harris(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
-END SUBROUTINE dens_harris
-
-SUBROUTINE psi_harris_eq(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = -lam_b*LOG(COSH(pt(2)/lam_b))
-END SUBROUTINE psi_harris_eq
-
-SUBROUTINE psi_harris_pert(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
-END SUBROUTINE psi_harris_pert
-
 END PROGRAM xmhd_tearing
