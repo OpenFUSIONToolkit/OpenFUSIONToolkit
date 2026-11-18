@@ -35,6 +35,7 @@ set(OFT_MPI_PLEN "4" CACHE STRING "Size of strings for MPI processor index")
 set(OFT_PATH_SLEN "200" CACHE STRING "Size of path strings")
 set(OFT_ERROR_SLEN "200" CACHE STRING "Size of error strings")
 set(OFT_SLEN "80" CACHE STRING "General string length")
+set(OFT_HDF5_WAIT "30" CACHE STRING "Wait time (s) for HDF5 file creation")
 
 # Internal variables
 set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
@@ -459,6 +460,16 @@ endif()
 # MUMPS
 if( OFT_MUMPS_FOUND )
   add_definitions( -DHAVE_MUMPS )
+endif()
+# STRUMPACK (not provided by PETSc)
+if( OFT_STRUMPACK_ROOT )
+  find_package( OFT_STRUMPACK )
+endif()
+if( OFT_STRUMPACK_FOUND )
+  add_definitions( -DHAVE_STRUMPACK )
+  include_directories( ${OFT_STRUMPACK_INCLUDE_DIRS} )
+  # C++ runtime is already linked by CMake as OFT contains C++ sources
+  set( EXT_LIBS ${OFT_STRUMPACK_LIBRARIES} ${EXT_LIBS} )
 endif()
 
 ########################

@@ -355,7 +355,7 @@ TYPE(oft_1d_int), POINTER, INTENT(inout) :: hole_ns(:) !< Hole nodesets
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
 CHARACTER(LEN=*), OPTIONAL, INTENT(IN) :: filepath !< Path to mesh file
 LOGICAL :: coils_xml
-INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag,njholes
+INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag,njholes,nclosure_save
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
 TYPE(xml_node) :: coil_element
@@ -516,6 +516,7 @@ IF(self%nholes>0)THEN
   END DO
 END IF
 !---Build mapping from mesh vertices to active vertices
+nclosure_save=self%nclosures
 IF(.NOT.ASSOCIATED(self%pmap))THEN
   ALLOCATE(self%pmap(self%mesh%np))
   self%pmap=0
@@ -636,7 +637,7 @@ WRITE(*,'(2A,I12)')oft_indent,'# of points    = ',self%mesh%np
 WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
 WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
 WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
-WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
+WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',nclosure_save
 IF(oft_debug_print(1))THEN
   CALL oft_increase_indent
   DO i=1,self%nclosures

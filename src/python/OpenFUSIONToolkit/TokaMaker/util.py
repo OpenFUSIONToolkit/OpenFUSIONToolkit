@@ -181,7 +181,7 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
     if r_inner_mid is None:
         r_inner_mid = r0 - a
 
-    # Outer arc: INTOR centered on z0; each half spans θ = π/2 by the moment definition
+    # Outer arc: INTOR centered on z0; each half spans theta = pi/2 by the moment definition
     n_seed = max(8 * npts, 800)
     n_su = n_seed // 2
     n_sl = n_seed - n_su
@@ -217,11 +217,11 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
     z_outer   = numpy.interp(t_sample, outer_cum, z_arc)
     r_outer[-1], z_outer[-1] = r_xu, z_xu
 
-    # Upper inner arc: X-point → midplane (skip X-point, already last in outer arc)
+    # Upper inner arc: X-point -> midplane (skip X-point, already last in outer arc)
     r_iu, z_iu = _inner_arc(r_xu, z_xu, r_inner_mid, zsurf, ziu, n_inner_u + 1)
     r_iu, z_iu = r_iu[1:], z_iu[1:]
 
-    # Lower inner arc: midplane → X-point (reversed; drop the final X-point,
+    # Lower inner arc: midplane -> X-point (reversed; drop the final X-point,
     # which is already the first point of the outer arc, to avoid a duplicate)
     r_il_raw, z_il_raw = _inner_arc(r_xl, z_xl, r_inner_mid, zsurf, zil, n_inner_l + 1)
     r_il = r_il_raw[::-1][:-1]
@@ -346,7 +346,8 @@ def read_ifile(filename):
     '''! Read i-file inverse equilibrium file
 
     @param filename Path to file
-    @result Dictionary containing i-file information
+    @result Dictionary containing i-file information (when present: `ffp`, `pp` for \f$FF'\f$, \f$P'\f$;
+    `psi_bounds` for the unpadded \f$[\psi_{axis}, \psi_{LCFS}]\f$)
     '''
     def read_array(content,offset,var_type,count):
         if var_type in ("i", "f"):
@@ -392,6 +393,17 @@ def read_ifile(filename):
     Z, offset = read_array(content,offset,var_type,sizes[0]*sizes[1])
     out_dict["R"] = R.reshape(sizes)
     out_dict["Z"] = Z.reshape(sizes)
+    # Optional records in writer order: FF', P' (npsi each), then psi bounds (2); later records are ignored
+    var_size = 4 if var_type == "f" else 8
+    def next_count(offset):
+        if offset >= len(content):
+            return 0
+        return struct.unpack_from("i",content,offset=offset)[0]//var_size
+    if next_count(offset) == sizes[0] and next_count(offset+var_size*sizes[0]+8) == sizes[0]:
+        out_dict["ffp"], offset = read_array(content,offset,var_type,sizes[0])
+        out_dict["pp"], offset = read_array(content,offset,var_type,sizes[0])
+    if next_count(offset) == 2:
+        out_dict["psi_bounds"], offset = read_array(content,offset,var_type,2)
     return out_dict
 
 

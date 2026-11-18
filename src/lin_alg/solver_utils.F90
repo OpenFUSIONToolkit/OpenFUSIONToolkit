@@ -29,7 +29,7 @@ USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matri
 USE oft_petsc_solvers, ONLY: oft_petsc_sjacobi_solver, oft_petsc_cg_solver, oft_petsc_gmres_solver, &
   oft_petsc_diagprecond, petsc_cg_solver_cast, petsc_gmres_solver_cast, petsc_sjacobi_solver_cast, &
   petsc_diagprecond_cast, oft_petsc_asprecond, oft_petsc_direct_solver, petsc_direct_solver_cast, &
-  oft_petsc_luprecond
+  oft_petsc_luprecond, oft_petsc_iluprecond
 #endif
 IMPLICIT NONE
 #include "local.h"
@@ -419,7 +419,12 @@ SELECT CASE(TRIM(solver_type))
   CASE("lu")
     ALLOCATE(oft_petsc_direct_solver::solver)
   CASE("ilu")
-    CALL oft_abort("ILU0 not currently supported via PETSc.","create_petsc_solver",__FILE__)
+    ALLOCATE(oft_petsc_direct_solver::solver)
+    !---Default to an incomplete factorization (can be overridden by `type` in XML)
+    SELECT TYPE(solver)
+      TYPE IS(oft_petsc_direct_solver)
+        solver%pre_factor%type='ilu'
+    END SELECT
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_petsc_solver",__FILE__)
 END SELECT
@@ -529,6 +534,19 @@ SELECT CASE(solver_type)
       CALL create_native_solver(solver,"sjacobi")
       native_solver=.TRUE.
     END IF
+  CASE("block_jacobi")
+    IF(use_petsc)THEN
+      CALL create_petsc_pre(solver,"block_jacobi")
+    ELSE
+      CALL create_native_pre(solver,"block_jacobi")
+      native_solver=.TRUE.
+    END IF
+  CASE("add_schwarz")
+    IF(use_petsc)THEN
+      CALL create_petsc_pre(solver,"add_schwarz")
+    ELSE
+      CALL oft_abort("Additive-Schwarz precon requires PETSc interface","create_solver_xml",__FILE__)
+    END IF
   CASE("lu")
     IF(use_petsc)THEN
       CALL create_petsc_solver(solver,"lu")
@@ -553,6 +571,11 @@ CALL solver%setup_from_xml(solver_node,val_level)
 CALL xml_get_element(solver_node,"pre",pre_node,ierr)
 IF(ierr==0)THEN
   CALL create_pre_xml(solver%pre,pre_node,native_solver,val_level)
+ELSE
+  CALL xml_get_element(solver_node,"solver",pre_node,ierr)
+  IF(ierr==0)THEN
+    CALL create_solver_xml(solver%pre,pre_node,val_level)
+  END IF
 END IF
 DEBUG_STACK_POP
 end subroutine create_solver_xml
@@ -599,8 +622,7 @@ SELECT CASE(TRIM(pre_type))
   CASE("lu")
     ALLOCATE(oft_petsc_luprecond::pre)
   CASE("ilu")
-    CALL oft_abort("ILU0 not currently supported via PETSc.","create_petsc_pre",__FILE__)
-  !   ALLOCATE(oft_petsc_luprecond::pre)
+    ALLOCATE(oft_petsc_iluprecond::pre)
   CASE DEFAULT
     CALL oft_abort("Invalid preconditioner type.","create_petsc_pre",__FILE__)
 END SELECT
@@ -733,6 +755,11 @@ CALL pre%setup_from_xml(pre_node,val_level)
 CALL xml_get_element(pre_node,"solver",solver_node,ierr)
 IF(ierr==0)THEN
   CALL create_solver_xml(pre%pre,solver_node,val_level)
+ELSE
+  CALL xml_get_element(pre_node,"pre",solver_node,ierr)
+  IF(ierr==0)THEN
+    CALL create_pre_xml(pre%pre,solver_node,native_solver,val_level)
+  END IF
 END IF
 DEBUG_STACK_POP
 end subroutine create_pre_xml
@@ -752,7 +779,7 @@ integer(i4) :: i,ierr,nnodes
 class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
 CHARACTER(LEN=:), ALLOCATABLE :: dir_type
-TYPE(xml_node) :: up_node,down_node,coarse_node,solver_node
+TYPE(xml_node) :: up_node,down_node,coarse_node,solver_node,tmp_node
 TYPE(xml_node), POINTER :: current_node
 TYPE(xml_nodelist) :: current_nodes
 DEBUG_STACK_PUSH
@@ -789,17 +816,18 @@ DO i=1,current_nodes%n
 END DO
 IF(ASSOCIATED(current_nodes%nodes))DEALLOCATE(current_nodes%nodes)
 !---
-CALL xml_get_element(pre_node,"coarse",current_node,ierr)
+CALL xml_get_element(pre_node,"coarse",tmp_node,ierr)
 IF(ierr==0)THEN
   IF(oft_debug_print(2))WRITE(*,*)'Found coarse solver'
   coarse_present=.TRUE.
-  CALL xml_get_element(current_node,"solver",coarse_node,ierr)
+  CALL xml_get_element(tmp_node,"solver",coarse_node,ierr)
 END IF
 !---Set smoother
 ALLOCATE(oft_ml_precond::pre)
 SELECT TYPE(pre)
   TYPE IS(oft_ml_precond)
     this_ml=>pre
+    CALL xml_read_attribute(pre_node,"report",pre%report_err,iostat=ierr)
   CLASS DEFAULT
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT

@@ -88,7 +88,11 @@ for (i, file) in enumerate(files):
         te_name = 'te'
     # Plot solution time
     plot = num_plots[0]
-    plot.add_plot(numpy.cumsum(stime), time, xlabel='Walltime [hr]', ylabel='Simulation Time [ms]')
+    walltime = numpy.cumsum(stime)
+    if walltime.max() > 2*60*60:
+        plot.add_plot(walltime/(60*60), time, xlabel='Walltime [hr]', ylabel='Simulation Time [ms]')
+    else:
+         plot.add_plot(walltime/60, time, xlabel='Walltime [m]', ylabel='Simulation Time [ms]')
     # Plot time step size
     plot = num_plots[1]
     plot.add_plot(time[:-2], dt*1.E3, xlabel='Time [ms]', ylabel='dt [us]', include_yzero=True)
@@ -156,6 +160,6 @@ for (i, file) in enumerate(files):
             plot_id += 1
             gr_plot = oft_mpl.plot(plot_id)
         # Plot growth rate
-        gr_plot.add_plot(gr_data[0], gr_data[1], xlabel='Time [ms]', ylabel='Growth rate [1/s]', include_yzero=True)
+        gr_plot.add_plot(gr_data[0]*1.E3, gr_data[1], xlabel='Time [ms]', ylabel='Growth rate [1/s]', include_yzero=False)
 # Display plots
 plt.show()
