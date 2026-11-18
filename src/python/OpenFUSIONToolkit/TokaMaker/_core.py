@@ -347,6 +347,8 @@ class TokaMaker():
 
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
+        if getattr(getattr(self, '_oft_env', None), 'mpi_finalized', False):
+            return # OFT environment already finalized at exit
         self.reset()
 
     def reset(self):
@@ -2931,8 +2933,8 @@ class TokaMaker_equilibrium():
 
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
-        if not self._equil_ptr:
-            return # Nothing to do
+        if (not self._equil_ptr) or getattr(getattr(self, '_oft_env', None), 'mpi_finalized', False):
+            return # Nothing to do (or OFT environment already finalized at exit)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_equil_destroy(self._equil_ptr,error_string)
         if error_string.value != b'':

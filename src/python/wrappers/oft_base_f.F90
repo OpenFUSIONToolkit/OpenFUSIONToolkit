@@ -117,17 +117,6 @@ INTEGER(c_int), INTENT(out) :: nprocs !< Total number of MPI tasks
 rank=oft_env%rank
 nprocs=oft_env%nprocs
 END SUBROUTINE oftpy_get_mpi_info
-!------------------------------------------------------------------------------
-!> Finalize MPI environment (if not already finalized) before exiting Python
-!------------------------------------------------------------------------------
-SUBROUTINE oftpy_finalize() BIND(C,NAME="oftpy_finalize")
-#ifdef HAVE_MPI
-INTEGER(i4) :: ierr
-LOGICAL :: flag
-CALL MPI_FINALIZED(flag,ierr)
-IF(.NOT.flag)CALL MPI_FINALIZE(ierr)
-#endif
-END SUBROUTINE oftpy_finalize
 !---------------------------------------------------------------------------------
 !> Set the number of OpenMP threads to use
 !---------------------------------------------------------------------------------

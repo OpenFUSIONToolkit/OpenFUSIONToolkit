@@ -167,3 +167,29 @@ def test_eigs_shift():
     '''Slowest decay times of a conducting cube using a shift for the eigenvalue solve that differs from the
     time step (requires rebuilding the LHS matrices and updating the preconditioner).'''
     assert run_eigs(2, dt=1.E-3, eig_shift=5.E-2)
+
+
+@pytest.mark.coverage
+def test_recreate():
+    '''Create, destroy, and recreate ThickCurr models (different meshes and solver settings) in the same process,
+    checking that state from the first model (XML preconditioner, plotting operators, and restart files) does not
+    leak into the second model.'''
+    write_box_mesh(MESH_FILE, (4, 4, 4))
+    write_box_mesh('thickcurr_box3.h5', (3, 3, 3))
+    config = {'case': 'recreate', 'mesh_file': MESH_FILE, 'mesh_file2': 'thickcurr_box3.h5', 'eta': [ETA],
+              'order': 2, 'dt': 5.E-2}
+    results = run_driver(config)
+    assert results is not None
+    tau_exp = box_tau(ETA, (1, 1, 0))
+    retval = True
+    for name in ('tau1', 'tau2'):
+        for i, val in enumerate(results[name]):
+            retval &= check_value("{0}_{1}".format(name, i+1), val, tau_exp, 5.E-2)
+    # Second model has no XML preconditioner, so the default (diagonal) preconditioner should be used
+    if results['max_lits'] <= 1:
+        print("FAILED: Preconditioner from previous model used ({0} iterations)".format(results['max_lits']))
+        retval = False
+    if results['stale_rst']:
+        print("FAILED: Restart file from previous run not removed")
+        retval = False
+    assert retval

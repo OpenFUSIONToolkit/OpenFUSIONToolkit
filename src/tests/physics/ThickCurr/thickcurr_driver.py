@@ -9,6 +9,7 @@
 #
 # Results are written to "thickcurr_results.json" by the head process.
 import os
+import gc
 import sys
 import json
 import numpy
@@ -89,6 +90,26 @@ def main(config):
             sensor_hist = tc_model.load_history('floops.hist')
             results['hist_signals1'] = [float(sensor_hist[name][-1]) for name in sensor_obj['names']]
             results['hist_t1'] = float(sensor_hist['time'][-1])
+    #---Create, destroy, and recreate models in the same process
+    elif config['case'] == 'recreate':
+        # First model: direct solver from XML, eigenmode plots, time advance, and plotting
+        tc_model.set_field(box_mode)
+        results['tau1'] = tc_model.get_eigs(2, save_plot=True).tolist()
+        tc_model.run_td(nsteps=4, plot_freq=2)
+        tc_model.plot_td(plot_freq=2)
+        del tc_model
+        gc.collect()
+        # Second model: different mesh and no XML (default preconditioner)
+        tc_model = ThickCurr(myOFT)
+        tc_model.setup_model(mesh_file=config['mesh_file2'], order=2, eta_values=config['eta'], dt=config.get('dt', 1.E-3),
+                             theta=config.get('theta', 1.0))
+        results['tau2'] = tc_model.get_eigs(2, save_plot=True).tolist()
+        tc_model.set_field(box_mode)
+        tc_model.run_td(nsteps=2, plot_freq=2)
+        tc_model.plot_td(plot_freq=2)
+        if myOFT.head_proc:
+            results['max_lits'] = int(max(tc_model.load_history('thickcurr.hist')['lits']))
+            results['stale_rst'] = os.path.exists('thickcurr_00004.rst')
     else:
         raise ValueError('Unknown test case "{0}"'.format(config['case']))
     #---Save results and plot metadata

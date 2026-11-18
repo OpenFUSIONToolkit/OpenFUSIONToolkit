@@ -203,12 +203,18 @@ END SUBROUTINE thickcurr_f_setup
 SUBROUTINE thickcurr_f_destroy(tc_ptr,error_str) BIND(C,NAME="thickcurr_f_destroy")
 TYPE(c_ptr), VALUE, INTENT(in) :: tc_ptr !< Pointer to ThickCurr object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(i4) :: i,j
 TYPE(thickcurr_py), POINTER :: self
 IF(.NOT.thickcurr_ccast(tc_ptr,self,error_str))RETURN
 CALL thickcurr_delete()
 IF(ASSOCIATED(self%a))THEN
   CALL self%a%delete()
   DEALLOCATE(self%a)
+END IF
+!---Vector Lagrange space only references the scalar Lagrange space
+IF(ASSOCIATED(self%ML_vlagrange))THEN
+  CALL self%ML_vlagrange%delete()
+  DEALLOCATE(self%ML_vlagrange)
 END IF
 IF(ASSOCIATED(self%ML_lagrange))THEN
   CALL self%ML_lagrange%delete()
@@ -221,6 +227,20 @@ END IF
 IF(ASSOCIATED(self%ML_hcurl))THEN
   CALL self%ML_hcurl%delete()
   DEALLOCATE(self%ML_hcurl)
+END IF
+!---Higher order Grad(H^1) levels are shared with the H^1 space (only free levels it owns)
+IF(ASSOCIATED(self%ML_H1grad))THEN
+  DO i=self%ML_H1grad%minlev,self%ML_H1grad%nlevels
+    IF(.NOT.ASSOCIATED(self%ML_H1grad%levels(i)%fe))CYCLE
+    DO j=self%ML_H1%minlev,self%ML_H1%nlevels
+      IF(ASSOCIATED(self%ML_H1grad%levels(i)%fe,self%ML_H1%levels(j)%fe))THEN
+        NULLIFY(self%ML_H1grad%levels(i)%fe)
+        EXIT
+      END IF
+    END DO
+  END DO
+  CALL self%ML_H1grad%delete()
+  DEALLOCATE(self%ML_H1grad)
 END IF
 IF(ASSOCIATED(self%ML_H1))THEN
   CALL self%ML_H1%delete()
@@ -235,6 +255,17 @@ NULLIFY(thickcurr_ML_hcurl,thickcurr_ML_H1grad,thickcurr_ML_hcurl_grad,thickcurr
 DEALLOCATE(self)
 tc_active=.FALSE.
 END SUBROUTINE thickcurr_f_destroy
+!---------------------------------------------------------------------------------
+!> Free a mesh that is not (yet) owned by a ThickCurr object (eg. after a failed setup)
+!---------------------------------------------------------------------------------
+SUBROUTINE thickcurr_f_free_mesh(mesh_ptr) BIND(C,NAME="thickcurr_f_free_mesh")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Pointer to mesh object
+TYPE(multigrid_mesh), POINTER :: ml_mesh
+IF(.NOT.c_associated(mesh_ptr))RETURN
+CALL c_f_pointer(mesh_ptr,ml_mesh)
+CALL multigrid_reset(ml_mesh)
+DEALLOCATE(ml_mesh)
+END SUBROUTINE thickcurr_f_free_mesh
 !---------------------------------------------------------------------------------
 !> Update run options (negative values are ignored)
 !---------------------------------------------------------------------------------
@@ -356,12 +387,13 @@ END SUBROUTINE thickcurr_f_get_energy
 !---------------------------------------------------------------------------------
 !> Compute slowest decaying eigenmodes
 !---------------------------------------------------------------------------------
-SUBROUTINE thickcurr_f_eigs(tc_ptr,nev,tau_ptr,shift,save_plot,error_str) BIND(C,NAME="thickcurr_f_eigs")
+SUBROUTINE thickcurr_f_eigs(tc_ptr,nev,tau_ptr,shift,save_plot,nconv,error_str) BIND(C,NAME="thickcurr_f_eigs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tc_ptr !< Pointer to ThickCurr object
 INTEGER(c_int), VALUE, INTENT(in) :: nev !< Number of eigenvalues to compute
 TYPE(c_ptr), VALUE, INTENT(in) :: tau_ptr !< Decay times [nev] (output)
 REAL(c_double), VALUE, INTENT(in) :: shift !< Shift for eigenvalue solve (<=0 to use time step)
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_plot !< Save eigenmodes for plotting?
+INTEGER(c_int), INTENT(out) :: nconv !< Number of converged eigenvalues
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(r8), POINTER, DIMENSION(:) :: tau
 LOGICAL :: plot_flag
@@ -373,10 +405,11 @@ RETURN
 #endif
 CALL c_f_pointer(tau_ptr,tau,[nev])
 plot_flag=save_plot
+nconv=0
 IF(shift>0.d0)THEN
-  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,shift=shift)
+  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,shift=shift,nconv=nconv)
 ELSE
-  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag)
+  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,nconv=nconv)
 END IF
 END SUBROUTINE thickcurr_f_eigs
 !---------------------------------------------------------------------------------
@@ -387,17 +420,21 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tc_ptr !< Pointer to ThickCurr object
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Pointer to sensor object (optional)
 REAL(c_double), INTENT(out) :: t_final !< Time at end of simulation [s]
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: pm_save
 TYPE(thickcurr_sensors), POINTER :: sensors
 TYPE(thickcurr_py), POINTER :: self
 IF(.NOT.thickcurr_ccast(tc_ptr,self,error_str))RETURN
+pm_save=oft_env%pm
 oft_env%pm=.TRUE.
 IF(c_associated(sensor_ptr))THEN
   CALL c_f_pointer(sensor_ptr,sensors)
-  sensors%hist_ready=.FALSE.
+  CALL sensors_close(sensors) ! Start new history file
   CALL thickcurr_run(self%a,probes=sensors,t_final=t_final)
+  CALL sensors_close(sensors)
 ELSE
   CALL thickcurr_run(self%a,t_final=t_final)
 END IF
+oft_env%pm=pm_save
 END SUBROUTINE thickcurr_f_run
 !---------------------------------------------------------------------------------
 !> Generate plot files from restart files
@@ -413,8 +450,9 @@ TYPE(thickcurr_py), POINTER :: self
 IF(.NOT.thickcurr_ccast(tc_ptr,self,error_str))RETURN
 IF(c_associated(sensor_ptr))THEN
   CALL c_f_pointer(sensor_ptr,sensors)
-  sensors%hist_ready=.FALSE.
+  CALL sensors_close(sensors) ! Start new history file
   CALL thickcurr_plot(probes=sensors,rst_range=[rst_start,rst_end])
+  CALL sensors_close(sensors)
 ELSE
   CALL thickcurr_plot(rst_range=[rst_start,rst_end])
 END IF
@@ -514,6 +552,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Pointer to sensor object
 TYPE(thickcurr_sensors), POINTER :: sensors
 IF(.NOT.c_associated(sensor_ptr))RETURN
 CALL c_f_pointer(sensor_ptr,sensors)
+CALL sensors_close(sensors)
 IF(ASSOCIATED(sensors%names))DEALLOCATE(sensors%names)
 IF(ASSOCIATED(sensors%wa))DEALLOCATE(sensors%wa,sensors%idxa)
 IF(ASSOCIATED(sensors%wb))DEALLOCATE(sensors%wb,sensors%idxb)
@@ -605,23 +644,29 @@ IF(.NOT.self%hist_ready)THEN
       CALL self%hist_file%add_field(TRIM(self%names(i)), 'r8')
     END DO
     CALL self%hist_file%write_header
+    CALL self%hist_file%open
   END IF
   self%hist_ready=.TRUE.
 END IF
 !---Sample signals
 ALLOCATE(signals(self%nsensors))
 CALL sensors_eval(self,a,signals)
-IF(oft_env%head_proc)THEN
-  CALL self%hist_file%open
-  CALL self%hist_file%write(data_r8=[t,signals])
-  CALL self%hist_file%close
-END IF
+IF(oft_env%head_proc)CALL self%hist_file%write(data_r8=[t,signals])
 DEALLOCATE(signals)
 END SUBROUTINE sensors_apply
 !---------------------------------------------------------------------------------
-!> Flush history file (file is closed after each sample)
+!> Flush history file
 !---------------------------------------------------------------------------------
 SUBROUTINE sensors_flush(self)
 CLASS(thickcurr_sensors), INTENT(inout) :: self !< Sensor object
+IF(oft_env%head_proc.AND.self%hist_ready)CALL self%hist_file%flush
 END SUBROUTINE sensors_flush
+!---------------------------------------------------------------------------------
+!> Close history file (if open), a new history file is started on the next sample
+!---------------------------------------------------------------------------------
+SUBROUTINE sensors_close(self)
+CLASS(thickcurr_sensors), INTENT(inout) :: self !< Sensor object
+IF(oft_env%head_proc.AND.self%hist_ready)CALL self%hist_file%close
+self%hist_ready=.FALSE.
+END SUBROUTINE sensors_close
 END MODULE thickcurr_f

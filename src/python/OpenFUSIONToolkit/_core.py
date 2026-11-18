@@ -288,14 +288,14 @@ class OFT_env():
         write_oft_xml(xml_blocks,path)
 
     def _finalize_mpi(self):
-        '''! Finalize MPI environment at exit
+        '''! Finalize OFT environment (including PETSc and MPI) at exit
 
-        @note Compiled objects that are destroyed after this point (eg. during interpreter shutdown) should not
-        perform MPI communication
+        @note Compiled objects that are destroyed after this point (eg. during interpreter shutdown) must not call
+        into the compiled library, which can be checked using @ref mpi_finalized
         '''
         if os.getpid() == self._init_pid:
             self.mpi_finalized = True
-            oftpy_finalize()
+            oft_finalize(ctypes.byref(c_bool(True)))
 
     def _remove_tempfiles(self):
         '''! Remove known temporary files'''

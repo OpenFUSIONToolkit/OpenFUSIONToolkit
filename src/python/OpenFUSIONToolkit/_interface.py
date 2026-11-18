@@ -121,8 +121,9 @@ oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
 oftpy_get_mpi_info = ctypes_subroutine(oftpy_lib.oftpy_get_mpi_info,
     [c_int_ptr, c_int_ptr])
 
-# oftpy_finalize()
-oftpy_finalize = ctypes_subroutine(oftpy_lib.oftpy_finalize)
+# oft_finalize(no_stop)
+oft_finalize = ctypes_subroutine(oftpy_lib.oft_finalize,
+    [c_bool_ptr])
 
 # oftpy_set_nthreads(nthreads)
 oftpy_set_nthreads = ctypes_subroutine(oftpy_lib.oftpy_set_nthreads,

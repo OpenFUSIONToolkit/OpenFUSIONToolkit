@@ -301,7 +301,9 @@ tc_nsteps=nsteps
 tc_rst_freq=rst_freq
 tc_rst_ind=rst_ind
 tc_nu=nu_tc
-!---Look for XML nodes
+!---Look for XML nodes (reset any nodes from a previous setup)
+tc_root_node=xml_node()
+tc_pre_node=xml_node()
 IF(ASSOCIATED(thickcurr_xml))THEN
   CALL xml_get_element(thickcurr_xml,"thickcurr",tc_root_node,ierr)
   IF(ierr==0)CALL xml_get_element(tc_root_node,"pre",tc_pre_node,ierr)
@@ -510,6 +512,27 @@ CALL tc_kop%delete
 CALL tc_mcop%delete
 CALL tc_mop%delete
 DEALLOCATE(tc_kop,tc_mcop,tc_mop)
+!---Plotting operators
+IF(ASSOCIATED(tc_hcurl_minv))THEN
+  CALL tc_hcurl_minv%pre%delete
+  DEALLOCATE(tc_hcurl_minv%pre)
+  CALL tc_hcurl_minv%delete
+  DEALLOCATE(tc_hcurl_minv)
+END IF
+IF(ASSOCIATED(tc_hcurl_mop))THEN
+  CALL tc_hcurl_mop%delete
+  DEALLOCATE(tc_hcurl_mop)
+END IF
+IF(ASSOCIATED(tc_lag_minv))THEN
+  CALL tc_lag_minv%pre%delete
+  DEALLOCATE(tc_lag_minv%pre)
+  CALL tc_lag_minv%delete
+  DEALLOCATE(tc_lag_minv)
+END IF
+IF(ASSOCIATED(tc_lag_mop))THEN
+  CALL tc_lag_mop%delete
+  DEALLOCATE(tc_lag_mop)
+END IF
 IF(tc_proj_initialized)THEN
   CALL tc_lop_solver%pre%delete
   DEALLOCATE(tc_lop_solver%pre)
@@ -977,13 +1000,34 @@ IF((io_stat/=0).OR.(rst_tmp/=ind))CALL oft_abort("Step count exceeds format widt
 filename='thickcurr_'//rst_char//'.rst'
 END FUNCTION thickcurr_rst_name
 !------------------------------------------------------------------------------
+!> Remove restart files from previous runs in the current directory
+!!
+!! Called when a new (non-restart) run is started so that restart files from an
+!! earlier, longer run are not mixed with those of the new run (eg. in
+!! @ref thick_wall::thickcurr_plot "thickcurr_plot").
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_remove_rst()
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+IF(oft_env%head_proc)THEN
+  CALL execute_command_line('rm -f thickcurr_'//REPEAT('[0-9]',THICKCURR_RST_LEN)//'.rst', &
+    exitstat=ierr)
+  IF(ierr/=0)CALL oft_warn('Failed to remove restart files from previous run')
+END IF
+CALL oft_mpi_barrier(ierr)
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_remove_rst
+!------------------------------------------------------------------------------
 !> Advance the vector potential in time
 !!
 !! Runtime options are set in the main input file using the `thickcurr_options`
 !! group, see @ref thick_wall::thickcurr_read_settings "thickcurr_read_settings".
 !!
 !! The tangential components of the vector potential on the boundary are held
-!! fixed at their initial values (perfectly conducting wall). The initial field is
+!! fixed at their initial values (perfectly conducting wall).
+!!
+!! When a new run is started (`rst_ind=0`) restart files from previous runs in the
+!! current directory are removed. The initial field is
 !! first processed with @ref thick_wall::thickcurr_clean_field "thickcurr_clean_field".
 !!
 !! Restart files are written to `thickcurr_XXXXX.rst` every `rst_freq` steps and
@@ -1042,6 +1086,7 @@ IF((tc_rst_ind>0).AND.oft_file_exist(TRIM(rst_file)))THEN
   END IF
 ELSE
   IF(tc_rst_ind>0)CALL oft_abort('Restart does not exist.','thickcurr_run',__FILE__)
+  CALL thickcurr_remove_rst ! Remove restart files from previous runs
   CALL u%add(0.d0,1.d0,a)
   CALL thickcurr_clean_field(u)
   t=0.d0
@@ -1338,16 +1383,21 @@ END SUBROUTINE eig_amat_apply
 !! If `save_plot` is true, the modes are saved to the plot group `thickcurr_eigs` in the
 !! `eigs/` subdirectory (so that they are not overwritten by other plot files), with the
 !! mode index used as the time.
+!!
+!! If only some modes converge a warning is printed, only the converged modes are
+!! saved, and the decay times of the remaining modes are set to zero (see `nconv`).
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift)
+SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift,nconv)
 INTEGER(i4), INTENT(in) :: nev !< Number of eigenvalues to compute
 REAL(r8), INTENT(out) :: tau(nev) !< Decay times for each mode (largest first) [s]
 TYPE(oft_vector_ptr), OPTIONAL, INTENT(inout) :: vecs(nev) !< Eigenvectors (optional, created if not associated)
 LOGICAL, OPTIONAL, INTENT(in) :: save_plot !< Save modes to plot file? (optional)
 REAL(r8), OPTIONAL, INTENT(in) :: tol !< Eigensolver tolerance (optional)
 REAL(r8), OPTIONAL, INTENT(in) :: shift !< Shift [s] (optional, default: \f$ \theta \Delta t \f$)
+INTEGER(i4), OPTIONAL, INTENT(out) :: nconv !< Number of converged modes (optional)
 #ifdef HAVE_ARPACK
-INTEGER(i4) :: i
+INTEGER(i4) :: i,nconv_l
+CHARACTER(LEN=OFT_SLEN) :: conv_msg
 INTEGER(i4), ALLOCATABLE :: sort_inds(:)
 REAL(r8) :: alam,mu,dt_eff,energy
 LOGICAL :: reshift
@@ -1398,12 +1448,22 @@ IF(oft_env%head_proc)THEN
 END IF
 CALL arsolver%apply(u,alam)
 IF(arsolver%info<0)CALL oft_abort("Eigenvalue solve failed","thickcurr_eigs",__FILE__)
+!---Check for partial convergence (non-converged modes are zeroed and placed last by ARPACK)
+nconv_l=nev
+IF((arsolver%info>0).AND.(arsolver%info<nev))THEN
+  nconv_l=arsolver%info
+  WRITE(conv_msg,'(A,I4,A,I4,A)')'Only ',nconv_l,' of ',nev,' eigenvalues converged, remaining decay times set to zero'
+  IF(oft_env%head_proc)CALL oft_warn(TRIM(conv_msg))
+END IF
+IF(PRESENT(nconv))nconv=nconv_l
 !------------------------------------------------------------------------------
 ! Compute time constants (largest first)
 !------------------------------------------------------------------------------
 ALLOCATE(sort_inds(nev))
-DO i=1,nev
-  sort_inds(i)=nev-i+1 ! ARPACK returns eigenvalues in ascending order
+tau=0.d0
+sort_inds=0
+DO i=1,nconv_l
+  sort_inds(i)=nconv_l-i+1 ! ARPACK returns eigenvalues in ascending order
   mu=arsolver%eig_val(1,sort_inds(i))
   IF(mu>=1.d0-1.d-10)THEN
     tau(i)=-1.d0
@@ -1415,7 +1475,7 @@ DO i=1,nev
 END DO
 IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A)')'Decay times [s]:'
-  DO i=1,nev
+  DO i=1,nconv_l
     WRITE(*,'(4X,I4,ES16.7)')i,tau(i)
   END DO
   WRITE(*,'(A)')'============================'
@@ -1431,7 +1491,7 @@ IF(PRESENT(vecs).OR.do_plot)THEN
     CALL xdmf%setup("thickcurr_eigs","eigs/")
     CALL hcurl_rep%mesh%setup_io(xdmf,thickcurr_plot_order())
   END IF
-  DO i=1,nev
+  DO i=1,nconv_l
     vslice=>arsolver%eig_vec(:,sort_inds(i))
     CALL u%restore_slice(vslice)
     CALL thickcurr_grad_proj(u)
@@ -1468,6 +1528,7 @@ END IF
 DEBUG_STACK_POP
 #else
 tau=0.d0
+IF(PRESENT(nconv))nconv=0
 CALL oft_abort("Subroutine requires ARPACK","thickcurr_eigs",__FILE__)
 #endif
 END SUBROUTINE thickcurr_eigs

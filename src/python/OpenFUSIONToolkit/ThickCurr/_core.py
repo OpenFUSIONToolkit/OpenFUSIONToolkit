@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 import os
+import warnings
 import numpy
 from ._interface import *
 from ..io import build_XDMF, histfile
@@ -59,6 +60,9 @@ class ThickCurr():
     @note As the underlying Fortran implementation stores state at the module level only one ThickCurr object
     may be active (set up) at a time.
     '''
+    ## Is a ThickCurr object currently setup? (only one may be active at a time)
+    _active = False
+
     def __init__(self,OFT_env):
         '''! Initialize ThickCurr object
 
@@ -93,6 +97,8 @@ class ThickCurr():
         error_string = self._oft_env.get_c_errorbuff()
         thickcurr_f_destroy(self._tc_ptr,error_string)
         self._tc_ptr = c_void_p()
+        self._mesh_ptr = c_void_p() # Mesh is freed with ThickCurr object
+        ThickCurr._active = False
 
     def print_ascii_logo(self, italic=True):
         '''! Print ThickCurr ASCII logo
@@ -160,10 +166,44 @@ class ThickCurr():
         '''
         if self._tc_ptr:
             raise ValueError('Model already setup')
+        if ThickCurr._active:
+            raise ValueError('Only one ThickCurr object can be setup at a time, delete the existing object first')
+        #---Validate inputs before loading the mesh
+        if order < 1:
+            raise ValueError('Invalid "order", must be >= 1')
+        if minlev == 0:
+            raise ValueError('Invalid "minlev", use "pmg=True" for p-multigrid')
         if nlevels is None:
             nlevels = nbase+1 if self._oft_env.nprocs > 1 else nbase
         if (self._oft_env.nprocs > 1) and (nlevels <= nbase):
             raise ValueError('"nlevels" must be > "nbase" when running with MPI')
+        if (eta_values is None) and (xml_filename is None):
+            raise ValueError('Resistivities must be specified using "eta_values" or "xml_filename"')
+        if mesh_file is not None:
+            if not os.path.isfile(mesh_file):
+                raise ValueError('Mesh file "{0}" does not exist'.format(mesh_file))
+        elif r is not None:
+            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
+            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
+            if (r.ndim != 2) or (r.shape[1] != 3):
+                raise ValueError('Point list must have 3 spatial dimensions `[np,3]`')
+            if (lc.ndim != 2) or (lc.shape[1] != 4):
+                raise ValueError('Cell list must be tetrahedra `[nc,4]`')
+            if reg is None:
+                reg = numpy.ones((lc.shape[0],),dtype=numpy.int32)
+            else:
+                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
+                if reg.shape != (lc.shape[0],):
+                    raise ValueError('Region list must have one entry per cell `[nc]`')
+        else:
+            raise ValueError('Mesh filename (native format) or mesh values required')
+        #---Load XML
+        if xml_filename is not None:
+            if not os.path.isfile(xml_filename):
+                raise ValueError('XML file "{0}" does not exist'.format(xml_filename))
+            oftpy_load_xml(self._oft_env.path2c(xml_filename),ctypes.byref(self._xml_ptr))
+            if not self._xml_ptr:
+                raise ValueError('Error parsing XML file "{0}"'.format(xml_filename))
         #---Mesh and ThickCurr settings
         self._oft_env.oft_in_groups['mesh_options'].update({
             'cad_type': '0',
@@ -180,8 +220,6 @@ class ThickCurr():
         #---Load mesh
         nregs = c_int()
         if mesh_file is not None:
-            if not os.path.isfile(mesh_file):
-                raise ValueError('Mesh file "{0}" does not exist'.format(mesh_file))
             self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
             self._oft_env.update_oft_in()
             np = c_int(-1)
@@ -189,46 +227,32 @@ class ThickCurr():
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
             oft_setup_vmesh(np,rfake,np,np,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
-        elif r is not None:
+        else:
             self._oft_env.update_oft_in()
-            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
-            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
-            if (r.ndim != 2) or (r.shape[1] != 3):
-                raise ValueError('Point list must have 3 spatial dimensions `[np,3]`')
-            if (lc.ndim != 2) or (lc.shape[1] != 4):
-                raise ValueError('Cell list must be tetrahedra `[nc,4]`')
-            if reg is None:
-                reg = numpy.ones((lc.shape[0],),dtype=numpy.int32)
-            else:
-                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_vmesh(c_int(r.shape[0]),r,c_int(4),c_int(lc.shape[0]),lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
-        else:
-            raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
-        #---Load XML
-        if xml_filename is not None:
-            if not os.path.isfile(xml_filename):
-                raise ValueError('XML file "{0}" does not exist'.format(xml_filename))
-            oftpy_load_xml(self._oft_env.path2c(xml_filename),ctypes.byref(self._xml_ptr))
-            if not self._xml_ptr:
-                raise ValueError('Error parsing XML file "{0}"'.format(xml_filename))
-        #---Resistivities (from XML if not specified)
-        if eta_values is not None:
-            eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
-            if eta_values.shape != (self.nregs,):
-                raise ValueError('Size of "eta_values" ({0}) does not match number of regions ({1})'.format(eta_values.size,self.nregs))
-            neta = self.nregs
-        elif xml_filename is None:
-            raise ValueError('Resistivities must be specified using "eta_values" or "xml_filename"')
-        else:
-            eta_values = numpy.zeros((1,),dtype=numpy.float64)
-            neta = 0
-        if minlev == 0:
-            raise ValueError('Invalid "minlev", use "pmg=True" for p-multigrid')
-        error_string = self._oft_env.get_c_errorbuff()
-        thickcurr_f_setup(ctypes.byref(self._tc_ptr),self._mesh_ptr,c_int(order),c_int(0 if pmg else minlev),c_int(neta),
-                          eta_values,self._xml_ptr,error_string)
-        self._check_error(error_string)
+        #---Build model (mesh is freed if setup fails)
+        try:
+            if eta_values is not None:
+                eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
+                if eta_values.shape != (self.nregs,):
+                    raise ValueError('Size of "eta_values" ({0}) does not match number of regions ({1})'.format(
+                        eta_values.size,self.nregs))
+                neta = self.nregs
+            else:
+                eta_values = numpy.zeros((1,),dtype=numpy.float64)
+                neta = 0
+            error_string = self._oft_env.get_c_errorbuff()
+            thickcurr_f_setup(ctypes.byref(self._tc_ptr),self._mesh_ptr,c_int(order),c_int(0 if pmg else minlev),c_int(neta),
+                              eta_values,self._xml_ptr,error_string)
+            self._check_error(error_string)
+        except BaseException:
+            thickcurr_f_free_mesh(self._mesh_ptr)
+            self._mesh_ptr = c_void_p()
+            self._tc_ptr = c_void_p()
+            self.nregs = -1
+            raise
+        ThickCurr._active = True
         self.dt = dt
 
     def set_options(self,dt=None,theta=None,lin_tol=None):
@@ -316,14 +340,19 @@ class ThickCurr():
         @param neigs Number of eigenvalues to compute
         @param shift Shift for eigenvalue solve [s] (default: time step)
         @param save_plot Save eigenmodes to plot files (`eigs` subdirectory, mode index as "time")
-        @result Decay times (slowest first) [s] `(neigs)`
+        @result Decay times (slowest first) [s] `(nconv)`, where `nconv <= neigs` is the number of converged modes
         '''
         self._check_setup()
         tau = numpy.zeros((neigs,), dtype=numpy.float64)
+        nconv = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        thickcurr_f_eigs(self._tc_ptr,c_int(neigs),tau,c_double(-1.0 if shift is None else shift),c_bool(save_plot),error_string)
+        thickcurr_f_eigs(self._tc_ptr,c_int(neigs),tau,c_double(-1.0 if shift is None else shift),c_bool(save_plot),
+                         ctypes.byref(nconv),error_string)
         self._check_error(error_string)
-        return tau
+        if nconv.value < neigs:
+            warnings.warn('Only {0} of {1} eigenvalues converged, returning converged values only'.format(nconv.value,neigs),
+                          RuntimeWarning, stacklevel=2)
+        return tau[:nconv.value]
 
     def setup_sensors(self,sensors,filename='floops.hist',nquad=3):
         r'''! Setup sensors for time-dependent simulations
@@ -400,6 +429,8 @@ class ThickCurr():
 
         On completion the vector potential is updated to the final state, so additional calls continue
         the simulation (restarting the time at zero).
+
+        @note When a new run is started any restart files from previous runs in the current working directory are removed.
 
         @note Output files are written to the current working directory on the head (rank 0) process:
           - `thickcurr.hist`: Step index, linear iterations, time, magnetic energy, Ohmic power, and walltime
