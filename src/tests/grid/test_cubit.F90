@@ -79,27 +79,70 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-! Check that the boundary mesh high-order nodes match the volume mesh on every level
+! Check that each level's boundary mesh matches the volume mesh: the boundary quadratic mapping
+! at each boundary cell's nodes must equal the volume quadratic mapping at the same points of the
+! volume cell behind that face. Corners are matched through vertex indices only, so this does not
+! reuse the edge/face lookup that fills the boundary nodes.
 SUBROUTINE check_bmesh_ho
-INTEGER(i4) :: i,j,level
-REAL(r8) :: max_err
+INTEGER(i4) :: i,j,k,c,v,level,morder,border
+REAL(r8) :: max_err,fb(4,4),fv(4,4),gb(4),gv(4)
+LOGICAL, ALLOCATABLE :: mcurved(:),bcurved(:)
 CLASS(oft_mesh), POINTER :: mesh
+CLASS(oft_bmesh), POINTER :: bmesh
 max_err=0._r8
 DO level=1,mg_mesh%mgmax
   mesh=>mg_mesh%meshes(level)
+  bmesh=>mesh%bmesh
   IF(.NOT.ASSOCIATED(mesh%ho_info%r))CYCLE
-  DO i=1,mesh%bmesh%ne
-    j=ABS(mesh%bmesh%parent%le(i))
-    max_err=MAX(max_err,MAXVAL(ABS(mesh%bmesh%ho_info%r(:,mesh%bmesh%ho_info%lep(1,i)) &
-      - mesh%ho_info%r(:,mesh%ho_info%lep(1,j)))))
-  END DO
-  IF(mesh%ho_info%nfp==1)THEN
-    DO i=1,mesh%bmesh%nc
-      j=ABS(mesh%bmesh%parent%lf(i))
-      max_err=MAX(max_err,MAXVAL(ABS(mesh%bmesh%ho_info%r(:,mesh%bmesh%ho_info%lcp(1,i)) &
-        - mesh%ho_info%r(:,mesh%ho_info%lfp(1,j)))))
+  IF(.NOT.ASSOCIATED(bmesh%ho_info%r))CALL oft_abort('Boundary high-order nodes missing', &
+    'check_bmesh_ho',__FILE__)
+  morder=mesh%order
+  border=bmesh%order
+  CALL mesh%set_order(2)
+  CALL bmesh%set_order(2)
+  ! Use the quadratic map on every cell of both meshes
+  mcurved=mesh%ho_info%is_curved
+  bcurved=bmesh%ho_info%is_curved
+  mesh%ho_info%is_curved=.TRUE.
+  bmesh%ho_info%is_curved=.TRUE.
+  DO i=1,bmesh%nc
+    c=mesh%lfc(1,ABS(bmesh%parent%lf(i)))
+    ! Logical position of each boundary cell corner in the boundary (fb) and volume (fv) cells
+    fb=0._r8
+    fv=-1._r8
+    DO k=1,bmesh%cell_np
+      CALL bmesh%vlog(k,fb(:,k))
+      v=bmesh%parent%lp(bmesh%lc(k,i))
+      DO j=1,mesh%cell_np
+        IF(mesh%lc(j,c)==v)THEN
+          fv(:,k)=0._r8
+          CALL mesh%vlog(j,fv(:,k))
+        END IF
+      END DO
+      IF(ALL(fv(:,k)<0._r8))CALL oft_abort('Boundary vertex not found in volume cell', &
+        'check_bmesh_ho',__FILE__)
     END DO
-  END IF
+    ! Corners
+    DO k=1,bmesh%cell_np
+      max_err=MAX(max_err,MAXVAL(ABS(bmesh%log2phys(i,fb(:,k)) - mesh%log2phys(c,fv(:,k)))))
+    END DO
+    ! Edge midpoints
+    DO k=1,bmesh%cell_ne
+      gb=(fb(:,bmesh%cell_ed(1,k))+fb(:,bmesh%cell_ed(2,k)))/2._r8
+      gv=(fv(:,bmesh%cell_ed(1,k))+fv(:,bmesh%cell_ed(2,k)))/2._r8
+      max_err=MAX(max_err,MAXVAL(ABS(bmesh%log2phys(i,gb) - mesh%log2phys(c,gv))))
+    END DO
+    ! Cell (face) centre
+    IF(bmesh%ho_info%ncp==1)THEN
+      gb=SUM(fb(:,1:bmesh%cell_np),DIM=2)/REAL(bmesh%cell_np,8)
+      gv=SUM(fv(:,1:bmesh%cell_np),DIM=2)/REAL(bmesh%cell_np,8)
+      max_err=MAX(max_err,MAXVAL(ABS(bmesh%log2phys(i,gb) - mesh%log2phys(c,gv))))
+    END IF
+  END DO
+  mesh%ho_info%is_curved=mcurved
+  bmesh%ho_info%is_curved=bcurved
+  CALL mesh%set_order(morder)
+  CALL bmesh%set_order(border)
 END DO
 max_err=oft_mpi_max(max_err)
 IF(oft_env%head_proc)WRITE(*,*)'Max boundary high-order node error =',max_err

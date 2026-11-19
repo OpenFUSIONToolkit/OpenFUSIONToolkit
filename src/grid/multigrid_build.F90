@@ -400,9 +400,10 @@ integer(i4) :: cad_type = 0
 integer(i4) :: nlevels = 1
 integer(i4) :: nbase = 1
 integer(i4) :: grid_order = 1
+LOGICAL :: ho_curve_all = .FALSE.
 !---Read in mesh options
 namelist/mesh_options/meshname,cad_type,nlevels,nbase,grid_order, &
-fix_boundary,jac_ratio_tol,part_meth,cad_feature_angle
+fix_boundary,jac_ratio_tol,part_meth,cad_feature_angle,ho_curve_all
 DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,mesh_options,IOSTAT=ierr)
@@ -431,6 +432,7 @@ end if
 !---Setup MG enviroment
 mg_mesh%mgmax=nlevels
 mg_mesh%nbase=nbase
+mg_mesh%ho_curve_all=ho_curve_all
 oft_env%nbase=nbase
 mg_mesh%mgdim=mg_mesh%mgmax
 allocate(mg_mesh%inter(mg_mesh%mgdim))

@@ -143,11 +143,9 @@ END DO
 DEALLOCATE(lptmp)
 !---
 CALL bmesh_local_init(self%bmesh,self)
-!---Copy high-order mapping if available
-IF(ASSOCIATED(self%ho_info%r))THEN
-  self%bmesh%order=1
-  CALL bmesh_global_copy_ho(self)
-END IF
+!---Copy high-order nodes if available (boundary mapping stays linear)
+self%bmesh%order=1
+CALL bmesh_global_copy_ho(self)
 DEBUG_STACK_POP
 end subroutine bmesh_global_init
 !---------------------------------------------------------------------------------
