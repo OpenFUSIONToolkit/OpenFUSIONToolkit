@@ -643,6 +643,112 @@
    "nlits_total": 18,
    "max_rss_mb": 405.8671875,
    "wall_s": 16.38
+  },
+  {
+   "name": "tet_p3_mg_run",
+   "tag": "baseline",
+   "pre": "ilu",
+   "order": 3,
+   "mg": true,
+   "mfnk": false,
+   "mode": "run",
+   "nsteps": 5,
+   "threads": 4,
+   "nprocs": 1,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 98.56584239006042,
+   "b_dofs": 38140.0,
+   "v_dofs": 20740.0,
+   "n_dofs": 6912.0,
+   "nthreads": 4,
+   "ncells_global": 1536,
+   "ncells_local": 1536,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "run_time_s": 96.209,
+   "final_norm_B": 0.3318468481680588,
+   "final_norm_V": 4700357.355689876,
+   "final_norm_Ti": 1671.641573307103,
+   "prof_setops_n": 6,
+   "prof_setops_total_s": 6.7843,
+   "prof_nlop_n": 27,
+   "prof_nlop_total_s": 0.96883,
+   "prof_preupdate_n": 1,
+   "prof_preupdate_total_s": 2.849e-06,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 6,
+     "total_s": 1.8295,
+     "avg_s": 0.30492,
+     "nrows": 30599,
+     "nnz": 5122413
+    },
+    {
+     "level": 3,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 6,
+     "total_s": 4.9536,
+     "avg_s": 0.82561,
+     "nrows": 86631,
+     "nnz": 24759995
+    }
+   ],
+   "build_fine_avg_s": 0.82561,
+   "build_coarse_avg_s": 0.30492,
+   "jac_nnz_total": 29882408,
+   "steps": [
+    {
+     "step": 1,
+     "t": 2e-07,
+     "lits": 42,
+     "nlits": 3,
+     "time_s": 33.039,
+     "dt": 2e-07
+    },
+    {
+     "step": 2,
+     "t": 3.99005e-07,
+     "lits": 48,
+     "nlits": 4,
+     "time_s": 21.07,
+     "dt": 1.99e-07
+    },
+    {
+     "step": 3,
+     "t": 5.940299e-07,
+     "lits": 38,
+     "nlits": 3,
+     "time_s": 12.132,
+     "dt": 1.95e-07
+    },
+    {
+     "step": 4,
+     "t": 7.89523e-07,
+     "lits": 42,
+     "nlits": 3,
+     "time_s": 13.421,
+     "dt": 1.95e-07
+    },
+    {
+     "step": 5,
+     "t": 9.836228e-07,
+     "lits": 47,
+     "nlits": 3,
+     "time_s": 14.736,
+     "dt": 1.94e-07
+    }
+   ],
+   "step_time_avg_s": 18.8796,
+   "step_time_avg_excl1_s": 15.33975,
+   "lits_total": 217,
+   "nlits_total": 16,
+   "max_rss_mb": 1871.73828125,
+   "wall_s": 98.55
   }
  ]
 }
