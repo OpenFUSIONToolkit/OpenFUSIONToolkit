@@ -99,8 +99,10 @@ def _coil_and_supply_panels(ax_I, ax_V, s1, t, I_coil, V, V_title):
     stem = [n[:-1] if n[-1:] in ('U', 'L') else n for n in m.coil_names]
     stems = list(dict.fromkeys(stem))
     cmap = plt.get_cmap('tab10' if len(stems) <= 10 else 'tab20')
-    style = [{'color': cmap(stems.index(s) % cmap.N), 'ls': '--' if n.endswith('L') else '-'}
-             for n, s in zip(m.coil_names, stem)]
+    style = []
+    for n, s in zip(m.coil_names, stem):                 # pair colour; the lower coil of a pair dashed
+        ls = '--' if n.endswith('L') else '-'
+        style.append({'color': cmap(stems.index(s) % cmap.N), 'ls': ls})
     for i in np.flatnonzero(np.abs(circ.T).sum(axis=1) > 0):
         ax_I.plot(t, I_coil[:, i] / m.coil_lim[i, 1], lw=1.2, label=m.coil_names[i], **style[i])
     ax_I.set(ylabel='$I / I_{max}$', title='coil currents', ylim=(-1.08, 1.08))
@@ -314,7 +316,12 @@ def startup_frames(model, g, s1, res, ramp, zoom, n_grid=61):
     frames = []
     for k, t in enumerate(s1.t):
         mp = field_maps(model, s1, res['x'][k], res['xdot'][k], s1.s, zoom[:2], zoom[2:], n=n_grid)
-        phase = 'channel' if t > s1.t_p0 + 1e-9 else ('breakdown' if t > bd['window'][0] + 1e-9 else 'premag')
+        if t > s1.t_p0 + 1e-9:
+            phase = 'channel'
+        elif t > bd['window'][0] + 1e-9:
+            phase = 'breakdown'
+        else:
+            phase = 'premag'
         frames.append({'t': t, 'Ip': res['Ip'][k], 'I_coil': res['I_coil'][k], 'I_seg': res['I_struct'][k],
                        'psi': nodal_flux(model, s1, res['x'][k], s1.plasma, res['Ip'][k]), 'phase': phase,
                        'Bp': mp['Bp'], 'psi_map': mp['psi'],
@@ -372,7 +379,9 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_max=400, m
             ax_m.add_collection(PolyCollection(g.seg_polys, array=J_f[g.seg_of_cell], cmap='RdBu_r', norm=Jnorm,
                                                edgecolors='face', linewidths=0.2))
             rel = frame['I_coil'] / d['coil_lim']
-            fc = [plt.get_cmap('RdBu_r')(Inorm(rel[i])) if d['used'][i] else LIGHT for i in g.coil_of_cell]
+            fc = []                                      # coil colour: current / limit if driven, else grey
+            for i in g.coil_of_cell:
+                fc.append(plt.get_cmap('RdBu_r')(Inorm(rel[i])) if d['used'][i] else LIGHT)
             ax_m.add_collection(PolyCollection(g.coil_polys, facecolors=fc, edgecolors=fc, linewidths=0.2))
             psi = frame['psi']
             psi_in = psi[g.node_in_lim]
@@ -448,8 +457,9 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_max=400, m
 
             # colour bars: (grid cell, norm, colour map, label, bottom of the bar in figure units)
             B_label = '$|B_p|$, coils + structure + plasma [mT]'
+            J_label = 'structure current density [kA/m$^2$]'
             for cell, norm, cmap, label, y0 in ((gsp[:, 0], Inorm, 'RdBu_r', 'coil current / limit', 0.175),
-                                                (gsp[:, 0], Jnorm, 'RdBu_r', 'structure current density [kA/m$^2$]', 0.065),
+                                                (gsp[:, 0], Jnorm, 'RdBu_r', J_label, 0.065),
                                                 (gsp[:, 1], Bnorm, 'Greys', B_label, 0.175)):
                 p = cell.get_position(fig)
                 cb = fig.colorbar(plt.cm.ScalarMappable(norm, cmap), orientation='horizontal',

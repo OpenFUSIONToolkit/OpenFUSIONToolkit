@@ -180,13 +180,18 @@ class MachineModel:
         self.seg_names = [s['name'] for s in segments]
         self.unit_names = self.coil_names + self.seg_names
         self.nc, self.ns = len(self.coil_names), len(self.seg_names)
-        self.nturns = np.array([sum(c['nturns'] for c in sets[n]) for n in self.coil_names], float)
         area = cell_geometry(P, LC)[0]
+        self.nturns = np.zeros(self.nc)
         self.coil_cells, self.coil_turns = [], []
-        for n in self.coil_names:
-            cells = [np.where(REG == c['reg_id'])[0] for c in sets[n]]
+        for i, n in enumerate(self.coil_names):
+            cells, turns = [], []
+            for c in sets[n]:                            # every element (mesh region) of the coil set
+                x = np.where(REG == c['reg_id'])[0]
+                cells.append(x)
+                turns.append(c['nturns'] * area[x] / area[x].sum())   # the element's turns spread over its area
+                self.nturns[i] += c['nturns']
             self.coil_cells.append(np.concatenate(cells))
-            self.coil_turns.append(np.concatenate([c['nturns'] * area[x] / area[x].sum() for c, x in zip(sets[n], cells)]))
+            self.coil_turns.append(np.concatenate(turns))
         gs.set_coil_currents({self.coil_names[0]: 1.0})  # an equilibrium must exist before the
         gs.solve(vacuum=True)                            # current distributions / field evaluations
         r_nodes = gs.r[:, 0]
@@ -246,8 +251,11 @@ class CircuitModel:
         if scheme not in ('zoh', 'be'):
             raise ValueError(f"scheme must be 'zoh' or 'be', not {scheme!r}")
         m, nc, ns = machine, machine.nc, machine.ns
-        if circuits is None:
-            circuits = {n: {n: 1.0} for n in m.coil_names if not any(e in n for e in exclude)}
+        if circuits is None:                             # one circuit per coil, except the excluded ones
+            circuits = {}
+            for n in m.coil_names:
+                if not any(e in n for e in exclude):
+                    circuits[n] = {n: 1.0}
         names = self.circ_names = list(circuits)
         self.ncirc = len(names)
         T = self.T = np.zeros((nc, self.ncirc))
@@ -354,7 +362,12 @@ def feed_forward(machine, t, I_coil, plasma=None, Ip=None, Rp=None):
         # exact step of M dx/dt + R x = -M_xc w with the forcing w constant on the step
         A, _, Bw = circ.zoh(t[k + 1] - t[k], None if Rp is None else Rp[k], forcing=-M_xc)
         x[k + 1] = A @ x[k] + Bw @ W[k]
-    I_p = x[:, -1] if Rp is not None else (np.zeros(len(t)) if Ip is None else Ip)
+    if Rp is not None:                                    # predicted: the last state
+        I_p = x[:, -1]
+    elif Ip is not None:                                  # replayed
+        I_p = Ip
+    else:                                                 # no channel
+        I_p = np.zeros(len(t))
     return np.column_stack([I_coil, x[:, :machine.ns], I_p])
 
 

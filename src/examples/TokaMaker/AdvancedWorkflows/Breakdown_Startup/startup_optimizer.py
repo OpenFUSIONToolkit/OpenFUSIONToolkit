@@ -145,8 +145,9 @@ class ConicProblem:
             n_zero += add_rows(self._row_block(terms, rhs.size, ntot), rhs, True, tag)
         if n_zero:
             cones.append(clarabel.ZeroConeT(n_zero))
-        n_nonneg = sum(add_rows(self._row_block(terms, rhs.size, ntot), rhs, False, tag)
-                       for terms, rhs, tag in self._ineq)
+        n_nonneg = 0
+        for terms, rhs, tag in self._ineq:
+            n_nonneg += add_rows(self._row_block(terms, rhs.size, ntot), rhs, False, tag)
         if n_nonneg:
             cones.append(clarabel.NonnegativeConeT(n_nonneg))
         for t_terms, t0, v_terms, v0, tag in self._soc:  # each cone scaled by its largest coefficient
@@ -172,11 +173,13 @@ class ConicProblem:
             self._eq_res = float(np.abs(r[:n_zero]).max(initial=0.0))
             self._ineq_res = float(np.maximum(r[n_zero:n_zero + n_nonneg], 0.0).max(initial=0.0))
             self.violations = self.evaluate({v: self.value(v) for v in self.vars.values()})
-            note = (f'equality residual {self._eq_res:.1e}',) if self.status == 'AlmostSolved' else ()
-            self.solve_log.append((step, self.status) + note)
-            # stop when accepted, or on a definite answer (e.g. infeasible)
-            if self.accepted() or not any(f in self.status for f in
-                                          ('NumericalError', 'InsufficientProgress', 'MaxIterations', 'AlmostSolved')):
+            entry = (step, self.status)
+            if self.status == 'AlmostSolved':
+                entry += (f'equality residual {self._eq_res:.1e}',)
+            self.solve_log.append(entry)
+            # stop when accepted, or on a definite answer (e.g. infeasible); retry only on these failures
+            retry = ('NumericalError', 'InsufficientProgress', 'MaxIterations', 'AlmostSolved')
+            if self.accepted() or not any(f in self.status for f in retry):
                 break
         return self.status
 
@@ -190,11 +193,15 @@ class ConicProblem:
         |lhs - rhs| for equalities, the amount by which inequalities and cones fail (0 when met)."""
         def lhs(terms):
             return sum(np.asarray(sp.csr_matrix(M) @ values[v]).ravel() for v, M in terms.items())
+        viol = []                                        # (tag, violation) of every constraint block
+        for T, r, tag in self._eq:
+            viol.append((tag, np.abs(lhs(T) - r).max()))
+        for T, r, tag in self._ineq:
+            viol.append((tag, np.maximum(lhs(T) - r, 0.0).max()))
+        for T, t0, Vt, v0, tag in self._soc:             # ||Vt v + v0|| <= T v + t0
+            viol.append((tag, max(np.linalg.norm(lhs(Vt) + v0) - (lhs(T)[0] + t0), 0.0)))
         out = {}
-        for tag, val in ([(tag, np.abs(lhs(T) - r).max()) for T, r, tag in self._eq]
-                         + [(tag, np.maximum(lhs(T) - r, 0.0).max()) for T, r, tag in self._ineq]
-                         + [(tag, max(np.linalg.norm(lhs(Vt) + v0) - (lhs(T)[0] + t0), 0.0))
-                            for T, t0, Vt, v0, tag in self._soc]):
+        for tag, val in viol:
             out[tag] = max(out.get(tag, 0.0), float(val))
         return out
 
@@ -581,19 +588,36 @@ class GSRamp:
         gs, pu, om = machine.gs, machine.psi_u, circuit.output_matrix
         # boundary targets: explicit points per slice, else create_isoflux from the shape keyframes
         explicit = rp.get('targets') or {}
-        explicit = dict(enumerate(explicit)) if isinstance(explicit, (list, tuple)) else explicit
-        shape = interp_keys(rp['shape'], self.t) if rp.get('shape') is not None else None
+        if isinstance(explicit, (list, tuple)):          # a list: one entry per slice
+            explicit = dict(enumerate(explicit))
+        shape = None
+        if rp.get('shape') is not None:
+            shape = interp_keys(rp['shape'], self.t)
         if shape is None and len(explicit) < n + 1:
             raise ValueError("give shape keyframes, or explicit targets for every slice")
-        self.iso = [np.asarray(explicit[k], float) if k in explicit else create_isoflux(rp['n_iso'], *shape[k])
-                    for k in range(n + 1)]
+        self.iso = []
+        for k in range(n + 1):
+            if k in explicit:
+                self.iso.append(np.asarray(explicit[k], float))
+            else:
+                self.iso.append(create_isoflux(rp['n_iso'], *shape[k]))
         # (R0, Z0, a, kappa, delta) per slice, for TokaMaker's starting guess only: keyframes, or from the targets
-        self.shape = shape if shape is not None else np.array(
-            [[i[:, 0].mean(), i[:, 1].mean(), np.ptp(i[:, 0]) / 2,
-              max(np.ptp(i[:, 1]) / max(np.ptp(i[:, 0]), 1e-3), 1.0), 0.0] for i in self.iso])
-        ex = rp.get('iso_exact', False)
-        ex = dict(enumerate(ex)) if isinstance(ex, (list, tuple)) else ex
-        self.iso_exact = [bool(ex.get(k, False)) if isinstance(ex, dict) else bool(ex) for k in range(n + 1)]
+        if shape is not None:
+            self.shape = shape
+        else:
+            self.shape = []
+            for i in self.iso:
+                width, height = np.ptp(i[:, 0]), np.ptp(i[:, 1])
+                kappa = max(height / max(width, 1e-3), 1.0)
+                self.shape.append([i[:, 0].mean(), i[:, 1].mean(), width / 2, kappa, 0.0])
+            self.shape = np.array(self.shape)
+        ex = rp.get('iso_exact', False)                  # True/False for all slices, a list, or {slice: bool}
+        if isinstance(ex, (list, tuple)):
+            ex = dict(enumerate(ex))
+        if isinstance(ex, dict):
+            self.iso_exact = [bool(ex.get(k, False)) for k in range(n + 1)]
+        else:
+            self.iso_exact = [bool(ex)] * (n + 1)
         # x-points per slice and the (B_R, B_Z) maps there
         self.xpts, self.G_xb = [None] * (n + 1), [None] * (n + 1)
         for k, v in (rp.get('xpoints') or {}).items():
@@ -612,8 +636,10 @@ class GSRamp:
         # nearest the target's innermost point
         self.G_iso = [om(eval_fields(gs, pu, iso)['psi'].T) for iso in self.iso]
         self.lim_pts = max(gs.lim_contours, key=len)[:-1, :2]
-        self.contact = [self.lim_pts[np.argmin(np.hypot(*(self.lim_pts - iso[np.argmin(iso[:, 0])]).T))]
-                        for iso in self.iso]
+        self.contact = []
+        for iso in self.iso:
+            inner = iso[np.argmin(iso[:, 0])]            # innermost target point
+            self.contact.append(self.lim_pts[np.argmin(np.hypot(*(self.lim_pts - inner).T))])
         self.G_contact = [om(eval_fields(gs, pu, ct[None, :])['psi'].T) for ct in self.contact]
         self.G_lim = om(eval_fields(gs, pu, self.lim_pts)['psi'].T)
         # joint optimization: stage 1's program without its objective, which becomes a floor
@@ -640,12 +666,17 @@ class GSRamp:
         nfail, prev_I, dpsi = 0, None, []
         for k in range(len(self.t)):
             self.stale[k] = True
-            Ik = I_units[k] if (not first or prev_I is None) else prev_I
+            if first and prev_I is not None:             # seeding pass: march from the previous slice
+                Ik = prev_I
+            else:
+                Ik = I_units[k]
             units = dict(zip(m.unit_names, Ik))
             gs.set_targets(Ip=float(abs(self.Ip[k])), Ip_ratio=rp['Ip_ratio'])
             gs.set_isoflux_constraints(self.iso[k], weights=np.full(len(self.iso[k]), rp['iso_weight']))
-            gs.set_saddle_constraints(self.xpts[k], weights=None if self.xpts[k] is None
-                                      else np.full(len(self.xpts[k]), rp['iso_weight']))
+            x_weights = None
+            if self.xpts[k] is not None:
+                x_weights = np.full(len(self.xpts[k]), rp['iso_weight'])
+            gs.set_saddle_constraints(self.xpts[k], weights=x_weights)
             gs.set_psi_dt(np.zeros(gs.np), 1.0e9)        # static equilibria (no eddy-current term)
             if self.psi_tot[k] is not None:
                 gs.set_psi(self.psi_tot[k])
@@ -654,8 +685,10 @@ class GSRamp:
             else:
                 gs.init_psi(*self.shape[k])
             for attempt, wfac in enumerate([1.0, 0.1, 0.01]):     # loosen the pin if TokaMaker fails
-                gs.set_coil_reg(reg_terms=[gs.coil_reg_term({n: 1.0}, target=float(v), weight=w_pin * wfac)
-                                           for n, v in units.items()])
+                reg_terms = []
+                for n, v in units.items():               # pin every coil and segment to its current
+                    reg_terms.append(gs.coil_reg_term({n: 1.0}, target=float(v), weight=w_pin * wfac))
+                gs.set_coil_reg(reg_terms=reg_terms)
                 gs.set_coil_currents(units)
                 if attempt > 0:
                     gs.init_psi(*self.shape[k])
@@ -670,15 +703,19 @@ class GSRamp:
                 self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s) failed: {err}')
                 continue
             if attempt > 0:
-                self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s) solved only with the coil pin loosened {1 / wfac:.0f}x')
+                self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s) solved only with the coil pin '
+                         f'loosened {1 / wfac:.0f}x')
             cc, _ = gs.get_coil_currents()
             Itm = prev_I = np.array([cc[n] for n in m.unit_names])
             psi = self.psi_tot[k] = gs.get_psi(normalized=False)
             new = psi - m.psi_u.T @ Itm
             if self.psi_p[k] is not None:
                 dpsi.append(np.abs(new - self.psi_p[k]).max() / max(np.abs(new).max(), 1e-12))
-            alpha = rp['relax']                          # under-relax the plasma flux
-            self.psi_p[k] = new if (first or self.psi_p[k] is None) else (1 - alpha) * self.psi_p[k] + alpha * new
+            if first or self.psi_p[k] is None:
+                self.psi_p[k] = new
+            else:                                        # under-relax the plasma flux
+                alpha = rp['relax']
+                self.psi_p[k] = (1 - alpha) * self.psi_p[k] + alpha * new
             self.stale[k] = False
             xpts = gs.get_xpoints()[0]
             self.tm_info[k] = {'psi_bounds': [float(x) for x in gs.psi_bounds], 'Ip': float(st['Ip']),
@@ -689,7 +726,8 @@ class GSRamp:
                                'x_points': np.zeros((0, 2)) if xpts is None else np.array(xpts),
                                'lim_point': [float(v) for v in gs.lim_point]}
             if self.ohm_scheme == 'current_weighted':    # weights J_phi dA / I_p over the plasma cells
-                J = gs.get_field_eval('eval', values=np.ascontiguousarray(gs.calc_jtor_plasma())).eval(self.pl_pts)[:, 0]
+                jtor = np.ascontiguousarray(gs.calc_jtor_plasma())
+                J = gs.get_field_eval('eval', values=jtor).eval(self.pl_pts)[:, 0]
                 self.wJ[k] = J * self.pl_area / max(float((J * self.pl_area).sum()), 1e-30)
         self.dpsi_rel = float(max(dpsi)) if dpsi and not nfail else np.inf
         return nfail
@@ -737,8 +775,10 @@ class GSRamp:
         # (external + plasma) at every target point = psi at the contact point. A flux error equal to a
         # displacement of shape_tol costs 1: dpsi = |grad psi| x displacement, |grad psi| = R B_p in the latest
         # TokaMaker solution, floored at a fifth of its mean
-        psi_pc = [float(eval_fields(m.gs, self.psi_p[k][None, :], self.contact[k][None, :])['psi'][0, 0])
-                  for k in range(N + 1)]                 # plasma flux at the contact points
+        psi_pc = []                                      # plasma flux at the contact points
+        for k in range(N + 1):
+            f = eval_fields(m.gs, self.psi_p[k][None, :], self.contact[k][None, :])
+            psi_pc.append(float(f['psi'][0, 0]))
         self.iso_grad = []
         for k in range(N + 1):
             f = eval_fields(m.gs, self.psi_tot[k][None, :], self.iso[k])
@@ -790,7 +830,10 @@ class GSRamp:
             P.le({V: E1, V1: -EL}, cap, tag='slew_handoff_up')
             P.le({V: -E1, V1: EL}, cap, tag='slew_handoff_dn')
         # stage-1 steps V_{j+1} - V_j (rows j nv..(j+1) nv) whose earlier interval (t_j, t_{j+1}] has the channel
-        rows = [j * nv + i for j in range(N1 - 1) if s1.t[j] >= s1.t_p0 - 1e-12 for i in range(nv)]
+        rows = []
+        for j in range(N1 - 1):
+            if s1.t[j] >= s1.t_p0 - 1e-12:
+                rows += list(range(j * nv, (j + 1) * nv))
         D1 = sp.diags([-1.0, 1.0], [0, 1], shape=(N1 - 1, N1))
         P.lsq({V1: sp.kron(D1, Vs).tocsr()[rows]}, 0.0, rp['dV'], tag='smooth_channel')
         if joint['lin']:                                 # hand-off flux >= stand-alone optimum - slack
@@ -845,8 +888,10 @@ class GSRamp:
             self.V, self.Fb = vv.reshape(N, nv), P.value(Fb)
             self.x = np.array([self.Ph[k] @ self.x0 + self.h[k] + self.Gv[k] @ vv for k in range(N + 1)])
             psi_c = [float((self.G_contact[k] @ self.x[k])[0]) + psi_pc[k] for k in range(N + 1)]
-            self.shape_err_m = [float((np.abs(self.G_iso[k] @ self.x[k] + isoA[k] - psi_c[k]) / self.iso_grad[k]).max())
-                                for k in range(N + 1)]
+            self.shape_err_m = []                        # largest boundary error per slice [m]
+            for k in range(N + 1):
+                dpsi = np.abs(self.G_iso[k] @ self.x[k] + isoA[k] - psi_c[k])
+                self.shape_err_m.append(float((dpsi / self.iso_grad[k]).max()))
             # boundary flux the coils deliver (contact point) minus Ohm's law [Wb] (0 with 'current_weighted')
             self.flux_mismatch_Wb = [float(2 * np.pi * (psi_c[k] - self.Fb[k])) for k in range(N + 1)]
         return st
@@ -912,11 +957,13 @@ class GSRamp:
                 self.psi_p[k] = (1 - w) * self.psi_p[lo] + w * self.psi_p[hi]
                 self.psi_tot[k] = (1 - w) * self.psi_tot[lo] + w * self.psi_tot[hi]
                 a, b = self.tm_info[lo], self.tm_info[hi]
+                psi_bounds = [(1 - w) * x + w * y for x, y in zip(a['psi_bounds'], b['psi_bounds'])]
                 self.tm_info[k] = {**a, 'L_i': (1 - w) * a['L_i'] + w * b['L_i'], 'ext_dev_rel': np.inf,
-                                   'psi_bounds': [(1 - w) * x + w * y for x, y in zip(a['psi_bounds'], b['psi_bounds'])]}
+                                   'psi_bounds': psi_bounds}
                 if self.ohm_scheme == 'current_weighted':
                     self.wJ[k] = (1 - w) * self.wJ[lo] + w * self.wJ[hi]
-                self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s): starting guess interpolated from slices {lo} and {hi}')
+                self.log(f'    TokaMaker slice {k} (t={self.t[k]:.2f} s): starting guess interpolated '
+                         f'from slices {lo} and {hi}')
             for it in range(max_iter):
                 if any(p is None for p in self.psi_p):
                     self.log('  a TokaMaker slice is missing; stopping')
@@ -927,7 +974,8 @@ class GSRamp:
                 # a failed convex step: retry with a 10x, then 100x stronger pull to the previous iterate
                 while not self.P.accepted() and self.x_prev is not None and self.prox_factor < 100:
                     self.prox_factor *= 10
-                    self.log(f'  Picard {it}: convex program {st}; retrying with the proximal weight x{self.prox_factor:.0f}')
+                    self.log(f'  Picard {it}: convex program {st}; retrying with the proximal weight '
+                             f'x{self.prox_factor:.0f}')
                     st = self.solve_qp()
                 t_qp = time.time() - t_qp
                 if not self.P.accepted():
@@ -947,7 +995,9 @@ class GSRamp:
                 if measure is not None and nf == 0:
                     h['shape_err_measured_cm'] = 100 * max(float(measure(self, k)) for k in range(n))
                 self.history.append(h)
-                measured = f" (measured {h['shape_err_measured_cm']:.2f} cm)" if 'shape_err_measured_cm' in h else ''
+                measured = ''
+                if 'shape_err_measured_cm' in h:
+                    measured = f" (measured {h['shape_err_measured_cm']:.2f} cm)"
                 self.log(f"  Picard {it}: {st:8s} current change {dI:.1e}, TokaMaker deviation {dev:.1e}, "
                          f"plasma flux change {self.dpsi_rel:.1e}, max shape error {h['shape_err_max_cm']:.2f} cm"
                          + measured + f" (convex {t_qp:.0f} s, TokaMaker {t_tm:.0f} s)")
