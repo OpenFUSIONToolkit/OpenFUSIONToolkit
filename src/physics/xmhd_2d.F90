@@ -41,7 +41,7 @@ IMPLICIT NONE
 #define TDIFF_RST_LEN 5
 #endif
 PRIVATE
-REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant (elec_charge, so temperatures are in eV)
+REAL(r8), PARAMETER :: k_boltz = elec_charge !< Boltzmann constant (elec_charge, so temperatures are in eV)
 
 !------------------------------------------------------------------------------
 !> Object to compute left-hand side of system for nonlinear solves
