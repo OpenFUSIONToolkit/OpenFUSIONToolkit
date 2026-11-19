@@ -54,6 +54,12 @@ CASE DEFAULT
   CALL oft_abort('Unknown field','bench_field_interp',__FILE__)
 END SELECT
 END SUBROUTINE bench_field_interp
+! Smooth, position dependent transport shaping (used with shaping=T to exercise the shaping paths)
+FUNCTION bench_shaping(pt) RESULT(val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8) :: val
+val=1.d0+0.5d0*SIN(2.d0*pi*pt(1))*COS(pi*pt(3))
+END FUNCTION bench_shaping
 END MODULE xmhd_bench_fields
 !---------------------------------------------------------------------------------
 PROGRAM xmhd_bench
@@ -72,8 +78,9 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, oft_hcurl_grad_project
 USE xmhd, ONLY: xmhd_run, xmhd_minlev, xmhd_taxis, xmhd_sub_fields, xmhd_prof_reps, xmhd_prof_report, &
-  xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
-USE xmhd_bench_fields, ONLY: bench_field
+  xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange, &
+  res_shaping, visc_shaping, diff_shaping, cond_shaping
+USE xmhd_bench_fields, ONLY: bench_field, bench_shaping
 IMPLICIT NONE
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
@@ -99,7 +106,8 @@ REAL(r8) :: te0 = 20.d0 ! Electron temperature [eV]
 REAL(r8) :: delta = 0.1d0 ! Relative density/temperature modulation
 LOGICAL :: two_temp = .TRUE. ! Evolve separate electron temperature
 LOGICAL :: pm = .FALSE. ! Print solver progress
-NAMELIST/xmhd_bench_options/order,minlev,mode,prof_reps,lam,b0,b1,v1,n0,t0,te0,delta,two_temp,pm
+LOGICAL :: shaping = .FALSE. ! Set all four transport shaping functions (res/visc/diff/cond) to bench_shaping
+NAMELIST/xmhd_bench_options/order,minlev,mode,prof_reps,lam,b0,b1,v1,n0,t0,te0,delta,two_temp,pm,shaping
 !------------------------------------------------------------------------------
 CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -201,6 +209,12 @@ xmhd_minlev=minlev
 xmhd_taxis=3
 oft_env%pm=pm
 xmhd_prof_reps=prof_reps
+IF(shaping)THEN
+  res_shaping=>bench_shaping
+  visc_shaping=>bench_shaping
+  diff_shaping=>bench_shaping
+  cond_shaping=>bench_shaping
+END IF
 CALL mytimer%tick
 IF(TRIM(mode)=='profile')THEN
   CALL xmhd_run(ic_fields,profile_only=.TRUE.) ! Calls oft_finalize

@@ -372,6 +372,12 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 !$omp threadprivate(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
+!---Residual scatter synchronization
+!> Cell shares a vertex (and therefore possibly DOFs) with a cell in another thread partition
+!! (`mesh%tloc_c`), so its local vector contributions must be added atomically [mesh%nc]
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: xmhd_cell_shared
+CLASS(oft_mesh), POINTER :: xmhd_cell_shared_mesh => NULL() !< Mesh used to build `xmhd_cell_shared`
+INTEGER(i4) :: xmhd_scatter_mode = 3 !< TEMPORARY (A/B): 1 = atomics for all cells, 2 = atomics for shared cells only, 3 = 2 + lock-free Jacobian adds for unshared cells
 CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
 !
@@ -473,7 +479,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_scatter_mode
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -1659,6 +1665,106 @@ END IF
 he = he/REAL(oft_lagrange%order,8)
 END FUNCTION xmhd_elem_size
 !------------------------------------------------------------------------------
+!> Test whether any spatial shaping function is set
+!!
+!! Used to skip the physical point evaluation (`mesh%log2phys`) at each
+!! quadrature point when nothing in the integration loop needs it.
+!------------------------------------------------------------------------------
+FUNCTION xmhd_shaping_active() RESULT(active)
+LOGICAL :: active !< Is any of `res_shaping`, `visc_shaping`, `diff_shaping`, or `cond_shaping` associated?
+active = ASSOCIATED(res_shaping).OR.ASSOCIATED(visc_shaping) &
+  .OR.ASSOCIATED(diff_shaping).OR.ASSOCIATED(cond_shaping)
+END FUNCTION xmhd_shaping_active
+!------------------------------------------------------------------------------
+!> Flag cells whose local vector contributions can race with other threads
+!!
+!! Cell loops in this module are threaded over the local mesh partitions
+!! (`mesh%tloc_c`). Every DOF of a cell lives on one of its vertices, edges,
+!! faces or its interior, so if every cell sharing a vertex with cell `i` is in
+!! the same partition as `i`, no other partition can touch any DOF of `i` and
+!! its contributions can be added without synchronization. Otherwise the cell
+!! is flagged in `xmhd_cell_shared` and must use atomic updates.
+!!
+!! The result is cached and rebuilt only if `mesh` changes.
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_setup_cell_shared()
+INTEGER(i4) :: i,ii,ip,j,k
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart
+IF(ALLOCATED(xmhd_cell_shared).AND.ASSOCIATED(xmhd_cell_shared_mesh,mesh))THEN
+  IF(SIZE(xmhd_cell_shared)==mesh%nc)RETURN
+END IF
+DEBUG_STACK_PUSH
+IF(ALLOCATED(xmhd_cell_shared))DEALLOCATE(xmhd_cell_shared)
+ALLOCATE(xmhd_cell_shared(mesh%nc))
+xmhd_cell_shared_mesh=>mesh
+IF(xmhd_scatter_mode==1)THEN
+  xmhd_cell_shared=.TRUE.
+  DEBUG_STACK_POP
+  RETURN
+END IF
+!---Partition index of each cell
+ALLOCATE(cpart(mesh%nc))
+cpart=0
+DO ip=1,mesh%nparts
+  DO ii=1,mesh%tloc_c(ip)%n
+    cpart(mesh%tloc_c(ip)%v(ii))=ip
+  END DO
+END DO
+!---Flag cells with a vertex neighbor in another partition
+!$omp parallel do private(j,k)
+DO i=1,mesh%nc
+  xmhd_cell_shared(i)=.FALSE.
+  DO k=1,mesh%cell_np
+    j=mesh%lc(k,i)
+    IF(ANY(cpart(mesh%lpc(mesh%kpc(j):mesh%kpc(j+1)-1))/=cpart(i)))THEN
+      xmhd_cell_shared(i)=.TRUE.
+      EXIT
+    END IF
+  END DO
+END DO
+DEALLOCATE(cpart)
+IF(oft_debug_print(2))WRITE(*,'(4X,A,I8,A,I8)')'xMHD shared cells: ',COUNT(xmhd_cell_shared),' of ',mesh%nc
+DEBUG_STACK_POP
+END SUBROUTINE xmhd_setup_cell_shared
+!------------------------------------------------------------------------------
+!> Add local cell contributions to a (thread-shared) local vector
+!!
+!! `vec(inds(i)) += vals(i)/scale`, using `!$omp atomic` updates if `atomic` is true
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_scatter_add(vec,inds,vals,atomic,scale)
+REAL(r8), INTENT(inout) :: vec(:) !< Target vector
+INTEGER(i4), INTENT(in) :: inds(:) !< Indices in `vec` for each value [n]
+REAL(r8), INTENT(in) :: vals(:) !< Values to add [n]
+LOGICAL, INTENT(in) :: atomic !< Use atomic updates?
+REAL(r8), OPTIONAL, INTENT(in) :: scale !< Divide values by this factor before adding
+INTEGER(i4) :: i
+REAL(r8) :: f
+IF(PRESENT(scale))THEN
+  IF(atomic)THEN
+    DO i=1,SIZE(inds)
+      f=vals(i)/scale
+      !$omp atomic
+      vec(inds(i)) = vec(inds(i)) + f
+    END DO
+  ELSE
+    DO i=1,SIZE(inds)
+      vec(inds(i)) = vec(inds(i)) + vals(i)/scale
+    END DO
+  END IF
+ELSE
+  IF(atomic)THEN
+    DO i=1,SIZE(inds)
+      !$omp atomic
+      vec(inds(i)) = vec(inds(i)) + vals(i)
+    END DO
+  ELSE
+    DO i=1,SIZE(inds)
+      vec(inds(i)) = vec(inds(i)) + vals(i)
+    END DO
+  END IF
+END IF
+END SUBROUTINE xmhd_scatter_add
+!------------------------------------------------------------------------------
 !> Update Jacobian matrix with new fields
 !------------------------------------------------------------------------------
 subroutine xmhd_build_ops(fullin)
@@ -1678,7 +1784,7 @@ class(oft_vector), pointer :: tmp
 real(r8) :: goptmp(3,4),vol,b(1,1),eta_curr,u,c1,c2,c3,c4,divv,tgam_fac,fulltmp(40)
 real(r8) :: bhat(3),dvT(3,3),pt(3),diff_tmp,c_gyro,krok_delta
 real(r8) :: he,v0_mag,cgop(3,6),uten(3,3,3)
-logical :: curved
+logical :: curved,need_pt,jac_nolock
 class(oft_matrix), pointer :: Jac
 type(oft_quad_type), pointer :: quad
 type(xmhd_loc_values) :: u0
@@ -1688,6 +1794,14 @@ IF(oft_debug_print(2))write(*,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
 Jac=>oft_xmhd_ops%J
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
+need_pt=xmhd_shaping_active() ! Physical points only needed for shaping functions
+!---Cells not sharing DOFs with other thread partitions can add to native matrices without locking
+CALL xmhd_setup_cell_shared()
+jac_nolock=.FALSE.
+SELECT TYPE(Jac)
+  CLASS IS(oft_native_matrix)
+    jac_nolock=(xmhd_scatter_mode==3)
+END SELECT
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
@@ -1793,7 +1907,7 @@ do ii=1,mesh%tloc_c(ip)%n
         eta_curr=eta*(eta_temp/u0%Te)**(3.d0/2.d0)
       END IF
     END IF
-    pt=mesh%log2phys(i,quad%pts(:,m))
+    IF(need_pt)pt=mesh%log2phys(i,quad%pts(:,m))
     IF(ASSOCIATED(res_shaping))eta_curr = eta_curr*res_shaping(pt)
     !---Viscous diffusion
     nu_tmp(1) = nu_par
@@ -2583,10 +2697,18 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Add local contribution to full matrix
 !------------------------------------------------------------------------------
   IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m)
-  IF(solid_cell(i))THEN
-    CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
+  IF(jac_nolock.AND.(.NOT.xmhd_cell_shared(i)))THEN
+    IF(solid_cell(i))THEN
+      CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc)
+    ELSE
+      CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc)
+    END IF
   ELSE
-    CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc,tlocks)
+    IF(solid_cell(i))THEN
+      CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
+    ELSE
+      CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc,tlocks)
+    END IF
   END IF
 end do
 END DO
@@ -3187,7 +3309,7 @@ real(r8), pointer, contiguous, dimension(:) :: jpin,npin
 real(r8), pointer, contiguous, dimension(:) :: bcout,bgout,nout,tout,teout,j2out,n2out
 real(r8), pointer, contiguous, dimension(:,:) :: vpin,vout
 real(r8), pointer, dimension(:) :: vtmp
-logical :: curved,back_step
+logical :: curved,back_step,need_pt
 type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
@@ -3247,6 +3369,9 @@ diag_vals=0.d0
 ptind=(/1,2/)
 IF(xmhd_taxis==1)ptind(1)=3
 IF(xmhd_taxis==2)ptind(2)=3
+!---Physical points only needed for shaping functions and diagnostics (dt<0)
+need_pt=xmhd_shaping_active().OR.(self%dt<0.d0)
+CALL xmhd_setup_cell_shared()
 !------------------------------------------------------------------------------
 ! Apply metric function
 !------------------------------------------------------------------------------
@@ -3356,7 +3481,7 @@ do ii=1,mesh%tloc_c(ip)%n
     IF(den_floor>0.d0)u0%N=MAX(den_floor,u0%N)
     IF(den_floor>0.d0)np0q=MAX(den_floor,np0q)
     !---Transport coefficients (if fixed)
-    pt=mesh%log2phys(i,quad%pts(:,m))
+    IF(need_pt)pt=mesh%log2phys(i,quad%pts(:,m))
     eta_curr=eta*eta_reg(mesh%reg(i))
     IF(ASSOCIATED(res_shaping))eta_curr = eta_curr*res_shaping(pt)
     nu_tmp(1) = nu_par
@@ -3708,30 +3833,25 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
 ! Add local contributions
 !------------------------------------------------------------------------------
-  !$omp critical(xmhderr_red)
+  ! Only cells on thread-partition boundaries need atomic updates (see xmhd_setup_cell_shared)
   !---B rows
   IF(xmhd_adv_b)THEN
-    do jr=1,oft_hcurl%nce
-      bcout(j_hcurl(jr)) = bcout(j_hcurl(jr)) + bc_loc(jr)
-      IF(j2_ind>0)j2out(j_hcurl(jr)) = j2out(j_hcurl(jr)) + j2_loc(jr)/j2_scale
-    end do
-    do jr=1,oft_hgrad%nce
-      bgout(j_hgrad(jr)) = bgout(j_hgrad(jr)) + bg_loc(jr)
-    end do
+    CALL xmhd_scatter_add(bcout,j_hcurl,bc_loc,xmhd_cell_shared(i))
+    IF(j2_ind>0)CALL xmhd_scatter_add(j2out,j_hcurl,j2_loc,xmhd_cell_shared(i),j2_scale)
+    CALL xmhd_scatter_add(bgout,j_hgrad,bg_loc,xmhd_cell_shared(i))
   END IF
   !---Lagrange rows (V,n,T)
   IF(.NOT.solid_cell(i))THEN
-    DO jr=1,oft_lagrange%nce
-      vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)/vel_scale
-      IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)/den_scale
-      IF(xmhd_adv_temp)THEN
-        tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)
-        IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)
-      END IF
-      IF(n2_ind>0)n2out(j_lag(jr)) = n2out(j_lag(jr)) + n2_loc(jr)/n2_scale
+    DO j=1,3
+      CALL xmhd_scatter_add(vout(:,j),j_lag,lag_loc(:,j),xmhd_cell_shared(i),vel_scale)
     END DO
+    IF(xmhd_adv_den)CALL xmhd_scatter_add(nout,j_lag,lag_loc(:,4),xmhd_cell_shared(i),den_scale)
+    IF(xmhd_adv_temp)THEN
+      CALL xmhd_scatter_add(tout,j_lag,lag_loc(:,5),xmhd_cell_shared(i))
+      IF(xmhd_two_temp)CALL xmhd_scatter_add(teout,j_lag,te_loc,xmhd_cell_shared(i))
+    END IF
+    IF(n2_ind>0)CALL xmhd_scatter_add(n2out,j_lag,n2_loc,xmhd_cell_shared(i),n2_scale)
   END IF
-  !$omp end critical(xmhderr_red)
 end do
 end do
 !---Delete temporary matrices
@@ -3875,6 +3995,7 @@ diag_vals=0.d0
 ptind=(/1,2/)
 IF(xmhd_taxis==1)ptind(1)=3
 IF(xmhd_taxis==2)ptind(2)=3
+CALL xmhd_setup_cell_shared()
 !------------------------------------------------------------------------------
 ! Apply metric function
 !------------------------------------------------------------------------------
@@ -3979,25 +4100,20 @@ do ii=1,mesh%tloc_c(ip)%n
 ! End quadrature loop
 !------------------------------------------------------------------------------
   end do
-  !$omp critical(xmhderr_red)
 !------------------------------------------------------------------------------
 ! Add local contributions
 !------------------------------------------------------------------------------
+  ! Only cells on thread-partition boundaries need atomic updates (see xmhd_setup_cell_shared)
   !---B rows
-  do jr=1,oft_hcurl%nce
-    bcout(j_hcurl(jr)) = bcout(j_hcurl(jr)) + bc_loc(jr)
-  end do
-  do jr=1,oft_hgrad%nce
-    bgout(j_hgrad(jr)) = bgout(j_hgrad(jr)) + bg_loc(jr)
-  end do
+  CALL xmhd_scatter_add(bcout,j_hcurl,bc_loc,xmhd_cell_shared(i))
+  CALL xmhd_scatter_add(bgout,j_hgrad,bg_loc,xmhd_cell_shared(i))
   !---Lagrange rows (V,n,T)
-  do jr=1,oft_lagrange%nce
-    vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)/vel_scale
-    IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)/den_scale
-    IF(xmhd_adv_temp)tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)
-    IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)
-  end do
-  !$omp end critical(xmhderr_red)
+  DO j=1,3
+    CALL xmhd_scatter_add(vout(:,j),j_lag,lag_loc(:,j),xmhd_cell_shared(i),vel_scale)
+  END DO
+  IF(xmhd_adv_den)CALL xmhd_scatter_add(nout,j_lag,lag_loc(:,4),xmhd_cell_shared(i),den_scale)
+  IF(xmhd_adv_temp)CALL xmhd_scatter_add(tout,j_lag,lag_loc(:,5),xmhd_cell_shared(i))
+  IF(xmhd_two_temp)CALL xmhd_scatter_add(teout,j_lag,te_loc,xmhd_cell_shared(i))
 end do
 end do
 !---Delete temporary matrices
