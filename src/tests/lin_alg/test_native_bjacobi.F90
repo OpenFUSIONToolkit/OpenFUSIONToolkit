@@ -11,8 +11,8 @@
 !! The current test cases are:
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
 !! - Solve the same system with a direct solve of the full distributed system (`dist_lu`),
-!!   then check refactorization against a fresh factorization after changing matrix values
-!!   (same pattern) and, for distributed runs, after changing the sparsity pattern
+!!   then check refactorization against a fresh factorization after small and large changes
+!!   in matrix values (same pattern) and, for distributed runs, after changing the sparsity pattern
 !!
 !! @authors Chris Hansen
 !! @date May 2014
@@ -209,14 +209,14 @@ IF(dist_lu)THEN
   CALL u%set(1.d0)
   CALL mop%apply(u,v)
   CALL lag_zerob%apply(v)
+  !---Same pattern: slightly change a symmetric subset of off-diagonal entries
+  CALL scale_entries(lag_rep,lop_native,11,1.05d0)
+  CALL linv_pre_lu%update(.FALSE.)
+  CALL check_lu(linv_pre_lu,lop,v)
   !---Same pattern: amplify a symmetric subset of off-diagonal entries to change pivoting
-  DO i=1,lop_native%nr
-    DO j=lop_native%kr(i),lop_native%kr(i+1)-1
-      IF(select_entry(lag_rep,i,lop_native%lc(j),7))lop_native%M(j)=20.d0*lop_native%M(j)
-    END DO
-  END DO
-  !---STRUMPACK reuses its matching/scaling for same-pattern refactors, so large value
-  !---changes require a full factorization
+  !---(STRUMPACK reuses its matching/scaling for same-pattern refactors, so large value
+  !---changes require a full factorization)
+  CALL scale_entries(lag_rep,lop_native,7,20.d0)
   CALL linv_pre_lu%update(sol_type==6)
   CALL check_lu(linv_pre_lu,lop,v)
   !---New pattern: drop a symmetric subset of off-diagonal entries (distributed only), which
@@ -260,6 +260,21 @@ CLASS(oft_fem_type), INTENT(in) :: fe
 INTEGER(i4), INTENT(in) :: i,j,m
 select_entry=(i/=j).AND.(MOD(fe%global%le(i)+fe%global%le(j),INT(m,8))==0)
 END FUNCTION select_entry
+!---------------------------------------------------------------------------------
+! Scale a symmetric subset of off-diagonal entries (see select_entry)
+!---------------------------------------------------------------------------------
+SUBROUTINE scale_entries(fe,A,m,factor)
+CLASS(oft_fem_type), INTENT(in) :: fe
+CLASS(oft_native_matrix), INTENT(inout) :: A
+INTEGER(i4), INTENT(in) :: m
+REAL(r8), INTENT(in) :: factor
+INTEGER(i4) :: i,j
+DO i=1,A%nr
+  DO j=A%kr(i),A%kr(i+1)-1
+    IF(select_entry(fe,i,A%lc(j),m))A%M(j)=factor*A%M(j)
+  END DO
+END DO
+END SUBROUTINE scale_entries
 !---------------------------------------------------------------------------------
 ! Create a copy of a matrix with a symmetric subset of off-diagonal entries removed
 !---------------------------------------------------------------------------------
