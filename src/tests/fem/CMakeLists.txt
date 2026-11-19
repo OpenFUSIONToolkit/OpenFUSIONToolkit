@@ -20,4 +20,10 @@ if( OFT_BUILD_TESTS )
   configure_file( test_hcurl_sop.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_hcurl_grad.F90 )
   configure_file( test_hcurl_grad.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+
+  # Quadrature-point basis cache tests
+  oft_add_test( test_fem_qcache.F90 )
+  configure_file( test_fem_qcache.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( ../grid/sphere_tet10_test.g ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( ../grid/sphere_hex27_test.g ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 endif()

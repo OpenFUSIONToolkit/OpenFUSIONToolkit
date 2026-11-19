@@ -10,6 +10,7 @@ set( FEM_OBJS
   hcurl_basis.F90
   hcurl_operators.F90
   hcurl_grad_operators.F90
+  fem_quad_cache.F90
 )
 
 add_library( oftfem ${FEM_OBJS} )
