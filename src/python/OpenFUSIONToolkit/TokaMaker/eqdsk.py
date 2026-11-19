@@ -1204,7 +1204,7 @@ class GEQDSKEquilibrium:
             fe_dl = dl / Bp_safe
             int_fe_dl = np.sum(fe_dl)
 
-            def flx_avg(quantity):
+            def flx_avg(quantity, fe_dl=fe_dl, int_fe_dl=int_fe_dl):
                 return np.sum(fe_dl * quantity) / int_fe_dl
 
             avg["R"][k] = flx_avg(r_s)

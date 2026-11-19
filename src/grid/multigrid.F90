@@ -16,7 +16,7 @@ use oft_base
 USE oft_sort, ONLY: sort_array, sort_matrix
 use oft_mesh_type, only: oft_mesh, oft_bmesh, mesh_seam
 use oft_mesh_local_util, only: mesh_local_findedge, mesh_local_findface
-use oft_mesh_global_util, only: mesh_global_set_curved
+use oft_mesh_global_util, only: mesh_global_set_curved, bmesh_global_copy_ho, mesh_global_transfer_ho
 implicit none
 #define MOD_NAME "multigrid"
 #include "local.h"
@@ -65,6 +65,7 @@ type :: multigrid_mesh
   type(multigrid_inter), pointer, dimension(:) :: inter => NULL() !< Structure containing linkages
   type(multigrid_inter), pointer, dimension(:) :: sinter => NULL() !< Structure containing linkages
   character(2) :: rlevel !< Character rep of refinement level
+  LOGICAL :: ho_curve_all = .FALSE. !< Use the quadratic map on every cell, not only boundary cells, when refining 3D quadratic meshes
 end type multigrid_mesh
 contains
 !------------------------------------------------------------------------------
@@ -148,67 +149,20 @@ integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,nfdf,ncde,ncdf,fc,c
 real(r8) :: f1(4),f2(4),ftmp(4),pt(3)
 class(oft_mesh), pointer :: mesh
 class(oft_mesh), pointer :: pmesh
+!---If only one level do nothing
+IF(mg_mesh%level==1)RETURN
 mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
 DEBUG_STACK_PUSH
-!---If only one level do nothing
-IF(mg_mesh%level==1)THEN
-  DEBUG_STACK_POP
-  RETURN
-END IF
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer level
   !---Synchronize T3D linkage to distributed mesh
   IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Copying quadratic mapping to distributed mesh'
   CALL oft_increase_indent
-  !---Copy quadratic mesh if available
-  IF(ASSOCIATED(pmesh%ho_info%r))THEN
-    ! mesh%order=pmesh%order
-    ho_count = mesh%ne*pmesh%ho_info%nep &
-      + mesh%nf*pmesh%ho_info%nfp &
-      + mesh%nc*pmesh%ho_info%ncp
-    ALLOCATE(mesh%ho_info%r(3,ho_count))
-    ! mesh%bmesh%order=pmesh%bmesh%order
-    ho_count = mesh%bmesh%ne*pmesh%bmesh%ho_info%nep &
-      + mesh%bmesh%nc*pmesh%bmesh%ho_info%ncp
-    ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
-    IF(pmesh%ho_info%nep==1)THEN
-      mesh%ho_info%nep=pmesh%ho_info%nep
-      ALLOCATE(mesh%ho_info%lep(mesh%ho_info%nep,mesh%ne))
-      DO i=1,mesh%ne
-        mesh%ho_info%r(:,i) = pmesh%ho_info%r(:,ABS(mesh%base%le(i)))
-        mesh%ho_info%lep(1,i) = i
-      END DO
-      mesh%bmesh%ho_info%nep=pmesh%bmesh%ho_info%nep
-      ALLOCATE(mesh%bmesh%ho_info%lep(mesh%bmesh%ho_info%nep,mesh%bmesh%ne))
-      DO i=1,mesh%bmesh%ne
-        mesh%bmesh%ho_info%r(:,i) = mesh%ho_info%r(:,ABS(mesh%bmesh%parent%le(i)))
-        mesh%bmesh%ho_info%lep(1,i) = i
-      END DO
-    END IF
-    IF(pmesh%ho_info%nfp==1)THEN
-      mesh%ho_info%nfp=pmesh%ho_info%nfp
-      ALLOCATE(mesh%ho_info%lfp(mesh%ho_info%nfp,mesh%nf))
-      DO i=1,mesh%nf
-        mesh%ho_info%r(:,i+mesh%ne) = pmesh%ho_info%r(:,ABS(mesh%base%lf(i))+pmesh%ne)
-        mesh%ho_info%lfp(1,i) = i + mesh%ne
-      END DO
-      mesh%bmesh%ho_info%ncp=pmesh%bmesh%ho_info%ncp
-      ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
-      DO i=1,mesh%bmesh%nc
-        mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne) = pmesh%ho_info%r(:,mesh%bmesh%parent%lf(i)+pmesh%ne)
-        mesh%bmesh%ho_info%lcp(1,i) = i+mesh%bmesh%ne
-      END DO
-    END IF
-    IF(pmesh%ho_info%ncp==1)THEN
-      mesh%ho_info%ncp=pmesh%ho_info%ncp
-      ALLOCATE(mesh%ho_info%lcp(mesh%ho_info%ncp,mesh%nc))
-      DO i=1,mesh%nc
-        mesh%ho_info%r(:,i+mesh%ne+mesh%nf) = pmesh%ho_info%r(:,ABS(mesh%base%lc(i))+pmesh%ne+pmesh%nf)
-        mesh%ho_info%lcp(1,i) = i + mesh%ne + mesh%nf
-      END DO
-    END IF
-  END IF
+  !---Copy quadratic mesh
+  CALL mesh_global_transfer_ho(mesh,pmesh)
+  !---Copy to boundary mesh
+  CALL bmesh_global_copy_ho(mesh)
   CALL oft_decrease_indent
   DEBUG_STACK_POP
   RETURN
@@ -238,23 +192,22 @@ do i=1,mesh%bmesh%np
   mesh%bmesh%r(:,i)=mesh%r(:,j)
 enddo
 CALL pmesh%set_order(2)
-CALL mesh_global_set_curved(pmesh,2)
+!---Place child nodes with the quadratic map on boundary cells only (default) or on every cell
+IF(mg_mesh%ho_curve_all)THEN
+  CALL mesh_global_set_curved(pmesh,1)
+ELSE
+  CALL mesh_global_set_curved(pmesh,2)
+END IF
 !---Create new high order nodes
 IF(pmesh%ho_info%nep==1)THEN
   mesh%ho_info%nep=pmesh%ho_info%nep
   ALLOCATE(mesh%ho_info%lep(mesh%ho_info%nep,mesh%ne))
   mesh%ho_info%lep=0
-  mesh%bmesh%ho_info%nep=pmesh%bmesh%ho_info%nep
-  ALLOCATE(mesh%bmesh%ho_info%lep(mesh%bmesh%ho_info%nep,mesh%bmesh%ne))
-  mesh%bmesh%ho_info%lep=0
 END IF
 IF(pmesh%ho_info%nfp==1)THEN
   mesh%ho_info%nfp=pmesh%ho_info%nfp
   ALLOCATE(mesh%ho_info%lfp(mesh%ho_info%nfp,mesh%nf))
   mesh%ho_info%lfp=0
-  mesh%bmesh%ho_info%ncp=pmesh%bmesh%ho_info%ncp
-  ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
-  mesh%bmesh%ho_info%lcp=0
 END IF
 IF(pmesh%ho_info%ncp==1)THEN
   mesh%ho_info%ncp=pmesh%ho_info%ncp
@@ -267,11 +220,6 @@ ho_count = mesh%ne*mesh%ho_info%nep &
   + mesh%nc*mesh%ho_info%ncp
 ALLOCATE(mesh%ho_info%r(3,ho_count))
 mesh%ho_info%r=0.d0
-! mesh%bmesh%order=pmesh%bmesh%order
-ho_count = mesh%bmesh%ne*pmesh%bmesh%ho_info%nep &
-  + mesh%bmesh%nc*pmesh%bmesh%ho_info%ncp
-ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
-mesh%bmesh%ho_info%r=0.d0
 !
 nfde=SIZE(mg_mesh%inter(mg_mesh%level-1)%lfde,DIM=1)
 nfdf=SIZE(mg_mesh%inter(mg_mesh%level-1)%lfdf,DIM=1)
@@ -540,23 +488,9 @@ IF(pmesh%ho_info%ncp==1)THEN
   END DO
   !$omp end do nowait
 END IF
-!$omp barrier
-!---Propogate to boundary mesh
-!$omp do
-do i=1,mesh%bmesh%ne
-  j=INT(ABS(mesh%bmesh%parent%le(i)),4)
-  mesh%bmesh%ho_info%lep(1,i)=i
-  mesh%bmesh%ho_info%r(:,i)=mesh%ho_info%r(:,mesh%ho_info%lep(1,j))
-enddo
-IF(pmesh%bmesh%ho_info%ncp==1)THEN
-  !$omp do
-  do i=1,mesh%bmesh%nc
-    j=INT(ABS(mesh%bmesh%parent%lf(i)),4)
-    mesh%bmesh%ho_info%lcp(1,i)=i+pmesh%bmesh%ne
-    mesh%bmesh%ho_info%r(:,i+pmesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
-  enddo
-END IF
 !$omp end parallel
+!---Propogate to boundary mesh
+CALL bmesh_global_copy_ho(mesh)
 CALL pmesh%set_order(1)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
@@ -570,44 +504,18 @@ integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde,cc
 real(r8) :: f1(4),f2(4),ftmp(4)
 class(oft_bmesh), pointer :: smesh
 class(oft_bmesh), pointer :: pmesh
+!---If only one level do nothing
+IF(mg_mesh%level==1)RETURN
 smesh=>mg_mesh%smesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
 DEBUG_STACK_PUSH
-!---If only one level do nothing
-IF(mg_mesh%level==1)THEN
-  DEBUG_STACK_POP
-  RETURN
-END IF
 IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN ! Current level is transfer level
   !---Synchronize T3D linkage to distributed mesh
   IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Copying quadratic mapping to distributed mesh'
   CALL oft_increase_indent
-  !---Copy quadratic mesh if available
-  IF(ASSOCIATED(pmesh%ho_info%r))THEN
-    ! smesh%order=pmesh%order
-    ho_count = smesh%ne*pmesh%ho_info%nep &
-      + smesh%nc*pmesh%ho_info%ncp
-    ALLOCATE(smesh%ho_info%r(3,ho_count))
-    IF(pmesh%ho_info%nep==1)THEN
-      smesh%ho_info%nep=pmesh%ho_info%nep
-      ALLOCATE(smesh%ho_info%lep(smesh%ho_info%nep,smesh%ne))
-      smesh%ho_info%lep=-1
-      DO i=1,smesh%ne
-        smesh%ho_info%r(:,i) = pmesh%ho_info%r(:,ABS(smesh%base%le(i)))
-        smesh%ho_info%lep(1,i) = i
-      END DO
-    END IF
-    IF(pmesh%ho_info%ncp==1)THEN
-      smesh%ho_info%ncp=pmesh%ho_info%ncp
-      ALLOCATE(smesh%ho_info%lcp(smesh%ho_info%ncp,smesh%nc))
-      smesh%ho_info%lcp=-1
-      DO i=1,smesh%nc
-        smesh%ho_info%r(:,i+smesh%ne) = pmesh%ho_info%r(:,ABS(smesh%base%lc(i))+pmesh%ne)
-        smesh%ho_info%lcp(1,i) = i + smesh%ne
-      END DO
-    END IF
-  END IF
+  !---Copy quadratic mesh
+  CALL mesh_global_transfer_ho(smesh,pmesh)
   CALL oft_decrease_indent
   DEBUG_STACK_POP
   RETURN

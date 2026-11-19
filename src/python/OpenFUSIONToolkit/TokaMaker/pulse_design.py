@@ -9457,7 +9457,7 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
         # Save a diagnostic figure (machine + coil currents + psi contours) alongside each
         # seed, using the same coil-current colormap idiom as plot_equil. Done for both
         # successful and failed solves so a failure still yields a psi plot to inspect.
-        def _save_seed_fig(ok):
+        def _save_seed_fig(ok, idx=idx, t=t, Ip=Ip, diverted=diverted, name=name):
             try:
                 fig, ax = plt.subplots(1, 1, figsize=(8, 9))
                 cb = mygs.plot_machine(fig, ax, coil_colormap='seismic', coil_symmap=False,

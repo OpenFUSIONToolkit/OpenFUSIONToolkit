@@ -519,6 +519,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
     if "STRUMPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_STRUMPACK_ROOT:PATH={0}".format(mydict["STRUMPACK_ROOT"]))
+        if "SCALAPACK_ROOT" in mydict:
+            cmake_lines.append("-DOFT_SCALAPACK_ROOT:PATH={0}".format(mydict["SCALAPACK_ROOT"]))
     if tmp_dict['OS_TYPE'] == 'Darwin':
         linker_test_source = """
 program test_program
@@ -1745,12 +1747,72 @@ class UMFPACK(package):
         self.setup_build_script(build_lines, self.config_dict)
 
 
+class SCALAPACK(package):
+    def __init__(self, shared_libs=False):
+        self.name = "SCALAPACK"
+        self.url = "https://github.com/Reference-ScaLAPACK/scalapack/archive/refs/tags/v2.2.2.tar.gz"
+        self.build_dir = "scalapack-2.2.2"
+        self.shared_libs = shared_libs
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        self.config_dict['SCALAPACK_LIBS'] = "-lscalapack"
+        # Installation check files
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['SCALAPACK_LIB'], 'libscalapack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['SCALAPACK_LIB'], 'libscalapack.a')]
+        return self.config_dict
+
+    def setup_build(self):
+        if 'MPI_CC' not in self.config_dict:
+            error_exit('ScaLAPACK requires MPI compilers')
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={SCALAPACK_ROOT}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DSCALAPACK_BUILD_TESTS:BOOL=OFF",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON"
+        ]
+        if self.shared_libs:
+            cmake_options.append('-DBUILD_SHARED_LIBS:BOOL=ON')
+        else:
+            cmake_options.append('-DBUILD_SHARED_LIBS:BOOL=OFF')
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options += [
+                "-DBLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+                "-DLAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}"
+            ]
+        if self.config_dict['CC_VENDOR'] == 'gnu':
+            # Legacy (K&R style) C sources (C23 is the default in GCC 15+) and Fortran argument mismatches
+            cmake_options.append('-DCMAKE_C_FLAGS="-std=gnu17 -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-implicit-int"')
+            if int(self.config_dict['CC_VERSION'].split(".")[0]) > 9:
+                cmake_options.append('-DCMAKE_Fortran_FLAGS="-fallow-argument-mismatch"')
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+        build_lines = [
+            "rm -rf build_dir",
+            "mkdir build_dir",
+            "cd build_dir",
+            "export CC={MPI_CC}",
+            "export FC={MPI_FC}",
+            # Allow configure with CMake 4+ (also needed by the nested BLACS configure step)
+            "export CMAKE_POLICY_VERSION_MINIMUM=3.5",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
 class STRUMPACK(package):
-    def __init__(self, build_openmp, comp_wrapper=False, shared_libs=False):
+    def __init__(self, build_openmp, with_mpi=False, comp_wrapper=False, shared_libs=False):
         self.name = "STRUMPACK"
         self.url = "https://github.com/pghysels/STRUMPACK/archive/refs/tags/v8.1.0.tar.gz"
         self.build_dir = "STRUMPACK-8.1.0"
         self.build_openmp = build_openmp
+        self.with_mpi = with_mpi
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
 
@@ -1773,12 +1835,11 @@ class STRUMPACK(package):
     def setup_build(self):
         if ver_lt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.21"):
             error_exit('CMAKE >= 3.21 required for STRUMPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
-        # Local (non-MPI) build with OpenMP only, all GPU and optional TPLs disabled
+        # Local build (optionally with MPI using ScaLAPACK), all GPU and optional TPLs disabled
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={STRUMPACK_ROOT}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DSTRUMPACK_USE_MPI:BOOL=OFF",
             "-DSTRUMPACK_USE_CUDA:BOOL=OFF",
             "-DSTRUMPACK_USE_HIP:BOOL=OFF",
             "-DSTRUMPACK_USE_SYCL:BOOL=OFF",
@@ -1798,6 +1859,17 @@ class STRUMPACK(package):
             cmake_options.append("-DSTRUMPACK_USE_OPENMP:BOOL=ON")
         else:
             cmake_options.append("-DSTRUMPACK_USE_OPENMP:BOOL=OFF")
+        compilers = {'CC': '{CC}', 'CXX': '{CXX}', 'FC': '{FC}'}
+        if self.with_mpi:
+            if ('MPI_CXX' not in self.config_dict) or ('SCALAPACK_LIB' not in self.config_dict):
+                error_exit('STRUMPACK with MPI requires an MPI C++ compiler and ScaLAPACK')
+            cmake_options += [
+                "-DSTRUMPACK_USE_MPI:BOOL=ON",
+                "-DTPL_SCALAPACK_LIBRARIES:PATH={0}".format(os.path.join(self.config_dict['SCALAPACK_LIB'], 'libscalapack.a'))
+            ]
+            compilers = {'CC': '{MPI_CC}', 'CXX': '{MPI_CXX}', 'FC': '{MPI_FC}'}
+        else:
+            cmake_options.append("-DSTRUMPACK_USE_MPI:BOOL=OFF")
         if self.shared_libs:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
@@ -1821,9 +1893,9 @@ class STRUMPACK(package):
             "rm -rf build_dir",
             "mkdir build_dir",
             "cd build_dir",
-            "export CC={CC}",
-            "export CXX={CXX}",
-            "export FC={FC}",
+            "export CC={0}".format(compilers['CC']),
+            "export CXX={0}".format(compilers['CXX']),
+            "export FC={0}".format(compilers['FC']),
             "{CMAKE} " + " ".join(cmake_options) + " ..",
             "make -j{MAKE_THREADS} strumpack",  # Skip tests and examples
             "make install/fast"
@@ -2147,6 +2219,7 @@ group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="
 #
 group = parser.add_argument_group("STRUMPACK", "STRUMPACK package options")
 group.add_argument("--build_strumpack", default=0, type=int, choices=(0,1), help="Build STRUMPACK library? (default: 0)")
+group.add_argument("--strumpack_mpi", default=0, type=int, choices=(0,1), help="Build STRUMPACK with MPI support (and ScaLAPACK) for distributed factorization? (default: 0)")
 # Disabled: no install root is passed to CMake, so the library is never enabled
 # group.add_argument("--strumpack_wrapper", action="store_true", default=False, help="STRUMPACK included in compilers")
 #
@@ -2280,7 +2353,11 @@ else:
     if options.build_umfpack == 1:
         packages.append(UMFPACK())
     if options.build_strumpack == 1:
-        packages.append(STRUMPACK(options.oft_use_openmp == 1))
+        if options.strumpack_mpi == 1:
+            if not use_mpi:
+                parser.exit(-1, 'STRUMPACK with MPI requires MPI\n')
+            packages.append(SCALAPACK())
+        packages.append(STRUMPACK(options.oft_use_openmp == 1, with_mpi=(options.strumpack_mpi == 1)))
 #
 for package in packages:
     config_dict = package.install(config_dict, keep_build_dirs=options.keep_build_dirs)

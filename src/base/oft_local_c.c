@@ -82,6 +82,13 @@ void oft_set_signal_handlers()
 	signal(SIGFPE, oft_signal_handler);
 }
 
+void oft_reset_signal_handlers()
+{
+	// Restore default handling of interrupt/termination signals
+	signal(SIGINT, SIG_DFL);
+	signal(SIGTERM, SIG_DFL);
+}
+
 // Jenkins's one_at_a_time hash
 uint32_t oft_simple_hash_c(const uint8_t* key, long length, uint32_t starting_value) {
   long i = 0;
