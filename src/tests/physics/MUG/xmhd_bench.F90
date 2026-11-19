@@ -15,6 +15,9 @@
 ! mode='profile' calls xmhd_run(...,profile_only=.TRUE.) (timing of Jacobian
 ! builds, NL residual, matvecs; see xmhd_profile). mode='run' takes `nsteps`
 ! time steps (from xmhd_options) and then prints the xMHD profiling counters.
+! mode='qcheck' calls xmhd_run(...,qcache_check=.TRUE.), which compares the NL
+! residual implementations (xmhd_qcache=0,1,2) on the initial state (Phase 3
+! equivalence check, driven by test_MUG_qcache.py).
 !---------------------------------------------------------------------------------
 MODULE xmhd_bench_fields
 USE oft_base
@@ -60,6 +63,18 @@ REAL(r8), INTENT(in) :: pt(3)
 REAL(r8) :: val
 val=1.d0+0.5d0*SIN(2.d0*pi*pt(1))*COS(pi*pt(3))
 END FUNCTION bench_shaping
+! Second shaping function, so that each transport coefficient can use a different one
+FUNCTION bench_shaping2(pt) RESULT(val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8) :: val
+val=1.d0+0.3d0*COS(2.d0*pi*pt(2))
+END FUNCTION bench_shaping2
+! Temperature dependent resistivity profile (used with res_prof=T)
+FUNCTION bench_res_profile(te) RESULT(val)
+REAL(r8), INTENT(in) :: te
+REAL(r8) :: val
+val=(20.d0/MAX(te,1.d0))**1.5d0
+END FUNCTION bench_res_profile
 END MODULE xmhd_bench_fields
 !---------------------------------------------------------------------------------
 PROGRAM xmhd_bench
@@ -79,8 +94,9 @@ USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, oft_hcurl_grad_project
 USE xmhd, ONLY: xmhd_run, xmhd_minlev, xmhd_taxis, xmhd_sub_fields, xmhd_prof_reps, xmhd_prof_report, &
   xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange, &
-  res_shaping, visc_shaping, diff_shaping, cond_shaping
-USE xmhd_bench_fields, ONLY: bench_field, bench_shaping
+  res_shaping, visc_shaping, diff_shaping, cond_shaping, res_profile, xmhd_den_floor => den_floor, &
+  xmhd_temp_floor => temp_floor, xmhd_g_accel => g_accel, xmhd_qcheck_solid, xmhd_qcheck_negsrc
+USE xmhd_bench_fields, ONLY: bench_field, bench_shaping, bench_shaping2, bench_res_profile
 IMPLICIT NONE
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
@@ -107,7 +123,15 @@ REAL(r8) :: delta = 0.1d0 ! Relative density/temperature modulation
 LOGICAL :: two_temp = .TRUE. ! Evolve separate electron temperature
 LOGICAL :: pm = .FALSE. ! Print solver progress
 LOGICAL :: shaping = .FALSE. ! Set all four transport shaping functions (res/visc/diff/cond) to bench_shaping
-NAMELIST/xmhd_bench_options/order,minlev,mode,prof_reps,lam,b0,b1,v1,n0,t0,te0,delta,two_temp,pm,shaping
+LOGICAL :: shaping_mix = .FALSE. ! With shaping=T: use a second function for diff/cond_shaping
+LOGICAL :: res_prof = .FALSE. ! Set a temperature dependent resistivity profile (used with eta_temp>0)
+REAL(r8) :: den_floor = -1.d0 ! Density floor [m^-3] (neg to disable)
+REAL(r8) :: temp_floor = -1.d0 ! Temperature floor [eV] (neg to disable)
+REAL(r8) :: g_accel = 0.d0 ! Gravitational acceleration [m/s^2]
+LOGICAL :: qcheck_solid = .FALSE. ! mode='qcheck': mark every fourth cell as solid
+LOGICAL :: qcheck_negsrc = .FALSE. ! mode='qcheck': set a floor source pattern
+NAMELIST/xmhd_bench_options/order,minlev,mode,prof_reps,lam,b0,b1,v1,n0,t0,te0,delta,two_temp,pm,shaping, &
+  shaping_mix,res_prof,den_floor,temp_floor,g_accel,qcheck_solid,qcheck_negsrc
 !------------------------------------------------------------------------------
 CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -214,10 +238,22 @@ IF(shaping)THEN
   visc_shaping=>bench_shaping
   diff_shaping=>bench_shaping
   cond_shaping=>bench_shaping
+  IF(shaping_mix)THEN
+    diff_shaping=>bench_shaping2
+    cond_shaping=>bench_shaping2
+  END IF
 END IF
+IF(res_prof)res_profile=>bench_res_profile
+xmhd_den_floor=den_floor
+xmhd_temp_floor=temp_floor
+xmhd_g_accel=g_accel
+xmhd_qcheck_solid=qcheck_solid
+xmhd_qcheck_negsrc=qcheck_negsrc
 CALL mytimer%tick
 IF(TRIM(mode)=='profile')THEN
   CALL xmhd_run(ic_fields,profile_only=.TRUE.) ! Calls oft_finalize
+ELSE IF(TRIM(mode)=='qcheck')THEN
+  CALL xmhd_run(ic_fields,qcache_check=.TRUE.) ! Calls oft_finalize
 ELSE
   CALL xmhd_run(ic_fields)
   run_time=mytimer%tock()
