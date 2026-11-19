@@ -13,6 +13,7 @@ Later phases rerun it unchanged to get A/B comparisons.
 | `results/` | Committed result files (`baseline.*`, `perf_*.txt`) |
 | `runs/` | Per-case run directories with inputs and `output.log` (gitignored) |
 | `phase0_baseline.md` | Phase 0 report |
+| `phase1_results.md` | Phase 1 report (conditional `log2phys`, partition-aware scatter) |
 
 The driver lives in the OFT source tree, not here, so the normal CMake build compiles and links it
 against the in-tree libraries (it is built whenever `OFT_BUILD_TESTS=ON`; no pytest wrapper uses it).
@@ -65,6 +66,8 @@ Useful options:
   `perf_children.txt` next to `output.log`. Pass `--perf-exe` if `perf` is not on `PATH` (eg.
   `/usr/lib/linux-tools/*/perf` on Ubuntu with a non-matching kernel).
 - `--debug 1`: OFT debug output, which includes per-level Jacobian build times for every call.
+- `--bench-opt shaping=T`: set all four xMHD transport shaping functions (`res/visc/diff/cond_shaping`) to a
+  smooth position-dependent function, to exercise the shaping code paths (Phase 1+).
 - `--mpiexec CMD`: MPI launcher for the `nprocs=2` case.
 
 Results go to `results/<tag>.json` (all fields, plus `levels` and per-step `steps` arrays) and to
@@ -77,6 +80,7 @@ Results go to `results/<tag>.json` (all fields, plus `levels` and per-step `step
 | `levels[]` | Per level: order, finemesh, ncalls, total/avg build time, Jacobian rows/nnz |
 | `nlop_s`, `matvec_s`, `dot_s` | Average time per NL residual apply, assembled Jacobian matvec, dot product |
 | `nlop_norm`, `matvec_norm` | Checksums (must match between A/B runs up to round-off) |
+| `prof_nlop_loop_total_s` | Time in the threaded cell loop of the NL residual (profile/run counters; Phase 1+) |
 | `steps[]`, `step_time_avg_s`, `step_time_avg_excl1_s`, `lits_total`, `nlits_total` | Run mode per-step data (wall time, linear/NL iterations) |
 | `prof_setops_*`, `prof_nlop_*`, `prof_preupdate_*` | Counters accumulated over the whole run (run mode) |
 | `final_norm_B/V/Ti` | Norms of the final fields (run mode checksums) |

@@ -378,7 +378,6 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
 !! (`mesh%tloc_c`), so its local vector contributions must be added atomically [mesh%nc]
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: xmhd_cell_shared
 CLASS(oft_mesh), POINTER :: xmhd_cell_shared_mesh => NULL() !< Mesh used to build `xmhd_cell_shared`
-INTEGER(i4) :: xmhd_scatter_mode = 3 !< TEMPORARY (A/B): 1 = atomics for all cells, 2 = atomics for shared cells only, 3 = 2 + lock-free Jacobian adds for unshared cells
 CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
 !
@@ -480,7 +479,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_scatter_mode
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -1698,11 +1697,6 @@ DEBUG_STACK_PUSH
 IF(ALLOCATED(xmhd_cell_shared))DEALLOCATE(xmhd_cell_shared)
 ALLOCATE(xmhd_cell_shared(mesh%nc))
 xmhd_cell_shared_mesh=>mesh
-IF(xmhd_scatter_mode==1)THEN
-  xmhd_cell_shared=.TRUE.
-  DEBUG_STACK_POP
-  RETURN
-END IF
 !---Partition index of each cell
 ALLOCATE(cpart(mesh%nc))
 cpart=0
@@ -1796,12 +1790,13 @@ Jac=>oft_xmhd_ops%J
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
 need_pt=xmhd_shaping_active() ! Physical points only needed for shaping functions
-!---Cells not sharing DOFs with other thread partitions can add to native matrices without locking
+!---Cells not sharing DOFs with other thread partitions (see xmhd_setup_cell_shared) can add
+!---to native matrices without locking; other matrix types always use the per-field locks
 CALL xmhd_setup_cell_shared()
 jac_nolock=.FALSE.
 SELECT TYPE(Jac)
   CLASS IS(oft_native_matrix)
-    jac_nolock=(xmhd_scatter_mode==3)
+    jac_nolock=.TRUE.
 END SELECT
 !------------------------------------------------------------------------------
 ! Reset matrices
