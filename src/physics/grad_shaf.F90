@@ -321,6 +321,7 @@ TYPE :: gs_equil
   REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
   REAL(r8) :: x_cut(2) = 0.d0 !< Normal of the second cut at the active X-point, toward the core (zero if none)
   LOGICAL :: x_cut_skipped = .FALSE. !< Second cut skipped (core axis more than 60 degrees from O - X)
+  LOGICAL, POINTER, DIMENSION(:) :: core_cells => NULL() !< Plasma cells connected to the O-point (see @ref gs_core_cells)
   REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
@@ -1177,6 +1178,7 @@ self%x_points=source%x_points
 self%x_vecs=source%x_vecs
 self%x_cut=source%x_cut
 self%x_cut_skipped=source%x_cut_skipped
+IF(ASSOCIATED(source%core_cells))ALLOCATE(self%core_cells,SOURCE=source%core_cells)
 self%vcontrol_val=source%vcontrol_val
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
@@ -1890,7 +1892,7 @@ DO j=1,device%fe_rep%mesh%nc
     call psi_eval%interp(j,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
     pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
+    IF(gs_test_bounds(self,pt,j).AND.psitmp(1)>self%plasma_bounds(1))THEN
       IF(self%mode==0)THEN
         itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
@@ -3558,7 +3560,7 @@ do j=1,device%fe_rep%mesh%nc
     CALL oft_blag_eval_all(device%fe_rep,j,device%fe_rep%quad%pts(:,m),rop)
     ffp=0.d0
     pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
-    IF(gs_test_bounds(self,pt))THEN
+    IF(gs_test_bounds(self,pt,j))THEN
       psitmp=0.d0
       !$omp simd reduction(+:psitmp)
       DO l=1,device%fe_rep%nce
@@ -3771,7 +3773,7 @@ do i=1,device%fe_rep%mesh%nc
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
     pt=device%fe_rep%mesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
+    IF(gs_test_bounds(self,pt,i).AND.psitmp(1)>self%plasma_bounds(1))THEN
       IF(self%mode==0)THEN
         itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
@@ -3866,6 +3868,7 @@ IF(self%o_point(1)<0.d0)THEN
   self%plasma_bounds(1)=MAXVAL(psi_vals) !MINVAL(psiv%v)
   self%plasma_bounds(2)=MAXVAL(psi_vals)
   self%nx_points=0
+  CALL gs_core_cells(self)
   self%o_point=[0.5d0, 0.d0]
   DEALLOCATE(psi_vals)
   RETURN
@@ -4028,6 +4031,7 @@ IF(device%full_domain)THEN
   self%diverted=.FALSE.
   self%nx_points=0
 END IF
+CALL gs_core_cells(self)
 !
 IF(.NOT.self%has_plasma)RETURN
 IF(oft_debug_print(1).AND.oft_env%pm)THEN
@@ -4303,9 +4307,10 @@ end subroutine gs_find_saddle
 !------------------------------------------------------------------------------
 !> Test whether a point is inside the LCFS
 !------------------------------------------------------------------------------
-function gs_test_bounds(self,pt) result(in_bounds)
+function gs_test_bounds(self,pt,cell) result(in_bounds)
 class(gs_equil), intent(inout) :: self !< G-S object
 real(8), intent(in) :: pt(2) !< Location to test in/out of plasma
+integer(4), optional, intent(in) :: cell !< Cell containing `pt` (then the cell must also be connected to the O-point)
 integer(4) :: i
 real(8) :: rmin,rmax
 logical :: in_bounds
@@ -4317,7 +4322,55 @@ DO i=1,self%nx_points
 END DO
 IF((self%nx_points>0).AND.ANY(self%x_cut/=0.d0))in_bounds=in_bounds.AND. &
   (DOT_PRODUCT(pt-self%x_points(:,self%nx_points),self%x_cut)>0.d0)
+IF(PRESENT(cell).AND.ASSOCIATED(self%core_cells))in_bounds=in_bounds.AND.self%core_cells(cell)
 end function gs_test_bounds
+!------------------------------------------------------------------------------
+!> Mark the plasma-region cells connected to the O-point, so that islands with \f$ \psi \f$ above the
+!! LCFS value elsewhere in the plasma region are not plasma
+!!
+!! Cells are reached from the O-point's cell through neighbors with a nodal value above the LCFS value and
+!! a vertex inside the X-point cuts, plus one ring of neighbors (where only the interpolant may exceed it)
+!------------------------------------------------------------------------------
+subroutine gs_core_cells(self)
+class(gs_equil), intent(inout) :: self !< G-S object
+integer(4) :: i,k,nq,cell,jd(self%device%fe_rep%nce)
+integer(4), allocatable :: queue(:)
+real(8), pointer :: vals(:)
+class(oft_bmesh), pointer :: mesh
+mesh=>self%device%fe_rep%mesh
+IF(.NOT.ASSOCIATED(self%core_cells))ALLOCATE(self%core_cells(mesh%nc))
+self%core_cells=.TRUE.
+IF((self%o_point(1)<0.d0).OR.(self%plasma_bounds(1)<-1.d98).OR.self%device%dipole_mode.OR.self%device%mirror_mode)RETURN
+cell=0
+CALL bmesh_findcell(mesh,cell,self%o_point)
+IF(cell==0)RETURN
+NULLIFY(vals)
+CALL self%psi%get_local(vals)
+ALLOCATE(queue(mesh%nc))
+self%core_cells=.FALSE.
+self%core_cells(cell)=.TRUE.
+queue(1)=cell; nq=1; i=0
+DO WHILE(i<nq)
+  i=i+1
+  DO k=1,3
+    cell=mesh%lcc(k,queue(i))
+    IF(cell<=0)CYCLE
+    IF(self%core_cells(cell).OR.(mesh%reg(cell)/=1))CYCLE
+    CALL self%device%fe_rep%ncdofs(cell,jd)
+    IF(MAXVAL(vals(jd))<=self%plasma_bounds(1))CYCLE
+    IF(.NOT.(gs_test_bounds(self,mesh%r(1:2,mesh%lc(1,cell))).OR.gs_test_bounds(self,mesh%r(1:2,mesh%lc(2,cell))) &
+      .OR.gs_test_bounds(self,mesh%r(1:2,mesh%lc(3,cell)))))CYCLE
+    self%core_cells(cell)=.TRUE.
+    nq=nq+1; queue(nq)=cell
+  END DO
+END DO
+DO i=1,nq
+  DO k=1,3
+    IF(mesh%lcc(k,queue(i))>0)self%core_cells(mesh%lcc(k,queue(i)))=.TRUE.
+  END DO
+END DO
+DEALLOCATE(queue,vals)
+end subroutine gs_core_cells
 !------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
 !------------------------------------------------------------------------------
@@ -4485,7 +4538,7 @@ do i=1,device%fe_rep%mesh%nc
     call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
     pt=device%fe_rep%mesh%log2phys(i,device%fe_rep%quad%pts(:,m))
-    IF(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1)))THEN
+    IF(gs_test_bounds(self,pt,i).AND.(psitmp(1)>self%plasma_bounds(1)))THEN
       pt(1)=MAX(pt(1),gs_epsilon)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
@@ -5025,7 +5078,7 @@ logical :: in_plasma
 !---
 pt=self%equil%device%fe_rep%mesh%log2phys(cell,f)
 in_plasma=.TRUE.
-IF(gs_test_bounds(self%equil,pt).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
+IF(gs_test_bounds(self%equil,pt,cell).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
   in_plasma=.TRUE.
 ELSE
   in_plasma=.FALSE.
@@ -5098,7 +5151,7 @@ real(8) :: psitmp(1),gpsitmp(3),pt(3)
 logical :: in_plasma
 pt=self%equil%device%fe_rep%mesh%log2phys(cell,f)
 in_plasma=.TRUE.
-IF(gs_test_bounds(self%equil,pt).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
+IF(gs_test_bounds(self%equil,pt,cell).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
   in_plasma=.TRUE.
 ELSE
   in_plasma=.FALSE.
@@ -5158,7 +5211,7 @@ real(8) :: psitmp(1),gpsitmp(3),pt(3),pani(2),bcross_kappa(1)
 logical :: in_plasma
 pt=self%equil%device%fe_rep%mesh%log2phys(cell,f)
 in_plasma=.TRUE.
-IF(gs_test_bounds(self%equil,pt).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
+IF(gs_test_bounds(self%equil,pt,cell).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
   in_plasma=.TRUE.
 ELSE
   in_plasma=.FALSE.
@@ -6253,6 +6306,7 @@ IF(ASSOCIATED(self%mirnov_targets))DEALLOCATE(self%mirnov_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
 IF(ASSOCIATED(self%coil_reg_targets))DEALLOCATE(self%coil_reg_targets)
 IF(ASSOCIATED(self%coil_currs))DEALLOCATE(self%coil_currs)
+IF(ASSOCIATED(self%core_cells))DEALLOCATE(self%core_cells)
 !---Destroy solution fields
 IF(ASSOCIATED(self%psi))THEN
   CALL self%psi%delete()
