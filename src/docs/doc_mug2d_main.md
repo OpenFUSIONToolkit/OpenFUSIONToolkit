@@ -124,7 +124,6 @@ the placeholder value -1, which is not physical. Set every coefficient used by y
 | `lin_tol`, `nl_tol` | \f$ 10^{-8} \f$, \f$ 10^{-5} \f$ | Absolute linear and nonlinear tolerances |
 | `B_0(3)` | 0 | Background field [T] (only `B_0(3)` if `cyl_flag=T`) |
 | `den_scale` | \f$ 10^{19} \f$ | Density normalization |
-| `k_boltz` | \f$ e \f$ | Converts \f$ T \f$ to J (temperature in eV) |
 | `nu(nreg)` | -1 | Kinematic viscosity \f$ \nu \f$ [m\f$^2\f$/s] |
 | `chi(nreg)` | -1 | Thermal diffusivity \f$ \chi \f$ [m\f$^2\f$/s] |
 | `D_diff(nreg)` | -1 | Particle diffusivity \f$ D \f$ [m\f$^2\f$/s] |

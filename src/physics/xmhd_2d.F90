@@ -41,6 +41,7 @@ IMPLICIT NONE
 #define TDIFF_RST_LEN 5
 #endif
 PRIVATE
+REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant (elec_charge, so temperatures are in eV)
 
 !------------------------------------------------------------------------------
 !> Object to compute left-hand side of system for nonlinear solves
@@ -118,7 +119,6 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8), ALLOCATABLE :: nu(:) !< kinematic viscosity [m^2/s], by region
   REAL(r8), ALLOCATABLE :: gamma(:) !< adiabatic index, by region, by region
   REAL(r8), ALLOCATABLE :: D_diff(:) !< diffusivity, by region
-  REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant (use elec_charge for T in eV)
   REAL(r8) :: den_scale = 1.d19 !< scale factor used to normalize density
   REAL(r8), ALLOCATABLE :: m_i(:) !< ion mass, by region
   REAL(r8), ALLOCATABLE :: eta(:, :) !< electrical resistivity, in units of mu0, by region. First column is in plane, second column is out of plane (for anisotropic resistivity)
@@ -210,8 +210,6 @@ integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
 real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
-IF(self%cyl_flag.AND.ANY(self%B_0(1:2)/=0.d0))CALL oft_abort( &
-  "Only vertical B_0 (B_0(3)) is supported in cylindrical coordinates","run_simulation",__FILE__)
 !---------------------------------------------------------------------------
 ! Create solver fields
 !---------------------------------------------------------------------------
@@ -760,7 +758,6 @@ type(oft_quad_type), pointer :: quad
 CLASS(oft_scalar_bfem), POINTER :: T_fe
 LOGICAL :: cyl_flag, incomp
 INTEGER(i4) :: i
-REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
 REAL(r8) :: chi, eta(2), nu, D_diff, gamma, diag_vals(5), B_0(3)
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights,psi_vac_weights, &
@@ -774,6 +771,9 @@ CALL get_field_weights(self%parent_sim,a,n_weights,vel_weights,T_weights,psi_wei
 
 B_0 = self%parent_sim%B_0
 cyl_flag = self%parent_sim%cyl_flag
+!---Check that B_0 is only vertical in cylindrical coordinates
+IF(cyl_flag.AND.ANY(B_0(1:2)/=0.d0))CALL oft_abort( &
+  "Only vertical B_0 (B_0(3)) is supported in cylindrical coordinates","nlfun_apply",__FILE__)
 incomp = self%parent_sim%incomp
 !---Field 5 is pressure on its own space when incompressible, otherwise temperature
 IF(incomp)THEN
@@ -1326,18 +1326,30 @@ REAL(r8), INTENT(IN) :: basis_vals(:) !< Basis values [nce]
 REAL(r8), INTENT(IN) :: basis_grads(:,:) !< Basis gradients [3,nce]
 REAL(r8), INTENT(IN) :: dt_fac !< Time step factor
 LOGICAL :: cyl_flag,linear
-INTEGER(i4) :: jr,jc,k,l
+INTEGER(i4) :: jr,jc,k,l,nce
 REAL(r8) :: n,dn(3),vel(3),dvel(3,3),div_vel,T,dT(3),dpsi(3),by,dby(3),btmp(3),B_0(3)
 REAL(r8) :: rmul,rden,int_factor,m_i,nu,eta(2),D_diff
-REAL(r8) :: db_psi(3),db_by(3),tmp2(3),tmp3(3)
-REAL(r8), PARAMETER :: k_boltz=elec_charge
+REAL(r8) :: db_psi(3),db_by(3),tmp2(3),b0_cross(3,3),psi_cross(3),dvel_cross(3)
 !---Local copies (avoids reloads through possible aliasing with jac_loc pointers)
 cyl_flag=self%cyl_flag; linear=self%linear; B_0=self%B_0
 n=pt%n; dn=pt%dn; vel=pt%vel; dvel=pt%dvel; div_vel=pt%div_vel; T=pt%T; dT=pt%dT
 dpsi=pt%dpsi; by=pt%by; dby=pt%dby; btmp=pt%btmp; rmul=pt%rmul; rden=pt%rden
 int_factor=pt%int_factor; m_i=pt%m_i; nu=pt%nu; eta=pt%eta; D_diff=pt%D_diff
-DO jr=1,SIZE(basis_vals)
-  DO jc=1,SIZE(basis_vals)
+nce=SIZE(basis_vals)
+!---B_0 x e_l, which does not depend on the basis functions
+DO l=1,3
+  tmp2 = 0.d0
+  tmp2(l) = 1.d0
+  b0_cross(:,l) = cross_product(B_0,tmp2)
+END DO
+!---Terms common to every geometry and mode. jc is the outer loop so that quantities depending
+!   only on the column basis function are computed once per column, and jr runs along memory.
+DO jc=1,nce
+  db_psi = cross_product(basis_grads(:,jc),[0.d0,1.d0/rden,0.d0]) ! Perturbed B from delta_psi
+  db_by = [0.d0,basis_vals(jc)/rden,0.d0] ! Perturbed B from delta_by
+  psi_cross = cross_product(dpsi,basis_grads(:,jc))
+  dvel_cross = cross_product(basis_grads(:,jc),dvel(2,:))
+  DO jr=1,nce
     !---Continuity
     ! n, n
     jac_loc(1,1)%m(jr,jc) = jac_loc(1,1)%m(jr,jc) &
@@ -1351,20 +1363,85 @@ DO jr=1,SIZE(basis_vals)
         + basis_vals(jr)*dt_fac*n*basis_grads(l,jc)*int_factor*rmul & ! n*div(delta_u)
         + basis_vals(jr)*dt_fac*basis_vals(jc)*dn(l)*int_factor*rmul ! delta_u dot grad(n)
     END DO
-    IF(cyl_flag)THEN
-      jac_loc(1,2)%m(jr,jc) = jac_loc(1,2)%m(jr,jc) &
-        + basis_vals(jr)*dt_fac*n*basis_vals(jc)*int_factor
-    END IF
     !---Momentum
-    ! vel, n
-    IF(linear)THEN
+    ! vel, vel
+    DO k=1,3
+      jac_loc(k+1,k+1)%m(jr,jc) = jac_loc(k+1,k+1)%m(jr,jc) &
+        + basis_vals(jr)*basis_vals(jc)*int_factor*rmul &
+        + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor*rmul &
+        + dt_fac*nu*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor*rmul &
+        - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(dn,basis_grads(:,jc))*int_factor*rmul/n
+      DO l=1,3
+        jac_loc(k+1,l+1)%m(jr,jc) = jac_loc(k+1,l+1)%m(jr,jc) &
+          + dt_fac*basis_vals(jr)*basis_vals(jc)*dvel(k,l)*int_factor*rmul
+      END DO
+    END DO
+    ! vel, psi
+    DO l=1,3
+      jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
+        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),db_psi)*btmp(l)*int_factor*rmul/(m_i*n*mu0) &
+        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),btmp)*db_psi(l)*int_factor*rmul/(m_i*n*mu0) &
+        - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n*mu0) &
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,db_psi)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*db_psi(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n**2*mu0)
+    END DO
+    ! vel, by
+    DO l=1,3
+      jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
+        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),db_by)*btmp(l)*int_factor*rmul/(m_i*n*mu0) &
+        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),btmp)*db_by(l)*int_factor*rmul/(m_i*n*mu0) &
+        - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n*mu0) &
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,db_by)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*db_by(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n**2*mu0)
+    END DO
+    !---Induction
+    ! psi, vel
+    DO l=1,3
+      jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
+        + basis_vals(jr)*dt_fac*basis_vals(jc)*dpsi(l)*int_factor/(eta(2)*rden) &
+        + basis_vals(jr)*dt_fac*basis_vals(jc)*b0_cross(2,l)*int_factor/eta(2)
+    END DO
+    ! psi, psi
+    jac_loc(6,6)%m(jr,jc) = jac_loc(6,6)%m(jr,jc) &
+      + basis_vals(jr)*basis_vals(jc)*int_factor/(eta(2)*rden) &
+      + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor/(eta(2)*rden) &
+      + dt_fac*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/rden
+    ! by, vel
+    DO l=1,3
+      jac_loc(7,l+1)%m(jr,jc) = jac_loc(7,l+1)%m(jr,jc) &
+        + basis_vals(jr)*dt_fac*basis_vals(jc)*dby(l)*int_factor/rden &
+        + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor/rden
+    END DO
+    jac_loc(7,3)%m(jr,jc) = jac_loc(7,3)%m(jr,jc) &
+      + basis_vals(jr)*dt_fac*psi_cross(2)*int_factor/rden
+    ! by, psi
+    jac_loc(7,6)%m(jr,jc) = jac_loc(7,6)%m(jr,jc) &
+      + basis_vals(jr)*dt_fac*dvel_cross(2)*int_factor/rden
+    ! by, by
+    jac_loc(7,7)%m(jr,jc) = jac_loc(7,7)%m(jr,jc) &
+      + basis_vals(jr)*basis_vals(jc)*int_factor/rden &
+      + basis_vals(jr)*dt_fac*DOT_PRODUCT(basis_grads(:,jc),vel)*int_factor/rden &
+      + basis_vals(jr)*dt_fac*basis_vals(jc)*(dvel(1,1)+dvel(3,3))*int_factor/rden &
+      + dt_fac*eta(1)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/rden
+  END DO
+END DO
+!---Momentum, vel-n coupling, which takes a different form in linear mode
+IF(linear)THEN
+  DO jc=1,nce
+    DO jr=1,nce
       DO l=1,3
         jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
           + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor*rmul/(m_i*n) &
           + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*rmul/(m_i*n) &
           + basis_vals(jr)*basis_vals(jc)*dt_fac*DOT_PRODUCT(vel,dvel(l,:))*int_factor*rmul/n
       END DO
-    ELSE
+    END DO
+  END DO
+ELSE
+  DO jc=1,nce
+    DO jr=1,nce
       DO l=1,3
         jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
           ! grad T terms
@@ -1381,26 +1458,24 @@ DO jr=1,SIZE(basis_vals)
           - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc),dvel(l,:))*int_factor*rmul/n &
           + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn,dvel(l,:))*int_factor*rmul/n**2
       END DO
-    END IF
-    IF(cyl_flag)THEN
+    END DO
+  END DO
+END IF
+IF(cyl_flag)THEN
+  !---Extra terms in cylindrical geometry (hoop stress, curvature and 1/R factors)
+  DO jc=1,nce
+    db_psi = cross_product(basis_grads(:,jc),[0.d0,1.d0/rden,0.d0]) ! Perturbed B from delta_psi
+    db_by = [0.d0,basis_vals(jc)/rden,0.d0] ! Perturbed B from delta_by
+    DO jr=1,nce
+      ! n, vel
+      jac_loc(1,2)%m(jr,jc) = jac_loc(1,2)%m(jr,jc) &
+        + basis_vals(jr)*dt_fac*n*basis_vals(jc)*int_factor
+      ! vel, n
       jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
         - dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(2.d0*mu0*m_i*n**2)
       jac_loc(3,1)%m(jr,jc) = jac_loc(3,1)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(1)*btmp(2))*int_factor/(mu0*m_i*n**2)
-    END IF
-    ! vel, vel
-    DO k=1,3
-      jac_loc(k+1,k+1)%m(jr,jc) = jac_loc(k+1,k+1)%m(jr,jc) &
-        + basis_vals(jr)*basis_vals(jc)*int_factor*rmul &
-        + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor*rmul &
-        + dt_fac*nu*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor*rmul &
-        - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(dn,basis_grads(:,jc))*int_factor*rmul/n
-      DO l=1,3
-        jac_loc(k+1,l+1)%m(jr,jc) = jac_loc(k+1,l+1)%m(jr,jc) &
-          + dt_fac*basis_vals(jr)*basis_vals(jc)*dvel(k,l)*int_factor*rmul
-      END DO
-    END DO
-    IF(cyl_flag)THEN
+      ! vel, vel
       jac_loc(2,2)%m(jr,jc) = jac_loc(2,2)%m(jr,jc) &
         + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*int_factor/rden
       jac_loc(2,3)%m(jr,jc) = jac_loc(2,3)%m(jr,jc) &
@@ -1410,102 +1485,46 @@ DO jr=1,SIZE(basis_vals)
       jac_loc(3,3)%m(jr,jc) = jac_loc(3,3)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*basis_vals(jc)*vel(1)*int_factor &
         + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*int_factor/rden
-    END IF
-    ! vel, psi
-    db_psi = cross_product(basis_grads(:,jc),[0.d0,1.d0/rden,0.d0]) ! Perturbed B from delta_psi
-    DO l=1,3
-      jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
-        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),db_psi)*btmp(l)*int_factor*rmul/(m_i*n*mu0) &
-        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),btmp)*db_psi(l)*int_factor*rmul/(m_i*n*mu0) &
-        - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,db_psi)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*db_psi(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n**2*mu0)
-    END DO
-    IF(cyl_flag)THEN
+      ! vel, psi
       jac_loc(2,6)%m(jr,jc) = jac_loc(2,6)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*(btmp(2)*db_psi(2)-btmp(1)*db_psi(1)-btmp(3)*db_psi(3))*int_factor/(m_i*n*mu0)
       jac_loc(3,6)%m(jr,jc) = jac_loc(3,6)%m(jr,jc) &
         - dt_fac*basis_vals(jr)*(btmp(1)*db_psi(2)+btmp(2)*db_psi(1))*int_factor/(m_i*n*mu0)
-    END IF
-    ! vel, by
-    db_by = [0.d0,basis_vals(jc)/rden,0.d0] ! Perturbed B from delta_by
-    DO l=1,3
-      jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
-        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),db_by)*btmp(l)*int_factor*rmul/(m_i*n*mu0) &
-        + dt_fac*DOT_PRODUCT(basis_grads(:,jr),btmp)*db_by(l)*int_factor*rmul/(m_i*n*mu0) &
-        - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,db_by)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*db_by(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n**2*mu0)
-    END DO
-    IF(cyl_flag)THEN
+      ! vel, by
       jac_loc(2,7)%m(jr,jc) = jac_loc(2,7)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*(btmp(2)*db_by(2)-btmp(1)*db_by(1)-btmp(3)*db_by(3))*int_factor/(m_i*n*mu0)
       jac_loc(3,7)%m(jr,jc) = jac_loc(3,7)%m(jr,jc) &
         - dt_fac*basis_vals(jr)*(btmp(1)*db_by(2)+btmp(2)*db_by(1))*int_factor/(m_i*n*mu0)
-    END IF
-    !---Induction
-    ! psi, vel
-    DO l=1,3
-      tmp2 = 0.d0
-      tmp2(l) = 1.d0
-      tmp3 = cross_product(B_0,tmp2)
-      jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-        + basis_vals(jr)*dt_fac*basis_vals(jc)*dpsi(l)*int_factor/(eta(2)*rden) &
-        + basis_vals(jr)*dt_fac*basis_vals(jc)*tmp3(2)*int_factor/eta(2)
-    END DO
-    ! psi, psi
-    jac_loc(6,6)%m(jr,jc) = jac_loc(6,6)%m(jr,jc) &
-      + basis_vals(jr)*basis_vals(jc)*int_factor/(eta(2)*rden) &
-      + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor/(eta(2)*rden) &
-      + dt_fac*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/rden
-    ! by, vel
-    DO l=1,3
-      jac_loc(7,l+1)%m(jr,jc) = jac_loc(7,l+1)%m(jr,jc) &
-        + basis_vals(jr)*dt_fac*basis_vals(jc)*dby(l)*int_factor/rden &
-        + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor/rden
-      IF(.NOT.cyl_flag)THEN
-        ! Background field: B_0y*div(delta v)
-        jac_loc(7,l+1)%m(jr,jc) = jac_loc(7,l+1)%m(jr,jc) &
-          + basis_vals(jr)*dt_fac*B_0(2)*basis_grads(l,jc)*int_factor
-      END IF
-    END DO
-    tmp2 = cross_product(dpsi,basis_grads(:,jc))
-    jac_loc(7,3)%m(jr,jc) = jac_loc(7,3)%m(jr,jc) &
-      + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/rden
-    IF(cyl_flag)THEN
+      ! by, vel
       jac_loc(7,2)%m(jr,jc) = jac_loc(7,2)%m(jr,jc) &
         - basis_vals(jr)*dt_fac*by*basis_vals(jc)*int_factor/rden**2
       jac_loc(7,3)%m(jr,jc) = jac_loc(7,3)%m(jr,jc) &
         - basis_vals(jr)*dt_fac*basis_vals(jc)*dpsi(3)*int_factor/rden**2 &
         ! Background field (only B_0z allowed)
         - basis_vals(jr)*dt_fac*B_0(3)*basis_grads(3,jc)*int_factor
-    ELSE
-      ! Background field: -B_0.grad(delta v_y)
-      jac_loc(7,3)%m(jr,jc) = jac_loc(7,3)%m(jr,jc) &
-        - basis_vals(jr)*dt_fac*DOT_PRODUCT(B_0,basis_grads(:,jc))*int_factor
-    END IF
-    ! by, psi
-    tmp2 = cross_product(basis_grads(:,jc),dvel(2,:))
-    jac_loc(7,6)%m(jr,jc) = jac_loc(7,6)%m(jr,jc) &
-      + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/rden
-    IF(cyl_flag)THEN
+      ! by, psi
       jac_loc(7,6)%m(jr,jc) = jac_loc(7,6)%m(jr,jc) &
         - basis_vals(jr)*dt_fac*vel(2)*basis_grads(3,jc)*int_factor/rden**2
-    END IF
-    ! by, by
-    jac_loc(7,7)%m(jr,jc) = jac_loc(7,7)%m(jr,jc) &
-      + basis_vals(jr)*basis_vals(jc)*int_factor/rden &
-      + basis_vals(jr)*dt_fac*DOT_PRODUCT(basis_grads(:,jc),vel)*int_factor/rden &
-      + basis_vals(jr)*dt_fac*basis_vals(jc)*(dvel(1,1)+dvel(3,3))*int_factor/rden &
-      + dt_fac*eta(1)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/rden
-    IF(cyl_flag)THEN
+      ! by, by
       jac_loc(7,7)%m(jr,jc) = jac_loc(7,7)%m(jr,jc) &
         - dt_fac*basis_vals(jr)*vel(1)*basis_vals(jc)*int_factor/rden**2
-    END IF
+    END DO
   END DO
-END DO
+ELSE
+  !---Background field terms in Cartesian geometry
+  DO jc=1,nce
+    DO jr=1,nce
+      ! by, vel: B_0y*div(delta v)
+      DO l=1,3
+        jac_loc(7,l+1)%m(jr,jc) = jac_loc(7,l+1)%m(jr,jc) &
+          + basis_vals(jr)*dt_fac*B_0(2)*basis_grads(l,jc)*int_factor
+      END DO
+      ! by, vel: -B_0.grad(delta v_y)
+      jac_loc(7,3)%m(jr,jc) = jac_loc(7,3)%m(jr,jc) &
+        - basis_vals(jr)*dt_fac*DOT_PRODUCT(B_0,basis_grads(:,jc))*int_factor
+    END DO
+  END DO
+END IF
 END SUBROUTINE jac_add_shared
 !---------------------------------------------------------------------------
 !> Add Jacobian contributions specific to the compressible system (temperature couplings)
@@ -1518,43 +1537,28 @@ REAL(r8), INTENT(IN) :: basis_vals(:) !< Basis values [nce]
 REAL(r8), INTENT(IN) :: basis_grads(:,:) !< Basis gradients [3,nce]
 REAL(r8), INTENT(IN) :: dt_fac !< Time step factor
 LOGICAL :: cyl_flag,linear
-INTEGER(i4) :: jr,jc,l
+INTEGER(i4) :: jr,jc,l,nce
 REAL(r8) :: n,dn(3),vel(3),div_vel,T,dT(3),rmul,int_factor,m_i,chi,gamma
-REAL(r8), PARAMETER :: k_boltz=elec_charge
 !---Local copies (avoids reloads through possible aliasing with jac_loc pointers)
 cyl_flag=self%cyl_flag; linear=self%linear
 n=pt%n; dn=pt%dn; vel=pt%vel; div_vel=pt%div_vel; T=pt%T; dT=pt%dT
 rmul=pt%rmul; int_factor=pt%int_factor; m_i=pt%m_i; chi=pt%chi; gamma=pt%gamma
-DO jr=1,SIZE(basis_vals)
-  DO jc=1,SIZE(basis_vals)
+nce=SIZE(basis_vals)
+!---Terms common to every geometry and mode
+DO jc=1,nce
+  DO jr=1,nce
     ! vel, T
     DO l=1,3
       jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*2.d0*k_boltz*dn(l)*basis_vals(jc)*int_factor*rmul/(m_i*n) &
         + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_grads(l,jc)*int_factor*rmul/m_i
     END DO
-    ! T, n
-    IF(linear)THEN
-      jac_loc(5,1)%m(jr,jc) = jac_loc(5,1)%m(jr,jc) &
-        + dt_fac*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel,dT)*int_factor*rmul/(n*(gamma-1)) &
-        + dt_fac*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor*rmul/n &
-        - dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:,jr),dT)*int_factor*rmul/n &
-        - dt_fac*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor*rmul/(n**2)
-    ELSE
-      jac_loc(5,1)%m(jr,jc) = jac_loc(5,1)%m(jr,jc) &
-        - dt_fac*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc),dT)*int_factor*rmul/n & ! grad(delta_n)
-        + dt_fac*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor*rmul/(n**2) ! delta_n
-    END IF
     ! T, vel
     DO l=1,3
       jac_loc(5,l+1)%m(jr,jc) = jac_loc(5,l+1)%m(jr,jc) &
         + basis_vals(jr)*dt_fac*basis_vals(jc)*dT(l)*int_factor*rmul/(gamma-1) & ! delta_u dot grad(T)
         + basis_vals(jr)*dt_fac*T*basis_grads(l,jc)*int_factor*rmul ! T*div(delta_u)
     END DO
-    IF(cyl_flag)THEN
-      jac_loc(5,2)%m(jr,jc) = jac_loc(5,2)%m(jr,jc) &
-        + basis_vals(jr)*dt_fac*T*basis_vals(jc)*int_factor
-    END IF
     ! T, T
     jac_loc(5,5)%m(jr,jc) = jac_loc(5,5)%m(jr,jc) &
       + basis_vals(jr)*basis_vals(jc)*int_factor*rmul/(gamma-1) & ! delta_T
@@ -1564,6 +1568,35 @@ DO jr=1,SIZE(basis_vals)
       - dt_fac*basis_vals(jr)*chi*DOT_PRODUCT(dn,basis_grads(:,jc))*int_factor*rmul/n
   END DO
 END DO
+!---T, n coupling, which takes a different form in linear mode
+IF(linear)THEN
+  DO jc=1,nce
+    DO jr=1,nce
+      jac_loc(5,1)%m(jr,jc) = jac_loc(5,1)%m(jr,jc) &
+        + dt_fac*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel,dT)*int_factor*rmul/(n*(gamma-1)) &
+        + dt_fac*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor*rmul/n &
+        - dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:,jr),dT)*int_factor*rmul/n &
+        - dt_fac*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor*rmul/(n**2)
+    END DO
+  END DO
+ELSE
+  DO jc=1,nce
+    DO jr=1,nce
+      jac_loc(5,1)%m(jr,jc) = jac_loc(5,1)%m(jr,jc) &
+        - dt_fac*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc),dT)*int_factor*rmul/n & ! grad(delta_n)
+        + dt_fac*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor*rmul/(n**2) ! delta_n
+    END DO
+  END DO
+END IF
+!---Extra T, vel term in cylindrical geometry
+IF(cyl_flag)THEN
+  DO jc=1,nce
+    DO jr=1,nce
+      jac_loc(5,2)%m(jr,jc) = jac_loc(5,2)%m(jr,jc) &
+        + basis_vals(jr)*dt_fac*T*basis_vals(jc)*int_factor
+    END DO
+  END DO
+END IF
 END SUBROUTINE jac_add_comp
 !---------------------------------------------------------------------------
 !> Add Jacobian contributions specific to the incompressible system (pressure couplings)
