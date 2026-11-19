@@ -163,6 +163,7 @@ def case_matrix(ncores, size=1.0):
     # --- Thread scaling (profile mode, p=3 MG)
     c.append(make_case('tet_p3_mg_omp1', cube_mesh(ni(CUBE_NI[3])), 3, mg=True, threads=1))
     # --- MPI (2 ranks x ncores/2 threads; level 1 is the serial base mesh, level 2 its distributed copy)
+    c.append(make_case('tet_p3_mg_mpiref', cube_mesh(ni(CUBE_NI['mpi'])), 3, mg=True))  # Serial reference for mpi2
     c.append(make_case('tet_p3_mg_mpi2', cube_mesh(ni(CUBE_NI['mpi']), nlevels=2, nbase=1), 3, mg=True, nprocs=2,
                        threads=max(1, ncores//2)))
     # --- Time stepping (smaller mesh): single level p=2, and p=3 MG with assembled Newton-Krylov vs matrix-free
