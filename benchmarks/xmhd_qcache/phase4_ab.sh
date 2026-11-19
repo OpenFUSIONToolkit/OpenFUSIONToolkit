@@ -17,7 +17,8 @@
 #   q2pm1   : cache path with the CSR position map (new default)
 #   q2pm1h  : as q2pm1 with the hand-written GEMM loop instead of BLAS dgemm
 # part=t1  : 1 thread, profile cases, builds only (prof_reps 2,1,0)
-# part=t4  : 4 threads, default matrix (profile, MPI, run/MFNK cases), p3 vs q2pm1
+# part=t4  : 4 threads, default matrix (profile, MPI, run/MFNK cases), p3 vs q2pm1, plus q0pm1 run cases
+# part=cq  : 4 threads, p-MG cases, default vs experimental coarse-level quadrature (xmhd_coarse_quad=T)
 # Results: results/p4ab_<part>_<cfg>_r<rep>.json. Tables: python phase4_tables.py
 BUILD=${1:?build dir}
 NEWEXE=$(realpath ${2:?new xmhd_bench})
@@ -53,5 +54,16 @@ if [ "$PART" = "all" ] || [ "$PART" = "t4" ]; then
     for cfg in p3 q2pm1; do
       run_cfg p4ab_t4_${cfg}_r${rep} 4 '.*' "" $cfg
     done
+  done
+  # New direct path (xmhd_qcache=0) in run mode: iteration histories must match too
+  run_cfg p4ab_t4_q0pm1_r1 4 '.*_run$' "" q0pm1
+fi
+if [ "$PART" = "all" ] || [ "$PART" = "cq" ]; then
+  # Experimental coarse-level quadrature (xmhd_coarse_quad=T) vs default, p-MG cases
+  for rep in $(seq 1 $NREP); do
+    python3 run_bench.py --build-dir $BUILD --exe $NEWEXE --tag p4ab_cq_q2pm1_r${rep} --cases 'tet_p3_mg$,tet_p4_mg$,curved_p3_mg$,tet_p3_mg_run$' \
+      --threads 4 --xmhd-opt xmhd_qcache=2
+    python3 run_bench.py --build-dir $BUILD --exe $NEWEXE --tag p4ab_cq_cq_r${rep} --cases 'tet_p3_mg$,tet_p4_mg$,curved_p3_mg$,tet_p3_mg_run$' \
+      --threads 4 --xmhd-opt xmhd_qcache=2 --xmhd-opt xmhd_coarse_quad=T
   done
 fi

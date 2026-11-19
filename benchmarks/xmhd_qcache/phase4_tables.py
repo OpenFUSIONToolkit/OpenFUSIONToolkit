@@ -129,7 +129,7 @@ def run_table(data, title):
     for c in cases:
         base = data.get('p3', {}).get(c, [None])[0]
         its0 = [(s['lits'], s['nlits']) for s in base.get('steps', [])] if base else None
-        for cfg in ('p3', 'q2pm1'):
+        for cfg in ('p3', 'q0pm1', 'q2pm1'):
             recs = data.get(cfg, {}).get(c, [])
             if not recs:
                 continue

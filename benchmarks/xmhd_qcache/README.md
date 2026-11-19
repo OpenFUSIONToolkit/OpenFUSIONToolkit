@@ -19,7 +19,10 @@ Later phases rerun it unchanged to get A/B comparisons.
 | `phase2_results.md` | Phase 2 report (quadrature-point cache module, validation, kernel A/B, memory) |
 | `phase3_results.md` | Phase 3 report (xMHD NL residual on the cache: design, equivalence matrix, A/B) |
 | `qcheck_summary.py` | Phase 3: summarizes the residual equivalence checks (`test_MUG_qcache.py -v -s` log) |
-| `../../src/tests/physics/MUG/test_MUG_qcache.py` | Phase 3 equivalence tests (`xmhd_bench` in `mode='qcheck'`) |
+| `../../src/tests/physics/MUG/test_MUG_qcache.py` | Phase 3/4 equivalence tests (`xmhd_bench` in `mode='qcheck'`): NL residual implementations, and (Phase 4) Jacobians of every MG level |
+| `phase4_results.md` | Phase 4 report (Jacobian on the quadrature cache, CSR position map, default `xmhd_qcache=2`) |
+| `jac_compare.py` | Phase 4: runs the equivalence configurations with `jac_dump` and compares Jacobian dumps entrywise, including across builds (eg. against a build of the original Jacobian) |
+| `phase4_ab.sh`, `phase4_tables.py` | Phase 4 A/B runs (original vs new Jacobian, cache/direct, position map on/off, BLAS/hand GEMM, experimental coarse quadrature) and their tables |
 
 The driver lives in the OFT source tree, not here, so the normal CMake build compiles and links it
 against the in-tree libraries (it is built whenever `OFT_BUILD_TESTS=ON`; no pytest wrapper uses it).
@@ -72,6 +75,8 @@ Useful options:
   `perf_children.txt` next to `output.log`. Pass `--perf-exe` if `perf` is not on `PATH` (eg.
   `/usr/lib/linux-tools/*/perf` on Ubuntu with a non-matching kernel).
 - `--debug 1`: OFT debug output, which includes per-level Jacobian build times for every call.
+- `--bench-opt jac_blas=F` (Phase 4+): form local Jacobian matrices with the hand-written loop instead of BLAS `dgemm`.
+- `--xmhd-opt xmhd_jac_posmap=0` (Phase 4+): assemble the Jacobian by searching the CSR column lists (no position map).
 - `--bench-opt shaping=T`: set all four xMHD transport shaping functions (`res/visc/diff/cond_shaping`) to a
   smooth position-dependent function, to exercise the shaping code paths (Phase 1+).
 - `--mpiexec CMD`: MPI launcher for the `nprocs=2` case.
@@ -90,6 +95,7 @@ Results go to `results/<tag>.json` (all fields, plus `levels` and per-step `step
 | `steps[]`, `step_time_avg_s`, `step_time_avg_excl1_s`, `lits_total`, `nlits_total` | Run mode per-step data (wall time, linear/NL iterations) |
 | `prof_setops_*`, `prof_nlop_*`, `prof_preupdate_*` | Counters accumulated over the whole run (run mode) |
 | `final_norm_B/V/Ti` | Norms of the final fields (run mode checksums) |
+| `levels[].qc_builds`, `levels[].posmap_mb`, `posmap_mem_mb`, `posmap_setup_s`, `jcache_coarse_mem_mb` | Phase 4+: Jacobian builds on the quadrature cache per level, CSR position map memory/setup, memory of the coarse-level Jacobian caches |
 | `max_rss_mb`, `wall_s` | From `/usr/bin/time -v` (with MPI, `max_rss_mb` covers the launcher process tree as GNU time reports it) |
 
 ## Phase 2 kernel benchmark
