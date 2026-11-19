@@ -117,7 +117,9 @@ max_err=0._r8
 DO level=2,mg_mesh%mgmax
   smesh=>mg_mesh%smeshes(level)
   pmesh=>mg_mesh%smeshes(level-1)
+  ! Skip unless both levels have high-order nodes (with a linear input mesh only the top level does)
   IF(.NOT.ASSOCIATED(smesh%ho_info%r))CYCLE
+  IF(.NOT.ASSOCIATED(pmesh%ho_info%r))CYCLE
   IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN
     !---Transfer level: nodes are copied from the parent level
     DO i=1,smesh%ne

@@ -291,6 +291,16 @@ def test_surf_circle_quad(mesh_type,levels):
     area_cubit = pytest.approx(3.14160, abs=1.E-3)
     assert cubit_setup(levels[0],levels[1],'circle_{0}_test'.format(mesh_type),test_2d='T',grid_order=2)
     assert check_result(volume_cubit, area_cubit)
+# Linear input meshes with a quadratic top level: coarse levels carry no high-order nodes
+@pytest.mark.coverage
+@pytest.mark.parametrize("mesh_type", ("tri3", "quad4"))
+@pytest.mark.parametrize("levels", ((1, 2), (2, 3), (1, 3)))
+@pytest.mark.parametrize("geom,area", (("circle", 3.1403), ("sphere", 12.5595)))
+def test_surf_linear_quad(geom,area,mesh_type,levels):
+    volume_cubit = pytest.approx(0.0, abs=1.E-4)
+    area_cubit = pytest.approx(area, abs=1.E-3)
+    assert cubit_setup(levels[0],levels[1],'{0}_{1}_test'.format(geom,mesh_type),test_2d='T',grid_order=2)
+    assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("mesh_type", ("tri3", "quad4"))
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_surf_sphere_base(mesh_type,top_lev):
