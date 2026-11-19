@@ -18,7 +18,7 @@ oft_in_template = """
  meshname='cube'
  cad_type=92
  nlevels=3
- nbase=3
+ nbase={1}
  grid_order=1
 /
 
@@ -34,14 +34,17 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc=False):
+def xml_setup(xml_file, petsc=False, nprocs=1):
     os.chdir(test_dir)
     petsc_flag=('T' if petsc else 'F')
+    nbase = 3
+    if nprocs > 1:
+        nbase = 2 # Distribute finest level for MPI runs
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(petsc_flag))
+        fid.write(oft_in_template.format(petsc_flag,nbase))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
-    return run_OFT("./test_solver_xml oft.in oft_in.xml", 1, 60)
+    return run_OFT("./test_solver_xml oft.in oft_in.xml", nprocs, 60)
 
 def validate_result(iteration_count,converged_error):
     #
@@ -123,4 +126,55 @@ def test_cg_jacobi(petsc_flag):
     iteration_count = 154
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=petsc_flag)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# PETSc additive Schwarz/block Jacobi with explicitly defined local subdomains
+# (nlocal=-1 uses field-based subdomains)
+@pytest.mark.parametrize("nlocal,overlap,iteration_count", (
+    (-1, 0, 1),
+    (2, 0, 100),
+    (2, 1, 1),
+))
+def test_gmres_petsc_asm(nlocal, overlap, iteration_count):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>{0}</nlocal>
+            <overlap>{1}</overlap>
+        </pre>
+    </solver>
+    """.format(nlocal, overlap)
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=True)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# PETSc additive Schwarz/block Jacobi with explicitly defined local subdomains (MPI)
+# (full_node=1 uses node-spanning subdomains with PCGASM)
+@pytest.mark.mpi
+@pytest.mark.parametrize("nlocal,overlap,full_node,iteration_count", (
+    (-1, 0, 0, 38),
+    (1, 1, 0, 8),
+    (2, 0, 0, 61),
+    (2, 1, 0, 15),
+    (-1, 0, 1, 38),
+    (1, 1, 1, 8),
+))
+def test_gmres_petsc_asm_mpi(nlocal, overlap, full_node, iteration_count):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>{0}</nlocal>
+            <overlap>{1}</overlap>
+            <full_node>{2}</full_node>
+        </pre>
+    </solver>
+    """.format(nlocal, overlap, full_node)
+    converged_error = 0.6394036978170452
+    assert xml_setup(xml_file,petsc=True,nprocs=2)
     assert validate_result(iteration_count,converged_error)
