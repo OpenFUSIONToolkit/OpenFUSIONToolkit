@@ -30,4 +30,8 @@ add_library( oftla
 # STRUMPACK C++ interface requires C++17
 if( OFT_STRUMPACK_FOUND )
   target_compile_features( oftla PRIVATE cxx_std_17 )
+  # C++ sources are not compiled with the MPI compiler wrappers
+  if( OFT_STRUMPACK_MPI )
+    target_include_directories( oftla PRIVATE ${MPI_C_INCLUDE_DIRS} )
+  endif()
 endif()

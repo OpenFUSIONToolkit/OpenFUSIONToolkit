@@ -51,7 +51,7 @@ jobs:
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
             build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_strumpack=1",
-            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1 --build_strumpack=1"
+            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1 --build_strumpack=1 --strumpack_mpi=1"
           }
         - {
             name: "Ubuntu 24.04 Intel 2025.2",
