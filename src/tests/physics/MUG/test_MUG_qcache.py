@@ -301,6 +301,12 @@ def test_qcache_pmg_p4():
     assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3)
 
 
+def test_qcache_pmg_coarse_quad():
+    '''Jacobians agree on all levels of a p-multigrid hierarchy with the experimental coarse-level quadrature'''
+    assert qcheck_case(cube_mesh(2), 3, xmhd=" xmhd_coarse_quad=T\n xmhd_hall=T\n", bench=" shaping=T\n",
+                       minlev=2, nlevels=2)
+
+
 @pytest.mark.mpi
 def test_qcache_mpi2():
     '''Residual implementations agree on a mesh distributed over 2 MPI ranks'''

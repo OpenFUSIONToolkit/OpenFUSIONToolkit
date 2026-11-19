@@ -157,6 +157,9 @@ type :: xmhd_qcache_data
   CLASS(oft_scalar_fem), POINTER :: lag_fe => NULL() !< Lagrange space the cache was built for
   CLASS(oft_h1_fem), POINTER :: hgrad_fe => NULL() !< Grad(H^1) space the cache was built for
   CLASS(oft_hcurl_fem), POINTER :: hcurl_fe => NULL() !< H(Curl) space the cache was built for
+  !> Finest-level spaces on this cache's geometry, for field reconstruction on coarse polynomial levels with
+  !! their own quadrature rule (`xmhd_coarse_quad`, experimental); not associated otherwise
+  TYPE(xmhd_qcache_data), POINTER :: rec => NULL()
 end type xmhd_qcache_data
 !------------------------------------------------------------------------------
 !> Precomputed positions of the local Jacobian entries of every cell in a native CSR matrix
@@ -462,6 +465,10 @@ LOGICAL, PUBLIC :: xmhd_jac_blas = .TRUE.
 !> Precomputed CSR positions of local Jacobian entries for native matrices: 0 = off (search every
 !! entry), 1 = on (see \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup")
 INTEGER(i4), PUBLIC :: xmhd_jac_posmap = 1
+!> EXPERIMENTAL (off by default): integrate the Jacobian of coarse polynomial levels on the finest mesh with their
+!! own quadrature rule (that of the level's H(Curl) space) instead of the finest level's. This changes the coarse
+!! operators of the p-multigrid preconditioner (not the solution of the nonlinear system)
+LOGICAL, PUBLIC :: xmhd_coarse_quad = .FALSE.
 REAL(r8), PUBLIC :: xmhd_jac_posmap_maxmb = -1.d0 !< Skip the position map of a level if it needs more memory per rank [MB] (negative: no limit)
 INTEGER(i4), PUBLIC :: xmhd_prof_nbuild_qc(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level on the quadrature cache
 INTEGER(i8), PUBLIC :: xmhd_prof_posmap_mem(xmhd_prof_maxlev) = 0 !< Memory of the CSR position map per level [bytes]
@@ -571,6 +578,7 @@ CONTAINS
 !! | `xmhd_qcache=2`    | Quadrature implementation: 0 = evaluate basis functions directly (reference implementation), 1 = precomputed quadrature-point cache in FULL mode for the NL residual (physical basis stored per cell: high memory; Jacobian evaluated directly), 2 = quadrature-point cache in REFERENCE mode (reference tables + per-cell geometry: low memory) for the NL residual and the Jacobian on all levels on the finest mesh. All give the same result to round-off | int |
 !! | `xmhd_jac_posmap=1` | Precompute the CSR positions of local Jacobian entries for native matrices (0 = off: search the column list for every entry). Uses `4*sum(nce_s*nce_t)` bytes per cell and level | int |
 !! | `xmhd_jac_posmap_maxmb=-1` | Skip the position map of a level if it needs more memory per MPI rank [MB] (neg for no limit) | real |
+!! | `xmhd_coarse_quad=F` | **Experimental**: integrate the Jacobian of coarse polynomial MG levels with their own (lower order) quadrature rule instead of the finest level's. Changes the preconditioner, not the solution | bool |
 !
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
@@ -592,7 +600,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_qcache,xmhd_jac_posmap,xmhd_jac_posmap_maxmb
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_qcache,xmhd_jac_posmap,xmhd_jac_posmap_maxmb,xmhd_coarse_quad
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -2940,6 +2948,17 @@ ELSE
 END IF
 END SUBROUTINE xmhd_jac_finish_cell
 !------------------------------------------------------------------------------
+!> Quadrature rule of the Jacobian on the current level
+!!
+!! The finest level's rule, except for coarse polynomial levels on the finest mesh with the experimental
+!! `xmhd_coarse_quad`, which use the rule of the level's own H(Curl) space.
+!------------------------------------------------------------------------------
+FUNCTION xmhd_jac_quad() RESULT(quad)
+TYPE(oft_quad_type), POINTER :: quad
+quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad
+IF(xmhd_coarse_quad.AND.(mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc))quad=>oft_hcurl%quad
+END FUNCTION xmhd_jac_quad
+!------------------------------------------------------------------------------
 !> Update Jacobian matrix with new fields
 !!
 !! The local matrices are formed from the pointwise coefficient tensors of \ref xmhd_jac_qp (shared by both
@@ -2958,6 +2977,7 @@ real(r8) :: umat(3,3)
 class(oft_vector), pointer :: tmp
 logical :: jac_nolock,use_qc
 class(oft_matrix), pointer :: Jac
+TYPE(oft_quad_type), POINTER :: quad
 TYPE(xmhd_jac_plan) :: plan
 TYPE(xmhd_qcache_data), POINTER :: jqc,fqc
 DEBUG_STACK_PUSH
@@ -2980,6 +3000,9 @@ IF(xmhd_qcache==2)THEN
   CLASS IS(xmhd_interp)
     fqc=>oft_xmhd_ops_ML(xmhd_nlevels)%qc
     jqc=>oft_xmhd_ops%qc
+    IF(ASSOCIATED(jqc))THEN
+      IF(ASSOCIATED(jqc%rec))fqc=>jqc%rec ! Own quadrature rule (xmhd_coarse_quad)
+    END IF
     IF(xmhd_qcache_valid(jqc).AND.ASSOCIATED(fqc))THEN
       use_qc=(fqc%mode==2).AND.ASSOCIATED(jqc%geom,fqc%geom).AND.ASSOCIATED(fqc%lag_fe,fullin%lag_rep) &
         .AND.ASSOCIATED(fqc%hcurl_fe,fullin%curl_rep).AND.ASSOCIATED(fqc%hgrad_fe,fullin%grad_rep)
@@ -3001,8 +3024,8 @@ END DO
 IF(use_qc)THEN
   CALL xmhd_jac_plan_setup(plan,oft_lagrange%nce,oft_hcurl%nce,oft_hgrad%nce,jqc%geom%nqp)
 ELSE
-  CALL xmhd_jac_plan_setup(plan,oft_lagrange%nce,oft_hcurl%nce,oft_hgrad%nce, &
-    xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad%np)
+  quad=>xmhd_jac_quad()
+  CALL xmhd_jac_plan_setup(plan,oft_lagrange%nce,oft_hcurl%nce,oft_hgrad%nce,quad%np)
 END IF
 !---CSR position map (native matrices; rebuilt if the matrix changed)
 IF(xmhd_jac_posmap>0)THEN
@@ -3087,7 +3110,7 @@ TYPE(xmhd_loc_values) :: u0
 TYPE(xmhd_jac_work) :: wk(3)
 TYPE(oft_local_mat), ALLOCATABLE :: mloc(:,:,:)
 TYPE(oft_1d_int), ALLOCATABLE :: iloc(:)
-quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad
+quad=>xmhd_jac_quad()
 need_pt=xmhd_shaping_active() ! Physical points only needed for shaping functions
 !$omp parallel private(ii,i,m,k,p,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop, &
 !$omp D,goptmp,cgop,vol,det,fulltmp,pt,shp,he,curved,u0,wk,mloc,iloc)
@@ -4514,7 +4537,8 @@ CALL mytimer%tick
 IF(ASSOCIATED(oft_xmhd_ops_ML))THEN
   DO i=1,SIZE(oft_xmhd_ops_ML)
     IF(.NOT.ASSOCIATED(oft_xmhd_ops_ML(i)%qc))CYCLE
-    IF(.NOT.oft_xmhd_ops_ML(i)%qc%own_geom)CALL xmhd_qcache_delete(oft_xmhd_ops_ML(i))
+    IF((.NOT.oft_xmhd_ops_ML(i)%qc%own_geom).OR.ASSOCIATED(oft_xmhd_ops_ML(i)%qc%rec)) &
+      CALL xmhd_qcache_delete(oft_xmhd_ops_ML(i))
   END DO
 END IF
 CALL xmhd_qcache_delete(ops)
@@ -4576,8 +4600,29 @@ CALL xmhd_qcache_delete(ops)
 ALLOCATE(ops%qc)
 qc=>ops%qc
 qc%mode=2
-qc%geom=>fqc%geom
-qc%own_geom=.FALSE.
+IF(xmhd_coarse_quad)THEN
+  !---Experimental: own quadrature rule, with the finest-level spaces on it for field reconstruction
+  ALLOCATE(qc%geom)
+  qc%own_geom=.TRUE.
+  CALL qc%geom%setup(mesh,oft_hcurl%quad,store_pts=xmhd_shaping_active(),store_shared=.TRUE.)
+  ALLOCATE(qc%rec)
+  qc%rec%mode=2
+  qc%rec%geom=>qc%geom
+  qc%rec%own_geom=.FALSE.
+  qc%rec%lag_fe=>fqc%lag_fe
+  qc%rec%hgrad_fe=>fqc%hgrad_fe
+  qc%rec%hcurl_fe=>fqc%hcurl_fe
+  CALL qc%rec%lag%setup(fqc%lag_fe,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_grad=.TRUE.)
+  CALL qc%rec%hgrad%setup(fqc%hgrad_fe,qc%geom,qcache_mode_ref,need_grad=.TRUE.)
+  CALL qc%rec%hcurl%setup(fqc%hcurl_fe,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_curl=.TRUE.)
+  qc%rec%dofs_lag=>fqc%dofs_lag ! Shared with the finest-level cache (not owned, see xmhd_qcache_delete)
+  qc%rec%dofs_hgrad=>fqc%dofs_hgrad
+  qc%rec%dofs_hcurl=>fqc%dofs_hcurl
+  qc%mem=qc%geom%mem()+qc%rec%lag%mem()+qc%rec%hgrad%mem()+qc%rec%hcurl%mem()
+ELSE
+  qc%geom=>fqc%geom
+  qc%own_geom=.FALSE.
+END IF
 CALL qc%lag%setup(oft_lagrange,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_grad=.TRUE.)
 CALL qc%hgrad%setup(oft_hgrad,qc%geom,qcache_mode_ref,need_grad=.TRUE.)
 CALL qc%hcurl%setup(oft_hcurl,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_curl=.TRUE.)
@@ -4593,7 +4638,7 @@ END DO
 qc%lag_fe=>oft_lagrange
 qc%hgrad_fe=>oft_hgrad
 qc%hcurl_fe=>oft_hcurl
-qc%mem=qc%lag%mem()+qc%hgrad%mem()+qc%hcurl%mem() &
+qc%mem=qc%mem+qc%lag%mem()+qc%hgrad%mem()+qc%hcurl%mem() &
   + 4_i8*(SIZE(qc%dofs_lag,KIND=i8)+SIZE(qc%dofs_hgrad,KIND=i8)+SIZE(qc%dofs_hcurl,KIND=i8)) &
   + 8_i8*SIZE(qc%he,KIND=i8)
 qc%setup_time=mytimer%tock()
@@ -4631,6 +4676,13 @@ END FUNCTION xmhd_qcache_valid
 SUBROUTINE xmhd_qcache_delete(ops)
 TYPE(xmhd_ops), INTENT(inout) :: ops !< Operator container
 IF(.NOT.ASSOCIATED(ops%qc))RETURN
+IF(ASSOCIATED(ops%qc%rec))THEN
+  CALL ops%qc%rec%lag%delete
+  CALL ops%qc%rec%hgrad%delete
+  CALL ops%qc%rec%hcurl%delete
+  DEALLOCATE(ops%qc%rec) ! Geometry and DOF tables are not owned
+  NULLIFY(ops%qc%rec)
+END IF
 CALL ops%qc%lag%delete
 CALL ops%qc%hgrad%delete
 CALL ops%qc%hcurl%delete
@@ -6095,7 +6147,14 @@ do i=levelin,minlev,-1
   if(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)then
     IF(use_qc.AND.(i<levelin))THEN
       jqc_ok=xmhd_qcache_valid(oft_xmhd_ops%qc)
-      IF(jqc_ok)jqc_ok=ASSOCIATED(oft_xmhd_ops%qc%geom,fqc%geom)
+      IF(jqc_ok)THEN
+        IF(xmhd_coarse_quad)THEN
+          jqc_ok=ASSOCIATED(oft_xmhd_ops%qc%rec)
+          IF(jqc_ok)jqc_ok=ASSOCIATED(oft_xmhd_ops%qc%rec%lag_fe,fqc%lag_fe)
+        ELSE
+          jqc_ok=ASSOCIATED(oft_xmhd_ops%qc%geom,fqc%geom)
+        END IF
+      END IF
       IF(.NOT.jqc_ok)CALL xmhd_jcache_setup(oft_xmhd_ops,fqc)
     END IF
     !---Construct Jacobian
