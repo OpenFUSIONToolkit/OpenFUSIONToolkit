@@ -406,7 +406,7 @@ class TokaMaker():
   | | (_) |   < (_| | |  | | (_| |   <  __/ |
   |_|\___/|_|\_\__,_|_|  |_|\__,_|_|\_\___|_|
 ''')
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,cond_dict=None,coil_dict=None,order=2,F0=0.0,full_domain=False):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,cond_dict=None,coil_dict=None,order=2,F0=0.0,full_domain=False,split_nlev=2):
         r'''! Setup full G-S solver (mesh, regions, and finite element space)
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
@@ -433,6 +433,8 @@ class TokaMaker():
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
         '''
         # Check before setup so an existing model is not reset below
         if (self.nregs != -1) or (self.np != -1):
@@ -440,7 +442,7 @@ class TokaMaker():
         try:
             self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
             self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-            self._setup_fe(order=order,F0=F0,full_domain=full_domain)
+            self._setup_fe(order=order,F0=F0,full_domain=full_domain,split_nlev=split_nlev)
         except Exception:
             # Return to a clean state (keeping user settings) so setup can be retried
             settings = self.settings
@@ -613,7 +615,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def setup(self,order=2,F0=0.0,full_domain=False):
+    def setup(self,order=2,F0=0.0,full_domain=False,split_nlev=2):
         r'''! Setup G-S solver
 
         @deprecated Use `setup_model()` instead.
@@ -621,20 +623,24 @@ class TokaMaker():
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
         '''
         warn(
             "`setup()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
             DeprecationWarning,
             stacklevel=2
         )
-        self._setup_fe(order=order,F0=F0,full_domain=full_domain)
+        self._setup_fe(order=order,F0=F0,full_domain=full_domain,split_nlev=split_nlev)
 
-    def _setup_fe(self,order=2,F0=0.0,full_domain=False):
+    def _setup_fe(self,order=2,F0=0.0,full_domain=False,split_nlev=2):
         r'''! Setup G-S solver
 
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
         '''
         if self.np != -1:
             raise ValueError('G-S instance already setup')
@@ -643,7 +649,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,split_nlev,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
