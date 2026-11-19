@@ -4,18 +4,18 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''Benchmark harness for xMHD quadrature-point caching work (Phase 0 baseline and later A/B runs).
+'''Benchmark harness for the 3D xMHD (MUG) module: Jacobian build, NL residual and time-step timings.
 
 Runs the `xmhd_bench` driver (src/tests/physics/MUG/xmhd_bench.F90, built with OFT_BUILD_TESTS)
-over a case matrix and writes machine-readable results (JSON + CSV).
+over a case matrix and writes machine-readable results (JSON + CSV). See README.md.
 
 Examples:
-  # Baseline, default case matrix
-  python run_bench.py --build-dir ../../builds/build_release --tag baseline
-  # A/B: same matrix with an extra xmhd_options entry (once Phase 2 adds it)
-  python run_bench.py --build-dir ... --tag qcache_ref --xmhd-opt xmhd_qcache=2
+  # Default case matrix with the default options (quadrature cache, CSR position map)
+  python run_bench.py --build-dir <build_dir> --tag cache
+  # Same matrix with direct basis evaluation and column-search assembly
+  python run_bench.py --build-dir <build_dir> --tag direct --xmhd-opt xmhd_qcache=0 --xmhd-opt xmhd_jac_posmap=0
   # Compare two result files
-  python run_bench.py --compare results/baseline.json results/qcache_full.json
+  python run_bench.py --compare results/direct.json results/cache.json
 '''
 import argparse
 import csv
@@ -251,22 +251,11 @@ def parse_output(text):
     for m in re.finditer(r'^XMHD_PROF (setops|nlop|preupdate) ncalls,total_s\s+(\d+)\s+' + FLOAT, text, re.M):
         r['prof_{0}_n'.format(m.group(1))] = int(m.group(2))
         r['prof_{0}_total_s'.format(m.group(1))] = float(m.group(3))
-    m = re.search(r'^XMHD_PROF nlop_loop total_s\s+' + FLOAT, text, re.M)
-    if m:
-        r['prof_nlop_loop_total_s'] = float(m.group(1))
     m = re.search(r'^XMHD_PROF qcache mode,setup_s,mem_mb\s+(\d+)\s+' + FLOAT + r'\s+' + FLOAT, text, re.M)
     if m:
         r['qcache_mode'], r['qcache_setup_s'], r['qcache_mem_mb'] = int(m.group(1)), float(m.group(2)), float(m.group(3))
     for m in re.finditer(r'^XMHD_PROF (nlop_norm|matvec_norm)\s+' + FLOAT, text, re.M):
         r[m.group(1)] = float(m.group(2))
-    m = re.search(r'^XMHD_PROF kernels ncells,nqp,nthreads,checksum\s+(\d+)\s+(\d+)\s+(\d+)', text, re.M)
-    if m:
-        r['kern_ncells'], r['kern_nqp'] = int(m.group(1)), int(m.group(2))
-    m = re.search(r'^XMHD_PROF kernels_s jacobian,lag,h1,hcurl,log2phys' + 5*(r'\s+' + FLOAT), text, re.M)
-    if m:
-        for i, k in enumerate(('jacobian', 'lag', 'h1', 'hcurl', 'log2phys')):
-            r['kern_{0}_s'.format(k)] = float(m.group(i+1))
-        r['kern_basis_s'] = r['kern_lag_s'] + r['kern_h1_s'] + r['kern_hcurl_s']
     levels = []
     for m in re.finditer(r'^XMHD_PROF build level,order,finemesh,ncalls,total_s,avg_s,nrows,nnz\s+(\d+)\s+(\d+)\s+([TF])\s+(\d+)\s+'
                          + FLOAT + r'\s+' + FLOAT + r'\s+(-?\d+)\s+(-?\d+)', text, re.M):
@@ -280,11 +269,10 @@ def parse_output(text):
                 lv['qc_builds'] = int(m.group(2))
                 lv['posmap_mb'] = float(m.group(3))
                 lv['posmap_setup_s'] = float(m.group(4))
-    m = re.search(r'^XMHD_PROF jcache coarse_mem_mb,blas,posmap\s+' + FLOAT + r'\s+([TF])\s+(\d+)', text, re.M)
+    m = re.search(r'^XMHD_PROF jcache coarse_mem_mb,posmap\s+' + FLOAT + r'\s+(\d+)', text, re.M)
     if m:
         r['jcache_coarse_mem_mb'] = float(m.group(1))
-        r['jac_blas'] = m.group(2) == 'T'
-        r['jac_posmap'] = int(m.group(3))
+        r['jac_posmap'] = int(m.group(2))
     if levels:
         r['posmap_mem_mb'] = sum(lv.get('posmap_mb', 0.) for lv in levels)
         r['posmap_setup_s'] = sum(lv.get('posmap_setup_s', 0.) for lv in levels)
@@ -377,8 +365,9 @@ def run_case(case, args, src_dir, exe):
 
 CSV_KEYS = ['tag', 'name', 'order', 'mg', 'mfnk', 'mode', 'threads', 'nprocs', 'returncode', 'ncells_global', 'cell_np',
             'mesh_order', 'b_dofs', 'v_dofs', 'n_dofs', 'build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s',
-            'matvec_s', 'dot_s', 'kern_nqp', 'kern_jacobian_s', 'kern_basis_s', 'kern_log2phys_s', 'jac_nnz_total', 'prof_preupdate_n', 'prof_preupdate_total_s', 'prof_setops_n',
-            'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'prof_nlop_loop_total_s', 'qcache_mode', 'qcache_setup_s', 'qcache_mem_mb', 'step_time_avg_s', 'step_time_avg_excl1_s',
+            'matvec_s', 'dot_s', 'jac_nnz_total', 'prof_preupdate_n', 'prof_preupdate_total_s', 'prof_setops_n',
+            'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'qcache_mode', 'qcache_setup_s', 'qcache_mem_mb',
+            'jac_posmap', 'posmap_mem_mb', 'posmap_setup_s', 'jcache_coarse_mem_mb', 'step_time_avg_s', 'step_time_avg_excl1_s',
             'lits_total', 'nlits_total', 'run_time_s', 'max_rss_mb', 'wall_s', 'nlop_norm', 'matvec_norm',
             'final_norm_B', 'final_norm_V', 'final_norm_Ti']
 
@@ -427,7 +416,7 @@ def compare(path_a, path_b):
         a = {r['name']: r for r in json.load(fid)['results']}
     with open(path_b) as fid:
         b = {r['name']: r for r in json.load(fid)['results']}
-    keys = ['build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s', 'prof_nlop_loop_total_s', 'prof_nlop_total_s',
+    keys = ['build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s', 'prof_nlop_total_s',
             'matvec_s', 'step_time_avg_excl1_s', 'run_time_s', 'max_rss_mb']
     print('{0:24s} {1:>22s} {2:>12s} {3:>12s} {4:>8s}'.format('case', 'metric', 'A', 'B', 'A/B'))
     for name in a:
@@ -463,7 +452,7 @@ def main():
     parser.add_argument('--cases', default=None, help='Comma separated subset of case names (or regex)')
     parser.add_argument('--threads', type=int, default=os.cpu_count(), help='OMP threads for cases without explicit setting')
     parser.add_argument('--xmhd-opt', action='append', default=[],
-                        help='Extra entry for &xmhd_options, eg. "xmhd_qcache=2" (repeatable; applies to all cases)')
+                        help='Extra entry for &xmhd_options, eg. "xmhd_qcache=0" (repeatable; applies to all cases)')
     parser.add_argument('--bench-opt', action='append', default=[],
                         help='Extra entry for &xmhd_bench_options (repeatable)')
     parser.add_argument('--pre', default='ilu', choices=('ilu', 'lu'),
