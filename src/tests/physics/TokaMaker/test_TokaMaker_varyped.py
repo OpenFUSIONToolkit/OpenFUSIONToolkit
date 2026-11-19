@@ -5,17 +5,14 @@
 #------------------------------------------------------------------------------
 '''! Regression tests for the TokaMaker VARYPED equilibrium scan.'''
 import os
-import shutil
-import sys
-import time
-import multiprocessing
 
 import numpy as np
+import pytest
 
-test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..', 'python')))
+from tokamaker_testing import mp_run
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker, eqdsk, meshing, varyped
+
 
 # Coil current targets of the D3Dlike VARYPED example (F coils in A-turns)
 D3DLIKE_TARGETS = {
@@ -29,48 +26,12 @@ D3DLIKE_TARGETS = {
 }
 
 
-def mp_run(target, args, timeout=30):
-    '''! Run a test case in a separate process (one OFT_env per process)
-
-    @param target Function to run, which puts its result on the queue
-    @param args Arguments to `target`, before the queue
-    @param timeout Time limit [s]
-    @result Result put on the queue by `target`, or `None` on timeout or error
-    '''
-    if os.environ.get('OFT_DEBUG_TEST', 0):
-        timeout *= 4
-    os.chdir(test_dir)
-    mp_q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=target, args=args + (mp_q,))
-    p.start()
-    start = time.time()
-    while time.time() - start <= timeout:
-        if not p.is_alive():
-            break
-        time.sleep(.5)
-    else: # Reached timeout
-        print("Timeout reached")
-        p.terminate()
-        p.join()
-        return None
-    try:
-        test_result = mp_q.get(timeout=5)
-    except:
-        print("Failed to get output")
-        return None
-    p.join()
-    return test_result
-
-
-def run_D3Dlike_scan_point(mp_q):
-    '''! Scan one VARYPED point of the D3Dlike example and compare the written files
-
-    The input p-file is extended past the separatrix (psi_N = 1.02, 1.05), as
-    p-files with scrape-off-layer points are, to check that the scan drops them.
-
-    @param mp_q Queue for the result
-    '''
+def run_D3Dlike_scan_point(out_root, reverse, output_cocos, mp_q):
+    '''Scan one D3Dlike VARYPED point and compare the written files.'''
     g_eq = eqdsk.read_geqdsk('TkMkr_D3Dlike_Hmode_BSamp=1.0.geqdsk')
+    if reverse:
+        g_eq = g_eq.flip_Bt_Ip(copy=True)
+    expected_g = g_eq.cocosify(output_cocos, copy=True)
     p_eq = eqdsk.read_pfile('D3Dlike_Hmode_test.peqdsk')
     psi_ptot = np.asarray(p_eq.psinorm_for('ptot'), dtype=float)
     p_eq = p_eq.remap(np.append(psi_ptot, [1.02, 1.05]))
@@ -96,23 +57,15 @@ def run_D3Dlike_scan_point(mp_q):
     reg_terms.append(mygs.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=1.E-2))
     mygs.set_coil_reg(reg_terms=reg_terms)
 
-    out_root = os.path.join(test_dir, 'varyped_test_output')
-    shutil.rmtree(out_root, ignore_errors=True)
-    os.makedirs(out_root)
-    try:
-        results = varyped.equilibrium_scan(mygs, p_eq, g_eq, [1.5], path_to_output=out_root,
-                                           file_output=True, result_output=False,
-                                           pin_edge_pprime=True)
-    except Exception as err:
-        print(err)
-        mp_q.put(None)
-        return
+    results = varyped.equilibrium_scan(mygs, p_eq, g_eq, [1.5], path_to_output=out_root,
+                                       file_output=True, result_output=False,
+                                       output_cocos=output_cocos)
     point = results[1]
     if point['status'] == 'failed':
         mp_q.put({'status': point['status']})
         return
     out_dir = results[0]['out_dir']
-    g_out = eqdsk.read_geqdsk(os.path.join(out_dir, point['gfile_name']))
+    g_out = eqdsk.read_geqdsk(os.path.join(out_dir, point['gfile_name']), cocos=results[0]['cocos'])
     p_out = eqdsk.read_pfile(os.path.join(out_dir, point['pfile_name']))
     g_pres = np.asarray(g_out.pres, dtype=float)
     g_psi = np.asarray(g_out.psi_N, dtype=float)
@@ -126,12 +79,21 @@ def run_D3Dlike_scan_point(mp_q):
         'p_ptot_sep': p_ptot[-1],
         'p_psi_max': p_psi[-1],
         'core_dev': np.max(np.abs(np.interp(g_psi[core], p_psi, p_ptot)/g_pres[core] - 1.0)),
+        'expected_ip': expected_g.Ip,
+        'expected_bt': expected_g.B_center,
+        'ip_target': point['Ip_target'],
+        'ip_out': g_out.Ip,
+        'bt_out': g_out.B_center,
+        'jtor': g_out.j_tor_averaged_direct[20],
+        'q_file': g_out.qpsi[20],
+        'q_trace': g_out.q_profile[20],
     })
 
 
-def test_D3Dlike_scan_point():
-    '''! Written g-file and p-file pressures agree with each other and the separatrix pressure'''
-    result = mp_run(run_D3Dlike_scan_point, (), timeout=600)
+@pytest.mark.parametrize('reverse,output_cocos', [(False, 2), (True, 7)])
+def test_D3Dlike_scan_point(tmp_path, reverse, output_cocos):
+    '''Written pressures agree and g-file field and current directions are consistent.'''
+    result = mp_run(run_D3Dlike_scan_point, (str(tmp_path), reverse, output_cocos), timeout=600)
     assert result is not None
     assert result['status'] in ('converged', 'partial')
     # p-file points outside the separatrix are dropped
@@ -141,3 +103,7 @@ def test_D3Dlike_scan_point():
     # Output p-file ptot is the scaled input ptot, as solved
     assert abs(result['p_ptot_sep']/result['psep'] - 1.0) < 1.E-3
     assert result['core_dev'] < 1.E-2
+    assert np.isclose(result['ip_target'], abs(result['expected_ip']))
+    assert np.sign(result['ip_out']) == np.sign(result['expected_ip']) == np.sign(result['jtor'])
+    assert np.sign(result['bt_out']) == np.sign(result['expected_bt'])
+    assert np.sign(result['q_file']) == np.sign(result['q_trace']) != 0
