@@ -14,6 +14,9 @@ Later phases rerun it unchanged to get A/B comparisons.
 | `runs/` | Per-case run directories with inputs and `output.log` (gitignored) |
 | `phase0_baseline.md` | Phase 0 report |
 | `phase1_results.md` | Phase 1 report (conditional `log2phys`, partition-aware scatter) |
+| `run_qcache_bench.py` | Phase 2 kernel benchmark driver for the quadrature cache (`src/fem/fem_quad_cache.F90`); runs `<build_dir>/tests/fem/fem_qcache_bench` on the Phase 0 meshes |
+| `../../src/tests/fem/fem_qcache_bench.F90` | Phase 2 kernel benchmark (direct evaluation vs FULL/REFERENCE cache, basis/reconstruction/residual kernels) |
+| `phase2_results.md` | Phase 2 report (quadrature-point cache module, validation, kernel A/B, memory) |
 
 The driver lives in the OFT source tree, not here, so the normal CMake build compiles and links it
 against the in-tree libraries (it is built whenever `OFT_BUILD_TESTS=ON`; no pytest wrapper uses it).
@@ -85,6 +88,20 @@ Results go to `results/<tag>.json` (all fields, plus `levels` and per-step `step
 | `prof_setops_*`, `prof_nlop_*`, `prof_preupdate_*` | Counters accumulated over the whole run (run mode) |
 | `final_norm_B/V/Ti` | Norms of the final fields (run mode checksums) |
 | `max_rss_mb`, `wall_s` | From `/usr/bin/time -v` (with MPI, `max_rss_mb` covers the launcher process tree as GNU time reports it) |
+
+## Phase 2 kernel benchmark
+
+```bash
+python run_qcache_bench.py --build-dir <build_dir> --tag phase2_kernels_t4 --threads 4
+python run_qcache_bench.py --build-dir <build_dir> --tag phase2_kernels_t1 --threads 1 --cases tet_p3,hex_p3
+python run_qcache_bench.py --report results/phase2_kernels_t4.json    # print tables again
+```
+
+Each case times one pass over all cells and quadrature points for six variants (direct evaluation,
+FULL/REFERENCE per-qp kernels, REFERENCE canonical frame, FULL/REFERENCE cell-batched kernels) and
+three kernels (basis only, basis + xMHD field reconstruction, reconstruction + test-function
+accumulation), interleaved over `--nreps` repetitions. Results are merged into `results/<tag>.json`
+after every case; run directories go to `runs/qcache_<tag>/`.
 
 ## A/B comparisons in later phases
 

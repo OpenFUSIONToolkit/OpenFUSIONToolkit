@@ -83,7 +83,7 @@ def parse(out):
         rec['cache_' + m.group(1)] = {'setup_s': vals[0:3], 'bytes': vals[3:6]}
     for m in re.finditer(r'QCACHE_BENCH xform space,nident,nperm,ndense,nnone,resid\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)', out):
         rec.setdefault('xform', {})[int(m.group(1))] = [int(v) for v in m.groups()[1:5]] + [float(m.group(6))]
-    for m in re.finditer(r'QCACHE_BENCH time (\w+) (\w+)\s+(\S+)((?:\s+\S+)+)', out):
+    for m in re.finditer(r'QCACHE_BENCH time (\w+) (\w+)[ \t]+(\S+)((?:[ \t]+\S+)+)', out):
         rec['times'].setdefault(m.group(1), {})[m.group(2)] = [float(v) for v in m.group(4).split()]
         rec['sums'].setdefault(m.group(1), {})[m.group(2)] = float(m.group(3))
     return rec
@@ -93,7 +93,7 @@ def run_case(case, args, exe):
     tag = '{0}_t{1}'.format(case['name'], args.threads)
     rdir = os.path.join(HERE, 'runs', 'qcache_' + args.tag, tag)
     os.makedirs(rdir, exist_ok=True)
-    src_root = os.path.abspath(os.path.join(HERE, '..', '..'))
+    src_root = os.path.abspath(os.path.join(HERE, '..', '..', 'src'))
     for f in case['mesh']['mesh_files']:
         shutil.copy(os.path.join(src_root, f), rdir)
     with open(os.path.join(rdir, 'oft.in'), 'w') as fid:
@@ -195,18 +195,24 @@ def main():
         return
     exe = os.path.join(os.path.abspath(args.build_dir), 'tests', 'fem', 'fem_qcache_bench')
     sel = [c for c in cases(args.size) if (not args.cases) or (c['name'] in args.cases.split(','))]
-    results = []
+    # Results are merged into results/<tag>.json after every case (same name+threads replaced)
+    os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)
+    out_file = os.path.join(HERE, 'results', args.tag + '.json')
+    data = {'meta': {}, 'results': []}
+    if os.path.exists(out_file):
+        with open(out_file) as fid:
+            data = json.load(fid)
+    data['meta'] = {'host': platform.node(), 'cpu': platform.processor(), 'ncores': os.cpu_count(),
+                    'date': time.strftime('%Y-%m-%d %H:%M:%S'), 'nreps': args.nreps}
     for case in sel:
         print('Running {0} ({1} threads)...'.format(case['name'], args.threads), flush=True)
         rec = run_case(case, args, exe)
-        results.append(rec)
+        data['results'] = [r for r in data['results']
+                           if not (r['name'] == rec['name'] and r['threads'] == rec['threads'])] + [rec]
+        with open(out_file, 'w') as fid:
+            json.dump(data, fid, indent=1)
         print(report([rec]), flush=True)
-    meta = {'host': platform.node(), 'cpu': platform.processor(), 'ncores': os.cpu_count(),
-            'date': time.strftime('%Y-%m-%d %H:%M:%S'), 'threads': args.threads, 'nreps': args.nreps}
-    os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)
-    with open(os.path.join(HERE, 'results', args.tag + '.json'), 'w') as fid:
-        json.dump({'meta': meta, 'results': results}, fid, indent=1)
-    print(memory_table(results))
+    print(memory_table(data['results']))
 
 
 if __name__ == '__main__':

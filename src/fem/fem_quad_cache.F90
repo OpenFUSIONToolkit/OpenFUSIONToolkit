@@ -38,14 +38,28 @@
 !!   the standard evaluators on a small internal "orientation template" mesh whose cells enumerate
 !!   all states, so they match the evaluators exactly. The per-entity assumption is checked
 !!   against direct evaluation on real meshes by `tests/fem/test_fem_qcache`.
+!! - For each (entity, state) the setup also fits the transform from the state-1 ("canonical")
+!!   functions (\ref fem_quad_cache::qcache_build_xform "qcache_build_xform"). On hexes all of
+!!   them are signed permutations. On tets, Lagrange and edge transforms are signed
+!!   permutations, \f$ H^1 \f$ faces of order >= 4 mix with the canonical functions of the face, its
+!!   edges/vertices and the interior bubbles, and H(Curl) faces (order >= 2) are not in the span of
+!!   the canonical H(Curl) functions at all (they differ by gradients, which live in the separate
+!!   \f$ H^1 \f$ space). Such states are handled exactly with their own table blocks.
 !!
-!! Kernel routines (\ref fem_quad_cache::fem_qcache_cell_rows "fem_qcache_cell_rows",
-!! \ref fem_quad_cache::fem_qcache_eval "fem_qcache_eval",
-!! \ref fem_quad_cache::fem_qcache_interp "fem_qcache_interp",
-!! \ref fem_quad_cache::fem_qcache_accum "fem_qcache_accum",
-!! \ref fem_quad_cache::fem_qcache_geom_get "fem_qcache_geom_get") contain no allocation,
-!! type-bound calls or `SELECT TYPE`, use no module or threadprivate state, and are safe to call
-!! concurrently from OpenMP threads once setup is complete.
+!! Kernel routines contain no allocation, type-bound calls or `SELECT TYPE`, use no module or
+!! threadprivate state, and are safe to call concurrently from OpenMP threads once setup is
+!! complete:
+!! - per (cell, qp): \ref fem_quad_cache::fem_qcache_eval "fem_qcache_eval" (basis),
+!!   \ref fem_quad_cache::fem_qcache_interp "fem_qcache_interp" (field reconstruction),
+!!   \ref fem_quad_cache::fem_qcache_accum "fem_qcache_accum" (test-function accumulation), with
+!!   rows from \ref fem_quad_cache::fem_qcache_cell_rows "fem_qcache_cell_rows" (gather), or in
+!!   the canonical frame (\ref fem_quad_cache::fem_qcache_coefs_to_ref "fem_qcache_coefs_to_ref",
+!!   \ref fem_quad_cache::fem_qcache_res_from_ref "fem_qcache_res_from_ref") where available;
+!! - per cell, all qp at once (recommended):
+!!   \ref fem_quad_cache::fem_qcache_interp_cell "fem_qcache_interp_cell",
+!!   \ref fem_quad_cache::fem_qcache_accum_cell "fem_qcache_accum_cell",
+!!   \ref fem_quad_cache::fem_qcache_eval_cell "fem_qcache_eval_cell";
+!! - geometry: \ref fem_quad_cache::fem_qcache_geom_get "fem_qcache_geom_get".
 !!
 !! @authors Chris Hansen
 !! @date November 2026
@@ -877,10 +891,10 @@ END SUBROUTINE fem_qcache_cell_rows
 !! For each entity with `nd` DOFs and state `s>1`, solves the least-squares problem
 !! \f$ \phi^s_j(x_m) = \sum_r M_{jr} \phi^1_{r}(x_m) \f$ over all quadrature points and all
 !! cached quantities and logical components (LAPACK `dgels`), first with the entity's own
-!! canonical functions as regressors `r`. If that does not reproduce the oriented functions
-!! the canonical functions of the entity's vertices, edges and (for faces) the cell interior are
-!! added, and finally all canonical functions of the cell. Transforms within 1E-10 of a signed permutation
-!! of the own block are stored exactly as such (kind 0 if the identity, kind 1 otherwise), others
+!! canonical functions as regressors `r`. If that does not reproduce the oriented functions, the
+!! canonical functions of the entity's vertices, edges and (for faces) the cell interior are
+!! added, and finally all canonical functions of the cell. Transforms within 1E-10 of a signed
+!! permutation of the own block are stored exactly as such (kind 0 if the identity, kind 1 otherwise), others
 !! as dense `nd x nreg` blocks with a regressor list (kind 2). If no fit reaches `qcache_xf_tol`
 !! the pair is marked kind 3: the oriented functions are not in the span of this space's
 !! canonical functions, and the state's own table block must be used (gather path, or the
@@ -1324,42 +1338,69 @@ REAL(r8), CONTIGUOUS, INTENT(in) :: coefs(:,:) !< Local DOF coefficients [nce,nf
 INTEGER(i4), INTENT(in) :: nfld !< Number of fields
 REAL(r8), INTENT(out) :: out(:,:) !< Reconstructed fields [npc,nfld]
 INTEGER(i4), OPTIONAL, INTENT(in) :: rows(:) !< Table rows from \ref fem_qcache_cell_rows [nce]
-INTEGER(i4) :: j,k,c,f,nlc,nce
-REAL(r8) :: x(3,6),lc(6),tmp
+INTEGER(i4) :: j,k,c,f,nlc,nce,r
+REAL(r8) :: x(3,6),lc(6),tmp,t1,t2,t3,cj
 nce=self%nce
 IF(self%mode==qcache_mode_full)THEN
-  DO f=1,nfld
-    DO c=1,self%q(iq)%npc
+  IF(self%q(iq)%npc==1)THEN
+    DO f=1,nfld
       tmp=0.d0
       !$omp simd reduction(+:tmp)
       DO j=1,nce
-        tmp=tmp+coefs(j,f)*self%q(iq)%full(j,c,qp,cell)
+        tmp=tmp+coefs(j,f)*self%q(iq)%full(j,1,qp,cell)
       END DO
-      out(c,f)=tmp
+      out(1,f)=tmp
     END DO
-  END DO
+  ELSE
+    DO f=1,nfld
+      t1=0.d0; t2=0.d0; t3=0.d0
+      !$omp simd reduction(+:t1,t2,t3) private(cj)
+      DO j=1,nce
+        cj=coefs(j,f)
+        t1=t1+cj*self%q(iq)%full(j,1,qp,cell)
+        t2=t2+cj*self%q(iq)%full(j,2,qp,cell)
+        t3=t3+cj*self%q(iq)%full(j,3,qp,cell)
+      END DO
+      out(1,f)=t1; out(2,f)=t2; out(3,f)=t3
+    END DO
+  END IF
   RETURN
 END IF
 nlc=self%q(iq)%nlc
 DO f=1,nfld
-  !---Logical components
-  IF(PRESENT(rows))THEN
-    DO k=1,nlc
-      tmp=0.d0
+  !---Logical components (nlc is 1 or 3)
+  IF(nlc==1)THEN
+    tmp=0.d0
+    IF(PRESENT(rows))THEN
       DO j=1,nce
-        tmp=tmp+coefs(j,f)*self%q(iq)%ref(rows(j),k,qp)
+        tmp=tmp+coefs(j,f)*self%q(iq)%ref(rows(j),1,qp)
       END DO
-      lc(k)=tmp
-    END DO
-  ELSE
-    DO k=1,nlc
-      tmp=0.d0
+    ELSE
       !$omp simd reduction(+:tmp)
       DO j=1,nce
-        tmp=tmp+coefs(j,f)*self%q(iq)%ref(j,k,qp)
+        tmp=tmp+coefs(j,f)*self%q(iq)%ref(j,1,qp)
       END DO
-      lc(k)=tmp
-    END DO
+    END IF
+    lc(1)=tmp
+  ELSE
+    t1=0.d0; t2=0.d0; t3=0.d0
+    IF(PRESENT(rows))THEN
+      DO j=1,nce
+        cj=coefs(j,f); r=rows(j)
+        t1=t1+cj*self%q(iq)%ref(r,1,qp)
+        t2=t2+cj*self%q(iq)%ref(r,2,qp)
+        t3=t3+cj*self%q(iq)%ref(r,3,qp)
+      END DO
+    ELSE
+      !$omp simd reduction(+:t1,t2,t3) private(cj)
+      DO j=1,nce
+        cj=coefs(j,f)
+        t1=t1+cj*self%q(iq)%ref(j,1,qp)
+        t2=t2+cj*self%q(iq)%ref(j,2,qp)
+        t3=t3+cj*self%q(iq)%ref(j,3,qp)
+      END DO
+    END IF
+    lc(1)=t1; lc(2)=t2; lc(3)=t3
   END IF
   !---Physical components
   IF(self%q(iq)%xform==qc_xform_none)THEN
@@ -1456,21 +1497,11 @@ INTEGER(i4), INTENT(in) :: nfld !< Number of fields
 REAL(r8), CONTIGUOUS, INTENT(in) :: coefs(:,:) !< Local DOF coefficients (cell frame) [nce,nfld]
 REAL(r8), CONTIGUOUS, INTENT(out) :: out(:,:,:) !< Reconstructed fields [npc,nqp,nfld]
 REAL(r8), CONTIGUOUS, INTENT(inout) :: work(:) !< Workspace [\ref fem_qcache_work_size]
-INTEGER(i4) :: j,c,m,f,nce
-REAL(r8) :: tmp
+INTEGER(i4) :: m,nce
 nce=self%nce
 IF(self%mode==qcache_mode_full)THEN
-  DO f=1,nfld
-    DO m=1,self%nqp
-      DO c=1,self%q(iq)%npc
-        tmp=0.d0
-        !$omp simd reduction(+:tmp)
-        DO j=1,nce
-          tmp=tmp+coefs(j,f)*self%q(iq)%full(j,c,m,cell)
-        END DO
-        out(c,m,f)=tmp
-      END DO
-    END DO
+  DO m=1,self%nqp
+    CALL fem_qcache_interp(self,iq,cell,m,coefs,nfld,out(:,m,:))
   END DO
   RETURN
 END IF
@@ -1509,6 +1540,7 @@ DO f=1,nfld
     lc(kq,f)=tmp
   END DO
 END DO
+
 !---Corrections for entities without a transform
 IF(self%nxf(3)>0)THEN
   DO i=1,self%nent
