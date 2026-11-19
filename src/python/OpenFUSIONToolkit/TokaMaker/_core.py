@@ -2415,6 +2415,19 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.save_mug(filename)
 
+    def save_imas(self,uri,time=0.0,**kwargs):
+        r'''! Save current equilibrium and coil currents to IMAS `equilibrium` and `pf_active` IDSs (Data Dictionary 4.x)
+
+        Requires imas-python. See @ref TokaMaker.imas_io.equilibrium_to_imas "equilibrium_to_imas" for options.
+
+        @param uri IMAS data entry URI or `.nc` file path
+        @param time Time of the equilibrium [s]
+        @param kwargs Options passed to @ref TokaMaker.imas_io.equilibrium_to_imas "equilibrium_to_imas"
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        self._tMaker_equil.save_imas(uri,time,**kwargs)
+
     def set_coil_current_dist(self,coil_name,curr_dist=None,normalize=False):
         '''! Overwrite coil with non-uniform current distribution.
 
@@ -3566,6 +3579,10 @@ class TokaMaker_equilibrium():
         Poloidal flux is returned in TokaMaker's convention (Wb/rad), where
         \f$ B_p = \left| \nabla \psi \right| / R \f$.
 
+        Besides the averages, each surface's area \f$ 2 \pi \oint R dl \f$ ('surface'), the
+        poloidal cross-section area it encloses ('area'), and the minimum and maximum of
+        \f$ |B| \f$ on it ('B_min', 'B_max') are returned.
+
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
@@ -3585,7 +3602,7 @@ class TokaMaker_equilibrium():
             psi_save = psi
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
-        fsa_avgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
+        fsa_avgs = numpy.zeros((9,psi.shape[0]), dtype=numpy.float64)
         shape_geo = numpy.zeros((6,psi.shape[0]), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,error_string)
@@ -3612,6 +3629,11 @@ class TokaMaker_equilibrium():
             '<|grad psi|^2>': fsa_avgs[1,:],
             '<Bp^2>': fsa_avgs[2,:],
             '<1/B^2>': fsa_avgs[3,:],
+            '<|grad psi|^2/B^2>': fsa_avgs[4,:],
+            'surface': fsa_avgs[5,:],
+            'area': fsa_avgs[6,:],
+            'B_min': fsa_avgs[7,:],
+            'B_max': fsa_avgs[8,:],
             'R_min': shape_geo[0,:],
             'R_max': shape_geo[1,:],
             'Z_min': shape_geo[2,:],
@@ -4161,6 +4183,20 @@ class TokaMaker_equilibrium():
         tokamaker_save_mug(self._equil_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+
+    def save_imas(self,uri,time=0.0,**kwargs):
+        r'''! Save equilibrium and coil currents to IMAS `equilibrium` and `pf_active` IDSs (Data Dictionary 4.x)
+
+        Requires imas-python. See @ref TokaMaker.imas_io.equilibrium_to_imas "equilibrium_to_imas" for options.
+
+        @param uri IMAS data entry URI or `.nc` file path
+        @param time Time of the equilibrium [s]
+        @param kwargs Options passed to @ref TokaMaker.imas_io.equilibrium_to_imas "equilibrium_to_imas"
+        '''
+        from . import imas_io
+        eq_ids = imas_io.equilibrium_to_imas(self,time,**kwargs)
+        pf_ids = imas_io.pf_active_to_imas(self,time,dd_version=imas_io._dd_version(eq_ids))
+        imas_io.save_imas(uri,[eq_ids,pf_ids])
 
     def save_TokaMaker(self,filename):
         r'''! Save current equilibrium to an HDF5 file for later use with TokaMaker

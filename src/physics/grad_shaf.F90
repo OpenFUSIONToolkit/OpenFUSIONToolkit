@@ -569,7 +569,8 @@ INTERFACE
     REAL(r8), INTENT(in) :: psi_q(nr) !< Locations in normalized flux
     REAL(r8), INTENT(out) :: prof(nr) !< q at each location
     REAL(r8), OPTIONAL, INTENT(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
-    REAL(r8), OPTIONAL, INTENT(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+    REAL(r8), OPTIONAL, INTENT(out) :: fsa_avgs(nr,9) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>,
+    !! <|grad(psi)|^2/B^2>, surface area, cross-section area, B_min, B_max
     REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
     LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
     REAL(r8), OPTIONAL, INTENT(out) :: dl !< Length of surface 1 (if `done(1)`)
@@ -4639,16 +4640,18 @@ real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
-real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+real(8), optional, intent(out) :: fsa_avgs(nr,9) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>,
+!! <|grad(psi)|^2/B^2>, then surface area, cross-section area, B_min and B_max of each surface
 real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
 logical, optional, intent(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
 logical, optional, intent(in) :: trace_only !< Trace every surface (skip the contour pass, e.g. for surfaces it rejected)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
-real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
+real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3),gpsi_tmp(3),bq,bext(2),vdet
 type(oft_lag_brinterp), target :: psi_int
+TYPE(oft_lag_bginterp), POINTER :: gpsi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
+integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z,bcell
 integer(4), parameter :: nlcfs=1000
 logical :: lcfs_all,lcfs_any,geo,trace,cc_done(nr)
 type(gsinv_interp), pointer :: field
@@ -4715,15 +4718,20 @@ END IF
 !---Trace
 call set_tracer(gseq%device%trace_type)
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
-!$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
-NULLIFY(ptout)
+!$omp                  imin_z,imax_z,error_str,lcfs_rz,gpsi_int,gpsi_tmp,bq,bext,bcell,f,gop,vdet) firstprivate(pt_last)
+NULLIFY(ptout,gpsi_int)
+IF(PRESENT(fsa_avgs))THEN
+  ALLOCATE(gpsi_int)
+  gpsi_int%u=>gseq%psi
+  CALL gpsi_int%setup(gseq%device%fe_rep)
+END IF
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 IF(PRESENT(fsa_avgs))THEN
   field%compute_geom=.TRUE.
   field%compute_fsa=.TRUE.
-  active_tracer%neq=10
+  active_tracer%neq=13
 ELSE IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
   active_tracer%neq=6
@@ -4737,7 +4745,7 @@ IF(qprof_trace_tol>0.d0)active_tracer%maxsteps=2e6
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+IF(PRESENT(shape_geo).OR.PRESENT(fsa_avgs))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
   IF(cc_done(j))CYCLE
@@ -4769,10 +4777,10 @@ do j=1,nr
     fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   field%f_surf=fpol
-  !---Record the traced path only where it is consumed: every surface for `shape_geo`,
-  !---but just the first for the LCFS parameters.
-  IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
-    IF(.NOT.PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+  !---Record the traced path only where it is consumed: every surface for `shape_geo` and
+  !---`fsa_avgs` (|B| extrema), but just the first for the LCFS parameters.
+  IF(PRESENT(shape_geo).OR.PRESENT(fsa_avgs).OR.(PRESENT(dl).AND.(j==1)))THEN
+    IF(.NOT.ASSOCIATED(ptout))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2),ptout)
   ELSE
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2))
@@ -4785,6 +4793,20 @@ do j=1,nr
     IF(PRESENT(dl).AND.(j==1))dl=-1.d0 ! LCFS outputs failed
     CYCLE
   end if
+  !---|B| extrema at the accepted points of the trace (not at trial steps of the integrator)
+  IF(PRESENT(fsa_avgs))THEN
+    bext=[HUGE(1.d0),-HUGE(1.d0)]
+    bcell=0
+    DO i=1,active_tracer%nsteps+1
+      pt=[ptout(2,i),ptout(3,i),0.d0]
+      CALL bmesh_findcell(gseq%device%fe_rep%mesh,bcell,pt,f)
+      IF(bcell==0)CYCLE
+      CALL gseq%device%fe_rep%mesh%jacobian(bcell,f,gop,vdet)
+      CALL gpsi_int%interp(bcell,f,gop,gpsi_tmp)
+      bq=SQRT(gpsi_tmp(1)**2+gpsi_tmp(2)**2+fpol**2)/pt(1)
+      bext=[MIN(bext(1),bq),MAX(bext(2),bq)]
+    END DO
+  END IF
   !------------------------------------------------------------------------------
   ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters.
   !------------------------------------------------------------------------------
@@ -4847,7 +4869,7 @@ do j=1,nr
           zbounds(:,2)=ptout(2:3,i)
         END IF
       END DO
-      IF(.NOT.PRESENT(shape_geo))DEALLOCATE(ptout)
+      IF(.NOT.(PRESENT(shape_geo).OR.PRESENT(fsa_avgs)))DEALLOCATE(ptout)
     END IF
   END IF
   !---Safety Factor (q)
@@ -4864,10 +4886,19 @@ do j=1,nr
     fsa_avgs(j,2)=active_tracer%v(8)/active_tracer%v(2)  ! <|grad(psi)|^2>
     fsa_avgs(j,3)=active_tracer%v(9)/active_tracer%v(2)  ! <B_p^2>
     fsa_avgs(j,4)=active_tracer%v(10)/active_tracer%v(2) ! <1/B^2>
+    fsa_avgs(j,5)=active_tracer%v(11)/active_tracer%v(2) ! <|grad(psi)|^2/B^2>
+    fsa_avgs(j,6)=ABS(active_tracer%v(12))               ! Surface area
+    fsa_avgs(j,7)=ABS(active_tracer%v(13))               ! Cross-section area
+    fsa_avgs(j,8)=bext(1)                                  ! B_min
+    fsa_avgs(j,9)=bext(2)                                  ! B_max
   END IF
 end do
 CALL active_tracer%delete
 IF(ASSOCIATED(ptout))DEALLOCATE(ptout)
+IF(ASSOCIATED(gpsi_int))THEN
+  CALL gpsi_int%delete()
+  DEALLOCATE(gpsi_int)
+END IF
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
@@ -5277,6 +5308,9 @@ IF(self%compute_fsa)THEN
   val(8)=val(2)*grad_psi2       ! <|grad(psi)|^2>
   val(9)=val(2)*Bp2             ! <B_p^2>
   val(10)=val(2)/(Bp2+Bt2)      ! <1/B^2>
+  val(11)=val(2)*grad_psi2/(Bp2+Bt2) ! <|grad(psi)|^2/B^2>
+  val(12)=2.d0*pi*pt(1)*SQRT(self%rho**2+val(1)**2) ! Surface area (dS/dtheta)
+  val(13)=self%rho**2/2.d0      ! Cross-section area (dA/dtheta)
 END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
