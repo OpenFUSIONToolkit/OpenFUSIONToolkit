@@ -339,12 +339,10 @@ END PROGRAM harris_sheet
 !!
 !! Below is an input file that can be used with this example. It uses a \f$ 64 \times 128 \f$ grid of quadratic
 !! (`order=2`) elements on a \f$ 25.6 \times 12.8 \f$ m domain. The grid is periodic in \f$ x \f$ (`ref_per`), and
-!! `packing` concentrates the cells in \f$ z \f$ around the current sheet (about 0.05 m at \f$ z = 0 \f$). This resolves the
-!! thin reconnection layer, and keeps the density advection stable with a small particle diffusivity (`D_diff`). At the
-!! walls (\f$ z = \pm 6.4 \f$ m) the density and temperature have Neumann (zero-gradient) boundary conditions, while the
-!! velocity, \f$ \psi \f$ and \f$ B_y \f$ keep the default Dirichlet conditions. The run takes 4000 steps of \f$ 10^{-7} \f$ s
-!! (0.4 ms), and writes a restart file every 50 steps. The `xmhd_plot_options` group sets the last restart file to plot
-!! (`rst_end`, default 2000), so that the plot files cover the whole run.
+!! `packing` concentrates the cells in \f$ z \f$ around the current sheet (about 0.05 m at \f$ z = 0 \f$) to resolve the
+!! thin reconnection layer. At the walls (\f$ z = \pm 6.4 \f$ m) the density and temperature have Neumann
+!! (zero-gradient) boundary conditions, while the velocity, \f$ \psi \f$ and \f$ B_y \f$ keep the default Dirichlet
+!! conditions. The run takes 4000 steps of \f$ 10^{-7} \f$ s (0.4 ms), and writes a restart file every 50 steps.
 !!
 !!\verbatim
 !!&runtime_options
@@ -430,8 +428,7 @@ END PROGRAM harris_sheet
 !!~$ ./harris_sheet oft.in oft_in.xml
 !!\endverbatim
 !!
-!! If the XML file is omitted, the solver falls back to diagonal preconditioning. This roughly doubles the number of
-!! linear iterations per step, and the adaptive time step then shrinks to keep them near `ittarget`.
+!! The XML preconditioner is required for the input above.
 !!
 !!\section doc_mug2d_harris_ex_post Post-Processing
 !!
