@@ -79,11 +79,28 @@ def check_results(order):
         suffixes.append('_pm1')
     for suffix in suffixes:
         for space, quants in spaces:
-            for mode in ('full', 'ref'):
+            for mode in ('full', 'ref', 'refc'):
+                expected.append('{0}{1}_{2}_mat'.format(space, suffix, mode))
+                checks = ['eval', 'interp', 'accum']
+                if mode != 'refc':
+                    checks += ['icell', 'acell']
                 for quant in quants:
-                    for check in ('eval', 'interp', 'accum'):
+                    for check in checks:
                         expected.append('{0}{1}_{2}_{3}_{4}'.format(space, suffix, mode, quant, check))
     retval = True
+    # Accepted orientation transforms must be exact; spaces with untransformable entity states
+    # (eg. H(Curl) faces on tets, order > 1) use the gather path instead of the canonical frame
+    for suffix in suffixes:
+        for space, _ in spaces:
+            canon = results.get('{0}{1}_canonical'.format(space, suffix))
+            resid = results.get('{0}{1}_xform_resid'.format(space, suffix))
+            nnone = results.get('{0}{1}_xform_none'.format(space, suffix))
+            if canon is None or resid is None or nnone is None:
+                print('FAILED: missing transform results for "{0}{1}"'.format(space, suffix))
+                retval = False
+            elif (canon > 0.5) != (nnone < 0.5) or not (resid < TOL):
+                print('FAILED: inconsistent transform state for "{0}{1}"'.format(space, suffix))
+                retval = False
     for name in expected:
         if name not in results:
             print('FAILED: missing result "{0}"'.format(name))

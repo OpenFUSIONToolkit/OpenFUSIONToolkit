@@ -49,6 +49,7 @@ USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
 !---
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
+USE fem_quad_cache, ONLY: fem_cell_shared_flags
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec, &
   fem_map_flag, comp_fem_partition
@@ -1688,8 +1689,6 @@ END FUNCTION xmhd_shaping_active
 !! The result is cached and rebuilt only if `mesh` changes.
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_setup_cell_shared()
-INTEGER(i4) :: i,ii,ip,j,k
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart
 IF(ALLOCATED(xmhd_cell_shared).AND.ASSOCIATED(xmhd_cell_shared_mesh,mesh))THEN
   IF(SIZE(xmhd_cell_shared)==mesh%nc)RETURN
 END IF
@@ -1697,27 +1696,7 @@ DEBUG_STACK_PUSH
 IF(ALLOCATED(xmhd_cell_shared))DEALLOCATE(xmhd_cell_shared)
 ALLOCATE(xmhd_cell_shared(mesh%nc))
 xmhd_cell_shared_mesh=>mesh
-!---Partition index of each cell
-ALLOCATE(cpart(mesh%nc))
-cpart=0
-DO ip=1,mesh%nparts
-  DO ii=1,mesh%tloc_c(ip)%n
-    cpart(mesh%tloc_c(ip)%v(ii))=ip
-  END DO
-END DO
-!---Flag cells with a vertex neighbor in another partition
-!$omp parallel do private(j,k)
-DO i=1,mesh%nc
-  xmhd_cell_shared(i)=.FALSE.
-  DO k=1,mesh%cell_np
-    j=mesh%lc(k,i)
-    IF(ANY(cpart(mesh%lpc(mesh%kpc(j):mesh%kpc(j+1)-1))/=cpart(i)))THEN
-      xmhd_cell_shared(i)=.TRUE.
-      EXIT
-    END IF
-  END DO
-END DO
-DEALLOCATE(cpart)
+CALL fem_cell_shared_flags(mesh,xmhd_cell_shared)
 IF(oft_debug_print(2))WRITE(*,'(4X,A,I8,A,I8)')'xMHD shared cells: ',COUNT(xmhd_cell_shared),' of ',mesh%nc
 DEBUG_STACK_POP
 END SUBROUTINE xmhd_setup_cell_shared
