@@ -5568,9 +5568,66 @@ IF(oft_env%head_proc)WRITE(*,'(A,ES24.15)')'XMHD_PROF nlop_norm ',elapsed_time
 CALL oft_xmhd_ops%J%apply(u, v)
 elapsed_time=SQRT(v%dot(v))
 IF(oft_env%head_proc)WRITE(*,'(A,ES24.15)')'XMHD_PROF matvec_norm ',elapsed_time
+CALL xmhd_prof_kernels
 CALL xmhd_prof_report
 CALL oft_finalize()
 end subroutine xmhd_profile
+!------------------------------------------------------------------------------
+!> Time the per-quadrature-point kernels of a fine-level Jacobian build in isolation
+!!
+!! Loops over all cells and quadrature points with the same calls as \ref xmhd_build_ops
+!! (no physics, no assembly) and reports the time spent in geometry (`mesh%jacobian`),
+!! each basis evaluation, and `mesh%log2phys`. Used by profile mode only.
+!------------------------------------------------------------------------------
+subroutine xmhd_prof_kernels
+INTEGER(4) :: i,m,k
+REAL(8) :: goptmp(3,4),cgop(3,6),vol,pt(3),ktimes(5),tsum(5),sink
+REAL(8), ALLOCATABLE :: lag_rop(:),lag_gop(:,:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
+LOGICAL :: curved
+TYPE(oft_quad_type), POINTER :: quad
+TYPE(oft_timer) :: ktimer
+quad=>oft_hcurl%quad
+tsum=0.d0
+sink=0.d0
+!$omp parallel private(i,m,k,goptmp,cgop,vol,pt,curved,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,ktimer,ktimes) &
+!$omp reduction(+:tsum,sink)
+ALLOCATE(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce),hgrad_rop(3,oft_hgrad%nce))
+ALLOCATE(hcurl_rop(3,oft_hcurl%nce),hcurl_cop(3,oft_hcurl%nce))
+ktimes=0.d0
+!$omp do schedule(static)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i)
+  DO m=1,quad%np
+    CALL ktimer%tick
+    IF(curved.OR.m==1)THEN
+      CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+      CALL oft_hcurl_get_cgops(goptmp,cgop)
+    END IF
+    ktimes(1)=ktimes(1)+ktimer%tock()
+    CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
+    CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
+    ktimes(2)=ktimes(2)+ktimer%tock()
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    ktimes(3)=ktimes(3)+ktimer%tock()
+    CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
+    CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
+    ktimes(4)=ktimes(4)+ktimer%tock()
+    pt=mesh%log2phys(i,quad%pts(:,m))
+    ktimes(5)=ktimes(5)+ktimer%tock()
+    sink=sink+lag_rop(1)+lag_gop(1,1)+hgrad_rop(1,1)+hcurl_rop(1,1)+hcurl_cop(1,1)+pt(1)
+  END DO
+END DO
+!$omp end do nowait
+tsum=tsum+ktimes
+DEALLOCATE(lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop)
+!$omp end parallel
+!---Report thread-averaged times (comparable to wall time of one fine-level build)
+tsum=tsum/REAL(oft_env%nthreads,8)
+IF(oft_env%head_proc)THEN
+  WRITE(*,'(A,2I8,I4,ES12.4)')'XMHD_PROF kernels ncells,nqp,nthreads,checksum ',mesh%nc,quad%np,oft_env%nthreads,sink
+  WRITE(*,'(A,5ES12.4)')'XMHD_PROF kernels_s jacobian,lag,h1,hcurl,log2phys ',tsum
+END IF
+end subroutine xmhd_prof_kernels
 !------------------------------------------------------------------------------
 !> Print accumulated xMHD profiling counters (timing and Jacobian sizes)
 !!

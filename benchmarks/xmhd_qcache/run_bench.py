@@ -253,6 +253,14 @@ def parse_output(text):
         r['prof_{0}_total_s'.format(m.group(1))] = float(m.group(3))
     for m in re.finditer(r'^XMHD_PROF (nlop_norm|matvec_norm)\s+' + FLOAT, text, re.M):
         r[m.group(1)] = float(m.group(2))
+    m = re.search(r'^XMHD_PROF kernels ncells,nqp,nthreads,checksum\s+(\d+)\s+(\d+)\s+(\d+)', text, re.M)
+    if m:
+        r['kern_ncells'], r['kern_nqp'] = int(m.group(1)), int(m.group(2))
+    m = re.search(r'^XMHD_PROF kernels_s jacobian,lag,h1,hcurl,log2phys' + 5*(r'\s+' + FLOAT), text, re.M)
+    if m:
+        for i, k in enumerate(('jacobian', 'lag', 'h1', 'hcurl', 'log2phys')):
+            r['kern_{0}_s'.format(k)] = float(m.group(i+1))
+        r['kern_basis_s'] = r['kern_lag_s'] + r['kern_h1_s'] + r['kern_hcurl_s']
     levels = []
     for m in re.finditer(r'^XMHD_PROF build level,order,finemesh,ncalls,total_s,avg_s,nrows,nnz\s+(\d+)\s+(\d+)\s+([TF])\s+(\d+)\s+'
                          + FLOAT + r'\s+' + FLOAT + r'\s+(-?\d+)\s+(-?\d+)', text, re.M):
@@ -349,7 +357,7 @@ def run_case(case, args, src_dir, exe):
 
 CSV_KEYS = ['tag', 'name', 'order', 'mg', 'mfnk', 'mode', 'threads', 'nprocs', 'returncode', 'ncells_global', 'cell_np',
             'mesh_order', 'b_dofs', 'v_dofs', 'n_dofs', 'build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s',
-            'matvec_s', 'dot_s', 'jac_nnz_total', 'prof_preupdate_n', 'prof_preupdate_total_s', 'prof_setops_n',
+            'matvec_s', 'dot_s', 'kern_nqp', 'kern_jacobian_s', 'kern_basis_s', 'kern_log2phys_s', 'jac_nnz_total', 'prof_preupdate_n', 'prof_preupdate_total_s', 'prof_setops_n',
             'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'step_time_avg_s', 'step_time_avg_excl1_s',
             'lits_total', 'nlits_total', 'run_time_s', 'max_rss_mb', 'wall_s', 'nlop_norm', 'matvec_norm',
             'final_norm_B', 'final_norm_V', 'final_norm_Ti']
