@@ -237,6 +237,78 @@
    "jac_nnz_total": 84287993,
    "max_rss_mb": 1555.62890625,
    "wall_s": 33.79
+  },
+  {
+   "name": "tet_p4_mg",
+   "tag": "baseline",
+   "pre": "ilu",
+   "order": 4,
+   "mg": true,
+   "mfnk": false,
+   "mode": "profile",
+   "nsteps": 0,
+   "threads": 4,
+   "nprocs": 1,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 40.7964289188385,
+   "dot_s": 5.028e-05,
+   "matvec_s": 0.05041,
+   "nlop_s": 0.07855,
+   "build_s": 4.942,
+   "b_dofs": 78340.0,
+   "v_dofs": 49150.0,
+   "n_dofs": 16380.0,
+   "nthreads": 4,
+   "ncells_global": 1536,
+   "ncells_local": 1536,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "prof_setops_n": 3,
+   "prof_setops_total_s": 14.825,
+   "prof_nlop_n": 16,
+   "prof_nlop_total_s": 1.2531,
+   "prof_preupdate_n": 0,
+   "prof_preupdate_total_s": 0.0,
+   "nlop_norm": 0.9789793985875128,
+   "matvec_norm": 1.030857177965629,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 1.3195,
+     "avg_s": 0.43984,
+     "nrows": 30599,
+     "nnz": 5122413
+    },
+    {
+     "level": 3,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 3.6992,
+     "avg_s": 1.2331,
+     "nrows": 86631,
+     "nnz": 24759995
+    },
+    {
+     "level": 4,
+     "order": 4,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 9.8051,
+     "avg_s": 3.2684,
+     "nrows": 188487,
+     "nnz": 84287993
+    }
+   ],
+   "build_fine_avg_s": 3.2684,
+   "build_coarse_avg_s": 1.67294,
+   "jac_nnz_total": 114170401,
+   "max_rss_mb": 2102.13671875,
+   "wall_s": 40.78
   }
  ]
 }
