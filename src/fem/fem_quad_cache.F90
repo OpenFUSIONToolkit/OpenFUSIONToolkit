@@ -217,7 +217,7 @@ CONTAINS
 !! synchronization. Flagged cells need atomic (or locked) updates.
 !------------------------------------------------------------------------------
 SUBROUTINE fem_cell_shared_flags(mesh,flags)
-CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh
+CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh with thread partitions (`tloc_c`)
 LOGICAL, INTENT(out) :: flags(:) !< Shared flag for each cell [mesh%nc]
 INTEGER(i4) :: i,ii,ip,j,k
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart
@@ -255,7 +255,7 @@ END SUBROUTINE fem_cell_shared_flags
 !------------------------------------------------------------------------------
 SUBROUTINE qcache_geom_setup(self,mesh,quad,store_pts,store_shared,affine_tol)
 CLASS(oft_qcache_geom), INTENT(inout) :: self !< Geometry cache
-CLASS(oft_mesh), POINTER, INTENT(in) :: mesh !< Mesh
+CLASS(oft_mesh), POINTER, INTENT(in) :: mesh !< Mesh (referenced by the cache, not copied)
 TYPE(oft_quad_type), INTENT(in) :: quad !< Quadrature rule
 LOGICAL, OPTIONAL, INTENT(in) :: store_pts !< Store physical quadrature points? (default: F)
 LOGICAL, OPTIONAL, INTENT(in) :: store_shared !< Store thread-partition boundary flags? (default: F)
@@ -595,7 +595,7 @@ SUBROUTINE qcache_eval_direct(fe,basis,iq,cell,f,gop,cgop,rop1,rop3,out)
 CLASS(oft_fem_type), INTENT(in) :: fe !< FE space
 INTEGER(i4), INTENT(in) :: basis !< Basis kind
 INTEGER(i4), INTENT(in) :: iq !< Quantity
-INTEGER(i4), INTENT(in) :: cell !< Cell
+INTEGER(i4), INTENT(in) :: cell !< Cell index
 REAL(r8), INTENT(in) :: f(:) !< Logical position
 REAL(r8), INTENT(in) :: gop(3,4) !< Logical gradient vectors
 REAL(r8), INTENT(in) :: cgop(3,6) !< Cross products of `gop`

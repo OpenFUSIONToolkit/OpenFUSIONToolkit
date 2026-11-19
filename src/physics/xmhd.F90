@@ -18,6 +18,14 @@
 !! and post-processing (@ref xmhd::xmhd_plot "xmhd_plot") routines, see their documentation
 !! for available options.
 !!
+!! The nonlinear residual and the Jacobian share their pointwise physics between two
+!! implementations (@ref xmhd::xmhd_resid_qp "xmhd_resid_qp", @ref xmhd::xmhd_jac_qp "xmhd_jac_qp"):
+!! direct evaluation of the basis functions at every quadrature point (`xmhd_qcache=0`) and
+!! the quadrature-point cache of \ref fem_quad_cache (`xmhd_qcache=1`, default). Local Jacobian
+!! matrices are formed with batched BLAS `dgemm` calls inside OpenMP parallel regions, so the
+!! BLAS must run single-threaded there (see the note in @ref xmhd::xmhd_read_settings
+!! "xmhd_read_settings").
+!!
 !! @note Electron mass is artificially enhanced by a factor using @ref xmhd::me_factor
 !! "me_factor"
 !!
@@ -2830,7 +2838,7 @@ END SUBROUTINE xmhd_jac_add_native
 !------------------------------------------------------------------------------
 !> Scale, apply boundary conditions to and add the local Jacobian matrices of one cell
 !!
-!! Shared by both implementations of \ref xmhd_build_ops: applies the velocity/density/hyper-field
+!! Shared by both implementations of \ref xmhd_build_ops. Applies the velocity/density/hyper-field
 !! scale factors, zeroes Dirichlet rows, rotates velocity rows for normal/tangential BCs, packs
 !! revolved-periodic velocity blocks and adds the result to the matrix (without locks for cells that
 !! do not share DOFs with other thread partitions, see \ref xmhd_setup_cell_shared).
