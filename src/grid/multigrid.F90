@@ -169,8 +169,8 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
       + mesh%nc*pmesh%ho_info%ncp
     ALLOCATE(mesh%ho_info%r(3,ho_count))
     ! mesh%bmesh%order=pmesh%bmesh%order
-    ho_count = mesh%bmesh%ne*pmesh%bmesh%ho_info%nep &
-      + mesh%bmesh%nc*pmesh%bmesh%ho_info%ncp
+    ho_count = mesh%bmesh%ne*pmesh%ho_info%nep &
+      + mesh%bmesh%nc*pmesh%ho_info%nfp
     ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
     IF(pmesh%ho_info%nep==1)THEN
       mesh%ho_info%nep=pmesh%ho_info%nep
@@ -179,7 +179,7 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
         mesh%ho_info%r(:,i) = pmesh%ho_info%r(:,ABS(mesh%base%le(i)))
         mesh%ho_info%lep(1,i) = i
       END DO
-      mesh%bmesh%ho_info%nep=pmesh%bmesh%ho_info%nep
+      mesh%bmesh%ho_info%nep=pmesh%ho_info%nep
       ALLOCATE(mesh%bmesh%ho_info%lep(mesh%bmesh%ho_info%nep,mesh%bmesh%ne))
       DO i=1,mesh%bmesh%ne
         mesh%bmesh%ho_info%r(:,i) = mesh%ho_info%r(:,ABS(mesh%bmesh%parent%le(i)))
@@ -193,10 +193,10 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
         mesh%ho_info%r(:,i+mesh%ne) = pmesh%ho_info%r(:,ABS(mesh%base%lf(i))+pmesh%ne)
         mesh%ho_info%lfp(1,i) = i + mesh%ne
       END DO
-      mesh%bmesh%ho_info%ncp=pmesh%bmesh%ho_info%ncp
+      mesh%bmesh%ho_info%ncp=pmesh%ho_info%nfp
       ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
       DO i=1,mesh%bmesh%nc
-        mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne) = pmesh%ho_info%r(:,mesh%bmesh%parent%lf(i)+pmesh%ne)
+        mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne) = mesh%ho_info%r(:,mesh%ho_info%lfp(1,ABS(mesh%bmesh%parent%lf(i))))
         mesh%bmesh%ho_info%lcp(1,i) = i+mesh%bmesh%ne
       END DO
     END IF
@@ -244,7 +244,7 @@ IF(pmesh%ho_info%nep==1)THEN
   mesh%ho_info%nep=pmesh%ho_info%nep
   ALLOCATE(mesh%ho_info%lep(mesh%ho_info%nep,mesh%ne))
   mesh%ho_info%lep=0
-  mesh%bmesh%ho_info%nep=pmesh%bmesh%ho_info%nep
+  mesh%bmesh%ho_info%nep=pmesh%ho_info%nep
   ALLOCATE(mesh%bmesh%ho_info%lep(mesh%bmesh%ho_info%nep,mesh%bmesh%ne))
   mesh%bmesh%ho_info%lep=0
 END IF
@@ -252,7 +252,7 @@ IF(pmesh%ho_info%nfp==1)THEN
   mesh%ho_info%nfp=pmesh%ho_info%nfp
   ALLOCATE(mesh%ho_info%lfp(mesh%ho_info%nfp,mesh%nf))
   mesh%ho_info%lfp=0
-  mesh%bmesh%ho_info%ncp=pmesh%bmesh%ho_info%ncp
+  mesh%bmesh%ho_info%ncp=pmesh%ho_info%nfp
   ALLOCATE(mesh%bmesh%ho_info%lcp(mesh%bmesh%ho_info%ncp,mesh%bmesh%nc))
   mesh%bmesh%ho_info%lcp=0
 END IF
@@ -268,8 +268,8 @@ ho_count = mesh%ne*mesh%ho_info%nep &
 ALLOCATE(mesh%ho_info%r(3,ho_count))
 mesh%ho_info%r=0.d0
 ! mesh%bmesh%order=pmesh%bmesh%order
-ho_count = mesh%bmesh%ne*pmesh%bmesh%ho_info%nep &
-  + mesh%bmesh%nc*pmesh%bmesh%ho_info%ncp
+ho_count = mesh%bmesh%ne*mesh%bmesh%ho_info%nep &
+  + mesh%bmesh%nc*mesh%bmesh%ho_info%ncp
 ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
 mesh%bmesh%ho_info%r=0.d0
 !
@@ -542,18 +542,20 @@ IF(pmesh%ho_info%ncp==1)THEN
 END IF
 !$omp barrier
 !---Propogate to boundary mesh
-!$omp do
-do i=1,mesh%bmesh%ne
-  j=INT(ABS(mesh%bmesh%parent%le(i)),4)
-  mesh%bmesh%ho_info%lep(1,i)=i
-  mesh%bmesh%ho_info%r(:,i)=mesh%ho_info%r(:,mesh%ho_info%lep(1,j))
-enddo
-IF(pmesh%bmesh%ho_info%ncp==1)THEN
+IF(pmesh%ho_info%nep==1)THEN
+  !$omp do
+  do i=1,mesh%bmesh%ne
+    j=INT(ABS(mesh%bmesh%parent%le(i)),4)
+    mesh%bmesh%ho_info%lep(1,i)=i
+    mesh%bmesh%ho_info%r(:,i)=mesh%ho_info%r(:,mesh%ho_info%lep(1,j))
+  enddo
+END IF
+IF(pmesh%ho_info%nfp==1)THEN
   !$omp do
   do i=1,mesh%bmesh%nc
     j=INT(ABS(mesh%bmesh%parent%lf(i)),4)
-    mesh%bmesh%ho_info%lcp(1,i)=i+pmesh%bmesh%ne
-    mesh%bmesh%ho_info%r(:,i+pmesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
+    mesh%bmesh%ho_info%lcp(1,i)=i+mesh%bmesh%ne
+    mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
   enddo
 END IF
 !$omp end parallel
@@ -642,7 +644,9 @@ IF(pmesh%ho_info%ncp==1)THEN
   smesh%ho_info%lcp=-1
 END IF
 CALL pmesh%set_order(2)
-CALL mesh_global_set_curved(pmesh,2)
+!---Use the quadratic map on every parent cell to place the child nodes, since
+!---imported meshes may be curved away from the boundary
+CALL mesh_global_set_curved(pmesh,1)
 !---Create new high order nodes
 ncde=SIZE(mg_mesh%sinter(mg_mesh%level-1)%lcde,DIM=1)
 !$omp parallel private(cell,k,j,l,ep,fp,f1,f2,ftmp,ed,ed2,cc)
@@ -716,11 +720,11 @@ IF(smesh%ho_info%ncp==1)THEN
       CALL pmesh%vlog(k,f1)
       f2=f2+f1/REAL(smesh%cell_np,8)
     END DO
-    !---Loop over edges
+    !---Loop over child cells
     DO l=1,4
       cc = (i-1)*4+l
       ftmp=0.d0
-      DO j=1,2
+      DO j=1,smesh%cell_np
         IF(smesh%lc(j,cc)>pmesh%np+pmesh%ne)THEN
           ftmp=ftmp+f2
         ELSE IF((smesh%lc(j,cc)>pmesh%np).AND.(smesh%lc(j,cc)<=pmesh%np+pmesh%ne))THEN

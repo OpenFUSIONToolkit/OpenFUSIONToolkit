@@ -15,12 +15,66 @@
 !!
 !!\section doc_mug2d_harris_ex_code Code Walk Through
 !!
-!! The code consists of the main run program and subroutines for field initialization.
+!! The code consists of a helper module with the field initialization functions, and the main run program.
 !!
+!!\subsection doc_mug2d_harris_ex_ic_funcs Initial condition functions
+!! The initial conditions are defined by three functions in the `harris_helpers` module, which comes before the main
+!! program: `dens_harris` (equilibrium density), `psi_harris_eq` (equilibrium flux) and `psi_harris_pert` (flux
+!! perturbation). Each one returns the unscaled profile at a point, and the main program scales the result by `n0` or
+!! `psi0`. Here the mesh coordinates `pt(1)` and `pt(2)` correspond to \f$ x \f$ and \f$ z \f$.
+!!
+!! The equilibrium is a Harris sheet, with density
+!! \f[ n = n_0 \left[ \mathrm{sech}^2(z / \lambda_n) + n_{\infty} \right] \f]
+!! and flux \f$ \psi_{eq} = -\psi_0 \lambda_b \ln \cosh(z / \lambda_b) \f$, which gives
+!! \f[ \mathbf{B}_{eq} = \psi_0 \tanh(z / \lambda_b) \hat{x} \f]
+!! The temperature is uniform (`t0`). With \f$ \lambda_n = \lambda_b \f$, the equilibrium is in pressure balance when
+!! \f$ 2 n_0 k T_0 = \psi_0^2 / 2 \mu_0 \f$, which the default input satisfies.
+!!
+!! Reconnection is seeded with the flux perturbation
+!! \f$ \delta\psi = -\psi_0 \delta \cos(2 \pi x / L_x) \cos(\pi z / L_z) \f$, which gives
+!! \f[ \delta \mathbf{B} = -\psi_0 \delta \frac{\pi}{L_z} \cos(2 \pi x / L_x) \sin(\pi z / L_z) \hat{x}
+!! + \psi_0 \delta \frac{2 \pi}{L_x} \sin(2 \pi x / L_x) \cos(\pi z / L_z) \hat{z} \f]
+!! This places the X-point at \f$ x = 0 \f$ and the O-points at \f$ x = \pm L_x/2 \f$.
+!!
+!! The shape parameters these functions use (\f$ n_{\infty} \f$ = `den_inf`, \f$ \lambda_n \f$ = `lam_n`,
+!! \f$ \lambda_b \f$ = `lam_b`, \f$ L_x \f$ = `L_x`, \f$ L_z \f$ = `L_z` and \f$ \delta \f$ = `delta`) are module
+!! variables, so they are shared with the main program, which uses the module. All but `den_inf` can be set through the
+!! `harris_sheet_options` group of the \ref doc_mug2d_harris_ex_input "input file", and any not set there keep the
+!! defaults below.
+! START SOURCE
+MODULE harris_helpers
+USE oft_local
+IMPLICIT NONE
+REAL(r8) :: den_inf = 2.d-1 !< Background density, relative to n0
+REAL(r8) :: lam_n = 2.d0 !< Equilibrium density width
+REAL(r8) :: lam_b = 2.d0 !< Equilibrium current sheet (flux) width
+REAL(r8) :: L_x = 2.d0 !< Box length in x
+REAL(r8) :: L_z = 2.d0 !< Box length in z
+REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
+CONTAINS
+! Equilibrium density
+SUBROUTINE dens_harris(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
+END SUBROUTINE dens_harris
+! Equilibrium flux
+SUBROUTINE psi_harris_eq(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = -lam_b*LOG(COSH(pt(2)/lam_b))
+END SUBROUTINE psi_harris_eq
+! Flux perturbation
+SUBROUTINE psi_harris_pert(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
+END SUBROUTINE psi_harris_pert
+END MODULE harris_helpers
 !!\subsection doc_mug2d_harris_ex_code_imports Module imports
 !!
-!! As usual, we start with a few module imports for required functionality.
-! START SOURCE
+!! As usual, we start with a few module imports for required functionality. The last of these, `harris_helpers`,
+!! provides the initial condition functions and shape parameters defined above.
 PROGRAM harris_sheet
 !---Runtime
 USE oft_base
@@ -36,6 +90,7 @@ USE oft_blag_operators, ONLY: oft_blag_zerob, oft_blag_getmop, oft_blag_project
 USE oft_scalar_inits, ONLY: poss_scalar_bfield
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 USE xmhd_2d
+USE harris_helpers
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
@@ -72,12 +127,6 @@ REAL(r8) :: nu=1.d0 !< viscosity
 REAL(r8) :: gamma=2.d0/3.d0 !< adiabatic index
 REAL(r8) :: D_diff=1.d0 !< Diffusion coefficient
 REAL(r8) :: den_scale=1.d19 !< Density scale factor for normalization of equations (used for post-processing)
-REAL(r8) :: den_inf = 2.d-1 !< Background density
-REAL(r8) :: lam_n = 2.d0 !< eq density width
-REAL(r8) :: lam_b = 2.d0 !< eq psi perturbation width
-REAL(r8) :: L_x = 2.d0 !< Box length in x
-REAL(r8) :: L_z = 2.d0 !< Box length in z
-REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
@@ -118,7 +167,8 @@ free_bc=.FALSE.
 mhd_sim%n_bc=>free_bc
 mhd_sim%T_bc=>free_bc
 !!\subsection doc_mug2d_harris_ex_ic Initial conditions
-!! Initial conditions are set field by field. Spatially varying fields (density and flux) are
+!! Initial conditions are set field by field. Spatially varying fields (density and flux) are computed from the
+!! \ref doc_mug2d_harris_ex_ic_funcs "initial condition functions" and
 !! \f$ L_2 \f$-projected onto the Lagrange basis using a mass matrix solve, while uniform fields
 !! are set directly. Each field is then copied into the matching component of the solution vector
 !! with `restore_local` (1 = density, 2-4 = velocity, 5 = temperature, 6 = \f$ \psi \f$, 7 = \f$ B_y \f$).
@@ -283,43 +333,6 @@ END IF
 CALL xmhd_2d_plot(mhd_sim)
 !---Finalize enviroment
 CALL oft_finalize
-CONTAINS
-
-!!\subsection doc_mug2d_harris_ex_ic_funcs Initial condition functions
-!! To set the initial conditions we define a set of functions, which are scaled by `n0` and `psi0` in the main program.
-!! Here the mesh coordinates `pt(1)` and `pt(2)` correspond to \f$ x \f$ and \f$ z \f$.
-!!
-!! The equilibrium is a Harris sheet, with density
-!! \f[ n = n_0 \left[ \mathrm{sech}^2(z / \lambda_n) + n_{\infty} \right] \f]
-!! and flux \f$ \psi_{eq} = -\psi_0 \lambda_b \ln \cosh(z / \lambda_b) \f$, which gives
-!! \f[ \mathbf{B}_{eq} = \psi_0 \tanh(z / \lambda_b) \hat{x} \f]
-!! The temperature is uniform (`t0`). With \f$ \lambda_n = \lambda_b \f$, the equilibrium is in pressure balance when
-!! \f$ 2 n_0 k T_0 = \psi_0^2 / 2 \mu_0 \f$, which the default input satisfies.
-!!
-!! Reconnection is seeded with the flux perturbation
-!! \f$ \delta\psi = -\psi_0 \delta \cos(2 \pi x / L_x) \cos(\pi z / L_z) \f$, which gives
-!! \f[ \delta \mathbf{B} = -\psi_0 \delta \frac{\pi}{L_z} \cos(2 \pi x / L_x) \sin(\pi z / L_z) \hat{x}
-!! + \psi_0 \delta \frac{2 \pi}{L_x} \sin(2 \pi x / L_x) \cos(\pi z / L_z) \hat{z} \f]
-!! This places the X-point at \f$ x = 0 \f$ and the O-points at \f$ x = \pm L_x/2 \f$.
-
-SUBROUTINE dens_harris(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
-END SUBROUTINE dens_harris
-
-SUBROUTINE psi_harris_eq(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = -lam_b*LOG(COSH(pt(2)/lam_b))
-END SUBROUTINE psi_harris_eq
-
-SUBROUTINE psi_harris_pert(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
-END SUBROUTINE psi_harris_pert
-
 END PROGRAM harris_sheet
 ! STOP SOURCE
 !!\section doc_mug2d_harris_ex_input Input file

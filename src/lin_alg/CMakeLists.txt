@@ -11,6 +11,7 @@ set( SOLVER_OBJS
   superlu_bridge.c
   superlu_dist_bridge.c
   umfpack_bridge.c
+  strumpack_bridge.cxx
   mkl_bridge.c
   oft_arpack.F90
   oft_lu.F90
@@ -25,3 +26,8 @@ add_library( oftla
   ${SOLVER_OBJS}
   ${MGMT_OBJS}
 )
+
+# STRUMPACK C++ interface requires C++17
+if( OFT_STRUMPACK_FOUND )
+  target_compile_features( oftla PRIVATE cxx_std_17 )
+endif()

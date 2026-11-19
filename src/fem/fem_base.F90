@@ -830,6 +830,10 @@ __FILE__)
 DO i=1,row%ne
   jp=new_graph%kr(i)
   jn=new_graph%kr(i+1)-1
+  IF(jn<jp)THEN
+    new_graph%kr(i)=0
+    CYCLE
+  END IF
   CALL sort_array(lrtmp(jp:jn),jn-jp+1)
   m=lrtmp(jp)
   new_graph%kr(i)=1

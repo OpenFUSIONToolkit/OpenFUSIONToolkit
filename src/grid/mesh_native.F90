@@ -31,22 +31,34 @@ REAL(r8), ALLOCATABLE, PUBLIC :: r_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: lc_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: reg_mem(:)
 !---
+LOGICAL :: cyl_mesh = .FALSE. !< Curve grid to toroidal shaping
+REAL(r8) :: cyl_rmin = 0.d0 !< Only project nodes with radius above this value when `cyl_mesh=T`
+LOGICAL :: reflect_copy_reg = .TRUE. !< Copy region numbers during reflection
 INTEGER(i4) :: np_ho = 0
 REAL(r8), ALLOCATABLE :: r_ho(:,:)
 INTEGER(i4), ALLOCATABLE :: le_ho(:,:),lf_ho(:,:)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: per_nodes
+TYPE(oft_1d_int), POINTER, DIMENSION(:) :: nsets => NULL()
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Finalize setup/load-in of native mesh and destroy temporaries created
 !! for grid construction (eg. high-order input nodes, in-memory data)
 !---------------------------------------------------------------------------------
 subroutine native_finalize_setup
+INTEGER(i4) :: i
 !
+cyl_mesh=.FALSE.
 np_ho=0
 IF(ALLOCATED(r_ho))DEALLOCATE(r_ho)
 IF(ALLOCATED(le_ho))DEALLOCATE(le_ho)
 IF(ALLOCATED(lf_ho))DEALLOCATE(lf_ho)
 IF(ALLOCATED(per_nodes))DEALLOCATE(per_nodes)
+IF(ASSOCIATED(nsets))THEN
+    DO i=1,SIZE(nsets)
+        DEALLOCATE(nsets(i)%v)
+    END DO
+    DEALLOCATE(nsets)
+END IF
 !
 IF(ALLOCATED(r_mem))DEALLOCATE(r_mem)
 IF(ALLOCATED(lc_mem))DEALLOCATE(lc_mem)
@@ -69,11 +81,16 @@ REAL(r8) :: zstretch = 1.d0
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
-namelist/native_mesh_options/filename,reflect,ref_periodic,zstretch
+namelist/native_mesh_options/filename,reflect,ref_periodic,zstretch,cyl_mesh,cyl_rmin,reflect_copy_reg
 DEBUG_STACK_PUSH
 np_mem=-1
 filename='none'
+reflect=.FALSE.
+ref_periodic=.FALSE.
 zstretch=1.d0
+cyl_mesh=.FALSE.
+cyl_rmin=0.d0
+reflect_copy_reg=.TRUE.
 IF(oft_env%head_proc)THEN
     IF(ALLOCATED(r_mem).AND.ALLOCATED(lc_mem).AND.ALLOCATED(reg_mem))THEN
         np_mem=SIZE(r_mem,DIM=2)
@@ -102,7 +119,13 @@ CALL MPI_Bcast(reflect,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 CALL MPI_Bcast(ref_periodic,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
-CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
+CALL MPI_Bcast(zstretch,1,OFT_MPI_R8,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(cyl_mesh,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(cyl_rmin,1,OFT_MPI_R8,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(reflect_copy_reg,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 #endif
 !---Read in mesh sizes
@@ -154,6 +177,7 @@ ELSE
     CALL hdf5_read(mesh%r,TRIM(filename),"mesh/R",success)
     IF(.NOT.success)CALL oft_abort('Error reading points','native_load_vmesh',__FILE__)
 END IF
+mesh%r(3,:)=mesh%r(3,:)*zstretch
 !---Read in cells
 ALLOCATE(mesh%lc(mesh%cell_np,mesh%nc))
 IF(np_mem>0)THEN
@@ -181,6 +205,7 @@ ELSE
         ALLOCATE(r_ho(3,np_ho))
         CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
         IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_vmesh',__FILE__)
+        r_ho(3,:)=r_ho(3,:)*zstretch
         CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/LE",ndims,dim_sizes)
         ALLOCATE(le_ho(2,dim_sizes(2)))
         CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
@@ -191,20 +216,29 @@ ELSE
             CALL hdf5_read(lf_ho,TRIM(filename),"mesh/ho_info/LF",success)
             IF(.NOT.success)CALL oft_abort('Error reading quadratic faces','native_load_vmesh',__FILE__)
         END IF
-        r_ho(3,:)=r_ho(3,:)*zstretch
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
-        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/NODES"))CALL oft_abort( &
-          "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
-        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/NODES",ndims,dim_sizes)
-        ALLOCATE(per_nodes(dim_sizes(1)))
-        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/NODES",success)
-        WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))THEN
+          IF(hdf5_field_exist(TRIM(filename),"mesh/periodicity/NODES"))THEN
+            CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/NODES",ndims,dim_sizes)
+            ALLOCATE(per_nodes(dim_sizes(1)))
+            CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/NODES",success)
+          ELSE
+            CALL oft_abort("Periodic nodeset not found in file", &
+              "native_load_vmesh",__FILE__)
+          END IF
+        ELSE
+          CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+          ALLOCATE(per_nodes(dim_sizes(1)))
+          CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        END IF
+        IF(oft_env%head_proc)WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
+    !---Read other nodeset information
+    CALL native_read_nodesets(nsets,TRIM(filename))
 END IF
 !---
-mesh%r(3,:)=mesh%r(3,:)*zstretch
 IF(reflect)THEN
     call mesh_global_resolution(mesh)
     call native_reflect(mesh,.1d0*mesh%hmin)
@@ -213,6 +247,26 @@ IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine native_load_vmesh
+!---------------------------------------------------------------------------------
+!> Setup surface IDs
+!---------------------------------------------------------------------------------
+subroutine native_cadlink(mesh)
+class(oft_mesh), intent(inout) :: mesh
+integer(i4) :: i,j
+LOGICAL, ALLOCATABLE :: pflag(:)
+!---Set surface IDs from nodesets if present
+IF(ASSOCIATED(nsets))THEN
+    ALLOCATE(pflag(mesh%np))
+    DO i=1,SIZE(nsets)
+        pflag = .FALSE.
+        pflag(nsets(i)%v)=.TRUE.
+        DO j=1,mesh%nbf
+            IF(ALL(pflag(mesh%lf(:,mesh%lbf(j)))))mesh%bfs(j)=i
+        END DO
+    END DO
+    DEALLOCATE(pflag)
+END IF
+end subroutine native_cadlink
 !---------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
 !! - Read in T3D options from input file
@@ -434,7 +488,7 @@ local_filename=filename
 IF(PRESENT(native_filename))local_filename=native_filename
 ! Look for sideset field
 IF(.NOT.hdf5_field_exist(local_filename,"mesh/NUM_SIDESETS"))RETURN
-!---Read nodesets
+!---Read sidesets
 CALL hdf5_read(num_ssets,local_filename,"mesh/NUM_SIDESETS",success=success)
 IF(.NOT.success)RETURN
 ALLOCATE(ssets(num_ssets))
@@ -590,6 +644,94 @@ DEALLOCATE(r_ho,le_ho,lf_ho)
 DEBUG_STACK_POP
 end subroutine native_hobase_hex
 !---------------------------------------------------------------------------------
+!> Adjust points to CAD boundary and propogate CAD linkage
+!---------------------------------------------------------------------------------
+subroutine native_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+integer(i4) :: i
+real(r8) :: rp(3)
+class(oft_mesh), pointer :: pmesh,mesh
+IF(mg_mesh%level==1)RETURN
+DEBUG_STACK_PUSH
+!---Get parent mesh
+mesh=>mg_mesh%mesh
+pmesh=>mg_mesh%meshes(mg_mesh%level-1)
+IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN
+    DEBUG_STACK_POP
+    RETURN
+END IF
+!---Handle toroidal grid
+IF(cyl_mesh)THEN
+    DO i=1,pmesh%ne
+        rp(1)=SQRT(SUM(pmesh%r(1:2,pmesh%le(1,i))**2))
+        rp(2)=SQRT(SUM(pmesh%r(1:2,pmesh%le(2,i))**2))
+        rp(3)=SQRT(SUM(mesh%r(1:2,i+pmesh%np)**2))
+        mesh%r(1:2,i+pmesh%np)=mesh%r(1:2,i+pmesh%np)*(rp(1)+rp(2))/(2.d0*rp(3))
+    END DO
+END IF
+DEBUG_STACK_POP
+end subroutine native_reffix
+!---------------------------------------------------------------------------------
+!> Add quadratic mesh node points using CAD model
+!---------------------------------------------------------------------------------
+subroutine native_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+real(r8) :: pt(3),r1,r2,r3,pts_tmp(3,10),wts_tmp(10)
+integer(i4) :: i,j,k,ierr,nerr
+CHARACTER(LEN=60) :: error_str
+class(oft_mesh), pointer :: mesh
+DEBUG_STACK_PUSH
+mesh=>mg_mesh%mesh
+IF(cyl_mesh)THEN
+    if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting cylindrical quadratic nodes'
+    wts_tmp(1:2)=1.d0/2.d0
+    DO i=1,mesh%ne
+        pts_tmp(:,1)=mesh%r(:,mesh%le(1,i))
+        pts_tmp(:,2)=mesh%r(:,mesh%le(2,i))
+        CALL ho_cyl(pts_tmp,wts_tmp,2,cyl_rmin,mesh%ho_info%r(:,i))
+    END DO
+    IF(mesh%ho_info%nfp>0)THEN
+        wts_tmp(1:4)=1.d0/4.d0
+        do i=1,mesh%nf
+            DO j=1,mesh%face_np
+                pts_tmp(:,j)=mesh%r(:,mesh%lf(j,i))
+            END DO
+            CALL ho_cyl(pts_tmp,wts_tmp,4,cyl_rmin,mesh%ho_info%r(:,i+mesh%ne))
+        end do
+    END IF
+    IF(mesh%ho_info%ncp>0)THEN
+        wts_tmp(1:8)=1.d0/8.d0
+        do i=1,mesh%nc
+            DO j=1,mesh%cell_np
+                pts_tmp(:,j)=mesh%r(:,mesh%lc(j,i))
+            END DO
+            CALL ho_cyl(pts_tmp,wts_tmp,8,cyl_rmin,mesh%ho_info%r(:,i+mesh%ne+mesh%nf))
+        end do
+    END IF
+END IF
+DEBUG_STACK_POP
+contains
+!
+subroutine ho_cyl(pts,wts,n,rmin,pt)
+real(r8), intent(in) :: pts(3,n),wts(n),rmin
+real(r8), intent(inout) :: pt(3)
+integer(i4), intent(in) :: n
+real(r8) :: rpos,rnew
+integer(i4) :: i
+pt=0.d0
+rpos=0.d0
+DO i=1,n
+    rpos=rpos+SQRT(SUM(pts(1:2,i)**2))*wts(i)
+    pt=pt+pts(:,i)*wts(i)
+END DO
+!
+IF(rpos>rmin)THEN
+    rnew=SQRT(SUM(pt(1:2)**2))
+    pt(1:2)=pt(1:2)*rpos/rnew
+END IF
+end subroutine ho_cyl
+end subroutine native_add_quad
+!---------------------------------------------------------------------------------
 !> Reflect an native mesh across the xy-plane
 !---------------------------------------------------------------------------------
 subroutine native_reflect(self,tol)
@@ -615,6 +757,14 @@ CLASS IS(oft_mesh)
 CLASS DEFAULT
   CALL oft_abort('Unknown mesh type','native_reflect',__FILE__)
 END SELECT
+IF(ANY(self%r(ref_index,:)>1.d-10).AND.ANY(self%r(ref_index,:)<-1.d-10))THEN
+    CALL oft_abort("Mesh intersects reflection plane","native_reflect",__FILE__)
+ELSE
+    IF(ALLOCATED(per_nodes).AND.ALL(self%r(ref_index,:)>=0.d0))THEN
+        self%r(ref_index,:)=-self%r(ref_index,:)
+        IF(np_ho>0)r_ho(ref_index,:)=-r_ho(ref_index,:)
+    END IF
+END IF
 CALL oft_increase_indent
 !---Reflect points that are not on reflection plane
 npold=self%np
@@ -647,8 +797,9 @@ do i=1,ncold
     DO j=1,self%cell_np
         ltemp(j,self%nc)=newindex(ltemp(j,i))
     END DO
-    regtmp(self%nc)=regtmp(i)+nreg
+    regtmp(self%nc)=regtmp(i)
 enddo
+IF(.NOT.reflect_copy_reg)regtmp(ncold+1:self%nc)=regtmp(ncold+1:self%nc)+nreg
 allocate(self%lc(self%cell_np,self%nc),self%reg(self%nc))
 self%lc=ltemp(:,1:self%nc)
 self%reg=regtmp
@@ -735,6 +886,29 @@ IF(np_ho>0)THEN
     r_ho = rtemp(:,1:np_ho)
     deallocate(rtemp)
 END IF
+!---Reflect nodesets
+IF(ASSOCIATED(nsets))THEN
+    DO i=1,SIZE(nsets)
+        np_per=nsets(i)%n
+        DO j=1,nsets(i)%n
+            IF(newindex(nsets(i)%v(j))/=nsets(i)%v(j))np_per=np_per+1
+        END DO
+        ALLOCATE(ltemp(nsets(i)%n,1))
+        ltemp(:,1)=nsets(i)%v
+        DEALLOCATE(nsets(i)%v)
+        ALLOCATE(nsets(i)%v(np_per))
+        nsets(i)%v(1:nsets(i)%n)=ltemp(:,1)
+        DEALLOCATE(ltemp)
+        np_per=nsets(i)%n
+        DO j=1,nsets(i)%n
+            IF(newindex(nsets(i)%v(j))/=nsets(i)%v(j))THEN
+                np_per=np_per+1
+                nsets(i)%v(np_per)=newindex(nsets(i)%v(j))
+            END IF
+        END DO
+        nsets(i)%n=np_per
+    END DO
+END IF
 !---Flag periodic points
 IF(ALLOCATED(per_nodes))THEN
     np_per=SIZE(per_nodes)
@@ -771,12 +945,12 @@ IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
             kk=mesh%lbp(k)
             IF(kk==j)CYCLE
             IF(ALL(ABS(mesh%r(1:2,j)-mesh%r(1:2,kk))<1.d-8).AND.ABS(mesh%r(3,kk))<1.d-8)THEN
-            IF(kk>j)THEN
-                mesh%periodic%lp(kk)=j
-            ELSE
-                mesh%periodic%lp(j)=kk
-            END IF
-            EXIT
+                IF(kk>j)THEN
+                    mesh%periodic%lp(kk)=j
+                ELSE
+                    mesh%periodic%lp(j)=kk
+                END IF
+                EXIT
             END IF
         END DO
     END DO
@@ -795,9 +969,9 @@ DO i=1,mesh%nbe
     j = mesh%lbe(i)
     pt_e=mesh%periodic%lp(mesh%le(:,j))
     IF(ALL(pt_e>0))THEN
-    ind=ABS(mesh_local_findedge(mesh,pt_e))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
-    mesh%periodic%le(j)=ind
+        IF(ALL(pt_e==mesh%le(:,j)))CYCLE ! Skip "uncopied" periodic edges
+        ind=ABS(mesh_local_findedge(mesh,pt_e))
+        mesh%periodic%le(j)=ind ! Unmatched edges (0) are reported after the parallel region
     END IF
 END DO
 !---Flag periodic faces
@@ -806,15 +980,95 @@ DO i=1,mesh%nbf
     j = mesh%lbf(i)
     pt_f=mesh%periodic%lp(mesh%lf(:,j))
     IF(ALL(pt_f>0))THEN
-    ind=ABS(mesh_local_findface(mesh,pt_f))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad face',i,ind
-    mesh%periodic%lf(j)=ind
+        ind=ABS(mesh_local_findface(mesh,pt_f))
+        mesh%periodic%lf(j)=ind ! Unmatched faces (0) are reported after the parallel region
+        IF(ind>0)mesh%bfs(i)=-2
     END IF
 END DO
 deallocate(pt_f)
 !$omp end parallel
+!---Errors are checked outside the parallel region, so that at most one thread aborts
+IF(ANY(mesh%periodic%le==0))CALL oft_abort('Unmatched periodic edge','native_set_periodic',__FILE__)
+IF(ANY(mesh%periodic%lf==0))CALL oft_abort('Unmatched periodic face','native_set_periodic',__FILE__)
+!---Revolved periodicity is only supported about the x-axis
+DO i=1,mesh%nbf
+    j = mesh%lbf(i)
+    IF(mesh%periodic%lf(j)>0)THEN
+        CALL check_revolved_face(j)
+        CALL check_revolved_face(mesh%periodic%lf(j))
+    END IF
+END DO
+!---Remove "uncopied" periodic points
+DO i=1,mesh%nbp
+    j=mesh%lbp(i)
+    IF(mesh%periodic%lp(j)==j)mesh%periodic%lp(j)=-1
+END DO
+!---Build periodic mapping basis from the first periodic face
+DO i=1,mesh%nbf
+    j = mesh%lbf(i)
+    IF(mesh%periodic%lf(j)>0)EXIT
+END DO
+IF(i<=mesh%nbf)THEN
+    ind=mesh%periodic%lf(j)
+    CALL periodic_face_normal(j,mesh%periodic%vmap_mats(:,1,1))
+    mesh%periodic%vmap_mats(:,2,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),[0.d0,0.d0,1.d0])
+    mesh%periodic%vmap_mats(:,2,1)=mesh%periodic%vmap_mats(:,2,1)/magnitude(mesh%periodic%vmap_mats(:,2,1))
+    mesh%periodic%vmap_mats(:,3,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),mesh%periodic%vmap_mats(:,2,1))
+    mesh%periodic%vmap_mats(:,3,1)=mesh%periodic%vmap_mats(:,3,1)/magnitude(mesh%periodic%vmap_mats(:,3,1))
+    CALL periodic_face_normal(ind,mesh%periodic%vmap_mats(:,1,2))
+    mesh%periodic%vmap_mats(:,1,2)=-mesh%periodic%vmap_mats(:,1,2)
+    mesh%periodic%vmap_mats(:,2,2)=-cross_product(mesh%periodic%vmap_mats(:,1,2),[0.d0,0.d0,1.d0])
+    mesh%periodic%vmap_mats(:,2,2)=mesh%periodic%vmap_mats(:,2,2)/magnitude(mesh%periodic%vmap_mats(:,2,2))
+    mesh%periodic%vmap_mats(:,3,2)=cross_product(mesh%periodic%vmap_mats(:,1,2),mesh%periodic%vmap_mats(:,2,2))
+    mesh%periodic%vmap_mats(:,3,2)=mesh%periodic%vmap_mats(:,3,2)/magnitude(mesh%periodic%vmap_mats(:,3,2))
+    IF(ABS(mesh%periodic%vmap_mats(3,1,1))>1.d0-1.d-8)THEN
+        mesh%periodic%vmap_mats=0.d0
+    ELSE
+        mesh%periodic%revolved=.TRUE.
+        mesh%periodic%vmap_matsT(:,:,1)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,1))
+        mesh%periodic%vmap_matsT(:,:,2)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,2))
+    END IF
+END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
+CONTAINS
+!> Compute the outward unit normal of a boundary face
+SUBROUTINE periodic_face_normal(face,norm)
+INTEGER(i4), INTENT(in) :: face !< Boundary face index
+REAL(r8), INTENT(out) :: norm(3) !< Outward unit normal
+INTEGER(i4) :: cface,k
+REAL(r8) :: fcoords(mesh%cell_nf),ftmp(mesh%cell_nf)
+DO cface=1,mesh%cell_nf
+    IF(mesh%lcf(cface,mesh%lfc(1,face))==face)EXIT
+END DO
+!---Evaluate at the face center (average of its corners in logical coordinates), where the
+!---logical-coordinate gradient is normal to the face for any cell type
+fcoords=0.d0
+DO k=1,mesh%face_np
+    ftmp=0.d0
+    CALL mesh%vlog(mesh%cell_fc(k,cface),ftmp)
+    fcoords=fcoords+ftmp
+END DO
+fcoords=fcoords/REAL(mesh%face_np,r8)
+CALL mesh%snormal(mesh%lfc(1,face),cface,fcoords,norm)
+END SUBROUTINE periodic_face_normal
+!> Abort if a periodic face is not normal to z and its plane does not contain the x-axis
+!!
+!! Non-planar ("revolved") periodicity assumes rotation about the x-axis
+SUBROUTINE check_revolved_face(face)
+INTEGER(i4), INTENT(in) :: face !< Periodic face index
+INTEGER(i4) :: k
+REAL(r8) :: norm(3),pt(3)
+CALL periodic_face_normal(face,norm)
+IF(ABS(norm(3))>1.d0-1.d-8)RETURN ! Planar periodicity in z
+IF(ABS(norm(1))>1.d-6)CALL oft_abort('Revolved periodic planes must contain the x-axis', &
+  'native_set_periodic',__FILE__)
+DO k=1,mesh%face_np
+    pt=mesh%r(:,mesh%lf(k,face))
+    IF(ABS(DOT_PRODUCT(norm,pt))>1.d-6*magnitude(pt))CALL oft_abort( &
+      'Revolved periodic planes must contain the x-axis','native_set_periodic',__FILE__)
+END DO
+END SUBROUTINE check_revolved_face
 end subroutine native_set_periodic
 !---------------------------------------------------------------------------------
 !> Needs docs

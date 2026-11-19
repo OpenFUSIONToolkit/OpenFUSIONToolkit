@@ -13,11 +13,11 @@
 !------------------------------------------------------------------------------
 MODULE gs_eq
 USE oft_base
-USE oft_io, ONLY: hdf5_read
+USE oft_io, ONLY: hdf5_read, hdf5_field_get_sizes
 USE oft_mesh_type, ONLY: oft_mesh, bmesh_findcell
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_mesh_global, ONLY: smesh_global_init
-USE oft_mesh_global_util, ONLY: mesh_global_resolution
+USE oft_mesh_global_util, ONLY: mesh_global_resolution, bmesh_global_orient
 USE oft_trimesh_type, ONLY: oft_trimesh
 !---
 USE fem_base, ONLY: oft_afem_type, oft_bfem_type
@@ -31,10 +31,12 @@ PRIVATE
 !> Grad-Shafranov equilibrium field
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(fem_interp) :: oft_gs_eq
+  INTEGER(i4) :: cyl_axis = 3 !< Axis of cylindrical coorinate system
   INTEGER(i4) :: order = 1 !< Order of FE representation on input mesh
   INTEGER(i4) :: interp_mode = 1 !< Interpolation mode (1 -> 'B', 2 -> 'P')
   INTEGER(i4), POINTER, DIMENSION(:) :: pcell => NULL() !< Previous 2D cell
   INTEGER(i4), POINTER, DIMENSION(:) :: cell_tri => NULL() !< Current 2D cell
+  REAL(r8) :: pmin = 0.d0 !< Minimum pressure
   REAL(r8) :: pmax = 0.d0 !< Maximum pressure
   REAL(r8), POINTER, DIMENSION(:) :: Pvals => NULL() !< Nodal pressure values
   REAL(r8), POINTER, DIMENSION(:,:) :: Bvals => NULL() !< Nodal B-Field values
@@ -63,7 +65,6 @@ SUBROUTINE gs_setup(self,mesh)
 CLASS(oft_gs_eq), INTENT(inout) :: self
 class(oft_mesh), target, intent(inout) :: mesh
 INTEGER(i4) :: i,io_unit
-REAL(r8) :: pmin
 REAL(r8), POINTER :: vals_tmp(:)
 DEBUG_STACK_PUSH
 self%mesh=>mesh
@@ -74,6 +75,7 @@ IF(TRIM(self%eq_file)/='none')THEN
   call mesh_global_resolution(self%tmesh)
   self%tmesh%dim=2
   CALL smesh_global_init(self%tmesh)
+  call bmesh_global_orient(self%tmesh)
   ! CALL bmesh_local_init(self%tmesh)
   !---Load GS fields
   CALL hdf5_read(self%order,TRIM(self%eq_file),'tokamaker/FE_ORDER')
@@ -104,7 +106,7 @@ ELSE
   CLOSE(io_unit)
 END IF
 !---
-pmin=MINVAL(self%Pvals)
+self%pmin=MINVAL(self%Pvals)
 self%pmax=MAXVAL(self%Pvals)
 !
 self%P_interp%vals=>self%Pvals
@@ -124,7 +126,7 @@ END IF
 IF(oft_debug_print(1))THEN
   WRITE(*,*)'G-S Equilibrium loaded: ',self%field_file
   WRITE(*,*)'  Order:    ',self%order
-  WRITE(*,*)'  Pressure: ',pmin,self%pmax
+  WRITE(*,*)'  Pressure: ',self%pmin,self%pmax
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE gs_setup
@@ -144,13 +146,20 @@ IF(.NOT.ASSOCIATED(self%Bvals))CALL oft_abort('Setup has not been called!', &
 'gs_interp',__FILE__)
 !---Get (R,Z) position
 pt=self%mesh%log2phys(cell,f)
-! rz(1)=SQRT(SUM(pt(1:2)**2))
-! rz(2)=pt(3)
-! rhat=pt(1:2)/rz(1)
-rz(1)=SQRT(SUM(pt([1,3])**2))
-rz(2)=pt(2)
-rhat=pt([1,3])/rz(1)
-that=(/-rhat(2),rhat(1)/)
+IF(self%cyl_axis==1)THEN
+  rz(1)=SQRT(SUM(pt([2,3])**2))
+  rz(2)=pt(1)
+  rhat=pt([2,3])/rz(1)
+ELSE IF(self%cyl_axis==2)THEN
+  rz(1)=SQRT(SUM(pt([1,3])**2))
+  rz(2)=pt(2)
+  rhat=pt([1,3])/rz(1)
+ELSE IF(self%cyl_axis==3)THEN
+  rz(1)=SQRT(SUM(pt([1,2])**2))
+  rz(2)=pt(3)
+  rhat=pt([1,2])/rz(1)
+END IF
+that=[-rhat(2),rhat(1)]
 !---Get logical position on TRI-MESH
 IF(cell/=self%pcell(oft_tid))self%cell_tri(oft_tid)=0
 self%pcell(oft_tid)=cell
@@ -159,10 +168,16 @@ CALL bmesh_findcell(self%tmesh,self%cell_tri(oft_tid),rz,f_tri)
 SELECT CASE(self%interp_mode)
   CASE(1)
     CALL self%B_interp%interp(self%cell_tri(oft_tid),f_tri,goptmp,b_axi)
-    ! val(1:2)=b_axi(1)*rhat + b_axi(2)*that
-    ! val(3)=b_axi(3)
-    val([1,3])=b_axi(1)*rhat + b_axi(2)*that
-    val(2)=b_axi(3)
+    IF(self%cyl_axis==1)THEN
+      val([2,3])=b_axi(1)*rhat + b_axi(2)*that
+      val(1)=b_axi(3)
+    ELSE IF(self%cyl_axis==2)THEN
+      val([1,3])=b_axi(1)*rhat - b_axi(2)*that
+      val(2)=b_axi(3)
+    ELSE IF(self%cyl_axis==3)THEN
+      val([1,2])=b_axi(1)*rhat + b_axi(2)*that
+      val(3)=b_axi(3)
+    END IF
   CASE(2)
     CALL self%P_interp%interp(self%cell_tri(oft_tid),f_tri,goptmp,val)
   CASE DEFAULT

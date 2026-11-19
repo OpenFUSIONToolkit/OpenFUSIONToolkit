@@ -45,7 +45,10 @@ PUBLIC mesh_destroy, bmesh_destroy
 !! - Global boundary flags
 !---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_per
+  LOGICAL :: revolved = .FALSE. !< Periodicity comes from revolution (always about the x-axis)?
   INTEGER(i4) :: nper = 0 !< Number of periodic directions
+  REAL(r8) :: vmap_mats(3,3,2) = 0.d0 !< Periodic mapping matrices for vectors
+  REAL(r8) :: vmap_matsT(3,3,2) = 0.d0 !< Periodic mapping matrices (transposed) for vectors
   INTEGER(i4), POINTER, DIMENSION(:) :: lp => NULL() !< Global index of points (np)
   INTEGER(i4), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne)
   INTEGER(i4), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
