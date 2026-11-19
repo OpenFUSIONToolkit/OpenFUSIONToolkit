@@ -3556,10 +3556,10 @@ IF((dt>0.d0).OR.xmhd_diss_centered)THEN
     !--- b W b
     u = DOT_PRODUCT(bhat,MATMUL(ten1,bhat))
     !--- 3*bb - I
-    do j=1,3
+    DO j=1,3
       ten1(:,j) = 3.d0*bhat(j)*bhat
       ten1(j,j) = ten1(j,j) - 1.d0
-    end do
+    END DO
     umat = umat + 0.5d0*nu_tmp(1)*u*ten1*den_scale/u0%N
   END IF
   IF(nu_gyro>0.d0)THEN
@@ -3571,17 +3571,17 @@ IF((dt>0.d0).OR.xmhd_diss_centered)THEN
     ten3(2,2) = ten3(2,2) - u
     ten3(3,3) = ten3(3,3) - u
     !--- I + 3*bb
-    do j=1,3
+    DO j=1,3
       ten1(:,j) = 3.d0*bhat(j)*bhat
       ten1(j,j) = ten1(j,j) + 1.d0
-    end do
+    END DO
     !--- b x W (I + 3*bb) and transpose
     ten2 = MATMUL(ten1,ten3)
     ten1 = MATMUL(ten3,ten1)
-    do j=1,3
+    DO j=1,3
       ten1(:,j) = cross_product(bhat,ten1(:,j))
       ten2(j,:) = cross_product(ten2(j,:),bhat)
-    end do
+    END DO
     umat = umat - nu_gyro*u0%Ti*(ten1 - ten2)/(4.d0*bmag)
   END IF
   IF(.NOT.xmhd_diss_centered)umat = 2.d0*umat
