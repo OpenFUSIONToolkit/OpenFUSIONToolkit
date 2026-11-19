@@ -2032,7 +2032,7 @@ LOGICAL, POINTER, DIMENSION(:) :: eflag
 INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc,gloc
-REAL(r8), POINTER, DIMENSION(:) :: vals,uvals,gvals
+REAL(r8), POINTER, DIMENSION(:) :: vals,uvals,gvals,uinit
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
@@ -2273,35 +2273,32 @@ IF(self%nlocal>1)THEN
   NULLIFY(uvals,gvals)
   CALL u%get_local(uvals)
   CALL g%get_local(gvals)
-  !$omp parallel private(j,uloc,gloc) if(thread_safe)
-  NULLIFY(gloc%local_tmp,uloc%local_tmp)
-  !$omp do schedule(dynamic,1)
-  DO i=1,self%nlocal
-    !---Setup local vectors
-    gloc%n=self%parts(i)%n; uloc%n=self%parts(i)%n
-    gloc%ng=self%parts(i)%n; uloc%ng=self%parts(i)%n
-    gloc%nslice=self%parts(i)%n; uloc%nslice=self%parts(i)%n
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    gloc%stitch_info=>self%local_stitch(i)
-    uloc%stitch_info=>self%local_stitch(i)
-    !---Get local slice for solve
-    !$omp simd
-    DO j=1,self%parts(i)%n
-      gloc%v(j)=gvals(ABS(self%parts(i)%v(j)))
-      uloc%v(j)=uvals(ABS(self%parts(i)%v(j)))
+  !---With overlap, parts read rows owned by other parts. Take initial guesses
+  !   from a copy so they do not depend on the order parts are solved in.
+  IF(self%loverlap)THEN
+    ALLOCATE(uinit(SIZE(uvals)))
+    uinit=uvals
+  ELSE
+    uinit=>uvals
+  END IF
+  !---Only open a parallel region if the sub-solver is thread safe and we are
+  !   not already in an active parallel region. Sub-solvers that are not thread
+  !   safe (eg. SuperLU-DIST, MUMPS) may use OpenMP internally, and even an
+  !   inactive outer region makes their teams nested. On targets where libgomp
+  !   uses its POSIX barrier (eg. macOS) nested teams that create tasks can
+  !   deadlock or release threads early.
+  IF(thread_safe.AND.(.NOT.omp_in_parallel()))THEN
+    !$omp parallel do schedule(dynamic,1)
+    DO i=1,self%nlocal
+      CALL apply_part(i)
     END DO
-    !---Solve sub-system
-    self%solvers(i)%s%A=>self%alocals(i)
-    CALL self%solvers(i)%s%apply(uloc,gloc)
-    !---Replace local slice into solution
-    !$omp simd
-    DO j=1,self%parts(i)%n
-      IF(self%parts(i)%v(j)>0)uvals(self%parts(i)%v(j))=uloc%v(j)
+  ELSE
+    DO i=1,self%nlocal
+      CALL apply_part(i)
     END DO
-    DEALLOCATE(gloc%v,uloc%v)
-  END DO
-  !$omp end parallel
+  END IF
   CALL u%restore_local(uvals)
+  IF(self%loverlap)DEALLOCATE(uinit)
   DEALLOCATE(uvals,gvals)
 ELSE
   IF(self%boundary_overlap)THEN
@@ -2349,6 +2346,38 @@ ELSE
 END IF
 self%update_slice=.FALSE.
 DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Solve the local sub-system for a single part
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE apply_part(ii)
+INTEGER(i4), INTENT(in) :: ii !< Index of part to solve
+INTEGER(i4) :: jj
+TYPE(oft_native_vector) :: uloc,gloc
+NULLIFY(gloc%local_tmp,uloc%local_tmp)
+!---Setup local vectors
+gloc%n=self%parts(ii)%n; uloc%n=self%parts(ii)%n
+gloc%ng=self%parts(ii)%n; uloc%ng=self%parts(ii)%n
+gloc%nslice=self%parts(ii)%n; uloc%nslice=self%parts(ii)%n
+ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
+gloc%stitch_info=>self%local_stitch(ii)
+uloc%stitch_info=>self%local_stitch(ii)
+!---Get local slice for solve
+!$omp simd
+DO jj=1,self%parts(ii)%n
+  gloc%v(jj)=gvals(ABS(self%parts(ii)%v(jj)))
+  uloc%v(jj)=uinit(ABS(self%parts(ii)%v(jj)))
+END DO
+!---Solve sub-system
+self%solvers(ii)%s%A=>self%alocals(ii)
+CALL self%solvers(ii)%s%apply(uloc,gloc)
+!---Replace local slice into solution
+!$omp simd
+DO jj=1,self%parts(ii)%n
+  IF(self%parts(ii)%v(jj)>0)uvals(self%parts(ii)%v(jj))=uloc%v(jj)
+END DO
+DEALLOCATE(gloc%v,uloc%v)
+END SUBROUTINE apply_part
 END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
