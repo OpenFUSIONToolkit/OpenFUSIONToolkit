@@ -122,7 +122,9 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,gyro_grav_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr/=0)CALL oft_abort('Error reading "gyro_grav_options"','MUG_gyro_grav_lag',__FILE__)
-CALL multigrid_construct(mg_mesh)
+!---Place the mesh ground point at the top wall, away from the periodic boundaries in x
+!   (corner vertices on both periodic boundaries have too many periodic copies)
+CALL multigrid_construct(mg_mesh,[0.d0,0.d0,1.d0])
 !---Lagrange
 ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
