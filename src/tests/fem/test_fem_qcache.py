@@ -79,7 +79,7 @@ def check_results(order):
         suffixes.append('_pm1')
     for suffix in suffixes:
         for space, quants in spaces:
-            for mode in ('full', 'ref', 'refc'):
+            for mode in ('ref', 'refc'):
                 expected.append('{0}{1}_{2}_mat'.format(space, suffix, mode))
                 checks = ['eval', 'interp', 'accum']
                 if mode != 'refc':

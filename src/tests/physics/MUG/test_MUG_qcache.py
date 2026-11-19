@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
 # MUG tests: equivalence of the xMHD nonlinear residual and Jacobian implementations (xmhd_qcache=0: direct
-# basis evaluation, 1: quadrature-point cache in FULL mode (residual only), 2: cache in REFERENCE mode). The
-# xmhd_bench driver (mode='qcheck') evaluates the residual of the same nonlinear state with each implementation
-# for dt>0, dt>0 with fields at the start of the step (back_step), and the dt<0 diagnostics call, and reports
-# the differences of every field block, the diagnostic values and the floor flags. It then builds the Jacobian
-# of every level with xmhd_qcache=0 (searching the CSR column lists, the reference), xmhd_qcache=2 with the
-# precomputed CSR position map (the default) and xmhd_qcache=0 with the position map, and reports entrywise
-# differences relative to the row maximum and the differences of products with random vectors.
+# basis evaluation, 1: quadrature-point cache). The xmhd_bench driver (mode='qcheck') evaluates the residual of
+# the same nonlinear state with both implementations for dt>0, dt>0 with fields at the start of the step
+# (back_step), and the dt<0 diagnostics call, and reports the differences of every field block, the diagnostic
+# values and the floor flags. It then builds the Jacobian of every level with xmhd_qcache=0 (searching the CSR
+# column lists, the reference), xmhd_qcache=1 with the precomputed CSR position map (the default) and
+# xmhd_qcache=0 with the position map, and reports entrywise differences relative to the row maximum and the
+# differences of products with random vectors.
 import os
 import re
 import sys
@@ -172,11 +172,11 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
     status, output = run_OFT("./xmhd_bench oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
     assert status
     blocks, diags, flags, max_rel = parse_qcheck(output)
-    # 3 cases x 3 mode pairs for every field block, 7 diagnostics x 3 mode pairs, 3 x 3 flag comparisons
+    # 3 cases for every field block, 7 diagnostics (dt<0 case), 3 flag comparisons
     assert max_rel is not None
-    assert len(blocks) > 0 and len(blocks) % 9 == 0
-    assert len(diags) == 21
-    assert len(flags) == 9
+    assert len(blocks) > 0 and len(blocks) % 3 == 0
+    assert len(diags) == 7
+    assert len(flags) == 3
     passed = True
     for case_modes in set((b[0], b[1]) for b in blocks):
         group = [b for b in blocks if (b[0], b[1]) == case_modes]

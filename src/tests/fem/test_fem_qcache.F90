@@ -9,12 +9,12 @@
 !!
 !! For Lagrange (order p, values + gradients), H^1 (order p+1, values + gradients) and
 !! H(Curl) (order p, values + curls) spaces on the finest mesh level, and for their p-1 levels
-!! evaluated at the finest quadrature, both cache modes (FULL and REFERENCE) are compared with
-!! the direct basis evaluators at every (cell, quadrature point), using the Jacobian evaluated
-!! at every point as the reference geometry. REFERENCE mode is checked both with gathered table
-!! rows ('ref') and in the canonical frame with per-cell orientation transforms ('refc'). Also
-!! checked: field reconstruction from local coefficients, test-function accumulation, a local
-!! matrix, det*w and physical quadrature points.
+!! evaluated at the finest quadrature, the cache is compared with the direct basis evaluators at
+!! every (cell, quadrature point), using the Jacobian evaluated at every point as the reference
+!! geometry. The per-qp kernels are checked both with gathered table rows ('ref') and in the
+!! canonical frame with per-cell orientation transforms ('refc'), and the cell-batched kernels
+!! once ('ref'). Also checked: field reconstruction from local coefficients, test-function
+!! accumulation, a local matrix, det*w and physical quadrature points.
 !!
 !! Results are written to 'qcache.results' as "<name> <max normalized error>" lines.
 !!
@@ -150,23 +150,23 @@ DO c=1,3
 END DO
 END SUBROUTINE direct_eval
 !------------------------------------------------------------------------------
-! Compare both cache modes with direct evaluation for one FE space
+! Compare the cache with direct evaluation for one FE space
 !------------------------------------------------------------------------------
 SUBROUTINE check_space(fe_in,name)
 CLASS(oft_afem_type), TARGET, INTENT(in) :: fe_in
 CHARACTER(LEN=*), INTENT(in) :: name
 TYPE(oft_fem_qcache) :: cache
 INTEGER(i4), PARAMETER :: nmat_cells=64
-INTEGER(i4) :: ipath,mode,iq,cell,m,j,c,npc,nce,nfld,io_unit,imat
+INTEGER(i4) :: ipath,iq,cell,m,j,c,npc,nce,nfld,io_unit,imat
 INTEGER(i4), ALLOCATABLE :: rows(:),dofs(:)
 REAL(r8) :: gop(3,4),cgop(3,6),det,emax(3),vmax(3),rmax(3),rscale(3),amax(3),ascale(3)
 REAL(r8) :: flux(3),tmp,kmax,kscale,icmax(3),acmax(3)
 REAL(r8), ALLOCATABLE :: coefc(:,:),dI(:,:,:,:),cI(:,:,:),flux3(:,:,:),res3(:,:),work(:)
 REAL(r8), ALLOCATABLE :: dval(:,:),cval(:,:),coefs(:,:),dinterp(:,:),cinterp(:,:),dres(:,:),cres(:,:)
 REAL(r8), ALLOCATABLE :: coef_glob(:,:),dmat(:,:),cmat(:,:)
-CHARACTER(LEN=5) :: mode_name
+CHARACTER(LEN=5) :: path_name
 CHARACTER(LEN=5), PARAMETER :: qnames(3)=(/'val  ','grad ','curl '/)
-CHARACTER(LEN=5), PARAMETER :: pnames(3)=(/'full ','ref  ','refc '/)
+CHARACTER(LEN=5), PARAMETER :: pnames(2)=(/'ref  ','refc '/)
 LOGICAL :: has(3),canon
 nce=fe_in%nce
 nfld=2
@@ -176,25 +176,23 @@ DO j=1,fe_in%ne
   coef_glob(j,1)=SIN(1.37d0*REAL(j,8)+0.3d0)
   coef_glob(j,2)=COS(0.71d0*REAL(j,8))
 END DO
-! Paths: 1 = FULL, 2 = REFERENCE (gather rows), 3 = REFERENCE (canonical frame)
-DO ipath=1,3
-  mode_name=pnames(ipath)
-  mode=qcache_mode_ref
-  IF(ipath==1)mode=qcache_mode_full
-  !---Lagrange/H1: values+gradients, H(Curl): values+curls
-  IF(ipath/=3)CALL cache%setup(fe_in,geom,mode,need_val=.TRUE.,need_grad=.TRUE.,need_curl=.TRUE.)
+! Paths: 1 = gather rows, 2 = canonical frame (same cache)
+!---Lagrange/H1: values+gradients, H(Curl): values+curls
+CALL cache%setup(fe_in,geom,need_val=.TRUE.,need_grad=.TRUE.,need_curl=.TRUE.)
+DO ipath=1,2
+  path_name=pnames(ipath)
   ! Canonical frame where available (gather path otherwise, see fem_qcache_canonical_ok)
-  canon=(ipath==3).AND.fem_qcache_canonical_ok(cache)
+  canon=(ipath==2).AND.fem_qcache_canonical_ok(cache)
   DO iq=1,3
     has(iq)=(cache%q(iq)%xform>=0)
   END DO
   imat=1
   IF(.NOT.has(1))imat=2
   IF(oft_env%head_proc)THEN
-    WRITE(*,'(2X,A,1X,A,A,I4,A,I6,A,F10.2,A,F9.4,A)')TRIM(name),TRIM(mode_name), &
+    WRITE(*,'(2X,A,1X,A,A,I4,A,I6,A,F10.2,A,F9.4,A)')TRIM(name),TRIM(path_name), &
       ': nce = ',nce,', rows = ',cache%nrows,', mem = ',REAL(cache%mem(),8)/1.d6,' MB, setup = ', &
       cache%setup_time,' s'
-    IF(ipath==2)WRITE(*,'(4X,A,4I6,A,ES10.2,A,2I4)')'orientation transforms (identity/signed perm/dense/none): ', &
+    IF(ipath==1)WRITE(*,'(4X,A,4I6,A,ES10.2,A,2I4)')'orientation transforms (identity/signed perm/dense/none): ', &
       cache%nxf,', fit residual = ',cache%xf_resid,', max regressors/face DOFs = ',MAXVAL(cache%xf_nreg), &
       cache%ent_ndof(cache%nent-1)
   END IF
@@ -275,8 +273,8 @@ DO ipath=1,3
       END DO
     END DO
     IF(canon)CALL fem_qcache_res_from_ref(cache,cell,cres,3)
-    !---Cell-batched kernels (FULL and REFERENCE)
-    IF(ipath<3)THEN
+    !---Cell-batched kernels
+    IF(ipath==1)THEN
       DO iq=1,3
         IF(.NOT.has(iq))CYCLE
         npc=cache%q(iq)%npc
@@ -306,10 +304,10 @@ DO ipath=1,3
   IF(oft_env%head_proc)THEN
     WRITE(*,'(4X,A,ES12.4)')'local matrix err = ',kmax
     OPEN(NEWUNIT=io_unit,FILE='qcache.results',POSITION='APPEND')
-    WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(mode_name)//'_mat ',kmax
-    IF(ipath==2)WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_xform_resid ',cache%xf_resid
-    IF(ipath==2)WRITE(io_unit,'(A,I6)')TRIM(name)//'_xform_none ',cache%nxf(3)
-    IF(ipath==3)WRITE(io_unit,'(A,I2)')TRIM(name)//'_canonical ',MERGE(1,0,canon)
+    WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(path_name)//'_mat ',kmax
+    IF(ipath==1)WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_xform_resid ',cache%xf_resid
+    IF(ipath==1)WRITE(io_unit,'(A,I6)')TRIM(name)//'_xform_none ',cache%nxf(3)
+    IF(ipath==2)WRITE(io_unit,'(A,I2)')TRIM(name)//'_canonical ',MERGE(1,0,canon)
     CLOSE(io_unit)
   END IF
   DO iq=1,3
@@ -322,18 +320,18 @@ DO ipath=1,3
     IF(oft_env%head_proc)THEN
       WRITE(*,'(4X,A,A,3ES12.4)')qnames(iq),' eval/interp/accum err = ',emax(iq),rmax(iq),amax(iq)
       OPEN(NEWUNIT=io_unit,FILE='qcache.results',POSITION='APPEND')
-      WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(mode_name)//'_'//TRIM(qnames(iq))//'_eval ',emax(iq)
-      WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(mode_name)//'_'//TRIM(qnames(iq))//'_interp ',rmax(iq)
-      WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(mode_name)//'_'//TRIM(qnames(iq))//'_accum ',amax(iq)
-      IF(ipath<3)THEN
-        WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(mode_name)//'_'//TRIM(qnames(iq))//'_icell ',icmax(iq)
-        WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(mode_name)//'_'//TRIM(qnames(iq))//'_acell ',acmax(iq)
+      WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(path_name)//'_'//TRIM(qnames(iq))//'_eval ',emax(iq)
+      WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(path_name)//'_'//TRIM(qnames(iq))//'_interp ',rmax(iq)
+      WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(path_name)//'_'//TRIM(qnames(iq))//'_accum ',amax(iq)
+      IF(ipath==1)THEN
+        WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(path_name)//'_'//TRIM(qnames(iq))//'_icell ',icmax(iq)
+        WRITE(io_unit,'(A,ES12.4)')TRIM(name)//'_'//TRIM(path_name)//'_'//TRIM(qnames(iq))//'_acell ',acmax(iq)
       END IF
       CLOSE(io_unit)
     END IF
   END DO
-  IF(ipath/=2)CALL cache%delete
 END DO
+CALL cache%delete
 DEALLOCATE(coef_glob)
 END SUBROUTINE check_space
 !------------------------------------------------------------------------------
@@ -350,8 +348,8 @@ INTEGER(i4) :: rank
 INTEGER(i4), ALLOCATABLE :: iwork(:)
 REAL(r8), ALLOCATABLE :: amat(:,:),bmat(:,:),a0(:,:),b0(:,:),work(:),ac(:,:),bc(:,:),sv(:)
 EXTERNAL :: dgelsd
-CALL cc%setup(fe_hcurl,geom,qcache_mode_ref)
-CALL ch%setup(fe_h1,geom,qcache_mode_ref,need_val=.FALSE.,need_grad=.TRUE.)
+CALL cc%setup(fe_hcurl,geom)
+CALL ch%setup(fe_h1,geom,need_val=.FALSE.,need_grad=.TRUE.)
 nc_c=cc%nce; nc_h=ch%nce
 nm=geom%nlog*geom%nqp
 nmc=geom%ncurl*geom%nqp

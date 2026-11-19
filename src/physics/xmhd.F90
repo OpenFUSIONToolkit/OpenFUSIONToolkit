@@ -50,9 +50,9 @@ USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
 !---
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
-USE fem_quad_cache, ONLY: fem_cell_shared_flags, oft_qcache_geom, oft_fem_qcache, qcache_mode_full, &
-  qcache_mode_ref, qcache_val, qcache_grad, qcache_curl, fem_qcache_interp_cell, fem_qcache_accum_cell, &
-  fem_qcache_work_size, fem_qcache_cell_rows, fem_qcache_eval_cell
+USE fem_quad_cache, ONLY: fem_cell_shared_flags, oft_qcache_geom, oft_fem_qcache, qcache_val, qcache_grad, &
+  qcache_curl, fem_qcache_interp_cell, fem_qcache_accum_cell, fem_qcache_work_size, fem_qcache_cell_rows, &
+  fem_qcache_eval_cell
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec, &
   fem_map_flag, comp_fem_partition
@@ -134,15 +134,16 @@ contains
   procedure :: apply_real => xmhd_massmatrix_apply
 end type oft_xmhd_massmatrix
 !------------------------------------------------------------------------------
-!> Quadrature-point basis/geometry cache for the xMHD NL residual on one FE level
+!> Quadrature-point basis/geometry cache for the xMHD NL residual and Jacobian on one FE level
 !!
-!! Built by \ref xmhd::xmhd_qcache_setup "xmhd_qcache_setup" for the FE spaces and mesh that are
-!! current when it is called, and used by \ref xmhd::xmhd_errmatrix_apply "xmhd_errmatrix_apply"
-!! when `xmhd_qcache>0` (see \ref xmhd::xmhd_resid_qcache "xmhd_resid_qcache"). All per-cell
-!! data are plain contiguous arrays so that the residual kernels contain no type-bound calls.
+!! Built by \ref xmhd::xmhd_qcache_setup "xmhd_qcache_setup" (finest level) or
+!! \ref xmhd::xmhd_jcache_setup "xmhd_jcache_setup" (coarse polynomial levels) for the FE spaces and
+!! mesh that are current when it is called, and used by
+!! \ref xmhd::xmhd_resid_qcache "xmhd_resid_qcache" and \ref xmhd::xmhd_jac_qcache "xmhd_jac_qcache"
+!! when `xmhd_qcache=1`. All per-cell data are plain contiguous arrays so that the kernels contain
+!! no type-bound calls.
 !------------------------------------------------------------------------------
 type :: xmhd_qcache_data
-  INTEGER(i4) :: mode = 0 !< Cache mode (`xmhd_qcache` value used to build it: 1 FULL, 2 REFERENCE)
   REAL(r8) :: setup_time = 0.d0 !< Wall time for setup [s]
   INTEGER(i8) :: mem = 0 !< Memory used by the cache [bytes]
   LOGICAL :: own_geom = .TRUE. !< Geometry owned by this cache (false for coarse polynomial levels, which share the finest level's)
@@ -231,7 +232,7 @@ type :: xmhd_ops
   CLASS(oft_matrix), POINTER :: J => NULL() !< Jacobian matrix
   CLASS(oft_matrix), POINTER :: interp => NULL() !< Interpolation matrix
   TYPE(oft_xmhd_errmatrix) :: A !< NL metric matrix
-  TYPE(xmhd_qcache_data), POINTER :: qc => NULL() !< Quadrature-point cache for the NL residual (`xmhd_qcache>0`) and Jacobian (`xmhd_qcache=2`)
+  TYPE(xmhd_qcache_data), POINTER :: qc => NULL() !< Quadrature-point cache for the NL residual and Jacobian (`xmhd_qcache=1`)
   TYPE(xmhd_jac_posmap_data), POINTER :: pm => NULL() !< CSR positions of the local Jacobian entries (`xmhd_jac_posmap`)
 end type xmhd_ops
 !------------------------------------------------------------------------------
@@ -361,20 +362,27 @@ LOGICAL :: xmhd_diss_centered = .FALSE. !< Time-center dissipation terms
 LOGICAL :: xmhd_lin_bdf2 = .TRUE. !< Use BDF2 time integration for linear runs (otherwise backward Euler)
 LOGICAL :: xmhd_lin_euler_start = .FALSE. !< Start linear BDF2 runs with one backward Euler step
 LOGICAL :: xmhd_skip_update = .FALSE. !< Internal flag for skipping Jac update
-!---Profiling counters (timing only; never affect results)
+!---Profiling counters (timing and memory only; reported by \ref xmhd_prof_report, never affect results)
 INTEGER(i4), PARAMETER :: xmhd_prof_maxlev = 20 !< Max levels tracked by profiling counters
-REAL(r8), PUBLIC :: xmhd_prof_tbuild(xmhd_prof_maxlev) = 0.d0 !< Accumulated Jacobian build time per level [s]
-INTEGER(i4), PUBLIC :: xmhd_prof_nbuild(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level
-LOGICAL, PUBLIC :: xmhd_prof_finemesh(xmhd_prof_maxlev) = .FALSE. !< Level built on finest mesh (full field interpolation)?
-INTEGER(i4), PUBLIC :: xmhd_prof_order(xmhd_prof_maxlev) = 0 !< Lagrange order of each level
-REAL(r8), PUBLIC :: xmhd_prof_tsetops = 0.d0 !< Accumulated time in xmhd_set_ops [s]
-INTEGER(i4), PUBLIC :: xmhd_prof_nsetops = 0 !< Number of calls to xmhd_set_ops (excluding skipped updates)
-REAL(r8), PUBLIC :: xmhd_prof_tnlop = 0.d0 !< Accumulated time in xmhd_errmatrix_apply [s]
-INTEGER(i4), PUBLIC :: xmhd_prof_nnlop = 0 !< Number of calls to xmhd_errmatrix_apply
-REAL(r8), PUBLIC :: xmhd_prof_tnlop_loop = 0.d0 !< Accumulated time in the threaded cell loop of xmhd_errmatrix_apply [s]
-REAL(r8), PUBLIC :: xmhd_prof_tpre = 0.d0 !< Accumulated time in preconditioner updates (eg. factorization) [s]
-INTEGER(i4), PUBLIC :: xmhd_prof_npre = 0 !< Number of preconditioner updates
-INTEGER(i4), PUBLIC :: xmhd_prof_reps(3) = [10,10,10] !< Repetition counts used by profile mode (builds, NL applies per build, matvecs per NL apply); 0 skips NL applies/matvecs
+REAL(r8) :: xmhd_prof_tbuild(xmhd_prof_maxlev) = 0.d0 !< Accumulated Jacobian build time per level [s]
+INTEGER(i4) :: xmhd_prof_nbuild(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level
+INTEGER(i4) :: xmhd_prof_nbuild_qc(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level on the quadrature cache
+LOGICAL :: xmhd_prof_finemesh(xmhd_prof_maxlev) = .FALSE. !< Level built on finest mesh (full field interpolation)?
+INTEGER(i4) :: xmhd_prof_order(xmhd_prof_maxlev) = 0 !< Lagrange order of each level
+INTEGER(i8) :: xmhd_prof_posmap_mem(xmhd_prof_maxlev) = 0 !< Memory of the CSR position map per level [bytes]
+REAL(r8) :: xmhd_prof_posmap_time(xmhd_prof_maxlev) = 0.d0 !< Accumulated setup time of the CSR position map per level [s]
+REAL(r8) :: xmhd_prof_tsetops = 0.d0 !< Accumulated time in xmhd_set_ops [s]
+INTEGER(i4) :: xmhd_prof_nsetops = 0 !< Number of calls to xmhd_set_ops (excluding skipped updates)
+REAL(r8) :: xmhd_prof_tnlop = 0.d0 !< Accumulated time in xmhd_errmatrix_apply [s]
+INTEGER(i4) :: xmhd_prof_nnlop = 0 !< Number of calls to xmhd_errmatrix_apply
+REAL(r8) :: xmhd_prof_tpre = 0.d0 !< Accumulated time in preconditioner updates (eg. factorization) [s]
+INTEGER(i4) :: xmhd_prof_npre = 0 !< Number of preconditioner updates
+REAL(r8) :: xmhd_prof_tqcache = 0.d0 !< Accumulated quadrature-cache setup time [s]
+INTEGER(i8) :: xmhd_prof_qcache_mem = 0 !< Memory of the most recently built finest-level quadrature cache [bytes]
+INTEGER(i8) :: xmhd_prof_jcache_mem = 0 !< Accumulated memory of the coarse-level Jacobian quadrature caches built [bytes]
+!> Repetition counts used by profile mode (Jacobian builds, NL applies per build, matvecs per NL apply);
+!! 0 skips NL applies/matvecs
+INTEGER(i4), PUBLIC :: xmhd_prof_reps(3) = [10,10,10]
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
 INTEGER(i4) :: n2_ind = -1 !< Index of hyper-diff aux field
 INTEGER(i4) :: j2_ind = -1 !< Index of hyper-res aux field
@@ -456,35 +464,21 @@ INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner upd
 INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Total number of partitions for preconditioning (divided across MPI processes)
 REAL(r8) :: xmhd_opdt = 1.d0 !< Time step for current preconditioner object
 LOGICAL :: xmhd_mfnk = .FALSE. !< Use Jacobian free non-linear advance
-!> Quadrature implementation of the NL residual and Jacobian: 0 = direct basis evaluation, 1 = quadrature cache
-!! (FULL mode) for the residual, 2 = quadrature cache (REFERENCE mode) for the residual and the Jacobian (default),
-!! see \ref xmhd::xmhd_resid_qcache "xmhd_resid_qcache" and \ref xmhd::xmhd_jac_qcache "xmhd_jac_qcache"
-INTEGER(i4), PUBLIC :: xmhd_qcache = 2
-!> Form local Jacobian matrices with BLAS `dgemm` (otherwise a cache-blocked loop), see \ref xmhd::xmhd_jac_gemm_nt "xmhd_jac_gemm_nt".
-!! `dgemm` is called from every OpenMP thread, so the BLAS must run single-threaded inside OpenMP parallel regions,
-!! as the OpenMP builds of OpenBLAS (`build_libs.py`, `USE_OPENMP=1`) and MKL do. With a pthreads OpenBLAS set
-!! `OPENBLAS_NUM_THREADS=1` (otherwise every small GEMM is threaded and the build does not scale with OpenMP threads).
-LOGICAL, PUBLIC :: xmhd_jac_blas = .TRUE.
+!> Quadrature implementation of the NL residual and Jacobian: 0 = direct basis evaluation at every quadrature
+!! point (reference implementation), 1 = quadrature-point cache (default), see
+!! \ref xmhd::xmhd_resid_qcache "xmhd_resid_qcache" and \ref xmhd::xmhd_jac_qcache "xmhd_jac_qcache"
+INTEGER(i4), PUBLIC :: xmhd_qcache = 1
 !> Precomputed CSR positions of local Jacobian entries for native matrices: 0 = off (search every
 !! entry), 1 = on (see \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup")
 INTEGER(i4), PUBLIC :: xmhd_jac_posmap = 1
+REAL(r8), PUBLIC :: xmhd_jac_posmap_maxmb = -1.d0 !< Skip the position map of a level if it needs more memory per rank [MB] (negative: no limit)
 !> EXPERIMENTAL (off by default): integrate the Jacobian of coarse polynomial levels on the finest mesh with their
 !! own quadrature rule (that of the level's H(Curl) space) instead of the finest level's. This changes the coarse
 !! operators of the p-multigrid preconditioner (not the solution of the nonlinear system)
 LOGICAL, PUBLIC :: xmhd_coarse_quad = .FALSE.
-REAL(r8), PUBLIC :: xmhd_jac_posmap_maxmb = -1.d0 !< Skip the position map of a level if it needs more memory per rank [MB] (negative: no limit)
-INTEGER(i4), PUBLIC :: xmhd_prof_nbuild_qc(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level on the quadrature cache
-INTEGER(i8), PUBLIC :: xmhd_prof_posmap_mem(xmhd_prof_maxlev) = 0 !< Memory of the CSR position map per level [bytes]
-REAL(r8), PUBLIC :: xmhd_prof_posmap_time(xmhd_prof_maxlev) = 0.d0 !< Accumulated setup time of the CSR position map per level [s]
 LOGICAL, PUBLIC :: xmhd_qcheck_solid = .FALSE. !< Equivalence check only: mark a subset of cells as solid
 LOGICAL, PUBLIC :: xmhd_qcheck_negsrc = .FALSE. !< Equivalence check only: set a floor source pattern
-!> Equivalence check only: if set, write the Jacobian of every level (built at the check state) to
-!! `<prefix>_L<level>_R<rank>.bin` (see \ref xmhd_jac_dump)
-CHARACTER(LEN=OFT_PATH_SLEN), PUBLIC :: xmhd_jac_dump_prefix = ''
 LOGICAL, PUBLIC :: xmhd_qcheck_jac = .TRUE. !< Equivalence check only: also compare the Jacobian implementations (\ref xmhd_jac_check)
-REAL(r8), PUBLIC :: xmhd_prof_tqcache = 0.d0 !< Accumulated quadrature-cache setup time [s]
-INTEGER(i8), PUBLIC :: xmhd_prof_qcache_mem = 0 !< Memory of the most recently built quadrature cache [bytes]
-INTEGER(i8), PUBLIC :: xmhd_prof_jcache_mem = 0 !< Accumulated memory of the coarse-level Jacobian quadrature caches built [bytes]
 !---Interpolator cache variables
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: xmhd_lag_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_lag_gop => NULL()
@@ -578,10 +572,16 @@ CONTAINS
 !! | `xmhd_monitor_div=F` | Monitor divergence error | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
-!! | `xmhd_qcache=2`    | Quadrature implementation: 0 = evaluate basis functions directly (reference implementation), 1 = precomputed quadrature-point cache in FULL mode for the NL residual (physical basis stored per cell: high memory; Jacobian evaluated directly), 2 = quadrature-point cache in REFERENCE mode (reference tables + per-cell geometry: low memory) for the NL residual and the Jacobian on all levels on the finest mesh. All give the same result to round-off | int |
-!! | `xmhd_jac_posmap=1` | Precompute the CSR positions of local Jacobian entries for native matrices (0 = off: search the column list for every entry). Uses `4*sum(nce_s*nce_t)` bytes per cell and level | int |
+!! | `xmhd_qcache=1`    | Quadrature implementation of the NL residual and the Jacobian: 0 = evaluate basis functions directly at every quadrature point (reference implementation), 1 = precomputed quadrature-point cache (reference basis tables + per-cell geometry; used for the NL residual and for the Jacobian of all levels on the finest mesh). Both give the same result to round-off. See the BLAS threading note below | int |
+!! | `xmhd_jac_posmap=1` | Precompute the CSR positions of local Jacobian entries for native matrices (0 = off: search the column list for every entry). Uses `4*sum(nce_s*nce_t)` bytes per cell and level (eg. 25 KB per cell for tets at p=3) | int |
 !! | `xmhd_jac_posmap_maxmb=-1` | Skip the position map of a level if it needs more memory per MPI rank [MB] (neg for no limit) | real |
-!! | `xmhd_coarse_quad=F` | **Experimental**: integrate the Jacobian of coarse polynomial MG levels with their own (lower order) quadrature rule instead of the finest level's. Changes the preconditioner, not the solution | bool |
+!! | `xmhd_coarse_quad=F` | **Experimental, off by default**: integrate the Jacobian of coarse polynomial MG levels with their own (lower order) quadrature rule instead of the finest level's. Changes the preconditioner, not the solution; MG convergence has only been checked on simple cases | bool |
+!!
+!! @note **BLAS threading.** The Jacobian forms its local matrices with many small BLAS `dgemm` calls from
+!! inside OpenMP parallel regions, so the BLAS library must run single-threaded there. OpenMP builds of
+!! OpenBLAS (as built by `build_libs.py`, or Ubuntu's `libopenblas0-openmp`) and MKL do this automatically. With
+!! a pthreads-threaded OpenBLAS (eg. Ubuntu's default `libopenblas0-pthread`) set `OPENBLAS_NUM_THREADS=1`,
+!! otherwise every small GEMM is threaded and the Jacobian build stops scaling with the number of OpenMP threads.
 !
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
@@ -672,7 +672,7 @@ IF(.NOT.xmhd_adv_den)d2_dens=-1.d0
 IF(.NOT.xmhd_two_temp)xmhd_therm_equil=.FALSE.
 IF((xmhd_jac_posmap<0).OR.(xmhd_jac_posmap>1))CALL oft_abort('Invalid "xmhd_jac_posmap" (0 or 1)', &
   'xmhd_read_settings',__FILE__)
-IF((xmhd_qcache<0).OR.(xmhd_qcache>2))CALL oft_abort('Invalid "xmhd_qcache" (0, 1 or 2)', &
+IF((xmhd_qcache<0).OR.(xmhd_qcache>1))CALL oft_abort('Invalid "xmhd_qcache" (0 or 1)', &
   'xmhd_read_settings',__FILE__)
 CALL xmhd_setup_regions
 DEBUG_STACK_POP
@@ -855,7 +855,7 @@ xmhd_opdt=dt
 !------------------------------------------------------------------------------
 call xmhd_alloc_ops
 jac_dt=dt/2.d0
-!---Quadrature-point cache for the NL residual on the finest level
+!---Quadrature-point cache of the finest level
 IF(xmhd_qcache>0)CALL xmhd_qcache_setup(oft_xmhd_ops)
 !---Force velocity to zero in solid regions
 IF(xmhd_rw)THEN
@@ -1756,7 +1756,7 @@ IF(maxextrap>1)THEN
   END DO
   DEALLOCATE(extrap_fields,extrapt)
 END IF
-!--- quadrature-point caches (if the NL residual was used)
+!--- quadrature-point caches
 CALL xmhd_qcache_free
 DEBUG_STACK_POP
 end subroutine xmhd_lin_run
@@ -2655,10 +2655,11 @@ DO s=1,3
 END DO
 END SUBROUTINE xmhd_jac_contract
 !------------------------------------------------------------------------------
-!> Small GEMM `C = A B^T + beta C` used to form local Jacobian matrices
+!> Small GEMM `C = A B^T + beta C` used to form local Jacobian matrices (BLAS `dgemm`)
 !!
-!! Uses BLAS `dgemm` if \ref xmhd_jac_blas is set and a cache-blocked loop otherwise. Called concurrently from
-!! OpenMP threads (see \ref xmhd_jac_blas for the BLAS threading requirement).
+!! `B` and `C` are passed as their full storage with offsets, so that column ranges of the work arrays can be
+!! used without array temporaries. Called concurrently from OpenMP threads, so the BLAS must run
+!! single-threaded inside OpenMP parallel regions (see the BLAS threading note in \ref xmhd_read_settings).
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_jac_gemm_nt(m,n,k,a,lda,b,ldb,ib0,beta,c,ldc,ic0)
 INTEGER(i4), INTENT(in) :: m !< Rows of `A` and `C`
@@ -2673,32 +2674,7 @@ REAL(r8), INTENT(in) :: a(lda,*) !< Matrix `A` [m,k]
 REAL(r8), INTENT(in) :: b(*) !< Storage of matrix `B` [n,k]
 REAL(r8), INTENT(in) :: beta !< Scale of `C` on input
 REAL(r8), INTENT(inout) :: c(*) !< Storage of matrix `C` [m,n]
-INTEGER(i4), PARAMETER :: nb=16
-INTEGER(i4) :: i,j,l,j0,j1,jc
-REAL(r8) :: t
-IF(xmhd_jac_blas)THEN
-  CALL dgemm('N','T',m,n,k,1.d0,a,lda,b(ib0+1),ldb,beta,c(ic0+1),ldc)
-  RETURN
-END IF
-IF(beta==0.d0)THEN
-  DO j=1,n
-    c(ic0+(j-1)*ldc+1:ic0+(j-1)*ldc+m)=0.d0
-  END DO
-END IF
-DO j0=1,n,nb
-  j1=MIN(n,j0+nb-1)
-  DO l=1,k
-    DO j=j0,j1
-      t=b(ib0+j+(l-1)*ldb)
-      IF(t==0.d0)CYCLE
-      jc=ic0+(j-1)*ldc
-      !$omp simd
-      DO i=1,m
-        c(jc+i)=c(jc+i)+t*a(i,l)
-      END DO
-    END DO
-  END DO
-END DO
+CALL dgemm('N','T',m,n,k,1.d0,a,lda,b(ib0+1),ldb,beta,c(ic0+1),ldc)
 END SUBROUTINE xmhd_jac_gemm_nt
 !------------------------------------------------------------------------------
 !> Build the CSR position map of the local Jacobian entries for the current level (native matrices)
@@ -2968,8 +2944,8 @@ END FUNCTION xmhd_jac_quad
 !! The local matrices are formed from the pointwise coefficient tensors of \ref xmhd_jac_qp (shared by both
 !! implementations) by batched contractions over the quadrature points of each cell
 !! (\ref xmhd_jac_wform, \ref xmhd_jac_contract). Basis functions and fields are either evaluated directly
-!! (\ref xmhd_jac_direct; `xmhd_qcache` = 0 or 1, and levels on coarse meshes) or taken from the
-!! quadrature-point cache (\ref xmhd_jac_qcache; `xmhd_qcache=2`, levels on the finest mesh, including
+!! (\ref xmhd_jac_direct; `xmhd_qcache=0`, and levels on coarse meshes) or taken from the
+!! quadrature-point cache (\ref xmhd_jac_qcache; `xmhd_qcache=1`, levels on the finest mesh, including
 !! coarse polynomial levels). Scaling, boundary conditions and assembly are shared
 !! (\ref xmhd_jac_finish_cell).
 !------------------------------------------------------------------------------
@@ -2999,7 +2975,7 @@ END SELECT
 !---Implementation: quadrature cache for levels on the finest mesh (see xmhd_set_ops)
 use_qc=.FALSE.
 NULLIFY(jqc,fqc)
-IF(xmhd_qcache==2)THEN
+IF(xmhd_qcache==1)THEN
   SELECT TYPE(fullin)
   CLASS IS(xmhd_interp)
     fqc=>oft_xmhd_ops_ML(xmhd_nlevels)%qc
@@ -3008,7 +2984,7 @@ IF(xmhd_qcache==2)THEN
       IF(ASSOCIATED(jqc%rec))fqc=>jqc%rec ! Own quadrature rule (xmhd_coarse_quad)
     END IF
     IF(xmhd_qcache_valid(jqc).AND.ASSOCIATED(fqc))THEN
-      use_qc=(fqc%mode==2).AND.ASSOCIATED(jqc%geom,fqc%geom).AND.ASSOCIATED(fqc%lag_fe,fullin%lag_rep) &
+      use_qc=ASSOCIATED(jqc%geom,fqc%geom).AND.ASSOCIATED(fqc%lag_fe,fullin%lag_rep) &
         .AND.ASSOCIATED(fqc%hcurl_fe,fullin%curl_rep).AND.ASSOCIATED(fqc%hgrad_fe,fullin%grad_rep)
     END IF
   END SELECT
@@ -3094,8 +3070,9 @@ end subroutine xmhd_build_ops
 !> Jacobian cell loop with direct basis evaluation (see \ref xmhd_build_ops)
 !!
 !! Evaluates the basis functions with the standard evaluators and the fields with the interpolator
-!! `fullin` at every quadrature point (fine-level basis arrays are shared with the interpolator through
-!! the `xmhd_*_rop` cache pointers), as in the original implementation.
+!! `fullin` at every quadrature point. On the finest level the basis arrays are shared with the
+!! interpolator through the `xmhd_*_rop` cache pointers, so each basis function is evaluated once per
+!! quadrature point.
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_jac_direct(plan,fullin,Jac,jac_nolock,tlocks)
 TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure
@@ -3196,7 +3173,7 @@ DEALLOCATE(j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,D
 !$omp end parallel
 END SUBROUTINE xmhd_jac_direct
 !------------------------------------------------------------------------------
-!> Jacobian cell loop on the quadrature-point cache (`xmhd_qcache=2`, see \ref xmhd_build_ops)
+!> Jacobian cell loop on the quadrature-point cache (`xmhd_qcache=1`, see \ref xmhd_build_ops)
 !!
 !! Per cell:
 !! 1. gather the local coefficients of the fine-level fields from the interpolator's local arrays and
@@ -3885,7 +3862,7 @@ END SUBROUTINE xmhd_shaping_eval
 !!
 !! Entries 1-7 are the Lagrange fields (Vx, Vy, Vz, n, T, Te, n2), 8-9 the H(Curl) fields (B, J2)
 !! and 10 the Grad(H^1) part of B. Fluxes that are not active are left zero by
-!! \ref xmhd_resid_qp and must not be accumulated, as in the original implementation.
+!! \ref xmhd_resid_qp and must not be accumulated (eg. J2 only for `dt>0`, and only B in solid cells).
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_resid_masks(dt,act_fluid,act_solid)
 REAL(r8), INTENT(in) :: dt !< Time step (negative for diagnostics)
@@ -4523,7 +4500,7 @@ DEALLOCATE(work,lc,hcc,hgc,lval,lgrd,hgv,hcv,hcj,lfv,lfg,hfv,hfc,gfg,rl,rc,rg,cp
 DEBUG_STACK_POP
 END SUBROUTINE xmhd_resid_qcache
 !------------------------------------------------------------------------------
-!> Build the quadrature-point cache of the NL residual for the current FE level
+!> Build the quadrature-point cache of the NL residual and Jacobian for the current (finest) FE level
 !!
 !! Uses the FE spaces, mesh and quadrature rule that are current (as set by
 !! \ref xmhd_set_level) and stores the cache in `ops%%qc` (replacing any existing one). Physical
@@ -4532,7 +4509,7 @@ END SUBROUTINE xmhd_resid_qcache
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_qcache_setup(ops)
 TYPE(xmhd_ops), INTENT(inout) :: ops !< Operator container of the current level
-INTEGER(i4) :: i,qmode
+INTEGER(i4) :: i
 TYPE(xmhd_qcache_data), POINTER :: qc
 TYPE(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -4548,18 +4525,12 @@ END IF
 CALL xmhd_qcache_delete(ops)
 ALLOCATE(ops%qc)
 qc=>ops%qc
-qc%mode=xmhd_qcache
-IF(qc%mode==1)THEN
-  qmode=qcache_mode_full
-ELSE
-  qmode=qcache_mode_ref
-END IF
 ALLOCATE(qc%geom)
 qc%own_geom=.TRUE.
 CALL qc%geom%setup(mesh,oft_hcurl%quad,store_pts=xmhd_shaping_active(),store_shared=.TRUE.)
-CALL qc%lag%setup(oft_lagrange,qc%geom,qmode,need_val=.TRUE.,need_grad=.TRUE.)
-CALL qc%hgrad%setup(oft_hgrad,qc%geom,qmode,need_grad=.TRUE.)
-CALL qc%hcurl%setup(oft_hcurl,qc%geom,qmode,need_val=.TRUE.,need_curl=.TRUE.)
+CALL qc%lag%setup(oft_lagrange,qc%geom,need_val=.TRUE.,need_grad=.TRUE.)
+CALL qc%hgrad%setup(oft_hgrad,qc%geom,need_grad=.TRUE.)
+CALL qc%hcurl%setup(oft_hcurl,qc%geom,need_val=.TRUE.,need_curl=.TRUE.)
 ALLOCATE(qc%dofs_lag(oft_lagrange%nce,mesh%nc),qc%dofs_hgrad(oft_hgrad%nce,mesh%nc))
 ALLOCATE(qc%dofs_hcurl(oft_hcurl%nce,mesh%nc),qc%he(mesh%nc))
 !$omp parallel do
@@ -4579,7 +4550,7 @@ qc%setup_time=mytimer%tock()
 xmhd_prof_tqcache=xmhd_prof_tqcache+qc%setup_time
 xmhd_prof_qcache_mem=qc%mem
 IF(oft_env%head_proc.AND.(oft_env%pm.OR.oft_debug_print(1)))THEN
-  WRITE(*,'(2X,A,I2,A,F10.4,A,F12.3,A)')'xMHD residual quadrature cache (mode ',qc%mode,'): setup ', &
+  WRITE(*,'(2X,A,F10.4,A,F12.3,A)')'xMHD quadrature cache: setup ', &
     qc%setup_time,' s, ',REAL(qc%mem,8)/1.d6,' MB (rank 0)'
 END IF
 DEBUG_STACK_POP
@@ -4603,22 +4574,20 @@ CALL mytimer%tick
 CALL xmhd_qcache_delete(ops)
 ALLOCATE(ops%qc)
 qc=>ops%qc
-qc%mode=2
 IF(xmhd_coarse_quad)THEN
   !---Experimental: own quadrature rule, with the finest-level spaces on it for field reconstruction
   ALLOCATE(qc%geom)
   qc%own_geom=.TRUE.
   CALL qc%geom%setup(mesh,oft_hcurl%quad,store_pts=xmhd_shaping_active(),store_shared=.TRUE.)
   ALLOCATE(qc%rec)
-  qc%rec%mode=2
   qc%rec%geom=>qc%geom
   qc%rec%own_geom=.FALSE.
   qc%rec%lag_fe=>fqc%lag_fe
   qc%rec%hgrad_fe=>fqc%hgrad_fe
   qc%rec%hcurl_fe=>fqc%hcurl_fe
-  CALL qc%rec%lag%setup(fqc%lag_fe,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_grad=.TRUE.)
-  CALL qc%rec%hgrad%setup(fqc%hgrad_fe,qc%geom,qcache_mode_ref,need_grad=.TRUE.)
-  CALL qc%rec%hcurl%setup(fqc%hcurl_fe,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_curl=.TRUE.)
+  CALL qc%rec%lag%setup(fqc%lag_fe,qc%geom,need_val=.TRUE.,need_grad=.TRUE.)
+  CALL qc%rec%hgrad%setup(fqc%hgrad_fe,qc%geom,need_grad=.TRUE.)
+  CALL qc%rec%hcurl%setup(fqc%hcurl_fe,qc%geom,need_val=.TRUE.,need_curl=.TRUE.)
   qc%rec%dofs_lag=>fqc%dofs_lag ! Shared with the finest-level cache (not owned, see xmhd_qcache_delete)
   qc%rec%dofs_hgrad=>fqc%dofs_hgrad
   qc%rec%dofs_hcurl=>fqc%dofs_hcurl
@@ -4627,9 +4596,9 @@ ELSE
   qc%geom=>fqc%geom
   qc%own_geom=.FALSE.
 END IF
-CALL qc%lag%setup(oft_lagrange,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_grad=.TRUE.)
-CALL qc%hgrad%setup(oft_hgrad,qc%geom,qcache_mode_ref,need_grad=.TRUE.)
-CALL qc%hcurl%setup(oft_hcurl,qc%geom,qcache_mode_ref,need_val=.TRUE.,need_curl=.TRUE.)
+CALL qc%lag%setup(oft_lagrange,qc%geom,need_val=.TRUE.,need_grad=.TRUE.)
+CALL qc%hgrad%setup(oft_hgrad,qc%geom,need_grad=.TRUE.)
+CALL qc%hcurl%setup(oft_hcurl,qc%geom,need_val=.TRUE.,need_curl=.TRUE.)
 ALLOCATE(qc%dofs_lag(oft_lagrange%nce,mesh%nc),qc%dofs_hgrad(oft_hgrad%nce,mesh%nc))
 ALLOCATE(qc%dofs_hcurl(oft_hcurl%nce,mesh%nc),qc%he(mesh%nc))
 !$omp parallel do
@@ -4657,14 +4626,13 @@ END SUBROUTINE xmhd_jcache_setup
 !------------------------------------------------------------------------------
 !> Test whether a quadrature-point cache matches the current settings, FE spaces and mesh
 !!
-!! @result Is the cache set up and usable for the current level?
+!! @result Is the cache set up for the current FE spaces and mesh (with physical points if shaping is active)?
 !------------------------------------------------------------------------------
 FUNCTION xmhd_qcache_valid(qc) RESULT(valid)
 TYPE(xmhd_qcache_data), POINTER, INTENT(in) :: qc !< Cache to check
 LOGICAL :: valid
 valid=.FALSE.
 IF(.NOT.ASSOCIATED(qc))RETURN
-IF(qc%mode/=xmhd_qcache)RETURN
 IF(.NOT.ASSOCIATED(qc%lag_fe,oft_lagrange))RETURN
 IF(.NOT.ASSOCIATED(qc%hgrad_fe,oft_hgrad))RETURN
 IF(.NOT.ASSOCIATED(qc%hcurl_fe,oft_hcurl))RETURN
@@ -4718,13 +4686,13 @@ END SUBROUTINE xmhd_qcache_free
 !------------------------------------------------------------------------------
 !> Check the quadrature-cache NL residual against the direct-evaluation implementation
 !!
-!! Evaluates \ref xmhd_errmatrix_apply on the state `u` with `xmhd_qcache` = 0 (direct), 2
-!! (REFERENCE) and 1 (FULL) for three cases: `dt>0` without and with fields at the start of the
-!! step (`self%%up`, a perturbed copy of `u`), and the diagnostics call (`dt<0`). For every pair of
-!! modes it prints the maximum difference of each field block relative to the block's maximum
-!! magnitude (`XMHD_QCHECK field ...`), the relative differences of the diagnostic values and the
-!! maximum difference of the floor flags, and finally the largest relative difference
-!! (`XMHD_QCHECK max_rel`).
+!! Evaluates \ref xmhd_errmatrix_apply on the state `u` with `xmhd_qcache` = 0 (direct) and 1
+!! (cache) for three cases: `dt>0` without and with fields at the start of the step (`self%%up`, a
+!! perturbed copy of `u`), and the diagnostics call (`dt<0`). It prints the maximum difference of
+!! each field block relative to the block's maximum magnitude (`XMHD_QCHECK field ...`), the
+!! relative differences of the diagnostic values and the maximum difference of the floor flags,
+!! and finally the largest relative difference (`XMHD_QCHECK max_rel`). Then (if
+!! `xmhd_qcheck_jac`) the Jacobians are compared with \ref xmhd_jac_check.
 !!
 !! Test-only options (public module variables): `xmhd_qcheck_solid` marks every fourth cell as a
 !! solid cell, and `xmhd_qcheck_negsrc` sets a non-zero floor source in about half of the cells.
@@ -4734,16 +4702,18 @@ SUBROUTINE xmhd_qcache_check(u,dt)
 CLASS(oft_vector), TARGET, INTENT(inout) :: u !< State to evaluate the residual at
 REAL(r8), INTENT(in) :: dt !< Time step
 CHARACTER(LEN=8), PARAMETER :: case_names(3) = ['dt>0    ','dt>0,up ','dt<0    ']
-INTEGER(i4), PARAMETER :: modes(3) = [0,2,1]
-INTEGER(i4), PARAMETER :: pairs(2,3) = RESHAPE([1,2, 1,3, 2,3],[2,3])
+INTEGER(i4), PARAMETER :: nmodes = 2
+INTEGER(i4), PARAMETER :: modes(nmodes) = [0,1]
+INTEGER(i4), PARAMETER :: npairs = 1
+INTEGER(i4), PARAMETER :: pairs(2,npairs) = RESHAPE([1,2],[2,npairs])
 INTEGER(i4) :: i,k,icase,im,ipair,mode_save
-REAL(r8) :: maxrel,rel,dmax,rmax,dvals(7,3)
+REAL(r8) :: maxrel,rel,dmax,rmax,dvals(7,nmodes)
 REAL(r8), POINTER, DIMENSION(:) :: va,vb
 REAL(r8), ALLOCATABLE, DIMENSION(:,:,:) :: flags
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_save
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: negsrc_save
 CLASS(oft_vector), POINTER :: up
-TYPE(oft_vector_ptr) :: res(3)
+TYPE(oft_vector_ptr) :: res(nmodes)
 DEBUG_STACK_PUSH
 mode_save=xmhd_qcache
 maxrel=0.d0
@@ -4760,10 +4730,10 @@ DO k=1,xmhd_rep%nfields
   DEALLOCATE(va)
   NULLIFY(va)
 END DO
-DO im=1,3
+DO im=1,nmodes
   CALL xmhd_rep%vec_create(res(im)%f)
 END DO
-ALLOCATE(flags(3,mesh%nc,3))
+ALLOCATE(flags(3,mesh%nc,nmodes))
 !---Optional test patterns
 IF(xmhd_qcheck_solid)THEN
   ALLOCATE(solid_save(mesh%nc))
@@ -4790,14 +4760,14 @@ DO icase=1,3
   ELSE
     oft_xmhd_ops%A%dt=ABS(dt/2.d0)
   END IF
-  DO im=1,3
+  DO im=1,nmodes
     xmhd_qcache=modes(im)
     neg_flag=0.d0
     CALL oft_xmhd_ops%A%apply(u,res(im)%f)
     flags(:,:,im)=neg_flag
     dvals(:,im)=oft_xmhd_ops%A%diag_vals
   END DO
-  DO ipair=1,3
+  DO ipair=1,npairs
     DO k=1,xmhd_rep%nfields
       CALL res(pairs(1,ipair))%f%get_local(va,k)
       CALL res(pairs(2,ipair))%f%get_local(vb,k)
@@ -4836,12 +4806,6 @@ xmhd_qcache=mode_save
 NULLIFY(oft_xmhd_ops%A%up)
 IF(xmhd_qcheck_jac)CALL xmhd_jac_check(u)
 xmhd_qcache=mode_save
-!---Optional Jacobian dump (used to compare Jacobian implementations across builds)
-IF(LEN_TRIM(xmhd_jac_dump_prefix)>0)THEN
-  NULLIFY(oft_xmhd_ops%A%up)
-  CALL xmhd_set_ops(u)
-  CALL xmhd_jac_dump(TRIM(xmhd_jac_dump_prefix))
-END IF
 NULLIFY(oft_xmhd_ops%A%up)
 neg_flag=0.d0
 IF(xmhd_qcheck_solid)THEN
@@ -4852,7 +4816,7 @@ IF(xmhd_qcheck_negsrc)THEN
   neg_source=negsrc_save
   DEALLOCATE(negsrc_save)
 END IF
-DO im=1,3
+DO im=1,nmodes
   CALL res(im)%f%delete
   DEALLOCATE(res(im)%f)
 END DO
@@ -4865,7 +4829,7 @@ END SUBROUTINE xmhd_qcache_check
 !!
 !! Builds the Jacobians of all levels (\ref xmhd_set_ops) at the state `u` in three configurations:
 !! (1) `xmhd_qcache=0` without the position map (direct evaluation, assembly by searching the CSR column
-!! lists: the reference), (2) `xmhd_qcache=2` with the position map (the default), and (3) `xmhd_qcache=0`
+!! lists: the reference), (2) `xmhd_qcache=1` with the position map (the default), and (3) `xmhd_qcache=0`
 !! with the position map. For configurations 2 and 3 it prints, for every level with a native matrix, the
 !! maximum entrywise difference relative to the largest entry of the same row (`rel_row`) and of the whole
 !! matrix (`rel_global`), and the relative 2-norm difference of the products with two fixed pseudo-random
@@ -4874,7 +4838,7 @@ END SUBROUTINE xmhd_qcache_check
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_jac_check(u)
 CLASS(oft_vector), TARGET, INTENT(inout) :: u !< State to build the Jacobians at
-INTEGER(i4), PARAMETER :: cfg_mode(3)=[0,2,0],cfg_pm(3)=[0,1,1],nvec=2
+INTEGER(i4), PARAMETER :: cfg_mode(3)=[0,1,0],cfg_pm(3)=[0,1,1],nvec=2
 INTEGER(i4) :: icfg,level,nlev,l,i,r,k,pm_save,iv
 REAL(r8) :: rel_row,rel_glob,rel_mv,dmax,amax,maxrel,dnorm,anorm
 REAL(r8), POINTER, DIMENSION(:) :: vtmp
@@ -4969,35 +4933,12 @@ END DO
 DEALLOCATE(mref,xv,yref,ytmp)
 END SUBROUTINE xmhd_jac_check
 !------------------------------------------------------------------------------
-!> Write the Jacobian of every level to binary files (native matrices only)
-!!
-!! One file per level and MPI rank, `<prefix>_L<level>_R<rank>.bin`, with stream records: level, rows,
-!! non-zeros (int32), row pointers `kr(nr+1)` and columns `lc(nnz)` (int32), values `M(nnz)` (float64).
-!! Used by the Jacobian equivalence checks to compare implementations, including across builds.
-!------------------------------------------------------------------------------
-SUBROUTINE xmhd_jac_dump(prefix)
-CHARACTER(LEN=*), INTENT(in) :: prefix !< File name prefix
-INTEGER(i4) :: level,io_unit
-CHARACTER(LEN=OFT_PATH_SLEN) :: fname
-DO level=xmhd_level,xmhd_minlev,-1
-  SELECT TYPE(this=>oft_xmhd_ops_ML(level)%J)
-  CLASS IS(oft_native_matrix)
-    WRITE(fname,'(2A,I0,A,I0,A)')prefix,'_L',level,'_R',oft_env%rank,'.bin'
-    OPEN(NEWUNIT=io_unit,FILE=TRIM(fname),ACCESS='STREAM',FORM='UNFORMATTED',STATUS='REPLACE')
-    WRITE(io_unit)level,this%nr,this%nnz
-    WRITE(io_unit)this%kr(1:this%nr+1),this%lc(1:this%nnz)
-    WRITE(io_unit)this%M(1:this%nnz)
-    CLOSE(io_unit)
-  END SELECT
-END DO
-END SUBROUTINE xmhd_jac_dump
-!------------------------------------------------------------------------------
 !> Compute the NL metric for solution field
 !!
 !! b = F(a)
 !!
 !! The cell loop either evaluates all basis functions directly at each quadrature point
-!! (`xmhd_qcache=0`) or uses the quadrature-point cache (`xmhd_qcache=1,2`, see
+!! (`xmhd_qcache=0`) or uses the quadrature-point cache (`xmhd_qcache=1`, see
 !! \ref xmhd_resid_qcache), which is built on first use for the current level. Both share the
 !! pointwise physics (\ref xmhd_resid_qp), the boundary conditions and the assembly.
 !------------------------------------------------------------------------------
@@ -5022,7 +4963,7 @@ logical :: curved,back_step,need_pt,use_qc,act(10),act_fluid(10),act_solid(10)
 type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
-type(oft_timer) :: prof_timer,loop_timer
+type(oft_timer) :: prof_timer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
 CALL prof_timer%tick
@@ -5086,7 +5027,6 @@ IF(use_qc)THEN
 ELSE
   CALL xmhd_setup_cell_shared()
 END IF
-CALL loop_timer%tick
 IF(use_qc)THEN
   CALL xmhd_resid_qcache(oft_xmhd_ops%qc,self%dt,full_interp,back_step,npin,vpin,jpin,act_fluid,act_solid, &
     need_pt,bcout,bgout,vout,nout,tout,teout,j2out,n2out,diag_vals,neg_vols)
@@ -5278,7 +5218,6 @@ IF(back_step)deallocate(vpin_loc,jpin_loc)
 NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
 END IF
-xmhd_prof_tnlop_loop=xmhd_prof_tnlop_loop+loop_timer%tock()
 !------------------------------------------------------------------------------
 ! Boundary conditions
 !------------------------------------------------------------------------------
@@ -6134,8 +6073,8 @@ CALL full_interp%setup(mesh)
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_hcurl%order
-!---Quadrature-point caches (xmhd_qcache=2): finest level, then coarse polynomial levels on its geometry
-use_qc=(xmhd_qcache==2).AND.(levelin==xmhd_nlevels)
+!---Quadrature-point caches (xmhd_qcache=1): finest level, then coarse polynomial levels on its geometry
+use_qc=(xmhd_qcache==1).AND.(levelin==xmhd_nlevels)
 IF(use_qc)THEN
   IF(.NOT.xmhd_qcache_valid(oft_xmhd_ops%qc))CALL xmhd_qcache_setup(oft_xmhd_ops)
   fqc=>oft_xmhd_ops%qc
@@ -7083,7 +7022,7 @@ comm_times=0
 !---Reset profiling counters (exclude setup calls)
 xmhd_prof_tbuild=0.d0; xmhd_prof_nbuild=0; xmhd_prof_nbuild_qc=0
 xmhd_prof_tsetops=0.d0; xmhd_prof_nsetops=0
-xmhd_prof_tnlop=0.d0; xmhd_prof_nnlop=0; xmhd_prof_tnlop_loop=0.d0
+xmhd_prof_tnlop=0.d0; xmhd_prof_nnlop=0
 DO i=1,nb
   IF(oft_env%head_proc)CALL mytimer%tick
   CALL xmhd_set_ops(u)
@@ -7111,74 +7050,17 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(MAX(1,nb*nn),8)
   WRITE(*,'(A,ES11.3)')'  Build  = ',build_optime/REAL(nb,8)
 END IF
-!---Checksums of NL residual and Jacobian action (for A/B comparisons)
+!---Checksums of the NL residual and the Jacobian action (to compare runs with different options or builds)
 CALL oft_xmhd_ops%A%apply(u, v)
 elapsed_time=SQRT(v%dot(v))
 IF(oft_env%head_proc)WRITE(*,'(A,ES24.15)')'XMHD_PROF nlop_norm ',elapsed_time
 CALL oft_xmhd_ops%J%apply(u, v)
 elapsed_time=SQRT(v%dot(v))
 IF(oft_env%head_proc)WRITE(*,'(A,ES24.15)')'XMHD_PROF matvec_norm ',elapsed_time
-CALL xmhd_prof_kernels
 CALL xmhd_prof_report
 CALL xmhd_qcache_free
 CALL oft_finalize()
 end subroutine xmhd_profile
-!------------------------------------------------------------------------------
-!> Time the per-quadrature-point kernels of a fine-level Jacobian build in isolation
-!!
-!! Loops over all cells and quadrature points with the same calls as \ref xmhd_build_ops
-!! (no physics, no assembly) and reports the time spent in geometry (`mesh%jacobian`),
-!! each basis evaluation, and `mesh%log2phys`. Used by profile mode only.
-!------------------------------------------------------------------------------
-subroutine xmhd_prof_kernels
-INTEGER(4) :: i,m,k
-REAL(8) :: goptmp(3,4),cgop(3,6),vol,pt(3),ktimes(5),tsum(5),sink
-REAL(8), ALLOCATABLE :: lag_rop(:),lag_gop(:,:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
-LOGICAL :: curved
-TYPE(oft_quad_type), POINTER :: quad
-TYPE(oft_timer) :: ktimer
-quad=>oft_hcurl%quad
-tsum=0.d0
-sink=0.d0
-!$omp parallel private(i,m,k,goptmp,cgop,vol,pt,curved,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,ktimer,ktimes) &
-!$omp reduction(+:tsum,sink)
-ALLOCATE(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce),hgrad_rop(3,oft_hgrad%nce))
-ALLOCATE(hcurl_rop(3,oft_hcurl%nce),hcurl_cop(3,oft_hcurl%nce))
-ktimes=0.d0
-!$omp do schedule(static)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i)
-  DO m=1,quad%np
-    CALL ktimer%tick
-    IF(curved.OR.m==1)THEN
-      CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
-      CALL oft_hcurl_get_cgops(goptmp,cgop)
-    END IF
-    ktimes(1)=ktimes(1)+ktimer%tock()
-    CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
-    ktimes(2)=ktimes(2)+ktimer%tock()
-    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
-    ktimes(3)=ktimes(3)+ktimer%tock()
-    CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
-    CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
-    ktimes(4)=ktimes(4)+ktimer%tock()
-    pt=mesh%log2phys(i,quad%pts(:,m))
-    ktimes(5)=ktimes(5)+ktimer%tock()
-    sink=sink+lag_rop(1)+lag_gop(1,1)+hgrad_rop(1,1)+hcurl_rop(1,1)+hcurl_cop(1,1)+pt(1)
-  END DO
-END DO
-!$omp end do nowait
-tsum=tsum+ktimes
-DEALLOCATE(lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop)
-!$omp end parallel
-!---Report thread-averaged times (comparable to wall time of one fine-level build)
-tsum=tsum/REAL(oft_env%nthreads,8)
-IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,2I8,I4,ES12.4)')'XMHD_PROF kernels ncells,nqp,nthreads,checksum ',mesh%nc,quad%np,oft_env%nthreads,sink
-  WRITE(*,'(A,5ES12.4)')'XMHD_PROF kernels_s jacobian,lag,h1,hcurl,log2phys ',tsum
-END IF
-end subroutine xmhd_prof_kernels
 !------------------------------------------------------------------------------
 !> Print accumulated xMHD profiling counters (timing and Jacobian sizes)
 !!
@@ -7193,12 +7075,11 @@ IF(.NOT.oft_env%head_proc)RETURN
 WRITE(*,'(A)')'XMHD_PROF begin'
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF setops ncalls,total_s ',xmhd_prof_nsetops,xmhd_prof_tsetops
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF nlop ncalls,total_s ',xmhd_prof_nnlop,xmhd_prof_tnlop
-WRITE(*,'(A,ES12.4)')'XMHD_PROF nlop_loop total_s ',xmhd_prof_tnlop_loop
 WRITE(*,'(A,I4,ES12.4,F14.3)')'XMHD_PROF qcache mode,setup_s,mem_mb ',xmhd_qcache,xmhd_prof_tqcache, &
   REAL(xmhd_prof_qcache_mem,8)/1.d6
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF preupdate ncalls,total_s ',xmhd_prof_npre,xmhd_prof_tpre
-WRITE(*,'(A,F14.3,L2,I3)')'XMHD_PROF jcache coarse_mem_mb,blas,posmap ',REAL(xmhd_prof_jcache_mem,8)/1.d6, &
-  xmhd_jac_blas,xmhd_jac_posmap
+WRITE(*,'(A,F14.3,I3)')'XMHD_PROF jcache coarse_mem_mb,posmap ',REAL(xmhd_prof_jcache_mem,8)/1.d6, &
+  xmhd_jac_posmap
 DO i=1,MIN(xmhd_nlevels,xmhd_prof_maxlev)
   IF(xmhd_prof_nbuild(i)==0)CYCLE
   tavg=xmhd_prof_tbuild(i)/REAL(xmhd_prof_nbuild(i),8)
