@@ -58,4 +58,5 @@ run_test WHAM WHAM_eq_ex.ipynb
 # Advanced workflow cases
 run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb 
 # run_test AdvancedWorkflows/IsofluxController NSTXU_shape_control_simulator.ipynb
-# run_test AdvancedWorkflows/Breakdown_Startup ARC_breakdown_startup_ex.ipynb  # needs clarabel, ~4 min 
+# run_test AdvancedWorkflows/Breakdown_Startup/optimization ARC_breakdown_startup_ex.ipynb  # needs clarabel, ~12 min
+run_test AdvancedWorkflows/Breakdown_Startup/validation DIIID_breakdown_validation_ex.ipynb 

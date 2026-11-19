@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-"""Start-up optimisation: breakdown and early plasma (stage 1), then a ramp of TokaMaker
-free-boundary equilibria (stage 2), optimised together.
+"""Start-up optimization: breakdown and early plasma (stage 1), then a ramp of TokaMaker
+free-boundary equilibria (stage 2), optimized together.
 
     ConicProblem    sparse conic-program builder on the Clarabel solver
     time_grid       stage-1 time grid
@@ -499,14 +499,14 @@ class UnitSampler:
         P, LC, REG = machine.mesh
         area, cen = cell_geometry(P, LC)
         pts, rows, cols, vals, npt = [], [], [], [], 0
-        groups = [(np.where(REG == machine.coil_dict[n]['reg_id'])[0], machine.nturns[i], False)
-                  for i, n in enumerate(machine.coil_names)] + [(s['cells'], 1.0, True) for s in machine.segments]
-        for i, (cells, nt, inv_r) in enumerate(groups):
-            w = area[cells] / cen[cells, 0] if inv_r else area[cells].copy()
+        w_seg = [area[s['cells']] / cen[s['cells'], 0] for s in machine.segments]   # J ~ 1/R
+        groups = list(zip(machine.coil_cells, machine.coil_turns)) + \
+            [(s['cells'], w / w.sum()) for s, w in zip(machine.segments, w_seg)]
+        for i, (cells, v) in enumerate(groups):          # v: turns per cell (sums to the unit's turns)
             pts.append(cen[cells])
             rows += [i] * len(cells)
             cols += list(range(npt, npt + len(cells)))
-            vals += list(nt * w / w.sum())
+            vals += list(v)
             npt += len(cells)
         self.pts = np.vstack(pts)
         self.S = sp.csr_matrix((vals, (rows, cols)), shape=(len(groups), npt))
@@ -518,7 +518,7 @@ class UnitSampler:
 
 class GSRamp:
     """Stage 2: a ramp of TokaMaker free-boundary equilibria from the stage-1 hand-off, I_p(t) and the
-    boundary shape prescribed per slice, optimised jointly with stage 1 by Picard iteration:
+    boundary shape prescribed per slice, optimized jointly with stage 1 by Picard iteration:
       1. TokaMaker solves every slice for its target shape, coil and structure currents pinned to the
          current trajectory -> the plasma's own flux psi_p per slice.
       2. One convex program in all ramp voltages AND all stage-1 variables, psi_p held fixed: the plasma
@@ -566,7 +566,7 @@ class GSRamp:
 
     def __init__(self, machine, circuit, scen, stage1, log=print):
         """circuit: a plasma-free CircuitModel with stage 1's circuits; stage1: the SOLVED StartupProblem
-        the ramp starts from (and re-optimises); log: function called with progress messages."""
+        the ramp starts from (and re-optimizes); log: function called with progress messages."""
         from OpenFUSIONToolkit.TokaMaker.util import create_isoflux
         self.m, self.c, self.scen, self.log, self.stage1 = machine, circuit, scen, log, stage1
         rp, tc = scen['ramp'], scen['ramp']['time']
@@ -616,7 +616,7 @@ class GSRamp:
                         for iso in self.iso]
         self.G_contact = [om(eval_fields(gs, pu, ct[None, :])['psi'].T) for ct in self.contact]
         self.G_lim = om(eval_fields(gs, pu, self.lim_pts)['psi'].T)
-        # joint optimisation: stage 1's program without its objective, which becomes a floor
+        # joint optimization: stage 1's program without its objective, which becomes a floor
         lin = stage1.P.linear_terms()
         L_star = float(sum((q @ stage1.P.value(v)).sum() for v, q in lin.items()))
         self.joint = {'P0': stage1.P.clone(objective=False), 'flux_star_Wb': stage1.flux_handoff(), 'lin': lin,
@@ -839,7 +839,7 @@ class GSRamp:
         st = P.solve()
         self.P, self.status = P, st
         if P.accepted():
-            s1.load(P)                                   # stage 1 re-optimised: new hand-off state
+            s1.load(P)                                   # stage 1 re-optimized: new hand-off state
             self.x0 = s1.x[-1][:c.nx].copy()
             vv = P.value(V)
             self.V, self.Fb = vv.reshape(N, nv), P.value(Fb)

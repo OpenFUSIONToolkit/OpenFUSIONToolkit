@@ -42,12 +42,16 @@ AdvancedWorkflows/
 │   └── README.md
 │
 ├── Breakdown_Startup/
-│   ├── ARC_breakdown_startup_ex.ipynb
 │   ├── startup_model.py
 │   ├── startup_optimizer.py
 │   ├── startup_plots.py
 │   ├── requirements_Breakdown_Startup.txt
-│   └── README.md
+│   ├── README.md
+│   ├── optimization/
+│   │   └── ARC_breakdown_startup_ex.ipynb
+│   └── validation/
+│       ├── DIIID_breakdown_validation_ex.ipynb
+│       └── g200480.00100
 │
 └── GPEC_Coupling/
     ├── kink_tearing_stability.ipynb

@@ -42,7 +42,7 @@ class MeshGeometry:
 
         P, LC, REG = model.mesh
         area, centroid = cell_geometry(P, LC)
-        self.coil_cells = [np.where(REG == model.coil_dict[n]['reg_id'])[0] for n in model.coil_names]
+        self.coil_cells = model.coil_cells
         self.coil_centre = np.array([centroid[c].mean(axis=0) for c in self.coil_cells])
         self.seg_cells = [s['cells'] for s in model.segments]
         self.seg_area = np.array([area[c].sum() for c in self.seg_cells])
@@ -287,15 +287,21 @@ def lcfs_distance(g, psi, psi_lcfs, pts, center=None):
     return np.linalg.norm(pts[:, None, :] - (a[None] + frac[..., None] * ab[None]), axis=2).min(axis=1)
 
 
-# ============================================================================ start-up animation
-# plain journal style, applied only inside make_startup_gif
-_RC = {'font.family': 'serif', 'font.serif': ['STIXGeneral', 'DejaVu Serif'], 'mathtext.fontset': 'stix',
+# ============================================================================ journal style
+# plain journal style: used by make_startup_gif and the validation notebook (plt.rcParams.update(STYLE));
+# COLORS: fixed categorical order (Paul Tol 'bright'), black for single or measured curves
+COLORS = ('#0077BB', '#CC3311', '#009988', '#EE7733', '#AA3377')
+STYLE = {'font.family': 'serif', 'font.serif': ['STIXGeneral', 'DejaVu Serif'], 'mathtext.fontset': 'stix',
        'font.size': 8.5, 'axes.labelsize': 8.5, 'xtick.labelsize': 8, 'ytick.labelsize': 8, 'font.weight': 'normal',
        'axes.labelweight': 'normal', 'axes.linewidth': 0.6, 'xtick.direction': 'in', 'ytick.direction': 'in',
        'xtick.top': True, 'ytick.right': True, 'xtick.minor.visible': True, 'ytick.minor.visible': True,
        'xtick.major.size': 3.0, 'ytick.major.size': 3.0, 'xtick.minor.size': 1.6, 'ytick.minor.size': 1.6,
        'xtick.major.width': 0.6, 'ytick.major.width': 0.6, 'xtick.minor.width': 0.5, 'ytick.minor.width': 0.5,
-       'lines.linewidth': 1.1, 'lines.markeredgewidth': 0.6, 'axes.grid': False}
+       'lines.linewidth': 1.1, 'lines.markeredgewidth': 0.6, 'axes.grid': False, 'legend.frameon': False,
+       'legend.fontsize': 7.5, 'axes.titlesize': 8.5}
+
+
+# ============================================================================ start-up animation
 
 
 def startup_frames(model, g, s1, res, ramp, zoom, n_grid=61):
@@ -340,7 +346,7 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_max=400, m
     so the playback speed changes smoothly between phases; the first and last frames and the
     first frame of every phase are held for ms_hold. Returns path."""
     from PIL import Image
-    BLUE, RED, LIGHT = '#0077BB', '#CC3311', '0.85'
+    (BLUE, RED), LIGHT = COLORS[:2], '0.85'
     frames, traces, zoom = d['frames'], d['traces'], d['zoom']
     # fixed colour scales and trace limits over the whole animation
     J = np.array([f['I_seg'] for f in frames]) / g.seg_area / 1e3      # structure current density [kA/m^2]
@@ -353,7 +359,7 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_max=400, m
              (flux.min() - 0.05 * np.ptp(flux), flux.max() + 0.05 * np.ptp(flux))]
     outside = ~Path(g.lim).contains_points(np.column_stack([d['R'].ravel(), d['Z'].ravel()])).reshape(d['R'].shape)
     images = []
-    with plt.rc_context(_RC):
+    with plt.rc_context(STYLE):
         for frame, J_f in zip(frames, J):
             fig = Figure(figsize=(7.0, 4.4), dpi=dpi)
             canvas = FigureCanvasAgg(fig)

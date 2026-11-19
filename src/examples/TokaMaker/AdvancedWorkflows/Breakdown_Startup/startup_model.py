@@ -9,6 +9,7 @@
                         current distribution (the eddy-current model of the structure)
     MachineModel        inductances, resistances, unit flux maps and coil limits from TokaMaker
     CircuitModel        M dx/dt + R x = S V for the supplies, structure (and plasma channel)
+    feed_forward        structure (and channel) currents driven by given coil currents (validation)
     ChannelPlasma       the early plasma as a uniform-current ring: one more circuit element
     FieldTracer, townsend_window, paschen_Emin   connection length and Townsend avalanche check
 
@@ -155,25 +156,37 @@ def segment_conductors(P, LC, REG, cond_dict, n_segments, center, min_cells=2, s
 class MachineModel:
     """Driven coils + segmented structure of a TokaMaker instance set up with the segment coils.
 
-    Args: gs TokaMaker instance; mesh (P, LC, REG); coil_dict the driven coils (no segments);
+    Args: gs TokaMaker instance; mesh (P, LC, REG); coil_dict the driven coils (no segments), as
+    from load_gs_mesh: entries sharing a 'coil_set' are one coil (in series, one current per turn);
     segments from segment_conductors; F0 = R B_phi [T m]; J_max coil current-density limit
     [A/m^2]; coil_lim optional {coil: (lo, hi)} per-turn current limits [A] overriding J_max;
     log progress-message callable.
 
-    Attributes: coil_names, seg_names, unit_names (units = coils then segments); nc, ns;
-    nturns [nc]; L [nu, nu] mutual inductances [H] (per-turn basis); R [nu] resistances [Ohm]
-    (coils 0: superconducting); psi_u [nu, n_nodes] vacuum flux [Wb/rad] of 1 A per turn in each
-    unit; coil_area [nc] [m^2]; coil_lim [nc, 2] per-turn current limits (lo, hi) [A].
+    Attributes: coil_names (coil sets), seg_names, unit_names (units = coils then segments); nc, ns;
+    nturns [nc] (net turns of each set); L [nu, nu] mutual inductances [H] (per-turn basis); R [nu]
+    resistances [Ohm] (coils 0: superconducting); psi_u [nu, n_nodes] vacuum flux [Wb/rad] of 1 A per
+    turn in each unit; coil_cells (cells of each coil) and coil_turns (turns carried by each of those
+    cells, each element's turns spread over its area); coil_area [nc] [m^2]; coil_lim [nc, 2] per-turn
+    current limits (lo, hi) [A].
     """
 
     def __init__(self, gs, mesh, coil_dict, segments, F0, J_max=40.0e6, coil_lim=None, log=print):
         P, LC, REG = mesh
         self.gs, self.mesh, self.coil_dict, self.segments, self.F0 = gs, mesh, coil_dict, segments, F0
-        self.coil_names = list(coil_dict.keys())
+        sets = {}
+        for name, c in coil_dict.items():
+            sets.setdefault(c.get('coil_set', name), []).append(c)
+        self.coil_names = list(sets)
         self.seg_names = [s['name'] for s in segments]
         self.unit_names = self.coil_names + self.seg_names
         self.nc, self.ns = len(self.coil_names), len(self.seg_names)
-        self.nturns = np.array([coil_dict[c]['nturns'] for c in self.coil_names], float)
+        self.nturns = np.array([sum(c['nturns'] for c in sets[n]) for n in self.coil_names], float)
+        area = cell_geometry(P, LC)[0]
+        self.coil_cells, self.coil_turns = [], []
+        for n in self.coil_names:
+            cells = [np.where(REG == c['reg_id'])[0] for c in sets[n]]
+            self.coil_cells.append(np.concatenate(cells))
+            self.coil_turns.append(np.concatenate([c['nturns'] * area[x] / area[x].sum() for c, x in zip(sets[n], cells)]))
         gs.set_coil_currents({self.coil_names[0]: 1.0})  # an equilibrium must exist before the
         gs.solve(vacuum=True)                            # current distributions / field evaluations
         r_nodes = gs.r[:, 0]
@@ -185,8 +198,7 @@ class MachineModel:
         self.L = 0.5 * (L + L.T)                         # exact symmetry
         log(f'computing the vacuum flux of a unit current in each of {len(self.unit_names)} units ...')
         self.psi_u = np.array([self.unit_psi({n: 1.0}) for n in self.unit_names])
-        area = cell_geometry(P, LC)[0]
-        self.coil_area = np.array([area[REG == coil_dict[c]['reg_id']].sum() for c in self.coil_names])
+        self.coil_area = np.array([area[c].sum() for c in self.coil_cells])
         I_max = J_max * self.coil_area / self.nturns
         self.coil_lim = np.column_stack([-I_max, I_max])
         for name, lim in (coil_lim or {}).items():
@@ -311,6 +323,39 @@ class CircuitModel:
                 A, B = E[:n, :n], E[:n, n:]
             self._zoh[key] = (A, B[:, :m], B[:, m:])[:2 if forcing is None else 3]
         return self._zoh[key]
+
+
+def feed_forward(machine, t, I_coil, plasma=None, Ip=None, Rp=None):
+    """Feed-forward circuit (validation against a discharge): given coil currents I_coil [nt, nc]
+    (per turn, linear in time between the times t [s]) drive the structure,
+    M_ss dI_s/dt + R_s I_s = -M_sc dI_c/dt, stepped exactly (a CircuitModel with no supply
+    circuits; the coil current rates enter through its forcing). The structure starts at rest.
+
+    Plasma channel (a ChannelPlasma), optional: with Ip [nt] [A] its current is prescribed (replay:
+    its changing flux linkage also drives the structure); with Rp [nt-1] [Ohm], its resistance on each
+    step, it is a circuit state, L_p dI_p/dt + R_p I_p + sum_u M_pu dI_u/dt = 0 (prediction).
+
+    Returns X [nt, nc + ns + 1]: coil (as given), segment and channel currents [A]."""
+    nc = machine.nc
+    # the unknowns are the segment currents only: a circuit model with no supply circuits
+    circ = CircuitModel(machine, 1.0, circuits={})
+    M_xc = machine.L[nc:, :nc]                            # state <- coil mutual inductances [H]
+    W = np.diff(I_coil, axis=0) / np.diff(t)[:, None]     # forcing: coil current rates [A/s], constant per step
+    if Rp is not None:
+        # prediction: the channel is one more state, also driven by the coil current rates
+        circ.add_plasma(plasma)
+        M_xc = np.vstack([M_xc, plasma.M_u[:nc]])
+    elif Ip is not None:
+        # replay: the channel current is known, so its rate is one more forcing of the segments
+        M_xc = np.hstack([M_xc, plasma.M_u[nc:, None]])
+        W = np.hstack([W, (np.diff(Ip) / np.diff(t))[:, None]])
+    x = np.zeros((len(t), circ.nx))                       # structure at rest at t[0]
+    for k in range(len(t) - 1):
+        # exact step of M dx/dt + R x = -M_xc w with the forcing w constant on the step
+        A, _, Bw = circ.zoh(t[k + 1] - t[k], None if Rp is None else Rp[k], forcing=-M_xc)
+        x[k + 1] = A @ x[k] + Bw @ W[k]
+    I_p = x[:, -1] if Rp is not None else (np.zeros(len(t)) if Ip is None else Ip)
+    return np.column_stack([I_coil, x[:, :machine.ns], I_p])
 
 
 # ============================================================================ early plasma channel
