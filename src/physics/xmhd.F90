@@ -163,7 +163,7 @@ end type xmhd_qcache_data
 !!
 !! Built by \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup" for one level. Blocks with the
 !! same pair of FE spaces have the same column pattern, so one position table per (row space, column
-!! space) pair is stored: entry `(jr,jc)` of the pair is the position of the local entry in the row's
+!! space) pair is stored (row-major): entry `(jr,jc)` of the pair is the position of the local entry in the row's
 !! extent within its block (`map(f,g)%%ext(1,row)` + value - 1 is the index into `M`), as cached by
 !! `mat_add_values` (`loc_cache`).
 !------------------------------------------------------------------------------
@@ -2564,56 +2564,62 @@ INTEGER(i4), INTENT(in) :: p !< Cell kind (1 fluid, 2 solid)
 INTEGER(i4), INTENT(in) :: q !< Quadrature point
 REAL(r8), INTENT(in) :: D(:,:) !< Coefficient tensor from \ref xmhd_jac_qp
 TYPE(xmhd_jac_work), INTENT(inout) :: wk(3) !< Work arrays per row space
-INTEGER(i4) :: s,k,f,g,sg,ng,off,ra,cb,a,b,kk,nv,nd,nvg,ncg,jc
-REAL(r8) :: dv
+INTEGER(i4) :: s,k,f,g,sg,ng,off,ra,cb,a,kk,nv,nd,ncg,row
+REAL(r8) :: dr(6)
 DO s=1,3
   nv=plan%nval(s); nd=plan%nder(s)
   DO k=1,plan%nch(s,p)
     f=plan%chf(k,s,p); g=plan%chg(k,s,p); off=plan%choff(k,s,p)
-    sg=plan%fsp(g); ng=plan%nce(sg); nvg=plan%nval(sg); ncg=plan%ncomp(sg)
+    sg=plan%fsp(g); ng=plan%nce(sg); ncg=plan%ncomp(sg)
     ra=plan%co(f); cb=plan%co(g)
     !---Value components of the test functions
     IF(k<=plan%nvb(s,p))THEN
       DO a=1,nv
         kk=a+(q-1)*nv
-        wk(s)%wv(off+1:off+ng,kk)=0.d0
-        DO b=1,ncg
-          dv=D(ra+a,cb+b)
-          IF(dv==0.d0)CYCLE
-          IF(b<=nvg)THEN
-            DO jc=1,ng
-              wk(s)%wv(off+jc,kk)=wk(s)%wv(off+jc,kk)+dv*wk(sg)%ev(jc,b,q)
-            END DO
-          ELSE
-            DO jc=1,ng
-              wk(s)%wv(off+jc,kk)=wk(s)%wv(off+jc,kk)+dv*wk(sg)%ed(jc,b-nvg,q)
-            END DO
-          END IF
-        END DO
+        row=ra+a
+        dr(1:ncg)=D(row,cb+1:cb+ncg)
+        CALL wcol(wk(s)%wv(off+1:off+ng,kk))
       END DO
     END IF
     !---Derivative components (gradients or curls) of the test functions
     IF(k>plan%nv1(s,p))THEN
       DO a=1,nd
         kk=a+(q-1)*nd
-        wk(s)%wd(off+1:off+ng,kk)=0.d0
-        DO b=1,ncg
-          dv=D(ra+nv+a,cb+b)
-          IF(dv==0.d0)CYCLE
-          IF(b<=nvg)THEN
-            DO jc=1,ng
-              wk(s)%wd(off+jc,kk)=wk(s)%wd(off+jc,kk)+dv*wk(sg)%ev(jc,b,q)
-            END DO
-          ELSE
-            DO jc=1,ng
-              wk(s)%wd(off+jc,kk)=wk(s)%wd(off+jc,kk)+dv*wk(sg)%ed(jc,b-nvg,q)
-            END DO
-          END IF
-        END DO
+        row=ra+nv+a
+        dr(1:ncg)=D(row,cb+1:cb+ncg)
+        CALL wcol(wk(s)%wd(off+1:off+ng,kk))
       END DO
     END IF
   END DO
 END DO
+CONTAINS
+!> Contract one row of `D` with the trial functions of space `sg` at qp `q`: `w(jc) = sum_b dr(b) E_{jc,b}`
+SUBROUTINE wcol(w)
+REAL(r8), INTENT(out) :: w(:) !< Result [ng]
+INTEGER(i4) :: jc
+IF(ALL(dr(1:ncg)==0.d0))THEN
+  w=0.d0
+  RETURN
+END IF
+SELECT CASE(sg)
+CASE(1) ! Lagrange: value, gradient
+  !$omp simd
+  DO jc=1,ng
+    w(jc)=dr(1)*wk(1)%ev(jc,1,q)+dr(2)*wk(1)%ed(jc,1,q)+dr(3)*wk(1)%ed(jc,2,q)+dr(4)*wk(1)%ed(jc,3,q)
+  END DO
+CASE(2) ! H(Curl): value, curl
+  !$omp simd
+  DO jc=1,ng
+    w(jc)=dr(1)*wk(2)%ev(jc,1,q)+dr(2)*wk(2)%ev(jc,2,q)+dr(3)*wk(2)%ev(jc,3,q) &
+      +dr(4)*wk(2)%ed(jc,1,q)+dr(5)*wk(2)%ed(jc,2,q)+dr(6)*wk(2)%ed(jc,3,q)
+  END DO
+CASE DEFAULT ! Grad(H^1): gradient
+  !$omp simd
+  DO jc=1,ng
+    w(jc)=dr(1)*wk(3)%ed(jc,1,q)+dr(2)*wk(3)%ed(jc,2,q)+dr(3)*wk(3)%ed(jc,3,q)
+  END DO
+END SELECT
+END SUBROUTINE wcol
 END SUBROUTINE xmhd_jac_wform
 !------------------------------------------------------------------------------
 !> Form the local matrices of a cell from the test functions and the contracted trial functions
@@ -2749,7 +2755,7 @@ CLASS IS(oft_native_matrix)
           DO jc=1,plan%nce(t)
             k=search_array(Jac%j_map(g)%offset+dofs(jc,t),Jac%lc(jp:jn),jn-jp+1)
             IF(k==0)fail=.TRUE.
-            pm%rel(o+(jc-1)*plan%nce(s)+jr,i)=k
+            pm%rel(o+(jr-1)*plan%nce(t)+jc,i)=k
           END DO
         END DO
       END DO
@@ -2805,30 +2811,28 @@ END SUBROUTINE xmhd_jac_posmap_delete
 !! Equivalent to `mat_add_local` (\ref fem_composite::fem_mat_add_local "fem_mat_add_local") with
 !! `mat_add_values`, without searching the column lists. Locks the row field if `tlocks` is present.
 !------------------------------------------------------------------------------
-SUBROUTINE xmhd_jac_add_native(Jac,pm,plan,mtmp,iloc,cell,jpw,tlocks)
+SUBROUTINE xmhd_jac_add_native(Jac,pm,plan,mtmp,iloc,cell,tlocks)
 CLASS(oft_native_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 TYPE(xmhd_jac_posmap_data), INTENT(in) :: pm !< Position map
 TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure
 TYPE(oft_local_mat), INTENT(in) :: mtmp(:,:) !< Local matrices of the cell
 TYPE(oft_1d_int), INTENT(in) :: iloc(:) !< Local-to-global DOF maps per field
 INTEGER(i4), INTENT(in) :: cell !< Cell index
-INTEGER(i4), INTENT(inout) :: jpw(:) !< Work array [max nce]
 INTEGER(KIND=omp_lock_kind), OPTIONAL, INTENT(inout) :: tlocks(:) !< Per-field locks
-INTEGER(i4) :: f,g,s,t,o,nr,jr,jc,k
+INTEGER(i4) :: f,g,s,t,o,nr,nc,jr,jc,k,jp
 DO f=1,plan%nfld
   IF(PRESENT(tlocks))CALL omp_set_lock(tlocks(f))
   s=plan%fsp(f); nr=plan%nce(s)
   DO g=1,plan%nfld
     IF(.NOT.ASSOCIATED(mtmp(f,g)%m))CYCLE
-    t=plan%fsp(g)
+    t=plan%fsp(g); nc=plan%nce(t)
     o=pm%pair(s,t)-1
+    !---Row by row: positions of one row are contiguous in the map and close together in M
     DO jr=1,nr
-      jpw(jr)=Jac%map(f,g)%ext(1,iloc(f)%v(jr))-1
-    END DO
-    DO jc=1,plan%nce(t)
-      DO jr=1,nr
-        k=jpw(jr)+pm%rel(o+(jc-1)*nr+jr,cell)
-        Jac%M(k)=Jac%M(k)+mtmp(f,g)%m(jr,jc)
+      jp=Jac%map(f,g)%ext(1,iloc(f)%v(jr))-1
+      k=o+(jr-1)*nc
+      DO jc=1,nc
+        Jac%M(jp+pm%rel(k+jc,cell))=Jac%M(jp+pm%rel(k+jc,cell))+mtmp(f,g)%m(jr,jc)
       END DO
     END DO
   END DO
@@ -2843,7 +2847,7 @@ END SUBROUTINE xmhd_jac_add_native
 !! revolved-periodic velocity blocks and adds the result to the matrix (without locks for cells that
 !! do not share DOFs with other thread partitions, see \ref xmhd_setup_cell_shared).
 !------------------------------------------------------------------------------
-SUBROUTINE xmhd_jac_finish_cell(Jac,mtmp,iloc,j_lag,j_hgrad,j_hcurl,solid,nolock,tlocks,plan,cell,jpw)
+SUBROUTINE xmhd_jac_finish_cell(Jac,mtmp,iloc,j_lag,j_hgrad,j_hcurl,solid,nolock,tlocks,plan,cell)
 CLASS(oft_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 TYPE(oft_local_mat), INTENT(inout) :: mtmp(:,:) !< Local matrices of the cell
 TYPE(oft_1d_int), INTENT(in) :: iloc(:) !< Local-to-global DOF maps per field
@@ -2855,7 +2859,6 @@ LOGICAL, INTENT(in) :: nolock !< Add without locking?
 INTEGER(KIND=omp_lock_kind), INTENT(inout) :: tlocks(:) !< Per-field locks
 TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure
 INTEGER(i4), INTENT(in) :: cell !< Cell index
-INTEGER(i4), INTENT(inout) :: jpw(:) !< Work array [max nce]
 INTEGER(i4) :: m,jr,jc
 REAL(r8) :: umat(3,3),uvec(3)
 !---Scale factors
@@ -2923,9 +2926,9 @@ IF(ASSOCIATED(oft_xmhd_ops%pm))THEN
   SELECT TYPE(Jac)
   CLASS IS(oft_native_matrix)
     IF(nolock)THEN
-      CALL xmhd_jac_add_native(Jac,oft_xmhd_ops%pm,plan,mtmp,iloc,cell,jpw)
+      CALL xmhd_jac_add_native(Jac,oft_xmhd_ops%pm,plan,mtmp,iloc,cell)
     ELSE
-      CALL xmhd_jac_add_native(Jac,oft_xmhd_ops%pm,plan,mtmp,iloc,cell,jpw,tlocks)
+      CALL xmhd_jac_add_native(Jac,oft_xmhd_ops%pm,plan,mtmp,iloc,cell,tlocks)
     END IF
     RETURN
   END SELECT
@@ -3074,7 +3077,6 @@ CLASS(oft_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 LOGICAL, INTENT(in) :: jac_nolock !< Matrix supports lock-free adds for unshared cells?
 INTEGER(KIND=omp_lock_kind), INTENT(inout) :: tlocks(:) !< Per-field locks
 INTEGER(i4) :: ii,i,ip,m,k,p
-INTEGER(i4), ALLOCATABLE :: jpw(:)
 INTEGER(i4), ALLOCATABLE, TARGET :: j_lag(:),j_hgrad(:),j_hcurl(:)
 REAL(r8), ALLOCATABLE, TARGET :: lag_rop(:),lag_gop(:,:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
 REAL(r8), ALLOCATABLE :: D(:,:)
@@ -3088,8 +3090,7 @@ TYPE(oft_1d_int), ALLOCATABLE :: iloc(:)
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad
 need_pt=xmhd_shaping_active() ! Physical points only needed for shaping functions
 !$omp parallel private(ii,i,m,k,p,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop, &
-!$omp D,goptmp,cgop,vol,det,fulltmp,pt,shp,he,curved,u0,wk,mloc,iloc,jpw)
-ALLOCATE(jpw(MAXVAL(plan%nce)))
+!$omp D,goptmp,cgop,vol,det,fulltmp,pt,shp,he,curved,u0,wk,mloc,iloc)
 ALLOCATE(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 ALLOCATE(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce),hgrad_rop(3,oft_hgrad%nce))
 ALLOCATE(hcurl_rop(3,oft_hcurl%nce),hcurl_cop(3,oft_hcurl%nce))
@@ -3159,12 +3160,12 @@ DO ii=1,mesh%tloc_c(ip)%n
   END DO
   CALL xmhd_jac_contract(plan,p,wk)
   CALL xmhd_jac_finish_cell(Jac,mloc(:,:,p),iloc,j_lag,j_hgrad,j_hcurl,(p==2), &
-    jac_nolock.AND.(.NOT.xmhd_cell_shared(i)),tlocks,plan,i,jpw)
+    jac_nolock.AND.(.NOT.xmhd_cell_shared(i)),tlocks,plan,i)
 END DO
 END DO
 NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 CALL xmhd_jac_work_free(wk,mloc)
-DEALLOCATE(j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,D,mloc,iloc,jpw)
+DEALLOCATE(j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,D,mloc,iloc)
 !$omp end parallel
 END SUBROUTINE xmhd_jac_direct
 !------------------------------------------------------------------------------
@@ -3194,7 +3195,7 @@ CLASS(oft_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 LOGICAL, INTENT(in) :: jac_nolock !< Matrix supports lock-free adds for unshared cells?
 INTEGER(KIND=omp_lock_kind), INTENT(inout) :: tlocks(:) !< Per-field locks
 INTEGER(i4) :: ii,i,ip,m,k,p,jr,g,nql,nqh,nqc,nqp,nlf,nhv,kte,kn2,wsize
-INTEGER(i4), ALLOCATABLE :: rl(:),rc(:),rg(:),jpw(:)
+INTEGER(i4), ALLOCATABLE :: rl(:),rc(:),rg(:)
 REAL(r8), ALLOCATABLE :: D(:,:),work(:),lc(:,:),hcc(:,:),hgc(:,:),cpt(:,:),cshp(:,:)
 REAL(r8), ALLOCATABLE :: lval(:,:,:),lgrd(:,:,:),hgv(:,:,:),hcv(:,:,:),hcj(:,:,:)
 REAL(r8) :: vals(40),det
@@ -3218,8 +3219,8 @@ IF(j2_ind>0)nhv=2
 wsize=MAX(fem_qcache_work_size(fqc%lag,nlf),fem_qcache_work_size(fqc%hcurl,nhv), &
   fem_qcache_work_size(fqc%hgrad,1))
 !$omp parallel private(ii,i,m,k,p,jr,g,rl,rc,rg,D,work,lc,hcc,hgc,cpt,cshp,lval,lgrd,hgv,hcv,hcj, &
-!$omp vals,det,u0,wk,mloc,iloc,jpw)
-ALLOCATE(rl(jqc%lag%nce),rc(jqc%hcurl%nce),rg(jqc%hgrad%nce),jpw(MAXVAL(plan%nce)))
+!$omp vals,det,u0,wk,mloc,iloc)
+ALLOCATE(rl(jqc%lag%nce),rc(jqc%hcurl%nce),rg(jqc%hgrad%nce))
 ALLOCATE(D(plan%nct,plan%nct),work(wsize))
 ALLOCATE(lc(nql,nlf),hcc(nqc,nhv),hgc(nqh,1),cpt(3,nqp),cshp(4,nqp))
 ALLOCATE(lval(1,nqp,nlf),lgrd(3,nqp,nlf),hgv(3,nqp,1),hcv(3,nqp,nhv),hcj(3,nqp,nhv))
@@ -3310,11 +3311,11 @@ DO ii=1,mesh%tloc_c(ip)%n
     END SELECT
   END DO
   CALL xmhd_jac_finish_cell(Jac,mloc(:,:,p),iloc,jqc%dofs_lag(:,i),jqc%dofs_hgrad(:,i),jqc%dofs_hcurl(:,i), &
-    (p==2),jac_nolock.AND.(.NOT.jqc%geom%cell_shared(i)),tlocks,plan,i,jpw)
+    (p==2),jac_nolock.AND.(.NOT.jqc%geom%cell_shared(i)),tlocks,plan,i)
 END DO
 END DO
 CALL xmhd_jac_work_free(wk,mloc)
-DEALLOCATE(rl,rc,rg,jpw,D,work,lc,hcc,hgc,cpt,cshp,lval,lgrd,hgv,hcv,hcj,mloc,iloc)
+DEALLOCATE(rl,rc,rg,D,work,lc,hcc,hgc,cpt,cshp,lval,lgrd,hgv,hcv,hcj,mloc,iloc)
 !$omp end parallel
 END SUBROUTINE xmhd_jac_qcache
 !------------------------------------------------------------------------------
