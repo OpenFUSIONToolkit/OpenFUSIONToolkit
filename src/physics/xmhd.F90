@@ -284,7 +284,7 @@ CHARACTER(LEN=1) :: nbc = 'd' !< Density BC ('d','n')
 CHARACTER(LEN=1) :: tbc = 'd' !< Temperature BC ('d','n')
 CHARACTER(LEN=3) :: visc_type = 'kin' !< Viscosity type ('kin','iso')
 INTEGER(i4) :: visc_itype = 1 !< Viscosity type flag (1->kin,2->iso)
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_cell !< Solid region flag
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_reg !< Solid region flag for each mesh region (valid on all MG levels)
 !---Physical parameters
 REAL(r8) :: jac_dt = 1.E-3_r8 !< Time step
 REAL(r8) :: dt_max = -1.d0
@@ -1804,7 +1804,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Handle solid region
     !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(solid_reg(mesh%reg(i)))THEN
       eta_curr=eta_reg(mesh%reg(i))
       IF(ASSOCIATED(res_shaping))eta_curr = eta_curr*res_shaping(pt)
       do jc=1,oft_hcurl%nce
@@ -2563,7 +2563,7 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Add local contribution to full matrix
 !------------------------------------------------------------------------------
   IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m)
-  IF(solid_cell(i))THEN
+  IF(solid_reg(mesh%reg(i)))THEN
     CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
   ELSE
     CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc,tlocks)
@@ -2771,7 +2771,7 @@ DO level=levelin,xmhd_minlev,-1
   !
   ALLOCATE(j_lag(oft_lagrange%nce))
   DO i=1,mesh%nc
-    IF(solid_cell(i))THEN
+    IF(solid_reg(mesh%reg(i)))THEN
       CALL oft_lagrange%ncdofs(i,j_lag)
       node_flag(j_lag)=1.d0
     END IF
@@ -2887,10 +2887,10 @@ DEBUG_STACK_PUSH
 ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
-  ALLOCATE(eta_reg(mesh%nreg),solid_cell(mesh%nc))
+  ALLOCATE(eta_reg(mesh%nreg),solid_reg(mesh%nreg))
 END IF
 eta_reg=-1.d0
-solid_cell=.FALSE.
+solid_reg=.FALSE.
 IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
@@ -2948,10 +2948,11 @@ IF(xmhd_root_node%associated())THEN
 END IF
 !
 xmhd_rw=.FALSE.
+solid_reg=(reg_types==2)
 DO i=1,mesh%nc
-  IF(reg_types(mesh%reg(i))==2)THEN
+  IF(solid_reg(mesh%reg(i)))THEN
     xmhd_rw=.TRUE.
-    solid_cell(i)=.TRUE.
+    EXIT
   END IF
 END DO
 #ifdef HAVE_MPI
@@ -3376,7 +3377,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Compute F (u) for solid region
     !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(solid_reg(mesh%reg(i)))THEN
       IF(xmhd_adv_b)THEN
         !---Eta J
         eta_curr=eta_reg(mesh%reg(i))
@@ -3698,7 +3699,7 @@ do ii=1,mesh%tloc_c(ip)%n
     end do
   END IF
   !---Lagrange rows (V,n,T)
-  IF(.NOT.solid_cell(i))THEN
+  IF(.NOT.solid_reg(mesh%reg(i)))THEN
     DO jr=1,oft_lagrange%nce
       vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)/vel_scale
       IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)/den_scale
@@ -3933,7 +3934,7 @@ do ii=1,mesh%tloc_c(ip)%n
       bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(hcurl_rop(:,jr),u0%B)*det
     end do
     !---Electron inertia
-    IF(xmhd_hall.AND.(.NOT.solid_cell(i)))THEN
+    IF(xmhd_hall.AND.(.NOT.solid_reg(mesh%reg(i))))THEN
       u0%J=u0%J*me_factor*elec_mass*det/(mu0*neq*elec_charge**2)
       do jr=1,oft_hcurl%nce
         bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(hcurl_cop(:,jr),u0%J)
@@ -3943,7 +3944,7 @@ do ii=1,mesh%tloc_c(ip)%n
     do jr=1,oft_hgrad%nce
       bg_loc(jr) = bg_loc(jr) + DOT_PRODUCT(hgrad_rop(:,jr),u0%B)*det
     end do
-    IF(solid_cell(i))CYCLE
+    IF(solid_reg(mesh%reg(i)))CYCLE
     !---Compute F_{V,n,T) (u)
     do jr=1,oft_lagrange%nce
       lag_loc(jr,1:3) = lag_loc(jr,1:3) + lag_rop(jr)*u0%V*det
@@ -4238,11 +4239,6 @@ integer(i4), intent(in) :: level !< Desired level
 if(level>xmhd_ML_hcurl%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
-! if(level<mg_mesh%mgdim)then
-!   call multigrid_level(mg_mesh,level)
-! else
-!   call multigrid_level(mg_mesh,mg_mesh%mgdim)
-! end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
@@ -4251,6 +4247,8 @@ IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL o
 CALL xmhd_ML_hcurl_grad%set_level(level,propogate=.TRUE.)
 IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
 IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_H1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+!---Operate on the mesh of this level (coarser than the finest mesh on geometric MG levels)
+mesh=>oft_hcurl%mesh
 xmhd_level=level
 ! xmhd_lev=oft_hcurl_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
