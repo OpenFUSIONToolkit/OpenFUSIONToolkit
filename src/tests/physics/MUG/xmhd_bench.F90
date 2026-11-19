@@ -95,7 +95,8 @@ USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, 
 USE xmhd, ONLY: xmhd_run, xmhd_minlev, xmhd_taxis, xmhd_sub_fields, xmhd_prof_reps, xmhd_prof_report, &
   xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange, &
   res_shaping, visc_shaping, diff_shaping, cond_shaping, res_profile, xmhd_den_floor => den_floor, &
-  xmhd_temp_floor => temp_floor, xmhd_g_accel => g_accel, xmhd_qcheck_solid, xmhd_qcheck_negsrc
+  xmhd_temp_floor => temp_floor, xmhd_g_accel => g_accel, xmhd_qcheck_solid, xmhd_qcheck_negsrc, &
+  xmhd_jac_dump_prefix
 USE xmhd_bench_fields, ONLY: bench_field, bench_shaping, bench_shaping2, bench_res_profile
 IMPLICIT NONE
 CLASS(oft_solver), POINTER :: minv => NULL()
@@ -130,8 +131,9 @@ REAL(r8) :: temp_floor = -1.d0 ! Temperature floor [eV] (neg to disable)
 REAL(r8) :: g_accel = 0.d0 ! Gravitational acceleration [m/s^2]
 LOGICAL :: qcheck_solid = .FALSE. ! mode='qcheck': mark every fourth cell as solid
 LOGICAL :: qcheck_negsrc = .FALSE. ! mode='qcheck': set a floor source pattern
+CHARACTER(LEN=256) :: jac_dump = '' ! mode='qcheck': write Jacobians of all levels with this prefix
 NAMELIST/xmhd_bench_options/order,minlev,mode,prof_reps,lam,b0,b1,v1,n0,t0,te0,delta,two_temp,pm,shaping, &
-  shaping_mix,res_prof,den_floor,temp_floor,g_accel,qcheck_solid,qcheck_negsrc
+  shaping_mix,res_prof,den_floor,temp_floor,g_accel,qcheck_solid,qcheck_negsrc,jac_dump
 !------------------------------------------------------------------------------
 CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -249,6 +251,7 @@ xmhd_temp_floor=temp_floor
 xmhd_g_accel=g_accel
 xmhd_qcheck_solid=qcheck_solid
 xmhd_qcheck_negsrc=qcheck_negsrc
+xmhd_jac_dump_prefix=jac_dump
 CALL mytimer%tick
 IF(TRIM(mode)=='profile')THEN
   CALL xmhd_run(ic_fields,profile_only=.TRUE.) ! Calls oft_finalize
