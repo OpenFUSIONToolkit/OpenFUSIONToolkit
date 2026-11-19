@@ -17,7 +17,8 @@
   "tag": "baseline",
   "exe": "/home/user/OpenFUSIONToolkit/builds/build_release/tests/physics/MUG/xmhd_bench",
   "xmhd_opt": [],
-  "bench_opt": []
+  "bench_opt": [],
+  "note": "tet_p3_mg_mpiref, tet_p3_mg_mpi2 (bind-to none) merged from separate runs after the main matrix"
  },
  "results": [
   {
@@ -487,7 +488,132 @@
    "wall_s": 238.23
   },
   {
+   "name": "tet_p3_mg_mpiref",
+   "tag": "baseline_mpiref",
+   "pre": "ilu",
+   "order": 3,
+   "mg": true,
+   "mfnk": false,
+   "mode": "profile",
+   "nsteps": 0,
+   "threads": 4,
+   "nprocs": 1,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 10.372471332550049,
+   "dot_s": 2.48e-05,
+   "matvec_s": 0.0155,
+   "nlop_s": 0.02844,
+   "build_s": 1.096,
+   "b_dofs": 38140.0,
+   "v_dofs": 20740.0,
+   "n_dofs": 6912.0,
+   "nthreads": 4,
+   "ncells_global": 1536,
+   "ncells_local": 1536,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "prof_setops_n": 3,
+   "prof_setops_total_s": 3.2886,
+   "prof_nlop_n": 16,
+   "prof_nlop_total_s": 0.45111,
+   "prof_preupdate_n": 0,
+   "prof_preupdate_total_s": 0.0,
+   "nlop_norm": 1.304707022641928,
+   "matvec_norm": 1.374114235521757,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 0.76338,
+     "avg_s": 0.25446,
+     "nrows": 30599,
+     "nnz": 5122413
+    },
+    {
+     "level": 3,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 2.5246,
+     "avg_s": 0.84154,
+     "nrows": 86631,
+     "nnz": 24759995
+    }
+   ],
+   "build_fine_avg_s": 0.84154,
+   "build_coarse_avg_s": 0.25446,
+   "jac_nnz_total": 29882408,
+   "max_rss_mb": 600.515625,
+   "wall_s": 10.36
+  },
+  {
    "name": "tet_p3_mg_mpi2",
+   "tag": "baseline_mpi_nobind",
+   "pre": "ilu",
+   "order": 3,
+   "mg": true,
+   "mfnk": false,
+   "mode": "profile",
+   "nsteps": 0,
+   "threads": 2,
+   "nprocs": 2,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 9.454013586044312,
+   "dot_s": 2.555e-05,
+   "matvec_s": 0.01791,
+   "nlop_s": 0.025,
+   "build_s": 0.9533,
+   "b_dofs": 38140.0,
+   "v_dofs": 20740.0,
+   "n_dofs": 6912.0,
+   "nthreads": 2,
+   "ncells_global": 1536,
+   "ncells_local": 768,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "prof_setops_n": 3,
+   "prof_setops_total_s": 2.86,
+   "prof_nlop_n": 16,
+   "prof_nlop_total_s": 0.4004,
+   "prof_preupdate_n": 0,
+   "prof_preupdate_total_s": 0.0,
+   "nlop_norm": 1.30470702264376,
+   "matvec_norm": 1.374114235520597,
+   "levels": [
+    {
+     "level": 3,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 0.69334,
+     "avg_s": 0.23111,
+     "nrows": 15687,
+     "nnz": 2531006
+    },
+    {
+     "level": 4,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 3,
+     "total_s": 2.1662,
+     "avg_s": 0.72208,
+     "nrows": 44075,
+     "nnz": 12229368
+    }
+   ],
+   "build_fine_avg_s": 0.72208,
+   "build_coarse_avg_s": 0.23111,
+   "jac_nnz_total": 14760374,
+   "max_rss_mb": 353.02734375,
+   "wall_s": 9.45,
+   "note": "mpiexec --bind-to none"
+  },
+  {
+   "name": "tet_p3_mg_mpi2_bound",
    "tag": "baseline",
    "pre": "ilu",
    "order": 3,
@@ -546,7 +672,8 @@
    "build_coarse_avg_s": 0.45571,
    "jac_nnz_total": 14760374,
    "max_rss_mb": 353.078125,
-   "wall_s": 16.91
+   "wall_s": 16.91,
+   "note": "OpenMPI default binding (--bind-to core for np<=2): 2 OMP threads share one core"
   },
   {
    "name": "tet_p2_run",
@@ -749,6 +876,112 @@
    "nlits_total": 16,
    "max_rss_mb": 1871.73828125,
    "wall_s": 98.55
+  },
+  {
+   "name": "tet_p3_mg_mfnk_run",
+   "tag": "baseline",
+   "pre": "ilu",
+   "order": 3,
+   "mg": true,
+   "mfnk": true,
+   "mode": "run",
+   "nsteps": 5,
+   "threads": 4,
+   "nprocs": 1,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 90.49380683898926,
+   "b_dofs": 38140.0,
+   "v_dofs": 20740.0,
+   "n_dofs": 6912.0,
+   "nthreads": 4,
+   "ncells_global": 1536,
+   "ncells_local": 1536,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "run_time_s": 88.414,
+   "final_norm_B": 0.3319481382822611,
+   "final_norm_V": 4716685.716637087,
+   "final_norm_Ti": 1672.00332262158,
+   "prof_setops_n": 5,
+   "prof_setops_total_s": 5.5621,
+   "prof_nlop_n": 210,
+   "prof_nlop_total_s": 7.5246,
+   "prof_preupdate_n": 2,
+   "prof_preupdate_total_s": 5.182e-06,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 5,
+     "total_s": 1.3578,
+     "avg_s": 0.27155,
+     "nrows": 30599,
+     "nnz": 5122413
+    },
+    {
+     "level": 3,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 5,
+     "total_s": 4.2034,
+     "avg_s": 0.84068,
+     "nrows": 86631,
+     "nnz": 24759995
+    }
+   ],
+   "build_fine_avg_s": 0.84068,
+   "build_coarse_avg_s": 0.27155,
+   "jac_nnz_total": 29882408,
+   "steps": [
+    {
+     "step": 1,
+     "t": 2e-07,
+     "lits": 34,
+     "nlits": 2,
+     "time_s": 29.65,
+     "dt": 2e-07
+    },
+    {
+     "step": 2,
+     "t": 4e-07,
+     "lits": 31,
+     "nlits": 2,
+     "time_s": 16.46,
+     "dt": 2e-07
+    },
+    {
+     "step": 3,
+     "t": 6e-07,
+     "lits": 34,
+     "nlits": 2,
+     "time_s": 11.894,
+     "dt": 2e-07
+    },
+    {
+     "step": 4,
+     "t": 8e-07,
+     "lits": 32,
+     "nlits": 2,
+     "time_s": 16.863,
+     "dt": 2e-07
+    },
+    {
+     "step": 5,
+     "t": 1e-06,
+     "lits": 33,
+     "nlits": 2,
+     "time_s": 11.575,
+     "dt": 2e-07
+    }
+   ],
+   "step_time_avg_s": 17.2884,
+   "step_time_avg_excl1_s": 14.198,
+   "lits_total": 164,
+   "nlits_total": 10,
+   "max_rss_mb": 1874.5078125,
+   "wall_s": 90.48
   }
  ]
 }

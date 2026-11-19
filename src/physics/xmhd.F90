@@ -282,7 +282,7 @@ REAL(r8), PUBLIC :: xmhd_prof_tnlop = 0.d0 !< Accumulated time in xmhd_errmatrix
 INTEGER(i4), PUBLIC :: xmhd_prof_nnlop = 0 !< Number of calls to xmhd_errmatrix_apply
 REAL(r8), PUBLIC :: xmhd_prof_tpre = 0.d0 !< Accumulated time in preconditioner updates (eg. factorization) [s]
 INTEGER(i4), PUBLIC :: xmhd_prof_npre = 0 !< Number of preconditioner updates
-INTEGER(i4), PUBLIC :: xmhd_prof_reps(3) = [10,10,10] !< Repetition counts used by profile mode (builds, NL applies per build, matvecs per NL apply)
+INTEGER(i4), PUBLIC :: xmhd_prof_reps(3) = [10,10,10] !< Repetition counts used by profile mode (builds, NL applies per build, matvecs per NL apply); 0 skips NL applies/matvecs
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
 INTEGER(i4) :: n2_ind = -1 !< Index of hyper-diff aux field
 INTEGER(i4) :: j2_ind = -1 !< Index of hyper-res aux field
@@ -5522,8 +5522,8 @@ class(oft_vector), pointer :: v
 type(oft_timer) :: mytimer
 CALL xmhd_rep%vec_create(v)
 nb=MAX(1,xmhd_prof_reps(1))
-nn=MAX(1,xmhd_prof_reps(2))
-nm=MAX(1,xmhd_prof_reps(3))
+nn=MAX(0,xmhd_prof_reps(2))
+nm=MAX(0,xmhd_prof_reps(3))
 matvec_time=0.d0
 nlop_time=0.d0
 build_optime=0.d0
@@ -5556,9 +5556,9 @@ DO i=1,nb
   END DO
 END DO
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(nb*nn*100,8)
-  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(nb*nn*nm,8)
-  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(nb*nn,8)
+  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(MAX(1,nb*nn*100),8)
+  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(MAX(1,nb*nn*nm),8)
+  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(MAX(1,nb*nn),8)
   WRITE(*,'(A,ES11.3)')'  Build  = ',build_optime/REAL(nb,8)
 END IF
 !---Checksums of NL residual and Jacobian action (for A/B comparisons)

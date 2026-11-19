@@ -288,6 +288,21 @@ def parse_output(text):
     return r
 
 
+def mpiexec_cmd(mpiexec):
+    """MPI launcher command; OpenMPI binds each rank to one core by default for np<=2, which would leave the
+    OpenMP threads of a rank on a single core, so binding is disabled for OpenMPI unless set explicitly"""
+    cmd = mpiexec.split()
+    if '--bind-to' in cmd:
+        return cmd
+    try:
+        ver = subprocess.run([cmd[0], '--version'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.decode()
+    except OSError:
+        ver = ''
+    if 'Open MPI' in ver or 'OpenRTE' in ver:
+        cmd += ['--bind-to', 'none']
+    return cmd
+
+
 def run_case(case, args, src_dir, exe):
     threads = case['threads'] if case['threads'] is not None else args.threads
     run_dir = os.path.join(args.work_dir, args.tag, case['name'])
@@ -297,7 +312,7 @@ def run_case(case, args, src_dir, exe):
     write_inputs(case, run_dir, src_dir, args)
     cmd = [exe, 'oft.in', 'oft_in.xml']
     if case['nprocs'] > 1:
-        cmd = args.mpiexec.split() + ['-np', str(case['nprocs'])] + cmd
+        cmd = mpiexec_cmd(args.mpiexec) + ['-np', str(case['nprocs'])] + cmd
     if args.perf and case['nprocs'] == 1:
         cmd = [args.perf_exe, 'record', '-F', str(args.perf_freq), '-g', '-o', 'perf.data', '--'] + cmd
     cmd = ['/usr/bin/time', '-v'] + cmd
@@ -420,6 +435,9 @@ def main():
                         help='Extra entry for &xmhd_bench_options (repeatable)')
     parser.add_argument('--pre', default='ilu', choices=('ilu', 'lu'),
                         help='Local solver in block-Jacobi preconditioner/smoother (lu: SuperLU, slow at p>=3)')
+    parser.add_argument('--prof-reps', default=None,
+                        help='Override profile-mode repetitions "builds,nlops_per_build,matvecs_per_nlop" '
+                             '(eg. 5,0,0 for builds only; 1,100,0 for NL residual only)')
     parser.add_argument('--debug', type=int, default=0, help='OFT debug level (1 prints per-level build times)')
     parser.add_argument('--perf', action='store_true', help='Record perf profiles (serial cases only)')
     parser.add_argument('--perf-exe', default=shutil.which('perf') or 'perf')
@@ -440,6 +458,9 @@ def main():
     if args.cases:
         sel = args.cases.split(',')
         cases = [c for c in cases if any(re.fullmatch(s, c['name']) for s in sel)]
+    if args.prof_reps:
+        for c in cases:
+            c['prof_reps'] = args.prof_reps
     if args.list:
         for c in cases:
             print(c['name'], c['order'], 'mg' if c['mg'] else '', 'mfnk' if c['mfnk'] else '', c['mode'], c['nprocs'])
@@ -452,7 +473,7 @@ def main():
     out = args.out or os.path.join(HERE, 'results', args.tag + '.json')
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     meta = machine_info(args)
-    meta.update({'pre': args.pre, 'size': args.size, 'tag': args.tag, 'exe': exe, 'xmhd_opt': args.xmhd_opt, 'bench_opt': args.bench_opt})
+    meta.update({'prof_reps': args.prof_reps, 'pre': args.pre, 'size': args.size, 'tag': args.tag, 'exe': exe, 'xmhd_opt': args.xmhd_opt, 'bench_opt': args.bench_opt})
     records = []
     for case in cases:
         print('Running {0} ...'.format(case['name']), flush=True)

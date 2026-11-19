@@ -23,7 +23,7 @@ CATEGORIES = [
     ('basis: hcurl', r'hcurl_basis|oft_hcurl_eval|oft_hcurl_ceval|hcurl_eval_all|hcurl_ceval_all'),
     ('omp lock/critical/barrier wait', r'gomp_mutex|GOMP_critical|omp_set_lock|gomp_\w*lock|futex|gomp_barrier|'
                                        r'gomp_team_barrier|do_wait|do_spin|gomp_sem|GOMP_barrier'),
-    ('local->global scatter (mat_add)', r'mat_add_local|add_values|fem_mat_add'),
+    ('local->global scatter (mat_add + CSR column search)', r'mat_add_local|add_values|fem_mat_add|oft_sort_MOD_search'),
     ('xmhd_interp_apply (field reconstruction)', r'xmhd_interp_apply|cc_interp'),
     ('xmhd_build_ops (self)', r'xmhd_build_ops'),
     ('xmhd_errmatrix_apply (self)', r'xmhd_errmatrix_apply'),
@@ -44,9 +44,12 @@ def summarize(path):
             m = LINE.match(line)
             if not m:
                 continue
-            pct, sym = float(m.group(1)), m.group(5).strip()
+            pct, dso, sym = float(m.group(1)), m.group(3), m.group(5).strip()
             if m.group(4) == 'k':
                 sym = '[k] ' + sym
+            if 'libgomp' in dso:
+                # libgomp has no symbols here: spin/lock/barrier waits (critical sections, locks, implicit barriers)
+                sym = 'GOMP_critical (libgomp)'
             for cat, pat in CATEGORIES:
                 if re.search(pat, sym):
                     totals[cat] = totals.get(cat, 0.) + pct
