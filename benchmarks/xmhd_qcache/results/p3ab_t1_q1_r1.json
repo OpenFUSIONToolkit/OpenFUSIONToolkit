@@ -1,0 +1,93 @@
+{
+ "meta": {
+  "hostname_hash": 5134,
+  "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+  "ncores": 4,
+  "python": "3.13.18",
+  "date": "2026-11-19 14:34:40",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "git_sha": "592f5119d8f03fb94af8aaaa71e24f3d70f1b4ef",
+  "git_dirty": false,
+  "CMAKE_BUILD_TYPE": "Release",
+  "CMAKE_Fortran_COMPILER": "/usr/bin/gfortran",
+  "OFT_USE_MPI": "TRUE",
+  "CMAKE_HOME_DIRECTORY": "/home/user/OpenFUSIONToolkit/src",
+  "prof_reps": "1,10,0",
+  "pre": "ilu",
+  "size": 1.0,
+  "tag": "p3ab_t1_q1_r1",
+  "exe": "/home/user/OpenFUSIONToolkit/builds/build_release/tests/physics/MUG/xmhd_bench",
+  "xmhd_opt": [
+   "xmhd_qcache=1"
+  ],
+  "bench_opt": []
+ },
+ "results": [
+  {
+   "name": "tet_p2",
+   "tag": "p3ab_t1_q1_r1",
+   "pre": "ilu",
+   "order": 2,
+   "mg": false,
+   "mfnk": false,
+   "mode": "profile",
+   "nsteps": 0,
+   "threads": 1,
+   "nprocs": 1,
+   "xmhd_opt": [
+    "xmhd_qcache=1"
+   ],
+   "returncode": 0,
+   "harness_wall_s": 18.381579160690308,
+   "dot_s": 0.0002389,
+   "matvec_s": 3.62e-07,
+   "nlop_s": 0.1871,
+   "build_s": 3.612,
+   "b_dofs": 118800.0,
+   "v_dofs": 49150.0,
+   "n_dofs": 16380.0,
+   "nthreads": 1,
+   "ncells_global": 12288,
+   "ncells_local": 12288,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "prof_setops_n": 1,
+   "prof_setops_total_s": 3.6122,
+   "prof_nlop_n": 11,
+   "prof_nlop_total_s": 2.0505,
+   "prof_preupdate_n": 0,
+   "prof_preupdate_total_s": 0.0,
+   "prof_nlop_loop_total_s": 2.0237,
+   "qcache_mode": 1,
+   "qcache_setup_s": 0.26324,
+   "qcache_mem_mb": 258.001,
+   "nlop_norm": 0.8598465835231318,
+   "matvec_norm": 0.9053626678116886,
+   "kern_ncells": 12288,
+   "kern_nqp": 14,
+   "kern_jacobian_s": 0.005194,
+   "kern_lag_s": 0.012928,
+   "kern_h1_s": 0.023619,
+   "kern_hcurl_s": 0.023322,
+   "kern_log2phys_s": 0.0085918,
+   "kern_basis_s": 0.059869000000000006,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 1,
+     "total_s": 3.6118,
+     "avg_s": 3.6118,
+     "nrows": 230407,
+     "nnz": 37697013
+    }
+   ],
+   "build_fine_avg_s": 3.6118,
+   "build_coarse_avg_s": 0,
+   "jac_nnz_total": 37697013,
+   "max_rss_mb": 1033.20703125,
+   "wall_s": 18.37
+  }
+ ]
+}
