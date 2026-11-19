@@ -1,0 +1,241 @@
+{
+ "meta": {
+  "hostname_hash": 38633,
+  "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+  "ncores": 4,
+  "python": "3.13.18",
+  "date": "2026-11-19 04:54:18",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "git_sha": "f064020ef0cc9e88027eccf30b9f14f9c4e0eba6",
+  "git_dirty": false,
+  "CMAKE_BUILD_TYPE": "Release",
+  "CMAKE_Fortran_COMPILER": "/usr/bin/gfortran",
+  "OFT_USE_MPI": "TRUE",
+  "CMAKE_HOME_DIRECTORY": "/home/user/OpenFUSIONToolkit/src",
+  "prof_reps": null,
+  "pre": "ilu",
+  "size": 1.0,
+  "tag": "perf_run",
+  "exe": "/home/user/OpenFUSIONToolkit/builds/build_release/tests/physics/MUG/xmhd_bench",
+  "xmhd_opt": [],
+  "bench_opt": []
+ },
+ "results": [
+  {
+   "name": "tet_p3_mg_run",
+   "tag": "perf_run",
+   "pre": "ilu",
+   "order": 3,
+   "mg": true,
+   "mfnk": false,
+   "mode": "run",
+   "nsteps": 5,
+   "threads": 4,
+   "nprocs": 1,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 99.29933905601501,
+   "b_dofs": 38140.0,
+   "v_dofs": 20740.0,
+   "n_dofs": 6912.0,
+   "nthreads": 4,
+   "ncells_global": 1536,
+   "ncells_local": 1536,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "run_time_s": 96.666,
+   "final_norm_B": 0.3318468481535668,
+   "final_norm_V": 4700357.35569252,
+   "final_norm_Ti": 1671.641573313295,
+   "prof_setops_n": 6,
+   "prof_setops_total_s": 6.4154,
+   "prof_nlop_n": 27,
+   "prof_nlop_total_s": 0.98369,
+   "prof_preupdate_n": 1,
+   "prof_preupdate_total_s": 4.44e-06,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 6,
+     "total_s": 1.4837,
+     "avg_s": 0.24729,
+     "nrows": 30599,
+     "nnz": 5122413
+    },
+    {
+     "level": 3,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 6,
+     "total_s": 4.9306,
+     "avg_s": 0.82176,
+     "nrows": 86631,
+     "nnz": 24759995
+    }
+   ],
+   "build_fine_avg_s": 0.82176,
+   "build_coarse_avg_s": 0.24729,
+   "jac_nnz_total": 29882408,
+   "steps": [
+    {
+     "step": 1,
+     "t": 2e-07,
+     "lits": 42,
+     "nlits": 3,
+     "time_s": 32.458,
+     "dt": 2e-07
+    },
+    {
+     "step": 2,
+     "t": 3.99005e-07,
+     "lits": 48,
+     "nlits": 4,
+     "time_s": 21.384,
+     "dt": 1.99e-07
+    },
+    {
+     "step": 3,
+     "t": 5.940299e-07,
+     "lits": 38,
+     "nlits": 3,
+     "time_s": 12.524,
+     "dt": 1.95e-07
+    },
+    {
+     "step": 4,
+     "t": 7.89523e-07,
+     "lits": 42,
+     "nlits": 3,
+     "time_s": 13.722,
+     "dt": 1.95e-07
+    },
+    {
+     "step": 5,
+     "t": 9.836228e-07,
+     "lits": 47,
+     "nlits": 3,
+     "time_s": 14.759,
+     "dt": 1.94e-07
+    }
+   ],
+   "step_time_avg_s": 18.9694,
+   "step_time_avg_excl1_s": 15.597249999999999,
+   "lits_total": 217,
+   "nlits_total": 16,
+   "max_rss_mb": 1871.96875,
+   "wall_s": 99.28999999999999,
+   "perf_report": "/home/user/OpenFUSIONToolkit/benchmarks/xmhd_qcache/runs/perf_run/tet_p3_mg_run/perf_report.txt",
+   "perf_children": "/home/user/OpenFUSIONToolkit/benchmarks/xmhd_qcache/runs/perf_run/tet_p3_mg_run/perf_children.txt"
+  },
+  {
+   "name": "tet_p3_mg_mfnk_run",
+   "tag": "perf_run",
+   "pre": "ilu",
+   "order": 3,
+   "mg": true,
+   "mfnk": true,
+   "mode": "run",
+   "nsteps": 5,
+   "threads": 4,
+   "nprocs": 1,
+   "xmhd_opt": [],
+   "returncode": 0,
+   "harness_wall_s": 96.28792190551758,
+   "b_dofs": 38140.0,
+   "v_dofs": 20740.0,
+   "n_dofs": 6912.0,
+   "nthreads": 4,
+   "ncells_global": 1536,
+   "ncells_local": 1536,
+   "mesh_order": 1,
+   "cell_np": 4,
+   "run_time_s": 93.009,
+   "final_norm_B": 0.3319481382912483,
+   "final_norm_V": 4716685.716669281,
+   "final_norm_Ti": 1672.00332262166,
+   "prof_setops_n": 5,
+   "prof_setops_total_s": 5.7322,
+   "prof_nlop_n": 210,
+   "prof_nlop_total_s": 8.444,
+   "prof_preupdate_n": 2,
+   "prof_preupdate_total_s": 5.667e-06,
+   "levels": [
+    {
+     "level": 2,
+     "order": 2,
+     "finemesh": true,
+     "ncalls": 5,
+     "total_s": 1.5123,
+     "avg_s": 0.30246,
+     "nrows": 30599,
+     "nnz": 5122413
+    },
+    {
+     "level": 3,
+     "order": 3,
+     "finemesh": true,
+     "ncalls": 5,
+     "total_s": 4.2191,
+     "avg_s": 0.84381,
+     "nrows": 86631,
+     "nnz": 24759995
+    }
+   ],
+   "build_fine_avg_s": 0.84381,
+   "build_coarse_avg_s": 0.30246,
+   "jac_nnz_total": 29882408,
+   "steps": [
+    {
+     "step": 1,
+     "t": 2e-07,
+     "lits": 34,
+     "nlits": 2,
+     "time_s": 30.644,
+     "dt": 2e-07
+    },
+    {
+     "step": 2,
+     "t": 4e-07,
+     "lits": 31,
+     "nlits": 2,
+     "time_s": 17.66,
+     "dt": 2e-07
+    },
+    {
+     "step": 3,
+     "t": 6e-07,
+     "lits": 34,
+     "nlits": 2,
+     "time_s": 12.795,
+     "dt": 2e-07
+    },
+    {
+     "step": 4,
+     "t": 8e-07,
+     "lits": 32,
+     "nlits": 2,
+     "time_s": 17.944,
+     "dt": 2e-07
+    },
+    {
+     "step": 5,
+     "t": 1e-06,
+     "lits": 33,
+     "nlits": 2,
+     "time_s": 12.048,
+     "dt": 2e-07
+    }
+   ],
+   "step_time_avg_s": 18.2182,
+   "step_time_avg_excl1_s": 15.11175,
+   "lits_total": 164,
+   "nlits_total": 10,
+   "max_rss_mb": 1874.54296875,
+   "wall_s": 96.28,
+   "perf_report": "/home/user/OpenFUSIONToolkit/benchmarks/xmhd_qcache/runs/perf_run/tet_p3_mg_mfnk_run/perf_report.txt",
+   "perf_children": "/home/user/OpenFUSIONToolkit/benchmarks/xmhd_qcache/runs/perf_run/tet_p3_mg_mfnk_run/perf_children.txt"
+  }
+ ]
+}
