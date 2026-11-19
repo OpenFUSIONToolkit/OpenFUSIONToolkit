@@ -923,7 +923,8 @@ contains
 !! shared with other processes (as for `get_local`), or of block `iblock` only.
 !! Backends that store local values contiguously (native vectors) return a pointer
 !! into the vector's own storage without copying; this default implementation,
-!! used by other backends, returns a copy obtained with `get_local`. Callers must
+!! used by other backends, returns a copy obtained with `get_local` (or a zeroed
+!! array for @ref OFT_ACCESS_ACCUMULATE, without reading the vector). Callers must
 !! work correctly in both cases.
 !!
 !! Contract:
@@ -952,8 +953,19 @@ DEBUG_STACK_PUSH
 IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vector_borrow_local',__FILE__)
 NULLIFY(vtmp)
-CALL self%get_local(vtmp,iblock)
-IF(mode==OFT_ACCESS_ACCUMULATE)vtmp=0.d0
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Zeroed contributions; values are not read, as get_local could overwrite contributions
+  !---already held by the backend for the blocks released earlier in this accumulation
+  IF(PRESENT(iblock))THEN
+    IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vector_borrow_local',__FILE__)
+    ALLOCATE(vtmp(self%map(iblock)%n))
+  ELSE
+    ALLOCATE(vtmp(self%n))
+  END IF
+  vtmp=0.d0
+ELSE
+  CALL self%get_local(vtmp,iblock)
+END IF
 array=>vtmp
 DEBUG_STACK_POP
 end subroutine vector_borrow_local
@@ -1061,8 +1073,19 @@ DEBUG_STACK_PUSH
 IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvector_borrow_local',__FILE__)
 NULLIFY(vtmp)
-CALL self%get_local(vtmp,iblock)
-IF(mode==OFT_ACCESS_ACCUMULATE)vtmp=(0.d0,0.d0)
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Zeroed contributions; values are not read, as get_local could overwrite contributions
+  !---already held by the backend for the blocks released earlier in this accumulation
+  IF(PRESENT(iblock))THEN
+    IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvector_borrow_local',__FILE__)
+    ALLOCATE(vtmp(self%map(iblock)%n))
+  ELSE
+    ALLOCATE(vtmp(self%n))
+  END IF
+  vtmp=(0.d0,0.d0)
+ELSE
+  CALL self%get_local(vtmp,iblock)
+END IF
 array=>vtmp
 DEBUG_STACK_POP
 end subroutine cvector_borrow_local
