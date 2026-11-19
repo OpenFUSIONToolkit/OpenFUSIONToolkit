@@ -228,3 +228,27 @@ NL residual dominated (`--prof-reps 1,100,0`; still includes one build and setup
   - runs `xmhd_prof_kernels`;
   - **fixes** the `Build =` line, which printed `matvec_time/10` instead of the build time.
 - Verified with `test_alfven.py` and `test_sound.py`: see "Regression tests" below.
+
+## Regression tests
+
+Run from `<build_dir>/tests` with `./run_test.sh`, `OMP_NUM_THREADS=2`. The full `test_alfven.py`/`test_sound.py`
+run was stopped after ~1 h in the slow MPI p-MG cases, so a reduced subset was run instead:
+
+| test | branch (instrumented) | `main` xmhd.F90 |
+|---|---|---|
+| alfven `test_nl_r1_p2` | PASSED | |
+| alfven `test_nl_r1_p2_mpi[False-False]` (2 ranks, NK) | PASSED | |
+| alfven `test_nl_r1_p2_mpi[False-True]` (2 ranks, MFNK) | PASSED | |
+| alfven `test_lin_r1_p2` | PASSED | |
+| alfven `test_hex_nl_r1_p2` | PASSED | |
+| sound `test_nl_r1_p2` | PASSED | |
+| sound `test_nl_r1_p2_mpi[False-False-False]` | PASSED | |
+| sound `test_lin_r1_p2` | PASSED | |
+| sound `test_nl_r1_p3` (p-MG) | PASSED | |
+| alfven `test_nl_r1_p3` (p-MG, NL) | FAILED: "NL Solver failed to converge" | FAILED (same) |
+| alfven `test_lin_r1_p3` (p-MG, linear) | FAILED: "Solver did not converge" | FAILED (same) |
+
+The two alfven p=3 p-MG failures also occur with unmodified `main` `xmhd.F90` in this container (Ubuntu
+SuperLU/OpenMPI/OpenBLAS), so they are environment issues and not caused by the instrumentation. They are
+consistent with the MG fragility seen while setting up the benchmark. `PASSED` tests compare errors against
+stored reference values, which confirms the counters do not change results.
