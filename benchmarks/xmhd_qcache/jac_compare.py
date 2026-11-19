@@ -69,7 +69,12 @@ def run(args):
     exe = os.path.join(os.path.abspath(args.build_dir), 'tests', 'physics', 'MUG', 'xmhd_bench')
     if args.exe:
         exe = os.path.abspath(args.exe)
-    workdir = os.path.join(os.path.abspath(args.build_dir), 'tests', 'physics', 'MUG')
+    # Private work directory (inputs are written there), with access to the Marklin test meshes
+    workdir = os.path.join(out, 'work', 'MUG')
+    os.makedirs(workdir, exist_ok=True)
+    marklin = os.path.join(out, 'work', 'Marklin')
+    if not os.path.exists(marklin):
+        os.symlink(os.path.join(os.path.abspath(args.build_dir), 'tests', 'physics', 'Marklin'), marklin)
     env = dict(os.environ)
     env.setdefault('OMP_NUM_THREADS', '2')
     for name, mesh_fn, order, xmhd, bench, minlev, nproc in cases:

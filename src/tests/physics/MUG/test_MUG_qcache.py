@@ -3,11 +3,14 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# MUG tests: equivalence of the xMHD nonlinear residual implementations (xmhd_qcache=0: direct basis
-# evaluation, 1: quadrature-point cache in FULL mode, 2: cache in REFERENCE mode). The xmhd_bench driver
-# (mode='qcheck') evaluates the residual of the same nonlinear state with each implementation for dt>0,
-# dt>0 with fields at the start of the step (back_step), and the dt<0 diagnostics call, and reports the
-# differences of every field block, the diagnostic values and the floor flags.
+# MUG tests: equivalence of the xMHD nonlinear residual and Jacobian implementations (xmhd_qcache=0: direct
+# basis evaluation, 1: quadrature-point cache in FULL mode (residual only), 2: cache in REFERENCE mode). The
+# xmhd_bench driver (mode='qcheck') evaluates the residual of the same nonlinear state with each implementation
+# for dt>0, dt>0 with fields at the start of the step (back_step), and the dt<0 diagnostics call, and reports
+# the differences of every field block, the diagnostic values and the floor flags. It then builds the Jacobian
+# of every level with xmhd_qcache=0 (searching the CSR column lists, the reference), xmhd_qcache=2 with the
+# precomputed CSR position map (the default) and xmhd_qcache=0 with the position map, and reports entrywise
+# differences relative to the row maximum and the differences of products with random vectors.
 import os
 import re
 import sys
@@ -85,6 +88,11 @@ equation_groups = {'Bc': 'B', 'Bg': 'B', 'Vx': 'V', 'Vy': 'V', 'Vz': 'V'}
 global_tol = 1.E-13
 # Diagnostic integrals and floor flags (no cancellation)
 diag_tol = 1.E-12
+# Jacobian entries relative to the largest entry of the same row (summation order differs; curved cells give
+# ~3E-12 for H(Curl) curl couplings, whose physical values are rebuilt from cancelling logical components) and
+# products with random vectors relative to their norm
+jac_row_tol = 1.E-11
+jac_matvec_tol = 1.E-12
 
 
 def cube_mesh(ni, hex_mesh=False, periodic=True, nlevels=1, nbase=1):
@@ -114,6 +122,18 @@ def revolved_mesh(cell_type):
     return {'mesh': mesh, 'mesh_groups': groups, 'lam': '2.,2.,2.'}
 
 
+def parse_jcheck(output):
+    '''Parse XMHD_JCHECK lines into a list of (level, cfgs, rel_row, rel_global, rel_matvec)'''
+    results = []
+    for line in output.splitlines():
+        if line.startswith('XMHD_JCHECK level='):
+            level = int(re.search(r'level=\s*(\d+)', line).group(1))
+            cfgs = re.search(r'cfgs=(\S+)', line).group(1)
+            rel_row, rel_glob, rel_mv = (float(v) for v in line.split()[-3:])
+            results.append((level, cfgs, rel_row, rel_glob, rel_mv))
+    return results
+
+
 def parse_qcheck(output):
     '''Parse XMHD_QCHECK lines into (block results, diagnostic results, flag results, max_rel)'''
     blocks, diags, flags = [], [], []
@@ -137,8 +157,13 @@ def parse_qcheck(output):
     return blocks, diags, flags, max_rel
 
 
-def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1):
-    '''Write the input, run the equivalence check, and validate the reported differences'''
+def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True):
+    '''Write the input, run the equivalence check, and validate the reported differences
+
+    nlevels is the expected number of Jacobian levels (polynomial levels on the finest mesh); jac=False
+    skips the Jacobian comparison (memory-heavy configurations)'''
+    if not jac:
+        bench += " jac_check=F\n"
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(order=order, minlev=minlev, xmhd=xmhd, bench=bench, **mesh))
@@ -173,6 +198,18 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1):
     for case, modes, max_diff in flags:
         if max_diff > diag_tol:
             print('FAILED: floor flags {0} {1} max_diff={2:.3E}'.format(case, modes, max_diff))
+            passed = False
+    # Jacobian: two configurations (cache + position map, direct + position map) against the reference per level
+    jres = parse_jcheck(output)
+    if jac:
+        assert len(jres) == 2*nlevels
+        assert len(set(r[0] for r in jres)) == nlevels
+    else:
+        assert len(jres) == 0
+    for level, cfgs, rel_row, rel_glob, rel_mv in jres:
+        if (rel_row > jac_row_tol) or (rel_mv > jac_matvec_tol):
+            print('FAILED: Jacobian level={0} cfgs={1} rel_row={2:.3E} rel_matvec={3:.3E}'.format(
+                level, cfgs, rel_row, rel_mv))
             passed = False
     return passed
 
@@ -226,9 +263,18 @@ def test_qcache_hex(order):
 
 
 def test_qcache_curved_p3():
-    '''Residual implementations agree on a curved (quadratic) tet mesh with shaping, floors and solid cells'''
+    '''Residual implementations agree on a curved (quadratic) tet mesh with shaping, floors and solid cells
+
+    The Jacobian comparison is skipped here (the p=3 Jacobian of this mesh needs ~8 GB for the check), see
+    test_qcache_curved_p2'''
     bench = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
-    assert qcheck_case(curved_mesh(), 3, xmhd=" xmhd_hall=T\n", bench=bench)
+    assert qcheck_case(curved_mesh(), 3, xmhd=" xmhd_hall=T\n", bench=bench, jac=False)
+
+
+def test_qcache_curved_p2():
+    '''Residual and Jacobian implementations agree on a curved (quadratic) tet mesh with shaping, floors and solid cells'''
+    bench = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
+    assert qcheck_case(curved_mesh(), 2, xmhd=" xmhd_hall=T\n", bench=bench)
 
 
 @pytest.mark.parametrize("vbc", ['norm', 'tang'])
@@ -245,8 +291,14 @@ def test_qcache_revolved(cell_type):
 
 
 def test_qcache_pmg():
-    '''Residual implementations agree on the finest level of a p-multigrid hierarchy (p=3 down to p=2)'''
-    assert qcheck_case(cube_mesh(2), 3, minlev=2)
+    '''Residual implementations agree on the finest level, Jacobians on all levels of a p-multigrid hierarchy (p=3, 2)'''
+    assert qcheck_case(cube_mesh(2), 3, minlev=2, nlevels=2)
+
+
+def test_qcache_pmg_p4():
+    '''Jacobians agree on all levels of a p-multigrid hierarchy (p=4, 3, 2) with Hall, hyper terms and shaping'''
+    xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
+    assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3)
 
 
 @pytest.mark.mpi

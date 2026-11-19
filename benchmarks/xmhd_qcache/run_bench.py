@@ -273,7 +273,21 @@ def parse_output(text):
         levels.append({'level': int(m.group(1)), 'order': int(m.group(2)), 'finemesh': m.group(3) == 'T',
                        'ncalls': int(m.group(4)), 'total_s': float(m.group(5)), 'avg_s': float(m.group(6)),
                        'nrows': int(m.group(7)), 'nnz': int(m.group(8))})
+    for m in re.finditer(r'^XMHD_PROF jac level,qc_builds,posmap_mb,posmap_setup_s\s+(\d+)\s+(\d+)\s+' + FLOAT + r'\s+' + FLOAT,
+                         text, re.M):
+        for lv in levels:
+            if lv['level'] == int(m.group(1)):
+                lv['qc_builds'] = int(m.group(2))
+                lv['posmap_mb'] = float(m.group(3))
+                lv['posmap_setup_s'] = float(m.group(4))
+    m = re.search(r'^XMHD_PROF jcache coarse_mem_mb,blas,posmap\s+' + FLOAT + r'\s+([TF])\s+(\d+)', text, re.M)
+    if m:
+        r['jcache_coarse_mem_mb'] = float(m.group(1))
+        r['jac_blas'] = m.group(2) == 'T'
+        r['jac_posmap'] = int(m.group(3))
     if levels:
+        r['posmap_mem_mb'] = sum(lv.get('posmap_mb', 0.) for lv in levels)
+        r['posmap_setup_s'] = sum(lv.get('posmap_setup_s', 0.) for lv in levels)
         r['levels'] = levels
         top = max(lv['level'] for lv in levels)
         r['build_fine_avg_s'] = sum(lv['avg_s'] for lv in levels if lv['level'] == top)

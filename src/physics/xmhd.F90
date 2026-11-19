@@ -31,6 +31,7 @@ MODULE xmhd
 #define XMHD_RST_LEN 5
 #endif
 USE oft_base
+USE oft_sort, ONLY: search_array
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
@@ -158,6 +159,26 @@ type :: xmhd_qcache_data
   CLASS(oft_hcurl_fem), POINTER :: hcurl_fe => NULL() !< H(Curl) space the cache was built for
 end type xmhd_qcache_data
 !------------------------------------------------------------------------------
+!> Precomputed positions of the local Jacobian entries of every cell in a native CSR matrix
+!!
+!! Built by \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup" for one level. Blocks with the
+!! same pair of FE spaces have the same column pattern, so one position table per (row space, column
+!! space) pair is stored: entry `(jr,jc)` of the pair is the position of the local entry in the row's
+!! extent within its block (`map(f,g)%%ext(1,row)` + value - 1 is the index into `M`), as cached by
+!! `mat_add_values` (`loc_cache`).
+!------------------------------------------------------------------------------
+type :: xmhd_jac_posmap_data
+  INTEGER(i4) :: nc = 0 !< Number of cells
+  INTEGER(i4) :: nr = 0 !< Matrix rows when built
+  INTEGER(i4) :: nnz = 0 !< Matrix non-zeros when built
+  INTEGER(i4) :: ncell = 0 !< Entries per cell (all space pairs)
+  INTEGER(i4) :: pair(3,3) = 0 !< Offset of each (row space, column space) table in a cell's entries + 1 (0 = unused)
+  INTEGER(i8) :: mem = 0 !< Memory [bytes]
+  REAL(r8) :: setup_time = 0.d0 !< Wall time for setup [s]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_ref => NULL() !< Column list of the matrix it was built for
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: rel => NULL() !< Positions [ncell,nc]
+end type xmhd_jac_posmap_data
+!------------------------------------------------------------------------------
 !> Block structure for contracting the pointwise Jacobian coefficients into local matrices
 !!
 !! See \ref xmhd::xmhd_jac_plan_setup "xmhd_jac_plan_setup". Row spaces `s`: 1 Lagrange, 2 H(Curl),
@@ -207,7 +228,8 @@ type :: xmhd_ops
   CLASS(oft_matrix), POINTER :: J => NULL() !< Jacobian matrix
   CLASS(oft_matrix), POINTER :: interp => NULL() !< Interpolation matrix
   TYPE(oft_xmhd_errmatrix) :: A !< NL metric matrix
-  TYPE(xmhd_qcache_data), POINTER :: qc => NULL() !< Quadrature-point cache for the NL residual (`xmhd_qcache>0`)
+  TYPE(xmhd_qcache_data), POINTER :: qc => NULL() !< Quadrature-point cache for the NL residual (`xmhd_qcache>0`) and Jacobian (`xmhd_qcache=2`)
+  TYPE(xmhd_jac_posmap_data), POINTER :: pm => NULL() !< CSR positions of the local Jacobian entries (`xmhd_jac_posmap`)
 end type xmhd_ops
 !------------------------------------------------------------------------------
 !> Interpolate a xMHD operator fields
@@ -437,11 +459,19 @@ LOGICAL :: xmhd_mfnk = .FALSE. !< Use Jacobian free non-linear advance
 INTEGER(i4), PUBLIC :: xmhd_qcache = 2
 !> Form local Jacobian matrices with BLAS `dgemm` (otherwise a cache-blocked loop), see \ref xmhd::xmhd_jac_gemm_nt "xmhd_jac_gemm_nt"
 LOGICAL, PUBLIC :: xmhd_jac_blas = .TRUE.
+!> Precomputed CSR positions of local Jacobian entries for native matrices: 0 = off (search every
+!! entry), 1 = on (see \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup")
+INTEGER(i4), PUBLIC :: xmhd_jac_posmap = 1
+REAL(r8), PUBLIC :: xmhd_jac_posmap_maxmb = -1.d0 !< Skip the position map of a level if it needs more memory per rank [MB] (negative: no limit)
+INTEGER(i4), PUBLIC :: xmhd_prof_nbuild_qc(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level on the quadrature cache
+INTEGER(i8), PUBLIC :: xmhd_prof_posmap_mem(xmhd_prof_maxlev) = 0 !< Memory of the CSR position map per level [bytes]
+REAL(r8), PUBLIC :: xmhd_prof_posmap_time(xmhd_prof_maxlev) = 0.d0 !< Accumulated setup time of the CSR position map per level [s]
 LOGICAL, PUBLIC :: xmhd_qcheck_solid = .FALSE. !< Equivalence check only: mark a subset of cells as solid
 LOGICAL, PUBLIC :: xmhd_qcheck_negsrc = .FALSE. !< Equivalence check only: set a floor source pattern
 !> Equivalence check only: if set, write the Jacobian of every level (built at the check state) to
 !! `<prefix>_L<level>_R<rank>.bin` (see \ref xmhd_jac_dump)
 CHARACTER(LEN=OFT_PATH_SLEN), PUBLIC :: xmhd_jac_dump_prefix = ''
+LOGICAL, PUBLIC :: xmhd_qcheck_jac = .TRUE. !< Equivalence check only: also compare the Jacobian implementations (\ref xmhd_jac_check)
 REAL(r8), PUBLIC :: xmhd_prof_tqcache = 0.d0 !< Accumulated quadrature-cache setup time [s]
 INTEGER(i8), PUBLIC :: xmhd_prof_qcache_mem = 0 !< Memory of the most recently built quadrature cache [bytes]
 INTEGER(i8), PUBLIC :: xmhd_prof_jcache_mem = 0 !< Accumulated memory of the coarse-level Jacobian quadrature caches built [bytes]
@@ -539,6 +569,8 @@ CONTAINS
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
 !! | `xmhd_qcache=2`    | Quadrature implementation: 0 = evaluate basis functions directly (reference implementation), 1 = precomputed quadrature-point cache in FULL mode for the NL residual (physical basis stored per cell: high memory; Jacobian evaluated directly), 2 = quadrature-point cache in REFERENCE mode (reference tables + per-cell geometry: low memory) for the NL residual and the Jacobian on all levels on the finest mesh. All give the same result to round-off | int |
+!! | `xmhd_jac_posmap=1` | Precompute the CSR positions of local Jacobian entries for native matrices (0 = off: search the column list for every entry). Uses `4*sum(nce_s*nce_t)` bytes per cell and level | int |
+!! | `xmhd_jac_posmap_maxmb=-1` | Skip the position map of a level if it needs more memory per MPI rank [MB] (neg for no limit) | real |
 !
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
@@ -560,7 +592,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_qcache
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_qcache,xmhd_jac_posmap,xmhd_jac_posmap_maxmb
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -627,6 +659,8 @@ IF(.NOT.xmhd_adv_b)THEN
 END IF
 IF(.NOT.xmhd_adv_den)d2_dens=-1.d0
 IF(.NOT.xmhd_two_temp)xmhd_therm_equil=.FALSE.
+IF((xmhd_jac_posmap<0).OR.(xmhd_jac_posmap>1))CALL oft_abort('Invalid "xmhd_jac_posmap" (0 or 1)', &
+  'xmhd_read_settings',__FILE__)
 IF((xmhd_qcache<0).OR.(xmhd_qcache>2))CALL oft_abort('Invalid "xmhd_qcache" (0, 1 or 2)', &
   'xmhd_read_settings',__FILE__)
 CALL xmhd_setup_regions
@@ -2649,6 +2683,159 @@ DO j0=1,n,nb
 END DO
 END SUBROUTINE xmhd_jac_gemm_nt
 !------------------------------------------------------------------------------
+!> Build the CSR position map of the local Jacobian entries for the current level (native matrices)
+!!
+!! For every cell and every (row space, column space) pair used by the blocks of `plan`, stores the position
+!! of each local entry within the row extent of its block, as `mat_add_values` computes with a search of
+!! the row's column list (`oft_sort::search_array`). Assembly then adds local matrices without searching
+!! (\ref xmhd_jac_add_native). Memory is `4*sum(nce_s*nce_t)` bytes per cell. The map is tied to the matrix
+!! (column list, rows, non-zeros) and rebuilt by \ref xmhd_build_ops if that changes. Must not be called
+!! from inside an OpenMP parallel region.
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_jac_posmap_setup(ops,plan)
+TYPE(xmhd_ops), INTENT(inout) :: ops !< Operator container of the current level
+TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure of the current level
+INTEGER(i4) :: i,s,t,k,f,g,jr,jc,jp,jn,o,rf(3,3),cf(3,3)
+INTEGER(i4), ALLOCATABLE :: dofs(:,:)
+REAL(r8) :: est
+LOGICAL :: fail
+TYPE(xmhd_jac_posmap_data), POINTER :: pm
+TYPE(oft_timer) :: mytimer
+CALL xmhd_jac_posmap_delete(ops)
+IF(xmhd_jac_posmap<=0)RETURN
+SELECT TYPE(Jac=>ops%J)
+CLASS IS(oft_native_matrix)
+  CALL mytimer%tick
+  ALLOCATE(ops%pm)
+  pm=>ops%pm
+  !---Space pairs used by the blocks (fluid cells use all blocks) and a representative block of each
+  rf=0; cf=0; pm%ncell=0
+  DO k=1,plan%nch(1,1)+plan%nch(2,1)+plan%nch(3,1)
+    s=1; o=k
+    DO WHILE(o>plan%nch(s,1))
+      o=o-plan%nch(s,1); s=s+1
+    END DO
+    f=plan%chf(o,s,1); g=plan%chg(o,s,1); t=plan%fsp(g)
+    IF(pm%pair(s,t)>0)CYCLE
+    pm%pair(s,t)=pm%ncell+1
+    pm%ncell=pm%ncell+plan%nce(s)*plan%nce(t)
+    rf(s,t)=f; cf(s,t)=g
+  END DO
+  pm%nc=mesh%nc
+  est=4.d0*REAL(pm%ncell,8)*REAL(mesh%nc,8)/1.d6
+  IF((xmhd_jac_posmap_maxmb>=0.d0).AND.(est>xmhd_jac_posmap_maxmb))THEN
+    IF(oft_env%head_proc.AND.(oft_env%pm.OR.oft_debug_print(1)))WRITE(*,'(2X,A,I3,A,F12.3,A)') &
+      'xMHD Jacobian position map skipped (level ',xmhd_level,'): ',est,' MB'
+    DEALLOCATE(ops%pm)
+    NULLIFY(ops%pm)
+    RETURN
+  END IF
+  ALLOCATE(pm%rel(pm%ncell,mesh%nc))
+  fail=.FALSE.
+  !$omp parallel private(i,s,t,f,g,jr,jc,jp,jn,o,dofs) reduction(.OR.:fail)
+  ALLOCATE(dofs(MAXVAL(plan%nce),3))
+  !$omp do schedule(static)
+  DO i=1,mesh%nc
+    CALL oft_lagrange%ncdofs(i,dofs(1:plan%nce(1),1))
+    CALL oft_hcurl%ncdofs(i,dofs(1:plan%nce(2),2))
+    CALL oft_hgrad%ncdofs(i,dofs(1:plan%nce(3),3))
+    DO t=1,3
+      DO s=1,3
+        IF(pm%pair(s,t)==0)CYCLE
+        f=rf(s,t); g=cf(s,t); o=pm%pair(s,t)-1
+        DO jr=1,plan%nce(s)
+          jp=Jac%map(f,g)%ext(1,dofs(jr,s))
+          jn=Jac%map(f,g)%ext(2,dofs(jr,s))
+          DO jc=1,plan%nce(t)
+            k=search_array(Jac%j_map(g)%offset+dofs(jc,t),Jac%lc(jp:jn),jn-jp+1)
+            IF(k==0)fail=.TRUE.
+            pm%rel(o+(jc-1)*plan%nce(s)+jr,i)=k
+          END DO
+        END DO
+      END DO
+    END DO
+  END DO
+  DEALLOCATE(dofs)
+  !$omp end parallel
+  IF(fail)CALL oft_abort('Entry not found','xmhd_jac_posmap_setup',__FILE__)
+  pm%nr=Jac%nr
+  pm%nnz=Jac%nnz
+  pm%lc_ref=>Jac%lc
+  pm%mem=4_i8*SIZE(pm%rel,KIND=i8)
+  pm%setup_time=mytimer%tock()
+  IF(xmhd_level<=xmhd_prof_maxlev)THEN
+    xmhd_prof_posmap_mem(xmhd_level)=pm%mem
+    xmhd_prof_posmap_time(xmhd_level)=xmhd_prof_posmap_time(xmhd_level)+pm%setup_time
+  END IF
+  IF(oft_env%head_proc.AND.(oft_env%pm.OR.oft_debug_print(1)))THEN
+    WRITE(*,'(2X,A,I3,A,F10.4,A,F12.3,A)')'xMHD Jacobian position map (level ',xmhd_level,'): setup ', &
+      pm%setup_time,' s, ',REAL(pm%mem,8)/1.d6,' MB (rank 0)'
+  END IF
+END SELECT
+END SUBROUTINE xmhd_jac_posmap_setup
+!------------------------------------------------------------------------------
+!> Test whether the CSR position map of a level matches its Jacobian matrix
+!!
+!! @result Is the map present and built for the current matrix?
+!------------------------------------------------------------------------------
+FUNCTION xmhd_jac_posmap_valid(ops) RESULT(valid)
+TYPE(xmhd_ops), INTENT(in) :: ops !< Operator container
+LOGICAL :: valid
+valid=.FALSE.
+IF(.NOT.ASSOCIATED(ops%pm))RETURN
+IF(ops%pm%nc/=mesh%nc)RETURN
+SELECT TYPE(Jac=>ops%J)
+CLASS IS(oft_native_matrix)
+  valid=(Jac%nr==ops%pm%nr).AND.(Jac%nnz==ops%pm%nnz).AND.ASSOCIATED(ops%pm%lc_ref,Jac%lc)
+END SELECT
+END FUNCTION xmhd_jac_posmap_valid
+!------------------------------------------------------------------------------
+!> Free the CSR position map of a level (safe to call if it was never built)
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_jac_posmap_delete(ops)
+TYPE(xmhd_ops), INTENT(inout) :: ops !< Operator container
+IF(.NOT.ASSOCIATED(ops%pm))RETURN
+IF(ASSOCIATED(ops%pm%rel))DEALLOCATE(ops%pm%rel)
+DEALLOCATE(ops%pm)
+NULLIFY(ops%pm)
+END SUBROUTINE xmhd_jac_posmap_delete
+!------------------------------------------------------------------------------
+!> Add the local Jacobian matrices of one cell to a native matrix using precomputed positions
+!!
+!! Equivalent to `mat_add_local` (\ref fem_composite::fem_mat_add_local "fem_mat_add_local") with
+!! `mat_add_values`, without searching the column lists. Locks the row field if `tlocks` is present.
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_jac_add_native(Jac,pm,plan,mtmp,iloc,cell,jpw,tlocks)
+CLASS(oft_native_matrix), INTENT(inout) :: Jac !< Jacobian matrix
+TYPE(xmhd_jac_posmap_data), INTENT(in) :: pm !< Position map
+TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure
+TYPE(oft_local_mat), INTENT(in) :: mtmp(:,:) !< Local matrices of the cell
+TYPE(oft_1d_int), INTENT(in) :: iloc(:) !< Local-to-global DOF maps per field
+INTEGER(i4), INTENT(in) :: cell !< Cell index
+INTEGER(i4), INTENT(inout) :: jpw(:) !< Work array [max nce]
+INTEGER(KIND=omp_lock_kind), OPTIONAL, INTENT(inout) :: tlocks(:) !< Per-field locks
+INTEGER(i4) :: f,g,s,t,o,nr,jr,jc,k
+DO f=1,plan%nfld
+  IF(PRESENT(tlocks))CALL omp_set_lock(tlocks(f))
+  s=plan%fsp(f); nr=plan%nce(s)
+  DO g=1,plan%nfld
+    IF(.NOT.ASSOCIATED(mtmp(f,g)%m))CYCLE
+    t=plan%fsp(g)
+    o=pm%pair(s,t)-1
+    DO jr=1,nr
+      jpw(jr)=Jac%map(f,g)%ext(1,iloc(f)%v(jr))-1
+    END DO
+    DO jc=1,plan%nce(t)
+      DO jr=1,nr
+        k=jpw(jr)+pm%rel(o+(jc-1)*nr+jr,cell)
+        Jac%M(k)=Jac%M(k)+mtmp(f,g)%m(jr,jc)
+      END DO
+    END DO
+  END DO
+  IF(PRESENT(tlocks))CALL omp_unset_lock(tlocks(f))
+END DO
+END SUBROUTINE xmhd_jac_add_native
+!------------------------------------------------------------------------------
 !> Scale, apply boundary conditions to and add the local Jacobian matrices of one cell
 !!
 !! Shared by both implementations of \ref xmhd_build_ops: applies the velocity/density/hyper-field
@@ -2656,7 +2843,7 @@ END SUBROUTINE xmhd_jac_gemm_nt
 !! revolved-periodic velocity blocks and adds the result to the matrix (without locks for cells that
 !! do not share DOFs with other thread partitions, see \ref xmhd_setup_cell_shared).
 !------------------------------------------------------------------------------
-SUBROUTINE xmhd_jac_finish_cell(Jac,mtmp,iloc,j_lag,j_hgrad,j_hcurl,solid,nolock,tlocks)
+SUBROUTINE xmhd_jac_finish_cell(Jac,mtmp,iloc,j_lag,j_hgrad,j_hcurl,solid,nolock,tlocks,plan,cell,jpw)
 CLASS(oft_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 TYPE(oft_local_mat), INTENT(inout) :: mtmp(:,:) !< Local matrices of the cell
 TYPE(oft_1d_int), INTENT(in) :: iloc(:) !< Local-to-global DOF maps per field
@@ -2666,6 +2853,9 @@ INTEGER(i4), INTENT(in) :: j_hcurl(:) !< H(Curl) DOFs of the cell
 LOGICAL, INTENT(in) :: solid !< Solid cell (B blocks only)?
 LOGICAL, INTENT(in) :: nolock !< Add without locking?
 INTEGER(KIND=omp_lock_kind), INTENT(inout) :: tlocks(:) !< Per-field locks
+TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure
+INTEGER(i4), INTENT(in) :: cell !< Cell index
+INTEGER(i4), INTENT(inout) :: jpw(:) !< Work array [max nce]
 INTEGER(i4) :: m,jr,jc
 REAL(r8) :: umat(3,3),uvec(3)
 !---Scale factors
@@ -2728,7 +2918,18 @@ IF(.NOT.solid)THEN
     END DO
   END IF
 END IF
-!---Add local contribution to full matrix
+!---Add local contribution to full matrix (precomputed positions for native matrices, if available)
+IF(ASSOCIATED(oft_xmhd_ops%pm))THEN
+  SELECT TYPE(Jac)
+  CLASS IS(oft_native_matrix)
+    IF(nolock)THEN
+      CALL xmhd_jac_add_native(Jac,oft_xmhd_ops%pm,plan,mtmp,iloc,cell,jpw)
+    ELSE
+      CALL xmhd_jac_add_native(Jac,oft_xmhd_ops%pm,plan,mtmp,iloc,cell,jpw,tlocks)
+    END IF
+    RETURN
+  END SELECT
+END IF
 IF(nolock)THEN
   CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc)
 ELSE
@@ -2796,13 +2997,23 @@ END DO
 !------------------------------------------------------------------------------
 IF(use_qc)THEN
   CALL xmhd_jac_plan_setup(plan,oft_lagrange%nce,oft_hcurl%nce,oft_hgrad%nce,jqc%geom%nqp)
+ELSE
+  CALL xmhd_jac_plan_setup(plan,oft_lagrange%nce,oft_hcurl%nce,oft_hgrad%nce, &
+    xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad%np)
+END IF
+!---CSR position map (native matrices; rebuilt if the matrix changed)
+IF(xmhd_jac_posmap>0)THEN
+  IF(.NOT.xmhd_jac_posmap_valid(oft_xmhd_ops))CALL xmhd_jac_posmap_setup(oft_xmhd_ops,plan)
+ELSE
+  CALL xmhd_jac_posmap_delete(oft_xmhd_ops)
+END IF
+IF(use_qc)THEN
+  IF(xmhd_level<=xmhd_prof_maxlev)xmhd_prof_nbuild_qc(xmhd_level)=xmhd_prof_nbuild_qc(xmhd_level)+1
   SELECT TYPE(fullin)
   CLASS IS(xmhd_interp)
     CALL xmhd_jac_qcache(plan,jqc,fqc,fullin,Jac,jac_nolock,tlocks)
   END SELECT
 ELSE
-  CALL xmhd_jac_plan_setup(plan,oft_lagrange%nce,oft_hcurl%nce,oft_hgrad%nce, &
-    xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad%np)
   CALL xmhd_jac_direct(plan,fullin,Jac,jac_nolock,tlocks)
 END IF
 CALL xmhd_jac_plan_delete(plan)
@@ -2863,6 +3074,7 @@ CLASS(oft_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 LOGICAL, INTENT(in) :: jac_nolock !< Matrix supports lock-free adds for unshared cells?
 INTEGER(KIND=omp_lock_kind), INTENT(inout) :: tlocks(:) !< Per-field locks
 INTEGER(i4) :: ii,i,ip,m,k,p
+INTEGER(i4), ALLOCATABLE :: jpw(:)
 INTEGER(i4), ALLOCATABLE, TARGET :: j_lag(:),j_hgrad(:),j_hcurl(:)
 REAL(r8), ALLOCATABLE, TARGET :: lag_rop(:),lag_gop(:,:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
 REAL(r8), ALLOCATABLE :: D(:,:)
@@ -2876,7 +3088,8 @@ TYPE(oft_1d_int), ALLOCATABLE :: iloc(:)
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad
 need_pt=xmhd_shaping_active() ! Physical points only needed for shaping functions
 !$omp parallel private(ii,i,m,k,p,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop, &
-!$omp D,goptmp,cgop,vol,det,fulltmp,pt,shp,he,curved,u0,wk,mloc,iloc)
+!$omp D,goptmp,cgop,vol,det,fulltmp,pt,shp,he,curved,u0,wk,mloc,iloc,jpw)
+ALLOCATE(jpw(MAXVAL(plan%nce)))
 ALLOCATE(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 ALLOCATE(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce),hgrad_rop(3,oft_hgrad%nce))
 ALLOCATE(hcurl_rop(3,oft_hcurl%nce),hcurl_cop(3,oft_hcurl%nce))
@@ -2946,12 +3159,12 @@ DO ii=1,mesh%tloc_c(ip)%n
   END DO
   CALL xmhd_jac_contract(plan,p,wk)
   CALL xmhd_jac_finish_cell(Jac,mloc(:,:,p),iloc,j_lag,j_hgrad,j_hcurl,(p==2), &
-    jac_nolock.AND.(.NOT.xmhd_cell_shared(i)),tlocks)
+    jac_nolock.AND.(.NOT.xmhd_cell_shared(i)),tlocks,plan,i,jpw)
 END DO
 END DO
 NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 CALL xmhd_jac_work_free(wk,mloc)
-DEALLOCATE(j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,D,mloc,iloc)
+DEALLOCATE(j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop,hcurl_cop,D,mloc,iloc,jpw)
 !$omp end parallel
 END SUBROUTINE xmhd_jac_direct
 !------------------------------------------------------------------------------
@@ -2981,7 +3194,7 @@ CLASS(oft_matrix), INTENT(inout) :: Jac !< Jacobian matrix
 LOGICAL, INTENT(in) :: jac_nolock !< Matrix supports lock-free adds for unshared cells?
 INTEGER(KIND=omp_lock_kind), INTENT(inout) :: tlocks(:) !< Per-field locks
 INTEGER(i4) :: ii,i,ip,m,k,p,jr,g,nql,nqh,nqc,nqp,nlf,nhv,kte,kn2,wsize
-INTEGER(i4), ALLOCATABLE :: rl(:),rc(:),rg(:)
+INTEGER(i4), ALLOCATABLE :: rl(:),rc(:),rg(:),jpw(:)
 REAL(r8), ALLOCATABLE :: D(:,:),work(:),lc(:,:),hcc(:,:),hgc(:,:),cpt(:,:),cshp(:,:)
 REAL(r8), ALLOCATABLE :: lval(:,:,:),lgrd(:,:,:),hgv(:,:,:),hcv(:,:,:),hcj(:,:,:)
 REAL(r8) :: vals(40),det
@@ -3005,8 +3218,8 @@ IF(j2_ind>0)nhv=2
 wsize=MAX(fem_qcache_work_size(fqc%lag,nlf),fem_qcache_work_size(fqc%hcurl,nhv), &
   fem_qcache_work_size(fqc%hgrad,1))
 !$omp parallel private(ii,i,m,k,p,jr,g,rl,rc,rg,D,work,lc,hcc,hgc,cpt,cshp,lval,lgrd,hgv,hcv,hcj, &
-!$omp vals,det,u0,wk,mloc,iloc)
-ALLOCATE(rl(jqc%lag%nce),rc(jqc%hcurl%nce),rg(jqc%hgrad%nce))
+!$omp vals,det,u0,wk,mloc,iloc,jpw)
+ALLOCATE(rl(jqc%lag%nce),rc(jqc%hcurl%nce),rg(jqc%hgrad%nce),jpw(MAXVAL(plan%nce)))
 ALLOCATE(D(plan%nct,plan%nct),work(wsize))
 ALLOCATE(lc(nql,nlf),hcc(nqc,nhv),hgc(nqh,1),cpt(3,nqp),cshp(4,nqp))
 ALLOCATE(lval(1,nqp,nlf),lgrd(3,nqp,nlf),hgv(3,nqp,1),hcv(3,nqp,nhv),hcj(3,nqp,nhv))
@@ -3097,11 +3310,11 @@ DO ii=1,mesh%tloc_c(ip)%n
     END SELECT
   END DO
   CALL xmhd_jac_finish_cell(Jac,mloc(:,:,p),iloc,jqc%dofs_lag(:,i),jqc%dofs_hgrad(:,i),jqc%dofs_hcurl(:,i), &
-    (p==2),jac_nolock.AND.(.NOT.jqc%geom%cell_shared(i)),tlocks)
+    (p==2),jac_nolock.AND.(.NOT.jqc%geom%cell_shared(i)),tlocks,plan,i,jpw)
 END DO
 END DO
 CALL xmhd_jac_work_free(wk,mloc)
-DEALLOCATE(rl,rc,rg,D,work,lc,hcc,hgc,cpt,cshp,lval,lgrd,hgv,hcv,hcj,mloc,iloc)
+DEALLOCATE(rl,rc,rg,jpw,D,work,lc,hcc,hgc,cpt,cshp,lval,lgrd,hgv,hcv,hcj,mloc,iloc)
 !$omp end parallel
 END SUBROUTINE xmhd_jac_qcache
 !------------------------------------------------------------------------------
@@ -4442,6 +4655,7 @@ INTEGER(i4) :: i
 IF(.NOT.ASSOCIATED(oft_xmhd_ops_ML))RETURN
 DO i=1,SIZE(oft_xmhd_ops_ML)
   CALL xmhd_qcache_delete(oft_xmhd_ops_ML(i))
+  CALL xmhd_jac_posmap_delete(oft_xmhd_ops_ML(i))
 END DO
 END SUBROUTINE xmhd_qcache_free
 !------------------------------------------------------------------------------
@@ -4561,6 +4775,10 @@ END DO
 IF(oft_env%head_proc)WRITE(*,'(A,ES12.4)')'XMHD_QCHECK max_rel ',maxrel
 !---Restore state
 xmhd_qcache=mode_save
+!---Jacobian implementations on every level (same state, test patterns still active)
+NULLIFY(oft_xmhd_ops%A%up)
+IF(xmhd_qcheck_jac)CALL xmhd_jac_check(u)
+xmhd_qcache=mode_save
 !---Optional Jacobian dump (used to compare Jacobian implementations across builds)
 IF(LEN_TRIM(xmhd_jac_dump_prefix)>0)THEN
   NULLIFY(oft_xmhd_ops%A%up)
@@ -4585,6 +4803,114 @@ CALL up%delete
 DEALLOCATE(up,flags)
 DEBUG_STACK_POP
 END SUBROUTINE xmhd_qcache_check
+!------------------------------------------------------------------------------
+!> Check the quadrature-cache Jacobian and the CSR position map against the direct implementation
+!!
+!! Builds the Jacobians of all levels (\ref xmhd_set_ops) at the state `u` in three configurations:
+!! (1) `xmhd_qcache=0` without the position map (direct evaluation, assembly by searching the CSR column
+!! lists: the reference), (2) `xmhd_qcache=2` with the position map (the default), and (3) `xmhd_qcache=0`
+!! with the position map. For configurations 2 and 3 it prints, for every level with a native matrix, the
+!! maximum entrywise difference relative to the largest entry of the same row (`rel_row`) and of the whole
+!! matrix (`rel_global`), and the relative 2-norm difference of the products with two fixed pseudo-random
+!! vectors (`rel_matvec`): `XMHD_JCHECK level=... cfgs=1:k ...`, and finally the largest `rel_row`
+!! (`XMHD_JCHECK max_rel`). The matrix structure must be identical (it is shared).
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_jac_check(u)
+CLASS(oft_vector), TARGET, INTENT(inout) :: u !< State to build the Jacobians at
+INTEGER(i4), PARAMETER :: cfg_mode(3)=[0,2,0],cfg_pm(3)=[0,1,1],nvec=2
+INTEGER(i4) :: icfg,level,nlev,l,i,r,k,pm_save,iv
+REAL(r8) :: rel_row,rel_glob,rel_mv,dmax,amax,maxrel,dnorm,anorm
+REAL(r8), POINTER, DIMENSION(:) :: vtmp
+TYPE(oft_1d_real), ALLOCATABLE :: mref(:)
+TYPE(oft_vector_ptr), ALLOCATABLE :: xv(:,:),yref(:,:),ytmp(:)
+pm_save=xmhd_jac_posmap
+nlev=xmhd_level-xmhd_minlev+1
+ALLOCATE(mref(nlev),xv(nvec,nlev),yref(nvec,nlev),ytmp(nlev))
+!---Fixed pseudo-random test vectors on every level
+DO l=1,nlev
+  level=xmhd_level-l+1
+  DO iv=1,nvec
+    CALL ML_xmhd_rep%vec_create(xv(iv,l)%f,level=level)
+    CALL ML_xmhd_rep%vec_create(yref(iv,l)%f,level=level)
+    NULLIFY(vtmp)
+    DO k=1,ML_xmhd_rep%nfields
+      CALL xv(iv,l)%f%get_local(vtmp,k)
+      DO i=1,SIZE(vtmp)
+        vtmp(i)=SIN(0.37d0*REAL(i,8)+1.3d0*REAL(k,8)+0.71d0*REAL(iv,8)+0.11d0*REAL(oft_env%rank,8))
+      END DO
+      CALL xv(iv,l)%f%restore_local(vtmp,k)
+      DEALLOCATE(vtmp)
+      NULLIFY(vtmp)
+    END DO
+  END DO
+  CALL ML_xmhd_rep%vec_create(ytmp(l)%f,level=level)
+END DO
+maxrel=0.d0
+DO icfg=1,3
+  xmhd_qcache=cfg_mode(icfg)
+  xmhd_jac_posmap=cfg_pm(icfg)
+  CALL xmhd_set_ops(u)
+  DO l=1,nlev
+    level=xmhd_level-l+1
+    SELECT TYPE(Jac=>oft_xmhd_ops_ML(level)%J)
+    CLASS IS(oft_native_matrix)
+      IF(icfg==1)THEN
+        ALLOCATE(mref(l)%v(Jac%nnz))
+        mref(l)%v=Jac%M(1:Jac%nnz)
+        DO iv=1,nvec
+          CALL Jac%apply(xv(iv,l)%f,yref(iv,l)%f)
+        END DO
+        CYCLE
+      END IF
+      !---Entrywise differences relative to the row and matrix maxima
+      rel_row=0.d0; dmax=0.d0; amax=0.d0
+      DO r=1,Jac%nr
+        IF(Jac%kr(r+1)<=Jac%kr(r))CYCLE
+        k=Jac%kr(r)
+        i=Jac%kr(r+1)-1
+        dnorm=MAXVAL(ABS(Jac%M(k:i)-mref(l)%v(k:i)))
+        anorm=MAXVAL(ABS(mref(l)%v(k:i)))
+        dmax=MAX(dmax,dnorm); amax=MAX(amax,anorm)
+        IF(anorm>0.d0)THEN
+          rel_row=MAX(rel_row,dnorm/anorm)
+        ELSE
+          rel_row=MAX(rel_row,dnorm)
+        END IF
+      END DO
+      rel_row=oft_mpi_max(rel_row)
+      dmax=oft_mpi_max(dmax); amax=oft_mpi_max(amax)
+      rel_glob=dmax/MAX(amax,TINY(amax))
+      !---Products with the test vectors
+      rel_mv=0.d0
+      DO iv=1,nvec
+        CALL Jac%apply(xv(iv,l)%f,ytmp(l)%f)
+        CALL ytmp(l)%f%add(1.d0,-1.d0,yref(iv,l)%f)
+        dnorm=ytmp(l)%f%norm(2)
+        anorm=yref(iv,l)%f%norm(2)
+        rel_mv=MAX(rel_mv,dnorm/MAX(anorm,TINY(anorm)))
+      END DO
+      maxrel=MAX(maxrel,rel_row,rel_mv)
+      IF(oft_env%head_proc)WRITE(*,'(A,I3,A,I1,A,I1,A,I1,A,I1,A,3ES12.4)')'XMHD_JCHECK level=',level, &
+        ' cfgs=1:',icfg,' modes=',cfg_mode(1),':',cfg_mode(icfg),' posmap=',cfg_pm(icfg), &
+        ' rel_row,rel_global,rel_matvec ',rel_row,rel_glob,rel_mv
+    END SELECT
+  END DO
+END DO
+IF(oft_env%head_proc)WRITE(*,'(A,ES12.4)')'XMHD_JCHECK max_rel ',maxrel
+!---Cleanup
+xmhd_jac_posmap=pm_save
+DO l=1,nlev
+  IF(ASSOCIATED(mref(l)%v))DEALLOCATE(mref(l)%v)
+  DO iv=1,nvec
+    CALL xv(iv,l)%f%delete
+    CALL yref(iv,l)%f%delete
+    DEALLOCATE(xv(iv,l)%f,yref(iv,l)%f)
+  END DO
+  CALL ytmp(l)%f%delete
+  DEALLOCATE(ytmp(l)%f)
+END DO
+DEALLOCATE(mref,xv,yref,ytmp)
+END SUBROUTINE xmhd_jac_check
 !------------------------------------------------------------------------------
 !> Write the Jacobian of every level to binary files (native matrices only)
 !!
@@ -6691,7 +7017,7 @@ dot_time=0.d0
 IF(oft_env%head_proc)WRITE(*,'(A,3I4)')'Starting profiling: reps = ',nb,nn,nm
 comm_times=0
 !---Reset profiling counters (exclude setup calls)
-xmhd_prof_tbuild=0.d0; xmhd_prof_nbuild=0
+xmhd_prof_tbuild=0.d0; xmhd_prof_nbuild=0; xmhd_prof_nbuild_qc=0
 xmhd_prof_tsetops=0.d0; xmhd_prof_nsetops=0
 xmhd_prof_tnlop=0.d0; xmhd_prof_nnlop=0; xmhd_prof_tnlop_loop=0.d0
 DO i=1,nb
@@ -6807,6 +7133,8 @@ WRITE(*,'(A,ES12.4)')'XMHD_PROF nlop_loop total_s ',xmhd_prof_tnlop_loop
 WRITE(*,'(A,I4,ES12.4,F14.3)')'XMHD_PROF qcache mode,setup_s,mem_mb ',xmhd_qcache,xmhd_prof_tqcache, &
   REAL(xmhd_prof_qcache_mem,8)/1.d6
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF preupdate ncalls,total_s ',xmhd_prof_npre,xmhd_prof_tpre
+WRITE(*,'(A,F14.3,L2,I3)')'XMHD_PROF jcache coarse_mem_mb,blas,posmap ',REAL(xmhd_prof_jcache_mem,8)/1.d6, &
+  xmhd_jac_blas,xmhd_jac_posmap
 DO i=1,MIN(xmhd_nlevels,xmhd_prof_maxlev)
   IF(xmhd_prof_nbuild(i)==0)CYCLE
   tavg=xmhd_prof_tbuild(i)/REAL(xmhd_prof_nbuild(i),8)
@@ -6824,6 +7152,8 @@ DO i=1,MIN(xmhd_nlevels,xmhd_prof_maxlev)
   END IF
   WRITE(*,'(A,I4,I4,L2,I8,2ES12.4,2I14)')'XMHD_PROF build level,order,finemesh,ncalls,total_s,avg_s,nrows,nnz ', &
     i,xmhd_prof_order(i),xmhd_prof_finemesh(i),xmhd_prof_nbuild(i),xmhd_prof_tbuild(i),tavg,nr,nnz
+  WRITE(*,'(A,I4,I8,F14.3,ES12.4)')'XMHD_PROF jac level,qc_builds,posmap_mb,posmap_setup_s ', &
+    i,xmhd_prof_nbuild_qc(i),REAL(xmhd_prof_posmap_mem(i),8)/1.d6,xmhd_prof_posmap_time(i)
 END DO
 WRITE(*,'(A)')'XMHD_PROF end'
 end subroutine xmhd_prof_report
