@@ -14,8 +14,11 @@ that the new path gives the same result as the old one to round-off, and measure
   periodicity, p-multigrid, 2 MPI ranks) × 3 residual evaluations (`dt>0`, `dt>0` with `back_step`, `dt<0`
   diagnostics) × 3 mode pairs. The largest difference is 3e-14 relative to the residual of the same
   equation, and diagnostics agree to 1e-15 (see below). NK and MFNK runs give identical iteration counts.
-- Speed (REFERENCE vs direct, NL residual): see the tables. The new path is never slower in the measured
-  cases.
+- Speed (REFERENCE vs direct, NL residual): 1.55-1.97x faster on tets (p2-p4, straight/curved, p-MG, 1 and 4
+  threads, 2 MPI ranks), 3.9-4.0x on hexes p3. Never slower in any measured case. Setup takes 7-160 ms and
+  memory is 1.3-44 MB. FULL mode is not useful (≤1.2x on tets, 2.2x on hexes, up to 1.7 GB). End-to-end step
+  time does not change yet because the Jacobian build dominates. MFNK residual time drops 1.6x.
+- Recommendation: flip the default to 2. The next phase should target the Jacobian build.
 - One Phase 2 kernel change: transposed reference tables, so that accumulation is a unit-stride dot product
   (accumulation 1.7x faster in the residual).
 
@@ -130,7 +133,43 @@ self-relative difference (shown separately) is meaningless at the 1e-12 level. T
 equation, ≤1e-13 relative to the largest residual entry, ≤1e-12 for diagnostics and floor flags. An
 implementation error gives O(1) differences.
 
-{{QCHECK_TABLE}}
+Largest differences per test over the three evaluations. "blocks": relative to the largest entry of the same equation; "Bg (own max)": the Grad(H^1) block relative to its own maximum (cancellation residue, informational); "diag": diagnostic integrals.
+
+| case | 0 vs 2: blocks | 0 vs 2: Bg (own max) | 0 vs 2: diag | 0 vs 1: blocks | 2 vs 1: blocks |
+|---|---|---|---|---|---|
+| `test_qcache_physics_tet_p2[base]` | 3.9e-16 | 1.8e-12 | 1.9e-16 | 5.4e-16 | 3.9e-16 |
+| `test_qcache_physics_tet_p2[single_temp_hall]` | 4.8e-16 | 1.4e-12 | 1.9e-16 | 3.9e-16 | 4.5e-16 |
+| `test_qcache_physics_tet_p2[two_temp_hall_equil]` | 4.7e-16 | 1.5e-12 | 1.8e-16 | 3.8e-16 | 3.8e-16 |
+| `test_qcache_physics_tet_p2[iso_gyro]` | 3.6e-16 | 1.3e-12 | 1.9e-16 | 5.4e-16 | 3.8e-16 |
+| `test_qcache_physics_tet_p2[kin_gyro_nopar]` | 3.6e-16 | 1.8e-12 | 1.9e-16 | 4.7e-16 | 3.8e-16 |
+| `test_qcache_physics_tet_p2[brag_two_temp]` | 1.7e-15 | 1.8e-12 | 4.4e-16 | 6.5e-16 | 1.2e-15 |
+| `test_qcache_physics_tet_p2[brag_single_temp]` | 7.7e-16 | 1.5e-12 | 2.2e-16 | 6.4e-16 | 9.0e-16 |
+| `test_qcache_physics_tet_p2[hyper]` | 2.0e-15 | 2.1e-12 | 2.2e-16 | 1.4e-15 | 1.6e-15 |
+| `test_qcache_physics_tet_p2[hyper_centered]` | 1.9e-15 | 1.8e-12 | 2.2e-16 | 1.3e-15 | 1.9e-15 |
+| `test_qcache_physics_tet_p2[shaping_eta_temp]` | 4.7e-16 | 1.8e-12 | 3.8e-16 | 4.5e-16 | 4.7e-16 |
+| `test_qcache_physics_tet_p2[eta_profile]` | 3.6e-16 | 2.5e-12 | 3.7e-16 | 5.4e-16 | 3.9e-16 |
+| `test_qcache_physics_tet_p2[no_upwind_iso]` | 3.6e-16 | 1.5e-12 | 4.4e-16 | 5.4e-16 | 4.8e-16 |
+| `test_qcache_physics_tet_p2[no_advec_den]` | 3.6e-16 | 1.5e-12 | 2.0e-16 | 3.9e-16 | 5.1e-16 |
+| `test_qcache_physics_tet_p2[no_temp]` | 3.6e-16 | 1.8e-12 | 1.8e-16 | 4.8e-16 | 5.3e-16 |
+| `test_qcache_physics_tet_p2[floors_solid]` | 4.0e-16 | 1.5e-12 | 0.0e+00 | 5.1e-16 | 5.1e-16 |
+| `test_qcache_physics_tet_p3[base]` | 5.9e-16 | 3.7e-11 | 0.0e+00 | 8.8e-16 | 6.6e-16 |
+| `test_qcache_physics_tet_p3[single_temp_hall]` | 5.9e-16 | 3.7e-11 | 3.7e-16 | 7.3e-16 | 8.8e-16 |
+| `test_qcache_physics_tet_p3[hyper]` | 8.7e-15 | 3.7e-11 | 1.9e-16 | 4.1e-15 | 8.0e-15 |
+| `test_qcache_physics_tet_p3[shaping_eta_temp]` | 8.8e-16 | 3.7e-11 | 2.4e-16 | 7.3e-16 | 7.3e-16 |
+| `test_qcache_physics_tet_p3[floors_solid]` | 8.9e-16 | 4.6e-11 | 1.9e-16 | 8.9e-16 | 1.1e-15 |
+| `test_qcache_tet[2]` | 1.7e-15 | 1.3e-12 | 3.8e-16 | 1.3e-15 | 1.6e-15 |
+| `test_qcache_tet[3]` | 7.8e-15 | 4.6e-11 | 3.6e-16 | 3.7e-15 | 8.2e-15 |
+| `test_qcache_tet[4]` | 2.9e-14 | 4.3e-10 | 1.1e-15 | 2.2e-14 | 3.1e-14 |
+| `test_qcache_hex[2]` | 1.9e-15 | 4.6e-07 | 4.1e-16 | 3.9e-15 | 3.4e-15 |
+| `test_qcache_hex[3]` | 5.1e-15 | 1.4e-07 | 1.4e-15 | 8.1e-15 | 8.7e-15 |
+| `test_qcache_curved_p3` | 7.2e-16 | 7.2e-16 | 1.1e-15 | 8.4e-16 | 3.7e-16 |
+| `test_qcache_vbc[norm]` | 3.3e-16 | 1.0e-16 | 2.2e-16 | 4.0e-16 | 4.0e-16 |
+| `test_qcache_vbc[tang]` | 4.0e-16 | 1.2e-16 | 1.8e-16 | 4.0e-16 | 4.0e-16 |
+| `test_qcache_revolved[tet]` | 4.0e-16 | 2.3e-16 | 2.4e-16 | 4.0e-16 | 3.0e-16 |
+| `test_qcache_revolved[hex]` | 1.0e-15 | 2.6e-16 | 1.5e-16 | 1.7e-15 | 1.5e-15 |
+| `test_qcache_pmg` | 5.9e-16 | 4.0e-11 | 1.9e-16 | 7.3e-16 | 8.8e-16 |
+| `test_qcache_mpi2` | 1.0e-14 | 3.7e-11 | 1.9e-16 | 4.0e-15 | 7.7e-15 |
+| **max** | 2.9e-14 | 4.6e-07 | 1.4e-15 | 2.2e-14 | 3.1e-14 |
 
 All 32 cases pass (`test_MUG_qcache.py`, 32 passed in ~105 s with 2 threads). The full log is in
 `results/phase3_qcheck.log`.
@@ -154,7 +193,21 @@ Valgrind (memcheck) on a cache-path run (tet p3, Hall, hyper terms, shaping, sol
 
 From the A/B runs (`run_bench.py` run cases, 5 time steps, 4 threads):
 
-{{RUN_TABLE}}
+| case | mode | step time (excl. 1st) [s] | run time [s] | NL residual total [s] | NL applies | lits | nlits | per-step its = q0 | final B, V, Ti rel. diff vs q0 |
+|---|---|---|---|---|---|---|---|---|---|
+| `tet_p2_run` | 0 | 1.891 | 12.694 | 0.251 | 29 | 56 | 18 | True | 2.4e-10, 1.3e-10, 1.1e-11 |
+| `tet_p2_run` | 2 | 2.122 | 13.777 | 0.223 | 29 | 56 | 18 | True | 2.3e-10, 1.2e-10, 1.2e-11 |
+| `tet_p2_run` | 1 | 1.997 | 13.308 | 0.276 | 29 | 56 | 18 | True | 4.4e-10, 2.5e-10, 3.0e-11 |
+| `tet_p3_mg_run` | 0 | 15.235 | 95.568 | 0.905 | 27 | 217 | 16 | True | 5.4e-10, 3.1e-11, 1.2e-11 |
+| `tet_p3_mg_run` | 2 | 15.393 | 97.338 | 0.630 | 27 | 217 | 16 | True | 6.3e-10, 6.5e-11, 1.6e-11 |
+| `tet_p3_mg_run` | 1 | 14.720 | 93.686 | 0.867 | 27 | 217 | 16 | True | 2.6e-12, 3.0e-12, 1.0e-13 |
+| `tet_p3_mg_mfnk_run` | 0 | 14.517 | 90.614 | 7.708 | 210 | 164 | 10 | True | 5.1e-10, 3.1e-11, 1.1e-11 |
+| `tet_p3_mg_mfnk_run` | 2 | 13.690 | 85.636 | 4.783 | 210 | 164 | 10 | True | 1.1e-09, 6.6e-11, 2.3e-11 |
+| `tet_p3_mg_mfnk_run` | 1 | 13.988 | 87.907 | 8.316 | 210 | 164 | 10 | True | 1.4e-10, 7.2e-12, 9.2e-13 |
+
+- Linear and nonlinear iteration counts are identical **at every step** for NK and MFNK, in all three modes.
+- Final field norms differ by ≤1.1e-9. Two runs with the *same* mode at 4 threads differ by up to 1.1e-9 (q0) and 8.9e-10 (q2) (OpenMP atomic and reduction ordering), so this is thread noise. At 1 thread the residual checksums agree to ≤7e-16.
+- End-to-end step time does not change measurably (within VM noise): the residual is 0.7-0.9% of the NK runs and 5-8% of the MFNK run, where it goes from 7.7 s to 4.8 s (1.6x) over 210 applies. Jacobian builds and preconditioner updates dominate, which is the target of the next phase.
 
 ### Regression tests with the cache path
 
@@ -183,7 +236,39 @@ Medians over repetitions. "NL apply" is profile mode's average time per `A%apply
 cell-loop timer divided by the number of applies (it includes the diagnostics and checksum calls). The cache is
 built once in `xmhd_run` and is not part of either.
 
-{{AB_TABLES}}
+### 1 thread (NL residual only: prof_reps=1,10,0)
+
+| case | NL apply q0 [s] | q2 [s] | q0/q2 | q1 [s] | q0/q1 | loop/apply q0 [s] | q2 [s] | q0/q2 | setup q2 [s] | mem q2 [MB] | setup q1 [s] | mem q1 [MB] | build q0 [s] | build q2 [s] | RSS q0/q2/q1 [MB] | nlop_norm rel q2, q1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `tet_p2` | 0.1874 | 0.1212 | 1.55 | 0.1871 | 1.00 | 0.1832 | 0.1184 | 1.55 | 0.0070 | 4.9 | 0.263 | 258 | 3.58 | 3.41 | 787/793/1033 | 0.0e+00, 0.0e+00 |
+| `tet_p3` | 0.6757 | 0.3659 | 1.85 | 0.7792 | 0.87 | 0.6646 | 0.3581 | 1.86 | 0.0102 | 7.6 | 4.357 | 1242 | 21.25 | 21.02 | 3482/3490/4666 | 1.2e-16, 0.0e+00 |
+| `tet_p4` | 0.2242 | 0.1340 | 1.67 | 0.2699 | 0.83 | 0.2212 | 0.1327 | 1.67 | 0.0142 | 3.8 | 1.782 | 470 | 10.79 | 11.86 | 1553/1558/2001 | 1.1e-16, 1.1e-16 |
+| `hex_p3` | 0.7938 | 0.2046 | 3.88 | 0.3721 | 2.13 | 0.7886 | 0.2051 | 3.85 | 0.1351 | 44.1 | 0.848 | 608 | 22.27 | 21.13 | 681/724/1261 | 6.6e-16, 0.0e+00 |
+| `curved_p3_mg` | 0.9867 | 0.5575 | 1.77 | 1.0650 | 0.93 | 0.9672 | 0.5442 | 1.78 | 0.1366 | 26.2 | 4.640 | 1664 | 38.49 | 38.83 | 5261/5286/6847 | 0.0e+00, 0.0e+00 |
+
+Repetitions (q0/q2/q1): tet_p2: 2/2/1, tet_p3: 2/2/1, tet_p4: 2/2/1, hex_p3: 2/2/1, curved_p3_mg: 2/2/1
+
+### 4 threads (default matrix, profile cases)
+
+| case | NL apply q0 [s] | q2 [s] | q0/q2 | q1 [s] | q0/q1 | loop/apply q0 [s] | q2 [s] | q0/q2 | setup q2 [s] | mem q2 [MB] | setup q1 [s] | mem q1 [MB] | build q0 [s] | build q2 [s] | RSS q0/q2/q1 [MB] | nlop_norm rel q2, q1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `tet_p2` | 0.0678 | 0.0487 | 1.39 | 0.0549 | 1.24 | 0.0641 | 0.0454 | 1.41 | 0.0074 | 4.9 | 0.063 | 258 | 1.17 | 1.16 | 788/794/1034 | 3.3e-14, 4.1e-14 |
+| `tet_p3` | 0.2378 | 0.1341 | 1.77 | 0.2456 | 0.97 | 0.2303 | 0.1256 | 1.83 | 0.0168 | 7.6 | 1.031 | 1242 | 6.51 | 6.47 | 3483/3491/4667 | 3.7e-13, 3.9e-13 |
+| `tet_p3_mg` | 0.2284 | 0.1275 | 1.79 | 0.2251 | 1.01 | 0.2224 | 0.1191 | 1.87 | 0.0111 | 7.6 | 1.224 | 1242 | 8.44 | 8.61 | 4190/4198/5374 | 1.0e-14, 7.7e-15 |
+| `tet_p4` | 0.0884 | 0.0450 | 1.97 | 0.0873 | 1.01 | 0.0837 | 0.0430 | 1.94 | 0.0293 | 3.8 | 0.379 | 470 | 3.52 | 3.38 | 1556/1561/2004 | 4.9e-13, 1.0e-11 |
+| `tet_p4_mg` | 0.0843 | 0.0443 | 1.90 | 0.0836 | 1.01 | 0.0825 | 0.0426 | 1.94 | 0.0318 | 3.8 | 0.472 | 470 | 5.24 | 4.98 | 2103/2108/2551 | 2.9e-11, 2.1e-11 |
+| `hex_p3` | 0.2581 | 0.0645 | 4.00 | 0.1135 | 2.27 | 0.2578 | 0.0644 | 4.00 | 0.1599 | 44.1 | 0.272 | 608 | 6.11 | 5.73 | 687/731/1267 | 4.5e-11, 2.4e-11 |
+| `curved_p3_mg` | 0.3277 | 0.1936 | 1.69 | 0.3073 | 1.07 | 0.3198 | 0.1856 | 1.72 | 0.0491 | 26.2 | 2.344 | 1664 | 11.50 | 11.27 | 5262/5288/6849 | 0.0e+00, 0.0e+00 |
+| `tet_p3_mg_omp1` | 0.6623 | 0.3801 | 1.74 | 0.7723 | 0.86 | 0.6552 | 0.3751 | 1.75 | 0.0081 | 7.6 | 4.702 | 1242 | 27.36 | 27.24 | 4188/4196/5373 | 1.2e-16, 0.0e+00 |
+| `tet_p3_mg_mpiref` | 0.0278 | 0.0170 | 1.64 | 0.0319 | 0.87 | 0.0271 | 0.0162 | 1.67 | 0.0094 | 1.7 | 0.031 | 155 | 1.01 | 1.09 | 601/604/749 | 4.7e-11, 4.7e-11 |
+| `tet_p3_mg_mpi2` | 0.0276 | 0.0180 | 1.53 | 0.0297 | 0.93 | 0.0262 | 0.0155 | 1.69 | 0.0108 | 1.3 | 0.029 | 78 | 1.02 | 1.01 | 353/356/427 | 2.4e-11, 2.3e-11 |
+
+Repetitions (q0/q2/q1): tet_p2: 2/2/1, tet_p3: 2/2/1, tet_p3_mg: 2/2/1, tet_p4: 2/2/1, tet_p4_mg: 2/2/1, hex_p3: 2/2/1, curved_p3_mg: 2/2/1, tet_p3_mg_omp1: 2/2/1, tet_p3_mg_mpiref: 2/2/1, tet_p3_mg_mpi2: 2/2/1
+
+Summary of the A/B results:
+- **REFERENCE (2)**: NL residual 1.55-1.97x faster on tets (p2-p4, straight and curved, with and without p-MG, 1/4 threads, 2 MPI ranks) and 3.9-4.0x on hexes p3. The loop timer gives the same ratios. Setup takes 7-160 ms (once per run); memory is 1.3-44 MB (geometry + DOF tables + reference tables; hex p3 tables are the largest). Jacobian build time and RSS are unchanged (noise).
+- **FULL (1)**: no faster than the direct path on tets (0.83-1.24x), 2.1-2.3x on hexes p3 (REFERENCE: 3.9-4.0x), at 78 MB-1.7 GB of extra memory and 0.03-4.7 s setup. It is bandwidth bound, as Phase 2 found. It is not useful in this form.
+- Thread scaling is unchanged: from 1 to 4 threads the REFERENCE path speeds up 2.5-3.2x and the direct path 2.5-3.1x.
 
 ## Remaining hotspots (tet p3, 1 thread, `perf`)
 
@@ -209,7 +294,7 @@ well (one cell per thread block, table in shared memory).
 
 ### Default
 
-**Flip the default to `xmhd_qcache=2` (REFERENCE).** {{FLIP_EVIDENCE}} Keep 0 for debugging and as a reference
+**Flip the default to `xmhd_qcache=2` (REFERENCE).** It matches the direct path to round-off in every tested configuration (32 equivalence cases, identical NK/MFNK iteration histories, the MUG regression subset). It is 1.55-1.97x faster on tets and 3.9-4.0x on hexes, at 1 and 4 threads and with MPI, for milliseconds of setup and a few MB of memory, and no configuration needs a fallback. Keep 0 for debugging and as a reference
 implementation, since the equivalence check compares against it. Don't make FULL (1) the default: it stores
 `nce*3*nqp` doubles per cell and space (≈100 KB/cell for tets p3, ≈4.7 MB/cell for hexes p3, see the memory
 column), and it is not faster than REFERENCE in these cases. Keep it as an option for small hex meshes.
