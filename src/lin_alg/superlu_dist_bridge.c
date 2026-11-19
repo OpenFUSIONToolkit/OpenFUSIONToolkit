@@ -379,6 +379,7 @@ oft_superlu_dist_pdgssvx_c(int iopt, int_t n, int_t nnz_loc, int_t m_loc, int_t 
  *	  = 1, performs LU decomposition (new sparsity pattern)
  *	  = 2, performs triangular solve
  *	  = 3, performs LU decomposition for a new matrix with the same sparsity pattern
+ *	       (orderings are recomputed, see below)
  *	  = 4, frees all the storage in the end
  *
  * n	(input) int, global order of the matrix A
@@ -448,9 +449,13 @@ oft_superlu_dist_pdgssvx_c(int iopt, int_t n, int_t nnz_loc, int_t m_loc, int_t 
 			OFT_SLUD_ScalePermstructInit(n, n, &LUfactors->ScalePermstruct);
 			OFT_SLUD_LUstructInit(n, &LUfactors->LUstruct);
 			*f_factors = LUfactors;
-		} else { /* Same pattern: reuse column permutation and symbolic structure */
+		} else { /* Same pattern: reuse solver structures, but not orderings */
 			OFT_SLUD_Destroy_LU(LUfactors->n, grid, &LUfactors->LUstruct);
-			LUfactors->options.Fact = SamePattern;
+			/* Fact = SamePattern (reuse of perm_c and etree) gives incorrect factors
+			   when MC64 selects a different row permutation for the new values
+			   (observed with SuperLU-DIST 8.2.1 and 9.2.1), so recompute all
+			   orderings. pdgssvx() re-initializes the solve structures. */
+			LUfactors->options.Fact = DOFACT;
 		}
 
 		/* Create local matrix from copies of the input arrays */

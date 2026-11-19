@@ -73,8 +73,9 @@ Native STRUMPACK options, in a `<strumpack>` group (values of `-1` or omitted us
 \note With compression the STRUMPACK factorization is approximate, which is intended for use as a
 preconditioner (eg. Block Jacobi sub-solver). STRUMPACK's iterative refinement is not supported. A
 refactorization with an unchanged non-zero pattern reuses the reordering and MC64 matching/scaling from the
-last full factorization; STRUMPACK only pivots within each front, so a full factorization may be needed after
-large changes in matrix values.
+last full factorization (local and distributed solves). STRUMPACK only pivots within each front, so after large
+changes in matrix values the solution can be inaccurate unless a full factorization is requested
+(`update(.TRUE.)`, as for a change in the non-zero pattern), even though the pattern has not changed.
 
 PETSc only options
 

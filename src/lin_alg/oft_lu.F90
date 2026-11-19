@@ -101,10 +101,12 @@ END TYPE superlu_struc
 !!
 !! @note A refactorization with the same non-zero pattern (`update(.FALSE.)`) reuses the
 !! fill-reducing reordering and MC64 matching/scaling computed at the last full
-!! factorization. STRUMPACK only pivots within each front, so a full factorization
-!! (`update(.TRUE.)`) may be needed after large changes in matrix values. A full
-!! factorization is also performed automatically if the non-zero pattern or any of the
-!! options below has changed since the last factorization.
+!! factorization, for both local and distributed (`distributed`) solves. STRUMPACK only
+!! pivots within each front, so after large changes in matrix values the solution can be
+!! inaccurate unless a full factorization is requested with `update(.TRUE.)`, even though
+!! the non-zero pattern has not changed. A full factorization is also performed
+!! automatically if the non-zero pattern or any of the options below has changed since
+!! the last factorization.
 !------------------------------------------------------------------------------
 TYPE :: strumpack_struc
   INTEGER(i4) :: comp_type = -1 !< Compression type (0 -> none, 1 -> HSS, 2 -> BLR, -1 -> default [none])
@@ -159,6 +161,19 @@ TYPE :: lu_dist_struc
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: loc_dst => NULL() !< Location of `loc_src` entries in `vals`
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: send_map => NULL() !< Local matrix entries to send to each neighbor
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: recv_map => NULL() !< Location in `vals` of entries received from each neighbor
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: src_kr => NULL() !< Row pointer of native matrix used in setup [nr+1]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: src_lc => NULL() !< Column indices of native matrix used in setup [nnz]
+  !---Distributed solution returned by the solver package ("mumps" only)
+  LOGICAL :: sol_map_valid = .FALSE. !< Is the solution redistribution map current?
+  INTEGER(i4) :: nsol = 0 !< Number of solution entries returned on this process
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_loc => NULL() !< Solution entries returned on this process [nsol]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: isol_loc => NULL() !< Global indices (1-based) of `sol_loc` entries [nsol]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_perm => NULL() !< `sol_loc` entries ordered by destination process [nsol]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_scounts => NULL() !< Solution entries sent to each process [nprocs]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_sdispls => NULL() !< Offsets of entries sent to each process [nprocs]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_rcounts => NULL() !< Solution entries received from each process [nprocs]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_rdispls => NULL() !< Offsets of entries received from each process [nprocs]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: sol_ridx => NULL() !< Locally-owned row of each received entry [nloc]
 END TYPE lu_dist_struc
 !------------------------------------------------------------------------------
 !> LU solver class
@@ -168,7 +183,8 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
   LOGICAL(kind=c_bool) :: iter_refine = .FALSE. !< Perform iterative refinement
   !> Factor the full distributed system across all processes ("superd", "mumps", and "strumpack" only).
-  !! Ignored when the system is not distributed (eg. serial runs or local blocks).
+  !! Ignored when the system is not distributed (eg. serial runs or local blocks). Changes to the
+  !! matrix's sparsity pattern are detected automatically and trigger a full factorization.
   LOGICAL :: distributed = .FALSE.
   INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
@@ -1141,9 +1157,9 @@ CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 #ifdef HAVE_MPI
 INTEGER(i4) :: mode,nrhs,ldb,ierr,nprow,npcol
+LOGICAL :: new_graph
 REAL(r8) :: rdummy(1)
 REAL(r8), POINTER, DIMENSION(:) :: bvals
-REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: xglob
 DEBUG_STACK_PUSH
 IF(self%nrhs>1)CALL oft_abort('Multiple RHS not supported for distributed solves', &
   'lusolver_apply_dist',__FILE__)
@@ -1179,7 +1195,7 @@ IF(.NOT.self%initialized)THEN
       self%mumps_struct%icntl(5)=0 ! Assembled matrix
       self%mumps_struct%icntl(18)=3 ! Distributed matrix entries
       self%mumps_struct%icntl(20)=10 ! Distributed dense RHS
-      self%mumps_struct%icntl(21)=0 ! Centralized solution (on host)
+      self%mumps_struct%icntl(21)=1 ! Distributed solution
 #else
       CALL oft_abort('OFT not compiled with MUMPS','lusolver_apply_dist',__FILE__)
 #endif
@@ -1198,13 +1214,16 @@ IF(.NOT.self%initialized)THEN
 END IF
 !---Factor matrix
 IF(self%refactor)THEN
-  IF(self%update_graph)CALL lu_dist_setup(self%dist,A_native,g)
+  !---Full setup if requested, not yet performed, or the non-zero pattern has changed
+  new_graph=self%update_graph
+  IF(.NOT.new_graph)new_graph=lu_dist_graph_changed(self%dist,A_native)
+  IF(new_graph)CALL lu_dist_setup(self%dist,A_native,g)
   CALL lu_dist_update(self%dist,A_native)
   SELECT CASE(TRIM(self%package))
     CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
       mode=3
-      IF(self%update_graph)mode=1
+      IF(new_graph)mode=1
       nrhs=0
       ldb=MAX(1,self%dist%nloc)
       CALL oft_superlu_dist_pdgssvx(mode,self%dist%ng,self%dist%nnz,self%dist%nloc,self%dist%offset, &
@@ -1214,7 +1233,7 @@ IF(self%refactor)THEN
 #endif
     CASE("mumps")
 #ifdef HAVE_MUMPS
-      IF(self%update_graph)THEN
+      IF(new_graph)THEN
         self%mumps_struct%n=self%dist%ng
         self%mumps_struct%nnz_loc=INT(self%dist%nnz,8)
         self%mumps_struct%irn_loc=>self%dist%irn
@@ -1227,11 +1246,16 @@ IF(self%refactor)THEN
       CALL dmumps(self%mumps_struct)
       IF(self%mumps_struct%infog(1)<0)CALL oft_abort('Factorization failed (MUMPS)', &
         'lusolver_apply_dist',__FILE__)
+      !---Allocate storage for distributed solution, whose layout is set by the factorization
+      IF(ASSOCIATED(self%dist%sol_loc))DEALLOCATE(self%dist%sol_loc,self%dist%isol_loc)
+      self%dist%nsol=self%mumps_struct%info(23)
+      ALLOCATE(self%dist%sol_loc(MAX(1,self%dist%nsol)),self%dist%isol_loc(MAX(1,self%dist%nsol)))
+      self%dist%sol_map_valid=.FALSE.
 #endif
     CASE("strumpack")
 #ifdef HAVE_STRUMPACK_MPI
       mode=3
-      IF(self%update_graph)mode=1
+      IF(new_graph)mode=1
       CALL strumpack_dist_call(self,mode,rdummy,ierr)
       IF(ierr/=0)CALL oft_abort('Factorization failed (STRUMPACK)','lusolver_apply_dist',__FILE__)
 #endif
@@ -1255,26 +1279,21 @@ SELECT CASE(TRIM(self%package))
 #endif
   CASE("mumps")
 #ifdef HAVE_MUMPS
-    !---Solution is gathered on host (rank 0) and then scattered to owners
-    IF(oft_env%rank==0)THEN
-      ALLOCATE(xglob(self%dist%ng))
-    ELSE
-      ALLOCATE(xglob(1))
-    END IF
+    !---Solution is distributed by MUMPS and then sent to the owning processes
     self%mumps_struct%nrhs=1
     self%mumps_struct%nloc_rhs=self%dist%nloc
     self%mumps_struct%lrhs_loc=MAX(1,self%dist%nloc)
     self%mumps_struct%irhs_loc=>self%dist%rows
     self%mumps_struct%rhs_loc=>bvals
-    self%mumps_struct%lrhs=self%dist%ng
-    self%mumps_struct%rhs=>xglob
+    self%mumps_struct%lsol_loc=MAX(1,self%dist%nsol)
+    self%mumps_struct%sol_loc=>self%dist%sol_loc
+    self%mumps_struct%isol_loc=>self%dist%isol_loc
     self%mumps_struct%job=3 ! Solve phase
     CALL dmumps(self%mumps_struct)
     IF(self%mumps_struct%infog(1)<0)CALL oft_abort('Solve failed (MUMPS)','lusolver_apply_dist',__FILE__)
-    CALL MPI_Scatterv(xglob,self%dist%counts,self%dist%displs,OFT_MPI_R8,bvals,self%dist%nloc, &
-      OFT_MPI_R8,0,self%dist%comm,ierr)
-    NULLIFY(self%mumps_struct%rhs,self%mumps_struct%rhs_loc,self%mumps_struct%irhs_loc)
-    DEALLOCATE(xglob)
+    NULLIFY(self%mumps_struct%rhs_loc,self%mumps_struct%irhs_loc)
+    NULLIFY(self%mumps_struct%sol_loc,self%mumps_struct%isol_loc)
+    CALL lu_dist_sol_scatter(self%dist,bvals)
 #endif
   CASE("strumpack")
 #ifdef HAVE_STRUMPACK_MPI
@@ -1347,7 +1366,7 @@ CLASS(oft_lusolver), INTENT(inout) :: self !< Solver object
 INTEGER(i4), INTENT(in) :: mode !< Operation (see @ref oft_strumpack_dist)
 REAL(r8), INTENT(inout) :: b(*) !< Locally-owned rows of RHS -> overwritten with solution (`mode=2`)
 INTEGER(i4), INTENT(out) :: info !< Solver return status (0 -> success)
-INTEGER(i4) :: fcomm
+INTEGER(i4) :: fcomm,idummy(1)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dist_rows
 DEBUG_STACK_PUSH
 #ifdef OFT_MPI_F08
@@ -1355,27 +1374,31 @@ fcomm=self%dist%comm%MPI_VAL
 #else
 fcomm=self%dist%comm
 #endif
-!---Row distribution (first row on each process and total)
-ALLOCATE(dist_rows(oft_env%nprocs+1))
-IF(mode==4)THEN
-  dist_rows=0
-ELSE
-  dist_rows(1:oft_env%nprocs)=self%dist%displs
-  dist_rows(oft_env%nprocs+1)=self%dist%ng
-END IF
-IF(mode==4)THEN
-  CALL oft_strumpack_dist(mode,0,0,0,b,dist_rows,dist_rows,dist_rows,b,fcomm, &
-    self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
-    self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
-    self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
-ELSE
-  CALL oft_strumpack_dist(mode,self%dist%ng,self%dist%nnz,self%dist%nloc,self%dist%vals, &
-    self%dist%lc,self%dist%kr,dist_rows,b,fcomm, &
-    self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
-    self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
-    self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
-END IF
-DEALLOCATE(dist_rows)
+idummy=0
+SELECT CASE(mode)
+  CASE(1,3)
+    !---Row distribution (first row on each process and total)
+    ALLOCATE(dist_rows(oft_env%nprocs+1))
+    dist_rows(1:oft_env%nprocs)=self%dist%displs
+    dist_rows(oft_env%nprocs+1)=self%dist%ng
+    CALL oft_strumpack_dist(mode,self%dist%ng,self%dist%nnz,self%dist%nloc,self%dist%vals, &
+      self%dist%lc,self%dist%kr,dist_rows,b,fcomm, &
+      self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
+      self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
+      self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
+    DEALLOCATE(dist_rows)
+  CASE(2)
+    CALL oft_strumpack_dist(mode,self%dist%ng,self%dist%nnz,self%dist%nloc,self%dist%vals, &
+      self%dist%lc,self%dist%kr,idummy,b,fcomm, &
+      self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
+      self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
+      self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
+  CASE DEFAULT
+    CALL oft_strumpack_dist(mode,0,0,0,b,idummy,idummy,idummy,b,fcomm, &
+      self%strumpack_struct%f_factors,self%strumpack_struct%comp_type,self%strumpack_struct%comp_rel_tol, &
+      self%strumpack_struct%comp_abs_tol,self%strumpack_struct%leaf_size,self%strumpack_struct%max_rank, &
+      self%strumpack_struct%min_sep_size,MERGE(1,0,self%strumpack_struct%verbose),info)
+END SELECT
 DEBUG_STACK_POP
 END SUBROUTINE strumpack_dist_call
 #endif
@@ -1387,6 +1410,8 @@ END SUBROUTINE strumpack_dist_call
 !! to these rows from other processes (partial sums and couplings to entries not
 !! present locally) are gathered from neighboring processes. The resulting
 !! communication pattern is saved for value updates in @ref lu_dist_update.
+!!
+!! @note All communication uses the private communicator `self%comm`, which must be set
 !------------------------------------------------------------------------------
 SUBROUTINE lu_dist_setup(self,A,g)
 TYPE(lu_dist_struc), INTENT(inout) :: self !< Distributed matrix structure
@@ -1394,7 +1419,7 @@ CLASS(oft_native_matrix), INTENT(in) :: A !< Native matrix
 CLASS(oft_vector), INTENT(inout) :: g !< Vector defining row ownership and linkage
 #ifdef HAVE_MPI
 INTEGER(i4), PARAMETER :: tag_count = 7301, tag_pattern = 7302
-INTEGER(i4) :: i,j,k,m,jp,jn,lo,hi,mid,last_col,nlocal_cand,ncand,ierr
+INTEGER(i4) :: i,j,k,m,jp,jn,last_col,nlocal_cand,ncand,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: gind,owner,con_ind,nsend,nrecv,cand_row,cand_col, &
   cand_id,cand_dst,row_ptr,row_fill,sort_col
 INTEGER(i8) :: ng8
@@ -1412,7 +1437,7 @@ IF(A%nr/=g%n)CALL oft_abort('Matrix and vector sizes do not match','lu_dist_setu
 !---Number locally-owned rows contiguously in rank order
 self%nloc=g%nslice
 ALLOCATE(self%counts(oft_env%nprocs),self%displs(oft_env%nprocs))
-CALL MPI_Allgather(self%nloc,1,OFT_MPI_I4,self%counts,1,OFT_MPI_I4,oft_env%COMM,ierr)
+CALL MPI_Allgather(self%nloc,1,OFT_MPI_I4,self%counts,1,OFT_MPI_I4,self%comm,ierr)
 ng8=SUM(INT(self%counts,8))
 IF(ng8>INT(HUGE(self%ng),8))CALL oft_abort('Global system too large for 32-bit indexing', &
   'lu_dist_setup',__FILE__)
@@ -1443,17 +1468,7 @@ IF(ANY(gind<1).OR.ANY(gind>self%ng))CALL oft_abort('Invalid global row index','l
 !---Determine owner of each local row
 ALLOCATE(owner(A%nr))
 DO i=1,A%nr
-  lo=1
-  hi=oft_env%nprocs
-  DO WHILE(lo<hi)
-    mid=(lo+hi+1)/2
-    IF(self%displs(mid)<gind(i))THEN
-      lo=mid
-    ELSE
-      hi=mid-1
-    END IF
-  END DO
-  owner(i)=lo-1
+  owner(i)=lu_dist_owner(self%displs,gind(i))
 END DO
 !---Map neighboring ranks to connection index
 self%nproc_con=g%stitch_info%nproc_con
@@ -1480,8 +1495,8 @@ DO i=1,A%nr
 END DO
 ALLOCATE(reqs(2*self%nproc_con))
 DO j=1,self%nproc_con
-  CALL MPI_Irecv(nrecv(j),1,OFT_MPI_I4,self%proc_con(j),tag_count,oft_env%COMM,reqs(j),ierr)
-  CALL MPI_Isend(nsend(j),1,OFT_MPI_I4,self%proc_con(j),tag_count,oft_env%COMM, &
+  CALL MPI_Irecv(nrecv(j),1,OFT_MPI_I4,self%proc_con(j),tag_count,self%comm,reqs(j),ierr)
+  CALL MPI_Isend(nsend(j),1,OFT_MPI_I4,self%proc_con(j),tag_count,self%comm, &
     reqs(self%nproc_con+j),ierr)
 END DO
 CALL MPI_Waitall(2*self%nproc_con,reqs,MPI_STATUSES_IGNORE,ierr)
@@ -1523,9 +1538,9 @@ END DO
 reqs=MPI_REQUEST_NULL
 DO j=1,self%nproc_con
   IF(nrecv(j)>0)CALL MPI_Irecv(recv_ij(j)%v,2*nrecv(j),OFT_MPI_I4,self%proc_con(j),tag_pattern, &
-    oft_env%COMM,reqs(j),ierr)
+    self%comm,reqs(j),ierr)
   IF(nsend(j)>0)CALL MPI_Isend(send_ij(j)%v,2*nsend(j),OFT_MPI_I4,self%proc_con(j),tag_pattern, &
-    oft_env%COMM,reqs(self%nproc_con+j),ierr)
+    self%comm,reqs(self%nproc_con+j),ierr)
 END DO
 CALL MPI_Waitall(2*self%nproc_con,reqs,MPI_STATUSES_IGNORE,ierr)
 DEALLOCATE(reqs)
@@ -1592,6 +1607,10 @@ DO j=1,self%nproc_con
   k=k+nrecv(j)
 END DO
 DEALLOCATE(row_ptr,sort_col,cand_id,cand_dst,nsend,nrecv)
+!---Save native matrix graph to detect changes in non-zero pattern
+ALLOCATE(self%src_kr(A%nr+1),self%src_lc(A%nnz))
+self%src_kr=A%kr(1:A%nr+1)
+self%src_lc=A%lc(1:A%nnz)
 DEBUG_STACK_POP
 #endif
 END SUBROUTINE lu_dist_setup
@@ -1619,7 +1638,7 @@ DO j=1,self%nproc_con
   rbuf(j)%n=self%recv_map(j)%n
   ALLOCATE(rbuf(j)%v(rbuf(j)%n))
   IF(rbuf(j)%n>0)CALL MPI_Irecv(rbuf(j)%v,rbuf(j)%n,OFT_MPI_R8,self%proc_con(j),tag_vals, &
-    oft_env%COMM,reqs(j),ierr)
+    self%comm,reqs(j),ierr)
 END DO
 DO j=1,self%nproc_con
   sbuf(j)%n=self%send_map(j)%n
@@ -1628,7 +1647,7 @@ DO j=1,self%nproc_con
     sbuf(j)%v(k)=A%M(self%send_map(j)%v(k))
   END DO
   IF(sbuf(j)%n>0)CALL MPI_Isend(sbuf(j)%v,sbuf(j)%n,OFT_MPI_R8,self%proc_con(j),tag_vals, &
-    oft_env%COMM,reqs(self%nproc_con+j),ierr)
+    self%comm,reqs(self%nproc_con+j),ierr)
 END DO
 !---Add local contributions (unstitched partial sums)
 self%vals=0.d0
@@ -1647,6 +1666,130 @@ DEALLOCATE(sbuf,rbuf,reqs)
 DEBUG_STACK_POP
 #endif
 END SUBROUTINE lu_dist_update
+!------------------------------------------------------------------------------
+!> Get the process that owns a given global row
+!------------------------------------------------------------------------------
+PURE FUNCTION lu_dist_owner(displs,grow) RESULT(owner)
+INTEGER(i4), INTENT(in) :: displs(:) !< Number of rows owned by lower ranks for each process [nprocs]
+INTEGER(i4), INTENT(in) :: grow !< Global row index (1-based)
+INTEGER(i4) :: owner !< Rank of owning process
+INTEGER(i4) :: lo,hi,mid
+lo=1
+hi=SIZE(displs)
+DO WHILE(lo<hi)
+  mid=(lo+hi+1)/2
+  IF(displs(mid)<grow)THEN
+    lo=mid
+  ELSE
+    hi=mid-1
+  END IF
+END DO
+owner=lo-1
+END FUNCTION lu_dist_owner
+!------------------------------------------------------------------------------
+!> Check if the non-zero pattern of a native matrix differs from the one used in @ref lu_dist_setup
+!!
+!! @note Collective over `self%comm`; the result is true on all processes if the pattern
+!! has changed on any process or setup has not been performed
+!------------------------------------------------------------------------------
+FUNCTION lu_dist_graph_changed(self,A) RESULT(changed)
+TYPE(lu_dist_struc), INTENT(in) :: self !< Distributed matrix structure
+CLASS(oft_native_matrix), INTENT(in) :: A !< Native matrix
+LOGICAL :: changed !< Has the pattern changed?
+#ifdef HAVE_MPI
+LOGICAL :: changed_loc
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+changed_loc=.TRUE.
+IF(ASSOCIATED(self%src_kr))THEN
+  IF((SIZE(self%src_kr)==A%nr+1).AND.(SIZE(self%src_lc)==A%nnz))THEN
+    changed_loc=ANY(self%src_kr/=A%kr(1:A%nr+1))
+    IF(.NOT.changed_loc)changed_loc=ANY(self%src_lc/=A%lc(1:A%nnz))
+  END IF
+END IF
+CALL MPI_Allreduce(changed_loc,changed,1,OFT_MPI_LOGICAL,MPI_LOR,self%comm,ierr)
+DEBUG_STACK_POP
+#else
+changed=.TRUE.
+#endif
+END FUNCTION lu_dist_graph_changed
+!------------------------------------------------------------------------------
+!> Send entries of a distributed solution returned by the solver package to the owning processes
+!!
+!! The redistribution map is built on the first call after each factorization, once the global
+!! indices of the returned entries (`isol_loc`) have been set by the solver package.
+!------------------------------------------------------------------------------
+SUBROUTINE lu_dist_sol_scatter(self,b)
+TYPE(lu_dist_struc), INTENT(inout) :: self !< Distributed matrix structure
+REAL(r8), INTENT(inout) :: b(:) !< Locally-owned rows of solution [nloc]
+#ifdef HAVE_MPI
+INTEGER(i4) :: i,k,ierr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dest,fill,isbuf,irbuf
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: sbuf,rbuf
+DEBUG_STACK_PUSH
+IF(.NOT.self%sol_map_valid)THEN
+  CALL lu_dist_sol_map_delete(self)
+  ALLOCATE(self%sol_perm(self%nsol),self%sol_ridx(self%nloc))
+  ALLOCATE(self%sol_scounts(oft_env%nprocs),self%sol_sdispls(oft_env%nprocs))
+  ALLOCATE(self%sol_rcounts(oft_env%nprocs),self%sol_rdispls(oft_env%nprocs))
+  !---Order returned entries by owning process
+  ALLOCATE(dest(self%nsol),fill(oft_env%nprocs))
+  self%sol_scounts=0
+  DO k=1,self%nsol
+    dest(k)=lu_dist_owner(self%displs,self%isol_loc(k))+1
+    self%sol_scounts(dest(k))=self%sol_scounts(dest(k))+1
+  END DO
+  self%sol_sdispls(1)=0
+  DO i=2,oft_env%nprocs
+    self%sol_sdispls(i)=self%sol_sdispls(i-1)+self%sol_scounts(i-1)
+  END DO
+  fill=self%sol_sdispls
+  DO k=1,self%nsol
+    fill(dest(k))=fill(dest(k))+1
+    self%sol_perm(fill(dest(k)))=k
+  END DO
+  DEALLOCATE(dest,fill)
+  !---Exchange global indices to map received entries to locally-owned rows
+  CALL MPI_Alltoall(self%sol_scounts,1,OFT_MPI_I4,self%sol_rcounts,1,OFT_MPI_I4,self%comm,ierr)
+  IF(SUM(self%sol_rcounts)/=self%nloc)CALL oft_abort('Incomplete distributed solution', &
+    'lu_dist_sol_scatter',__FILE__)
+  self%sol_rdispls(1)=0
+  DO i=2,oft_env%nprocs
+    self%sol_rdispls(i)=self%sol_rdispls(i-1)+self%sol_rcounts(i-1)
+  END DO
+  ALLOCATE(isbuf(MAX(1,self%nsol)),irbuf(MAX(1,self%nloc)))
+  isbuf(1:self%nsol)=self%isol_loc(self%sol_perm)
+  CALL MPI_Alltoallv(isbuf,self%sol_scounts,self%sol_sdispls,OFT_MPI_I4, &
+    irbuf,self%sol_rcounts,self%sol_rdispls,OFT_MPI_I4,self%comm,ierr)
+  self%sol_ridx=irbuf(1:self%nloc)-self%offset
+  DEALLOCATE(isbuf,irbuf)
+  IF(ANY(self%sol_ridx<1).OR.ANY(self%sol_ridx>self%nloc))CALL oft_abort( &
+    'Received solution entry for row not owned locally','lu_dist_sol_scatter',__FILE__)
+  self%sol_map_valid=.TRUE.
+END IF
+!---Send solution entries to owning processes
+ALLOCATE(sbuf(MAX(1,self%nsol)),rbuf(MAX(1,self%nloc)))
+sbuf(1:self%nsol)=self%sol_loc(self%sol_perm)
+CALL MPI_Alltoallv(sbuf,self%sol_scounts,self%sol_sdispls,OFT_MPI_R8, &
+  rbuf,self%sol_rcounts,self%sol_rdispls,OFT_MPI_R8,self%comm,ierr)
+b(self%sol_ridx)=rbuf(1:self%nloc)
+DEALLOCATE(sbuf,rbuf)
+DEBUG_STACK_POP
+#endif
+END SUBROUTINE lu_dist_sol_scatter
+!------------------------------------------------------------------------------
+!> Deallocate solution redistribution map built by @ref lu_dist_sol_scatter
+!------------------------------------------------------------------------------
+SUBROUTINE lu_dist_sol_map_delete(self)
+TYPE(lu_dist_struc), INTENT(inout) :: self !< Distributed matrix structure
+IF(ASSOCIATED(self%sol_perm))DEALLOCATE(self%sol_perm)
+IF(ASSOCIATED(self%sol_scounts))DEALLOCATE(self%sol_scounts)
+IF(ASSOCIATED(self%sol_sdispls))DEALLOCATE(self%sol_sdispls)
+IF(ASSOCIATED(self%sol_rcounts))DEALLOCATE(self%sol_rcounts)
+IF(ASSOCIATED(self%sol_rdispls))DEALLOCATE(self%sol_rdispls)
+IF(ASSOCIATED(self%sol_ridx))DEALLOCATE(self%sol_ridx)
+self%sol_map_valid=.FALSE.
+END SUBROUTINE lu_dist_sol_map_delete
 !------------------------------------------------------------------------------
 !> Deallocate internal storage for row-distributed matrix
 !!
@@ -1677,6 +1820,12 @@ IF(ASSOCIATED(self%recv_map))THEN
   END DO
   DEALLOCATE(self%recv_map)
 END IF
+IF(ASSOCIATED(self%src_kr))DEALLOCATE(self%src_kr)
+IF(ASSOCIATED(self%src_lc))DEALLOCATE(self%src_lc)
+IF(ASSOCIATED(self%sol_loc))DEALLOCATE(self%sol_loc)
+IF(ASSOCIATED(self%isol_loc))DEALLOCATE(self%isol_loc)
+CALL lu_dist_sol_map_delete(self)
+self%nsol=0
 self%ng=0
 self%nloc=0
 self%offset=0
