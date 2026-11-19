@@ -232,7 +232,7 @@ class ThinCurr():
             raise ValueError('"pmap" entries must be non-negative')
         return pmap
 
-    def update_coil_types(self,vcoils=[],icoils=[]):
+    def update_coil_types(self,vcoils=(),icoils=()):
         '''! Update coil types for ThinCurr model
 
         @note Any coil names not specified in `vcoils` or `icoils` will be left unchanged.
