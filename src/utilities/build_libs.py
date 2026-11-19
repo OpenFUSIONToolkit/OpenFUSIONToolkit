@@ -963,6 +963,11 @@ class MPICH(package):
             "--without-hip",
             "--without-cuda"
         ]
+        if self.config_dict['OS_TYPE'] == 'Darwin' and self.config_dict['CC_VENDOR'] == 'llvm':
+            # Libtool cannot build shared Fortran libraries with LLVM Flang on macOS (silently falls back
+            # to static), so request static libraries explicitly to ensure dependencies (eg. hwloc) are
+            # included in the compiler wrappers
+            self.shared_libs = False
         if self.shared_libs:
             config_options += [
                 "--enable-shared=yes",
@@ -2181,6 +2186,9 @@ class PETSC(package):
             options += ['--download-suitesparse']
         if self.with_mumps:
             options += ['--download-mumps', '--download-scalapack', '--download-blacs']
+            if config_dict['CC_VENDOR'] == 'llvm':
+                # ScaLAPACK detection of Fortran name mangling fails with LLVM Flang (STOP message is captured)
+                options += ['--download-scalapack-cmake-arguments="-DCDEFS=Add_"']
         #
         if 'MKL_ROOT' in self.config_dict:
             options += ['--with-blas-lapack-dir={MKL_ROOT}']
