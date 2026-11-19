@@ -98,7 +98,7 @@ type. Key fields:
 | `steps[]`, `step_time_avg_s`, `step_time_avg_excl1_s`, `lits_total`, `nlits_total` | Run mode per-step data (wall time, linear/NL iterations) |
 | `prof_setops_*`, `prof_nlop_*`, `prof_preupdate_*` | Counters accumulated over the whole run |
 | `final_norm_B/V/Ti` | Norms of the final fields (run mode checksums) |
-| `max_rss_mb`, `wall_s` | From `/usr/bin/time -v` (with MPI, `max_rss_mb` covers the launcher process tree as GNU time reports it) |
+| `max_rss_mb`, `wall_s` | From GNU `/usr/bin/time -v` (`max_rss_mb` also from BSD/macOS `time -l`; omitted if neither is available, eg. install the `time` package on Debian/Ubuntu). With MPI, `max_rss_mb` covers the launcher process tree as reported by `time` |
 
 ## Testing on another platform
 

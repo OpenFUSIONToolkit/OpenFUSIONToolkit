@@ -294,6 +294,11 @@ def parse_output(text):
     m = re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)', text)
     if m:
         r['max_rss_mb'] = int(m.group(1))/1024.
+    else:
+        # BSD/macOS time -l reports bytes
+        m = re.search(r'^\s*(\d+)\s+maximum resident set size', text, re.M)
+        if m:
+            r['max_rss_mb'] = int(m.group(1))/1024.**2
     m = re.search(r'Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(\S+)', text)
     if m:
         parts = [float(p) for p in m.group(1).split(':')]
@@ -319,6 +324,17 @@ def mpiexec_cmd(mpiexec):
     return cmd
 
 
+def time_cmd():
+    """Prefix that reports the peak memory of a run: GNU time (`-v`) or BSD/macOS time (`-l`), or none"""
+    if not os.path.isfile('/usr/bin/time'):
+        return []
+    for flag in ('-v', '-l'):
+        p = subprocess.run(['/usr/bin/time', flag, 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if p.returncode == 0:
+            return ['/usr/bin/time', flag]
+    return []
+
+
 def run_case(case, args, src_dir, exe):
     threads = case['threads'] if case['threads'] is not None else args.threads
     run_dir = os.path.join(args.work_dir, args.tag, case['name'])
@@ -331,7 +347,7 @@ def run_case(case, args, src_dir, exe):
         cmd = mpiexec_cmd(args.mpiexec) + ['-np', str(case['nprocs'])] + cmd
     if args.perf and case['nprocs'] == 1:
         cmd = [args.perf_exe, 'record', '-F', str(args.perf_freq), '-g', '-o', 'perf.data', '--'] + cmd
-    cmd = ['/usr/bin/time', '-v'] + cmd
+    cmd = time_cmd() + cmd
     env = dict(os.environ)
     env['OMP_NUM_THREADS'] = str(threads)
     env.setdefault('OMPI_ALLOW_RUN_AS_ROOT', '1')
