@@ -251,6 +251,9 @@ def parse_output(text):
     for m in re.finditer(r'^XMHD_PROF (setops|nlop|preupdate) ncalls,total_s\s+(\d+)\s+' + FLOAT, text, re.M):
         r['prof_{0}_n'.format(m.group(1))] = int(m.group(2))
         r['prof_{0}_total_s'.format(m.group(1))] = float(m.group(3))
+    m = re.search(r'^XMHD_PROF nlop_loop total_s\s+' + FLOAT, text, re.M)
+    if m:
+        r['prof_nlop_loop_total_s'] = float(m.group(1))
     for m in re.finditer(r'^XMHD_PROF (nlop_norm|matvec_norm)\s+' + FLOAT, text, re.M):
         r[m.group(1)] = float(m.group(2))
     m = re.search(r'^XMHD_PROF kernels ncells,nqp,nthreads,checksum\s+(\d+)\s+(\d+)\s+(\d+)', text, re.M)
@@ -358,7 +361,7 @@ def run_case(case, args, src_dir, exe):
 CSV_KEYS = ['tag', 'name', 'order', 'mg', 'mfnk', 'mode', 'threads', 'nprocs', 'returncode', 'ncells_global', 'cell_np',
             'mesh_order', 'b_dofs', 'v_dofs', 'n_dofs', 'build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s',
             'matvec_s', 'dot_s', 'kern_nqp', 'kern_jacobian_s', 'kern_basis_s', 'kern_log2phys_s', 'jac_nnz_total', 'prof_preupdate_n', 'prof_preupdate_total_s', 'prof_setops_n',
-            'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'step_time_avg_s', 'step_time_avg_excl1_s',
+            'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'prof_nlop_loop_total_s', 'step_time_avg_s', 'step_time_avg_excl1_s',
             'lits_total', 'nlits_total', 'run_time_s', 'max_rss_mb', 'wall_s', 'nlop_norm', 'matvec_norm',
             'final_norm_B', 'final_norm_V', 'final_norm_Ti']
 

@@ -280,6 +280,7 @@ REAL(r8), PUBLIC :: xmhd_prof_tsetops = 0.d0 !< Accumulated time in xmhd_set_ops
 INTEGER(i4), PUBLIC :: xmhd_prof_nsetops = 0 !< Number of calls to xmhd_set_ops (excluding skipped updates)
 REAL(r8), PUBLIC :: xmhd_prof_tnlop = 0.d0 !< Accumulated time in xmhd_errmatrix_apply [s]
 INTEGER(i4), PUBLIC :: xmhd_prof_nnlop = 0 !< Number of calls to xmhd_errmatrix_apply
+REAL(r8), PUBLIC :: xmhd_prof_tnlop_loop = 0.d0 !< Accumulated time in the threaded cell loop of xmhd_errmatrix_apply [s]
 REAL(r8), PUBLIC :: xmhd_prof_tpre = 0.d0 !< Accumulated time in preconditioner updates (eg. factorization) [s]
 INTEGER(i4), PUBLIC :: xmhd_prof_npre = 0 !< Number of preconditioner updates
 INTEGER(i4), PUBLIC :: xmhd_prof_reps(3) = [10,10,10] !< Repetition counts used by profile mode (builds, NL applies per build, matvecs per NL apply); 0 skips NL applies/matvecs
@@ -3313,7 +3314,7 @@ logical :: curved,back_step,need_pt
 type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
-type(oft_timer) :: prof_timer
+type(oft_timer) :: prof_timer,loop_timer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
 CALL prof_timer%tick
@@ -3372,6 +3373,7 @@ IF(xmhd_taxis==2)ptind(2)=3
 !---Physical points only needed for shaping functions and diagnostics (dt<0)
 need_pt=xmhd_shaping_active().OR.(self%dt<0.d0)
 CALL xmhd_setup_cell_shared()
+CALL loop_timer%tick
 !------------------------------------------------------------------------------
 ! Apply metric function
 !------------------------------------------------------------------------------
@@ -3865,6 +3867,7 @@ IF(j2_ind>0)DEALLOCATE(j2_loc)
 IF(back_step)deallocate(vpin_loc,jpin_loc)
 NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
+xmhd_prof_tnlop_loop=xmhd_prof_tnlop_loop+loop_timer%tock()
 !------------------------------------------------------------------------------
 ! Boundary conditions
 !------------------------------------------------------------------------------
@@ -5649,7 +5652,7 @@ comm_times=0
 !---Reset profiling counters (exclude setup calls)
 xmhd_prof_tbuild=0.d0; xmhd_prof_nbuild=0
 xmhd_prof_tsetops=0.d0; xmhd_prof_nsetops=0
-xmhd_prof_tnlop=0.d0; xmhd_prof_nnlop=0
+xmhd_prof_tnlop=0.d0; xmhd_prof_nnlop=0; xmhd_prof_tnlop_loop=0.d0
 DO i=1,nb
   IF(oft_env%head_proc)CALL mytimer%tick
   CALL xmhd_set_ops(u)
@@ -5758,6 +5761,7 @@ IF(.NOT.oft_env%head_proc)RETURN
 WRITE(*,'(A)')'XMHD_PROF begin'
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF setops ncalls,total_s ',xmhd_prof_nsetops,xmhd_prof_tsetops
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF nlop ncalls,total_s ',xmhd_prof_nnlop,xmhd_prof_tnlop
+WRITE(*,'(A,ES12.4)')'XMHD_PROF nlop_loop total_s ',xmhd_prof_tnlop_loop
 WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF preupdate ncalls,total_s ',xmhd_prof_npre,xmhd_prof_tpre
 DO i=1,MIN(xmhd_nlevels,xmhd_prof_maxlev)
   IF(xmhd_prof_nbuild(i)==0)CYCLE
