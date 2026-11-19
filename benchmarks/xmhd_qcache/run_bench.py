@@ -13,7 +13,7 @@ Examples:
   # Baseline, default case matrix
   python run_bench.py --build-dir ../../builds/build_release --tag baseline
   # A/B: same matrix with an extra xmhd_options entry (once Phase 2 adds it)
-  python run_bench.py --build-dir ... --tag qcache_full --xmhd-opt xmhd_qcache=2
+  python run_bench.py --build-dir ... --tag qcache_ref --xmhd-opt xmhd_qcache=2
   # Compare two result files
   python run_bench.py --compare results/baseline.json results/qcache_full.json
 '''
@@ -254,6 +254,9 @@ def parse_output(text):
     m = re.search(r'^XMHD_PROF nlop_loop total_s\s+' + FLOAT, text, re.M)
     if m:
         r['prof_nlop_loop_total_s'] = float(m.group(1))
+    m = re.search(r'^XMHD_PROF qcache mode,setup_s,mem_mb\s+(\d+)\s+' + FLOAT + r'\s+' + FLOAT, text, re.M)
+    if m:
+        r['qcache_mode'], r['qcache_setup_s'], r['qcache_mem_mb'] = int(m.group(1)), float(m.group(2)), float(m.group(3))
     for m in re.finditer(r'^XMHD_PROF (nlop_norm|matvec_norm)\s+' + FLOAT, text, re.M):
         r[m.group(1)] = float(m.group(2))
     m = re.search(r'^XMHD_PROF kernels ncells,nqp,nthreads,checksum\s+(\d+)\s+(\d+)\s+(\d+)', text, re.M)
@@ -361,7 +364,7 @@ def run_case(case, args, src_dir, exe):
 CSV_KEYS = ['tag', 'name', 'order', 'mg', 'mfnk', 'mode', 'threads', 'nprocs', 'returncode', 'ncells_global', 'cell_np',
             'mesh_order', 'b_dofs', 'v_dofs', 'n_dofs', 'build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s',
             'matvec_s', 'dot_s', 'kern_nqp', 'kern_jacobian_s', 'kern_basis_s', 'kern_log2phys_s', 'jac_nnz_total', 'prof_preupdate_n', 'prof_preupdate_total_s', 'prof_setops_n',
-            'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'prof_nlop_loop_total_s', 'step_time_avg_s', 'step_time_avg_excl1_s',
+            'prof_setops_total_s', 'prof_nlop_n', 'prof_nlop_total_s', 'prof_nlop_loop_total_s', 'qcache_mode', 'qcache_setup_s', 'qcache_mem_mb', 'step_time_avg_s', 'step_time_avg_excl1_s',
             'lits_total', 'nlits_total', 'run_time_s', 'max_rss_mb', 'wall_s', 'nlop_norm', 'matvec_norm',
             'final_norm_B', 'final_norm_V', 'final_norm_Ti']
 
@@ -410,7 +413,8 @@ def compare(path_a, path_b):
         a = {r['name']: r for r in json.load(fid)['results']}
     with open(path_b) as fid:
         b = {r['name']: r for r in json.load(fid)['results']}
-    keys = ['build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s', 'matvec_s', 'step_time_avg_excl1_s', 'max_rss_mb']
+    keys = ['build_s', 'build_fine_avg_s', 'build_coarse_avg_s', 'nlop_s', 'prof_nlop_loop_total_s', 'prof_nlop_total_s',
+            'matvec_s', 'step_time_avg_excl1_s', 'run_time_s', 'max_rss_mb']
     print('{0:24s} {1:>22s} {2:>12s} {3:>12s} {4:>8s}'.format('case', 'metric', 'A', 'B', 'A/B'))
     for name in a:
         if name not in b:
@@ -429,6 +433,10 @@ def compare(path_a, path_b):
             va, vb = a[name].get(k), b[name].get(k)
             if va is not None and vb is not None:
                 print('{0:24s} {1:>22s} {2:12d} {3:12d}'.format(name, k, va, vb))
+        if ('steps' in a[name]) and ('steps' in b[name]):
+            its_a = [(st['lits'], st['nlits']) for st in a[name]['steps']]
+            its_b = [(st['lits'], st['nlits']) for st in b[name]['steps']]
+            print('{0:24s} {1:>22s} {2}'.format(name, 'per-step its match', its_a == its_b))
 
 #------------------------------------------------------------------------------
 def main():

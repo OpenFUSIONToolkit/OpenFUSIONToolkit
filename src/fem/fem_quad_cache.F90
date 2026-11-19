@@ -141,6 +141,9 @@ TYPE, PUBLIC :: oft_qcache_quant
   INTEGER(i4) :: nlc = 0 !< Number of logical components
   INTEGER(i4) :: npc = 0 !< Number of physical components (1 or 3)
   REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: ref => NULL() !< Reference table (REFERENCE mode) [nrows,nlc,nqp]
+  !> Transposed reference table (REFERENCE mode) [nlc*nqp,nrows], used by the cell-batched kernels so that
+  !! test-function accumulation is a unit-stride dot product and per-entity corrections are unit-stride updates
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: reft => NULL()
   REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: full => NULL() !< Physical table (FULL mode) [nce,npc,nqp,nc]
 END TYPE oft_qcache_quant
 !------------------------------------------------------------------------------
@@ -759,6 +762,18 @@ DO s=1,ns
 END DO
 oriented_cell=-1
 DEALLOCATE(rop1,rop3,lt,ls)
+!---Transposed tables for the cell-batched kernels
+DO iq=1,3
+  IF(self%q(iq)%xform<0)CYCLE
+  ALLOCATE(self%q(iq)%reft(self%q(iq)%nlc*self%nqp,self%nrows))
+  DO m=1,self%nqp
+    DO k=1,self%q(iq)%nlc
+      DO j=1,self%nrows
+        self%q(iq)%reft((m-1)*self%q(iq)%nlc+k,j)=self%q(iq)%ref(j,k,m)
+      END DO
+    END DO
+  END DO
+END DO
 !---Free template objects (pointer components are shared and must not be freed)
 NULLIFY(tfe%mesh)
 DEALLOCATE(tfe)
@@ -793,6 +808,7 @@ CLASS(oft_fem_qcache), INTENT(inout) :: self !< Basis cache
 INTEGER(i4) :: iq
 DO iq=1,3
   IF(ASSOCIATED(self%q(iq)%ref))DEALLOCATE(self%q(iq)%ref)
+  IF(ASSOCIATED(self%q(iq)%reft))DEALLOCATE(self%q(iq)%reft)
   IF(ASSOCIATED(self%q(iq)%full))DEALLOCATE(self%q(iq)%full)
   self%q(iq)%xform=-1
   self%q(iq)%nlc=0
@@ -827,6 +843,7 @@ INTEGER(i4) :: iq
 nbytes=0
 DO iq=1,3
   IF(ASSOCIATED(self%q(iq)%ref))nbytes=nbytes+8_i8*SIZE(self%q(iq)%ref,KIND=i8)
+  IF(ASSOCIATED(self%q(iq)%reft))nbytes=nbytes+8_i8*SIZE(self%q(iq)%reft,KIND=i8)
   IF(ASSOCIATED(self%q(iq)%full))nbytes=nbytes+8_i8*SIZE(self%q(iq)%full,KIND=i8)
 END DO
 IF(ASSOCIATED(self%ent_row0))nbytes=nbytes+4_i8*(SIZE(self%ent_row0,KIND=i8)+4_i8*self%nent)
@@ -1541,7 +1558,7 @@ DO f=1,nfld
   END DO
 END DO
 
-!---Corrections for entities without a transform
+!---Corrections for entities without a transform (unit-stride updates with the transposed table)
 IF(self%nxf(3)>0)THEN
   DO i=1,self%nent
     IF(self%ent_orient(i)==0)CYCLE
@@ -1549,12 +1566,12 @@ IF(self%nxf(3)>0)THEN
     IF(self%xf_kind(s,i)/=3)CYCLE
     nd=self%ent_ndof(i); d0=self%ent_dof0(i); r0=self%ent_row0(s,i)
     DO f=1,nfld
-      DO kq=1,nkq
-        tmp=0.d0
-        DO j=1,nd
-          tmp=tmp+tab(r0+j,kq)*coefs(d0+j,f)
+      DO j=1,nd
+        tmp=coefs(d0+j,f)
+        !$omp simd
+        DO kq=1,nkq
+          lc(kq,f)=lc(kq,f)+self%q(iq)%reft(kq,r0+j)*tmp
         END DO
-        lc(kq,f)=lc(kq,f)+tmp
       END DO
     END DO
   END DO
@@ -1634,10 +1651,10 @@ INTEGER(i4), INTENT(in) :: nlc !< Logical components
 REAL(r8), INTENT(inout) :: lf(nlc*self%nqp,nfld) !< Logical fluxes at all qp
 INTEGER(i4) :: i,j,f,kq,m,k,s,nd,d0,r0,nkq,nce,g
 REAL(r8) :: tmp,x(3,3)
-REAL(r8), CONTIGUOUS, POINTER :: tab(:,:)
+REAL(r8), CONTIGUOUS, POINTER :: tabt(:,:)
 nce=self%nce
 nkq=nlc*self%nqp
-tab(1:self%nrows,1:nkq)=>self%q(iq)%ref
+tabt=>self%q(iq)%reft
 !---Logical fluxes
 IF(self%q(iq)%xform==qc_xform_none)THEN
   DO f=1,nfld
@@ -1661,14 +1678,15 @@ ELSE
     END DO
   END DO
 END IF
-!---Contract with canonical table
-rw=0.d0
+!---Contract with canonical table (unit-stride dot products with the transposed table)
 DO f=1,nfld
-  DO kq=1,nkq
-    tmp=lf(kq,f)
-    DO j=1,nce
-      rw(j,f)=rw(j,f)+tab(j,kq)*tmp
+  DO j=1,nce
+    tmp=0.d0
+    !$omp simd reduction(+:tmp)
+    DO kq=1,nkq
+      tmp=tmp+tabt(kq,j)*lf(kq,f)
     END DO
+    rw(j,f)=tmp
   END DO
 END DO
 !---Map to cell DOFs (kind 3 entities are skipped and computed below)
@@ -1680,11 +1698,13 @@ IF(self%nxf(3)>0)THEN
     IF(self%xf_kind(s,i)/=3)CYCLE
     nd=self%ent_ndof(i); d0=self%ent_dof0(i); r0=self%ent_row0(s,i)
     DO f=1,nfld
-      DO kq=1,nkq
-        tmp=lf(kq,f)
-        DO j=1,nd
-          res(d0+j,f)=res(d0+j,f)+tab(r0+j,kq)*tmp
+      DO j=1,nd
+        tmp=0.d0
+        !$omp simd reduction(+:tmp)
+        DO kq=1,nkq
+          tmp=tmp+tabt(kq,r0+j)*lf(kq,f)
         END DO
+        res(d0+j,f)=res(d0+j,f)+tmp
       END DO
     END DO
   END DO

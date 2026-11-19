@@ -4108,9 +4108,9 @@ DO k=1,xmhd_rep%nfields
     va(i)=va(i)*(1.d0+0.05d0*SIN(REAL(i,8)))
   END DO
   CALL up%restore_local(va,k)
+  DEALLOCATE(va)
+  NULLIFY(va)
 END DO
-DEALLOCATE(va)
-NULLIFY(va)
 DO im=1,3
   CALL xmhd_rep%vec_create(res(im)%f)
 END DO

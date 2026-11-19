@@ -17,6 +17,9 @@ Later phases rerun it unchanged to get A/B comparisons.
 | `run_qcache_bench.py` | Phase 2 kernel benchmark driver for the quadrature cache (`src/fem/fem_quad_cache.F90`); runs `<build_dir>/tests/fem/fem_qcache_bench` on the Phase 0 meshes |
 | `../../src/tests/fem/fem_qcache_bench.F90` | Phase 2 kernel benchmark (direct evaluation vs FULL/REFERENCE cache, basis/reconstruction/residual kernels) |
 | `phase2_results.md` | Phase 2 report (quadrature-point cache module, validation, kernel A/B, memory) |
+| `phase3_results.md` | Phase 3 report (xMHD NL residual on the cache: design, equivalence matrix, A/B) |
+| `qcheck_summary.py` | Phase 3: summarizes the residual equivalence checks (`test_MUG_qcache.py -v -s` log) |
+| `../../src/tests/physics/MUG/test_MUG_qcache.py` | Phase 3 equivalence tests (`xmhd_bench` in `mode='qcheck'`) |
 
 The driver lives in the OFT source tree, not here, so the normal CMake build compiles and links it
 against the in-tree libraries (it is built whenever `OFT_BUILD_TESTS=ON`; no pytest wrapper uses it).
@@ -109,8 +112,8 @@ after every case; run directories go to `runs/qcache_<tag>/`.
 2. Run the same matrix with a different `--tag`, passing any new `xmhd_options` through `--xmhd-opt`, eg.
    ```bash
    python run_bench.py --build-dir <build_dir> --tag qcache_off  --xmhd-opt xmhd_qcache=0
-   python run_bench.py --build-dir <build_dir> --tag qcache_full --xmhd-opt xmhd_qcache=2
-   python run_bench.py --build-dir <build_dir> --tag qcache_ref  --xmhd-opt xmhd_qcache=1
+   python run_bench.py --build-dir <build_dir> --tag qcache_full --xmhd-opt xmhd_qcache=1
+   python run_bench.py --build-dir <build_dir> --tag qcache_ref  --xmhd-opt xmhd_qcache=2
    ```
    `--xmhd-opt` adds raw lines to `&xmhd_options` for every case and can be repeated. `--bench-opt` does the same for
    `&xmhd_bench_options`. On `main` an unknown `xmhd_options` entry is a namelist read error, so only pass
