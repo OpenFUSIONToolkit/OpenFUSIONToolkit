@@ -1,0 +1,35 @@
+| case | 0 vs 2: blocks | 0 vs 2: Bg (own max) | 0 vs 2: diag | 0 vs 1: blocks | 2 vs 1: blocks |
+|---|---|---|---|---|---|
+| `test_qcache_physics_tet_p2[base]` | 3.6e-16 | 1.3e-12 | 3.3e-16 | 4.8e-16 | 3.9e-16 |
+| `test_qcache_physics_tet_p2[single_temp_hall]` | 3.6e-16 | 1.8e-12 | 1.9e-16 | 5.1e-16 | 5.1e-16 |
+| `test_qcache_physics_tet_p2[two_temp_hall_equil]` | 3.9e-16 | 1.8e-12 | 1.1e-16 | 5.4e-16 | 5.4e-16 |
+| `test_qcache_physics_tet_p2[iso_gyro]` | 3.8e-16 | 1.8e-12 | 3.3e-16 | 5.1e-16 | 5.4e-16 |
+| `test_qcache_physics_tet_p2[kin_gyro_nopar]` | 3.8e-16 | 1.7e-12 | 2.2e-16 | 3.9e-16 | 4.7e-16 |
+| `test_qcache_physics_tet_p2[brag_two_temp]` | 1.4e-15 | 3.1e-12 | 1.9e-16 | 6.5e-16 | 1.1e-15 |
+| `test_qcache_physics_tet_p2[brag_single_temp]` | 7.7e-16 | 1.8e-12 | 3.8e-16 | 5.8e-16 | 9.6e-16 |
+| `test_qcache_physics_tet_p2[hyper]` | 2.0e-15 | 2.3e-12 | 3.3e-16 | 1.4e-15 | 1.8e-15 |
+| `test_qcache_physics_tet_p2[hyper_centered]` | 1.4e-15 | 1.8e-12 | 3.3e-16 | 1.2e-15 | 1.5e-15 |
+| `test_qcache_physics_tet_p2[shaping_eta_temp]` | 3.8e-16 | 1.8e-12 | 1.9e-16 | 5.4e-16 | 5.4e-16 |
+| `test_qcache_physics_tet_p2[eta_profile]` | 3.6e-16 | 1.8e-12 | 2.2e-16 | 3.9e-16 | 3.8e-16 |
+| `test_qcache_physics_tet_p2[no_upwind_iso]` | 3.2e-16 | 1.8e-12 | 2.2e-16 | 7.2e-16 | 5.4e-16 |
+| `test_qcache_physics_tet_p2[no_advec_den]` | 3.6e-16 | 2.1e-12 | 2.2e-16 | 3.9e-16 | 3.6e-16 |
+| `test_qcache_physics_tet_p2[no_temp]` | 3.5e-16 | 1.8e-12 | 1.9e-16 | 3.6e-16 | 4.8e-16 |
+| `test_qcache_physics_tet_p2[floors_solid]` | 3.6e-16 | 2.5e-12 | 1.9e-16 | 4.0e-16 | 4.0e-16 |
+| `test_qcache_physics_tet_p3[base]` | 5.9e-16 | 4.3e-11 | 1.8e-16 | 5.9e-16 | 5.9e-16 |
+| `test_qcache_physics_tet_p3[single_temp_hall]` | 4.6e-16 | 6.3e-11 | 1.8e-16 | 6.6e-16 | 7.2e-16 |
+| `test_qcache_physics_tet_p3[hyper]` | 7.1e-15 | 8.6e-11 | 1.5e-16 | 3.9e-15 | 9.1e-15 |
+| `test_qcache_physics_tet_p3[shaping_eta_temp]` | 5.9e-16 | 7.3e-11 | 2.4e-16 | 6.0e-16 | 9.1e-16 |
+| `test_qcache_physics_tet_p3[floors_solid]` | 8.9e-16 | 6.1e-11 | 2.0e-16 | 6.7e-16 | 8.9e-16 |
+| `test_qcache_tet[2]` | 2.3e-15 | 1.8e-12 | 4.4e-16 | 1.1e-15 | 2.6e-15 |
+| `test_qcache_tet[3]` | 8.9e-15 | 6.1e-11 | 1.9e-16 | 4.2e-15 | 7.7e-15 |
+| `test_qcache_tet[4]` | 3.2e-14 | 4.9e-10 | 9.5e-16 | 2.9e-14 | 2.9e-14 |
+| `test_qcache_hex[2]` | 2.0e-15 | 7.0e-07 | 3.7e-16 | 3.4e-15 | 2.8e-15 |
+| `test_qcache_hex[3]` | 5.3e-15 | 3.8e-07 | 8.2e-16 | 6.5e-15 | 6.1e-15 |
+| `test_qcache_curved_p3` | 7.8e-16 | 7.8e-16 | 1.1e-15 | 8.2e-16 | 3.3e-16 |
+| `test_qcache_vbc[norm]` | 2.7e-16 | 1.5e-16 | 2.2e-16 | 3.3e-16 | 3.3e-16 |
+| `test_qcache_vbc[tang]` | 2.7e-16 | 1.0e-16 | 2.2e-16 | 4.0e-16 | 4.0e-16 |
+| `test_qcache_revolved[tet]` | 2.8e-16 | 3.2e-16 | 3.8e-16 | 3.0e-16 | 3.0e-16 |
+| `test_qcache_revolved[hex]` | 6.2e-16 | 4.6e-16 | 2.9e-16 | 1.8e-15 | 1.5e-15 |
+| `test_qcache_pmg` | 5.9e-16 | 5.5e-11 | 2.4e-16 | 5.9e-16 | 5.9e-16 |
+| `test_qcache_mpi2` | 1.0e-14 | 6.1e-11 | 1.8e-16 | 4.0e-15 | 7.8e-15 |
+| **max** | 3.2e-14 | 7.0e-07 | 1.1e-15 | 2.9e-14 | 2.9e-14 |
