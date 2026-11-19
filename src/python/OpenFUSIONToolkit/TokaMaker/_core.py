@@ -3807,7 +3807,10 @@ class TokaMaker_equilibrium():
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         '''
         li_norm = li_normalization.lower()
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,axis_pad=axis_pad,li_normalization='std' if li_norm == 'all' else li_normalization,geom_type=geom_type,beta_Ip=beta_Ip)
+        stats_norm = li_normalization
+        if li_norm == 'all':
+            stats_norm = 'std'
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,axis_pad=axis_pad,li_normalization=stats_norm,geom_type=geom_type,beta_Ip=beta_Ip)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
@@ -3836,7 +3839,11 @@ class TokaMaker_equilibrium():
         print("  Diamagnetic flux [Wb]   =   {0:11.4E}".format(eq_stats['dflux'])) if 'dflux' in eq_stats else None
         print("  Toroidal flux [Wb]      =   {0:11.4E}".format(eq_stats['tflux'])) if 'tflux' in eq_stats else None
         if 'l_i' in eq_stats:
-            for key in (['l_i_std','l_i_iter'] if li_norm == 'all' else ['l_i_'+li_norm]):
+            if li_norm == 'all':
+                li_keys = [key for key in eq_stats if key.startswith('l_i_')]
+            else:
+                li_keys = ['l_i_'+li_norm]
+            for key in li_keys:
                 print("  {0:24}=   {1:7.4F}".format(key,eq_stats[key]))
 
     def calc_loopvoltage(self):
