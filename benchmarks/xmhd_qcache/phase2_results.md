@@ -430,7 +430,15 @@ Max relative checksum difference vs direct (recon, resid): 5.0e-15
 
 From `builds/build_release/tests` with `OMP_NUM_THREADS=2`:
 
-@@REGRESSION@@
+| suite | result |
+|---|---|
+| `fem/` (all FEM tests, including the 20 new `test_fem_qcache` tests) | 351 passed, 233 skipped (PETSc / unsupported configurations), 0 failed, 10 min |
+| `physics/MUG/test_alfven.py`, `test_sound.py`, `-k "test_nl_r1_p2 or test_lin_r1_p2 or test_hex_nl_r1_p2"` (incl. 2-rank NK/MFNK variants) | 23 passed, 16 skipped, 0 failed |
+| `physics/MUG/test_MUG_visc.py`, `test_MUG_gyro.py` | 11 passed |
+
+The MUG tests compare against stored reference values. They check that moving the partition-flag routine to
+`fem_cell_shared_flags` (the only change to `xmhd.F90`) did not change results. The known p-MG failures
+(alfven `test_nl_r1_p3`/`test_lin_r1_p3`) were not part of this subset.
 
 ## Notes for Phase 3
 
