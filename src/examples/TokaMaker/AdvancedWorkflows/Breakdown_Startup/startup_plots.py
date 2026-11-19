@@ -300,29 +300,28 @@ _RC = {'font.family': 'serif', 'font.serif': ['STIXGeneral', 'DejaVu Serif'], 'm
 
 def startup_frames(model, g, s1, res, ramp, zoom, n_grid=61):
     """Everything the animation draws, one entry per time slice: stage 1 (premagnetisation to the
-    hand-off) then the TokaMaker ramp. Stage-1 slices carry |B_p| and the Lloyd quantity on an
-    R-Z grid over the zoom window (R_min, R_max, Z_min, Z_max): the applied field (coils +
-    structure) up to the end of the breakdown window, then the stray field, i.e. the applied field
-    minus the vertical field that the channel's radial force balance needs. Ramp slices carry the
-    last closed flux surface. Returns a dict for make_startup_gif."""
+    hand-off) then the TokaMaker ramp. Every slice carries the total |B_p| and flux (coils,
+    structure and plasma) on an R-Z grid over the zoom window (R_min, R_max, Z_min, Z_max), so the
+    same quantity is shown in every phase; breakdown slices also carry the Lloyd quantity, and ramp
+    slices the last closed flux surface. Returns a dict for make_startup_gif."""
     rg, pl, bd = s1.scen['region'], s1.scen['plasma'], s1.scen['breakdown']
     frames = []
     for k, t in enumerate(s1.t):
-        x_ext, xdot_ext = res['x'][k].copy(), res['xdot'][k].copy()
-        x_ext[s1.ip] = xdot_ext[s1.ip] = 0.0             # applied field only: coils + structure
-        mp = field_maps(model, s1, x_ext, xdot_ext, s1.s, zoom[:2], zoom[2:], n=n_grid)
+        mp = field_maps(model, s1, res['x'][k], res['xdot'][k], s1.s, zoom[:2], zoom[2:], n=n_grid)
         phase = 'channel' if t > s1.t_p0 + 1e-9 else ('breakdown' if t > bd['window'][0] + 1e-9 else 'premag')
         frames.append({'t': t, 'Ip': res['Ip'][k], 'I_coil': res['I_coil'][k], 'I_seg': res['I_struct'][k],
                        'psi': nodal_flux(model, s1, res['x'][k], s1.plasma, res['Ip'][k]), 'phase': phase,
-                       'R': mp['R'], 'Z': mp['Z'],     # channel: stray field, applied minus the required B_v
-                       'Bp': np.hypot(mp['Br'], mp['Bz'] + s1.kf * s1.s * res['Ip'][k]) if phase == 'channel'
-                       else mp['Bp'],
-                       'lloyd': mp['lloyd'] if 0 < k and phase != 'channel' else None})
+                       'Bp': mp['Bp'], 'psi_map': mp['psi'],
+                       'lloyd': mp['lloyd'] if 0 < k and phase != 'channel' else None})   # I_p = 0 there
+    R, Z = mp['R'], mp['Z']
+    grid_pts = np.column_stack([R.ravel(), Z.ravel()])
     nc = ramp.c.ncirc
     for k in range(1, len(ramp.t)):                       # slice 0 is the hand-off, already shown
         info = ramp.tm_info[k]
+        f = eval_fields(model.gs, ramp.psi_tot[k][None, :], grid_pts)
         frames.append({'t': ramp.t[k], 'Ip': ramp.Ip[k], 'I_coil': ramp.c.T @ ramp.x[k][:nc], 'I_seg': ramp.x[k][nc:],
                        'psi': ramp.psi_tot[k], 'phase': 'ramp', 'psi_bounds': info['psi_bounds'], 'iso': ramp.iso[k],
+                       'Bp': np.hypot(f['Br'][0], f['Bz'][0]).reshape(R.shape), 'psi_map': f['psi'][0].reshape(R.shape),
                        'lcfs': _lcfs_poly(g, ramp.psi_tot[k], info['psi_bounds'][0], info['o_point'])})
     traces = {'t': np.r_[s1.t, ramp.t[1:]], 'Ip': np.r_[res['Ip'], ramp.Ip[1:]],
               't1': s1.t, 'Bmax': res['B_pts_ext'].max(axis=1), 'flux1': res['flux_bound_Wb'],
@@ -330,14 +329,16 @@ def startup_frames(model, g, s1, res, ramp, zoom, n_grid=61):
     return {'frames': frames, 'traces': traces, 'used': np.abs(s1.c.T).sum(axis=1) > 0,
             'coil_lim': np.abs(model.coil_lim[:, 1]), 'region': (rg['R'], rg['Z'], rg['radius']),
             'channel': (pl['Rc'], pl['Zc'], pl['a']), 'window': bd['window'],
-            'threshold': bd['margin'] * bd['E_star'], 'zoom': zoom}
+            'threshold': bd['margin'] * bd['E_star'], 'zoom': zoom, 'R': R, 'Z': Z}
 
 
-def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_hold=1500):
+def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_max=400, ms_hold=1500):
     """Animated GIF of the start-up from startup_frames: (a) machine, (b) plasma region,
     (c)-(e) plasma current, largest |B_p| in the breakdown region, and flux at the plasma boundary
-    (the channel edge in stage 1, TokaMaker's boundary on the ramp). colors: GIF palette size;
-    ms_frame / ms_hold: duration of each frame / of the first and last frames [ms]. Returns path."""
+    (the channel edge in stage 1, TokaMaker's boundary on the ramp). colors: GIF palette size.
+    Frame durations [ms] grow as sqrt(time step), from ms_frame for the shortest step up to ms_max,
+    so the playback speed changes smoothly between phases; the first and last frames and the
+    first frame of every phase are held for ms_hold. Returns path."""
     from PIL import Image
     BLUE, RED, LIGHT = '#0077BB', '#CC3311', '0.85'
     frames, traces, zoom = d['frames'], d['traces'], d['zoom']
@@ -350,6 +351,7 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_hold=1500)
     ylims = [(-0.03 * Ip_kA.max(), 1.05 * Ip_kA.max()),
              (10 ** np.floor(np.log10(max(Bmax_mT.min(), 1e-3))), 10 ** np.ceil(np.log10(max(Bmax_mT.max(), 1e-2)))),
              (flux.min() - 0.05 * np.ptp(flux), flux.max() + 0.05 * np.ptp(flux))]
+    outside = ~Path(g.lim).contains_points(np.column_stack([d['R'].ravel(), d['Z'].ravel()])).reshape(d['R'].shape)
     images = []
     with plt.rc_context(_RC):
         for frame, J_f in zip(frames, J):
@@ -376,36 +378,38 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_hold=1500)
                                          ec='k', lw=0.5, ls=':'))
             ax_m.set(xlim=g.extent[:2], ylim=g.extent[2:], xlabel='$R$ [m]', ylabel='$Z$ [m]', aspect='equal')
 
-            # (b) zoom window: |B_p| and the breakdown contour in stage 1, flux surfaces on the ramp
+            # (b) zoom window, every phase: total |B_p| and flux; red: where breakdown is possible
+            # (Lloyd contour), then the channel edge, then TokaMaker's last closed flux surface
+            R, Z = d['R'], d['Z']
+            bp = np.ma.masked_where(outside, np.clip(frame['Bp'] * 1e3, 0.1001, 99.9))
+            ax_z.contourf(R, Z, bp, levels=np.logspace(-1, 2, 25), norm=Bnorm, cmap='Greys')
+            ax_z.contour(R, Z, np.ma.masked_where(outside, frame['psi_map']), 15, colors='0.6', linewidths=0.3)
             if frame['phase'] != 'ramp':
-                grid_pts = np.column_stack([frame['R'].ravel(), frame['Z'].ravel()])
-                outside = ~Path(g.lim).contains_points(grid_pts).reshape(frame['R'].shape)
-                bp = np.ma.masked_where(outside, np.clip(frame['Bp'] * 1e3, 0.1001, 99.9))
-                ax_z.contourf(frame['R'], frame['Z'], bp, levels=np.logspace(-1, 2, 25), norm=Bnorm, cmap='Greys')
                 if frame['lloyd'] is not None:
                     lloyd = np.ma.masked_where(outside, frame['lloyd'])
                     if lloyd.min() < d['threshold'] < lloyd.max():
-                        ax_z.contour(frame['R'], frame['Z'], lloyd, levels=[d['threshold']], colors=RED,
-                                     linewidths=1.0)
+                        ax_z.contour(R, Z, lloyd, levels=[d['threshold']], colors=RED, linewidths=1.0)
                 ax_z.add_patch(plt.Circle(d['region'][:2], d['region'][2], fill=False, ls='--', ec=BLUE, lw=0.9))
                 if frame['phase'] == 'channel':
                     ax_z.add_patch(plt.Circle(d['channel'][:2], d['channel'][2], fill=False, ec=RED, lw=1.2))
             else:
-                ax_z.tricontour(g.tri_in, psi, levels=np.linspace(psi_in.min(), psi_in.max(), 25), colors='0.75',
-                                linewidths=0.3)
                 poly = frame['lcfs']
                 if poly is not None:
                     # normalised flux surfaces, drawn only on the triangles inside the LCFS
                     psi_bound, psi_axis = frame['psi_bounds']       # TokaMaker order: [LCFS, axis]
                     tri_plasma = mtri.Triangulation(g.R, g.Z, g.lc, mask=~Path(poly).contains_points(g.cell_centre))
                     ax_z.tricontour(tri_plasma, (psi - psi_axis) / (psi_bound - psi_axis),
-                                    levels=np.linspace(0.1, 0.9, 9), colors='0.4', linewidths=0.5)
+                                    levels=np.linspace(0.1, 0.9, 9), colors='w', linewidths=0.5)
                     ax_z.plot(poly[:, 0], poly[:, 1], color=RED, lw=1.2)
                 ax_z.plot(frame['iso'][:, 0], frame['iso'][:, 1], 'o', mfc='none', mec=BLUE, ms=2.5)
             ax_z.plot(g.lim[:, 0], g.lim[:, 1], 'k', lw=0.8)
             ax_z.set(xlim=zoom[:2], ylim=zoom[2:], xlabel='$R$ [m]', aspect='equal')
-            phase_label = {'premag': 'premagnetisation and swing', 'breakdown': 'breakdown window',
-                           'channel': 'early plasma channel', 'ramp': 'free-boundary ramp'}[frame['phase']]
+            phase_label, red_label = {'premag': ('premagnetisation and swing', 'red: Lloyd criterion met'),
+                                      'breakdown': ('breakdown window', 'red: Lloyd criterion met'),
+                                      'channel': ('early plasma channel', 'red: channel edge'),
+                                      'ramp': ('free-boundary ramp', 'red: last closed flux surface')}[frame['phase']]
+            ax_z.text(0.03, 0.015, red_label, transform=ax_z.transAxes, ha='left', va='bottom', fontsize=6.5,
+                      color=RED, bbox=dict(fc='w', ec='none', alpha=0.8, pad=1.0))
             fig.text(0.5, 0.965, f'$t$ = {frame["t"]:+.3f} s     $I_p$ = {frame["Ip"] / 1e3:5.0f} kA     {phase_label}',
                      ha='center', va='center', fontsize=9)
 
@@ -437,8 +441,7 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_hold=1500)
                 axt.text(0.02, 0.93, f'({lab})', transform=axt.transAxes, ha='left', va='top')
 
             # colour bars: (grid cell, norm, colour map, label, bottom of the bar in figure units)
-            B_label = ('stray $|B_p|$ (applied minus required $B_v$) [mT]' if frame['phase'] in ('channel', 'ramp')
-                       else 'applied $|B_p|$ [mT]')
+            B_label = '$|B_p|$, coils + structure + plasma [mT]'
             for cell, norm, cmap, label, y0 in ((gsp[:, 0], Inorm, 'RdBu_r', 'coil current / limit', 0.175),
                                                 (gsp[:, 0], Jnorm, 'RdBu_r', 'structure current density [kA/m$^2$]', 0.065),
                                                 (gsp[:, 1], Bnorm, 'Greys', B_label, 0.175)):
@@ -455,7 +458,12 @@ def make_startup_gif(d, g, path, dpi=100, colors=96, ms_frame=160, ms_hold=1500)
             canvas.draw()
             images.append(Image.fromarray(np.asarray(canvas.buffer_rgba())[..., :3])
                           .convert('P', palette=Image.ADAPTIVE, colors=colors))
-    durations = [ms_frame] * len(images)
+    t = np.array([f['t'] for f in frames])
+    dt = np.diff(t, prepend=t[0] - (t[1] - t[0]))
+    durations = np.clip(ms_frame * np.sqrt(dt / dt.min()), ms_frame, ms_max).round().astype(int).tolist()
+    for i in range(1, len(frames)):
+        if frames[i]['phase'] != frames[i - 1]['phase']:
+            durations[i] = ms_hold
     durations[0] = durations[-1] = ms_hold
     images[0].save(path, save_all=True, append_images=images[1:], duration=durations, loop=0, optimize=True)
     return path
