@@ -5,278 +5,65 @@
 #------------------------------------------------------------------------------
 """Machine, circuit and early-plasma models for breakdown and start-up design with TokaMaker.
 
-Contents
-    segment_conductors  split every passive conducting region of a TokaMaker mesh into segments,
-                        each of which TokaMaker then treats as a 1-turn coil with a 1/R current
-                        distribution (the eddy-current model of the structure)
-    MachineModel        inductance matrix, resistances, unit flux responses and coil limits,
-                        all computed by TokaMaker
-    CircuitModel        M dx/dt + R x = S V for the driven coils + structure (+ plasma channel),
-                        with an exact zero-order-hold discretisation
+    segment_conductors  split the passive conductors into segments, each a 1-turn coil with a 1/R
+                        current distribution (the eddy-current model of the structure)
+    MachineModel        inductances, resistances, unit flux maps and coil limits from TokaMaker
+    CircuitModel        M dx/dt + R x = S V for the supplies, structure (and plasma channel)
     ChannelPlasma       the early plasma as a uniform-current ring: one more circuit element
-    FieldTracer, townsend_window, paschen_Emin
-                        connection length and Townsend avalanche check of a breakdown
+    FieldTracer, townsend_window, paschen_Emin   connection length and Townsend avalanche check
 
-Conventions: coil currents are per-turn amps (as TokaMaker's set_coil_currents takes them);
-psi is TokaMaker's poloidal flux per radian [Wb/rad], so the loop voltage is -2 pi dpsi/dt and
-E_phi = -(dpsi/dt) / R; B_R = -(dpsi/dZ)/R, B_Z = (dpsi/dR)/R.
+SI units (m, s, A, V) except electron temperatures [eV] and the Townsend constants [Torr based].
+Coil currents are per-turn [A]; psi is TokaMaker's poloidal flux per radian [Wb/rad], so the loop
+voltage is -2 pi dpsi/dt, E_phi = -(dpsi/dt) / R, B_R = -(dpsi/dZ) / R and B_Z = (dpsi/dR) / R.
 """
 import numpy as np
 import scipy.sparse as sp
+from scipy.cluster.vq import kmeans2
 from scipy.linalg import expm
+from scipy.sparse.csgraph import connected_components
 from matplotlib.path import Path
 
-MU0 = 4e-7 * np.pi
+MU0 = 4e-7 * np.pi      # vacuum permeability [H/m]
 LN_LAMBDA = 15.0        # Coulomb logarithm, used for the Spitzer resistivity in both stages
 
 
-# ============================================================================ field evaluation
+# ============================================================================ geometry and fields
 def eval_fields(gs, psi_vecs, pts, second=False, h=5.0e-3):
-    """psi, B_R, B_Z of each nodal flux vector in psi_vecs at the points pts, using TokaMaker's own
-    finite-element interpolation. Returns a dict of arrays [n_vec, n_pts]; with second=True also
-    dBz_dR (central difference of the interpolated gradient, step h)."""
+    """psi [Wb/rad], B_R and B_Z [T] of nodal flux vectors psi_vecs [n_vec, n_nodes] at points
+    pts [n_pts, 2] (R, Z) [m], by TokaMaker's finite-element interpolation. If second, also
+    dBz_dR [T/m] by a central difference of the gradient with step h [m].
+    Returns a dict of arrays [n_vec, n_pts]."""
     psi_vecs = np.atleast_2d(psi_vecs)
     pts = np.atleast_2d(np.asarray(pts, float))
-    nv, npt = psi_vecs.shape[0], pts.shape[0]
-    out = {k: np.zeros((nv, npt)) for k in ('psi', 'Br', 'Bz')}
-    if second:
-        out['dBz_dR'] = np.zeros((nv, npt))
-    R = pts[:, 0]
-    dR = np.array([h, 0.0])
-    for i in range(nv):                                  # one interpolator call per vector, all points at once
-        psi_i = np.ascontiguousarray(psi_vecs[i])
-        fe, fg = gs.get_field_eval('eval', values=psi_i), gs.get_field_eval('grad', values=psi_i)
-        g = fg.eval(pts)
-        out['psi'][i] = fe.eval(pts)[:, 0]
-        out['Br'][i], out['Bz'][i] = -g[:, 1] / R, g[:, 0] / R
+    R, dR = pts[:, 0], np.array([h, 0.0])
+    out = {k: np.zeros((len(psi_vecs), len(pts))) for k in ('psi', 'Br', 'Bz', 'dBz_dR')[:4 if second else 3]}
+    for i, psi_i in enumerate(psi_vecs):
+        psi_i = np.ascontiguousarray(psi_i)
+        out['psi'][i] = gs.get_field_eval('eval', values=psi_i).eval(pts)[:, 0]
+        f_grad = gs.get_field_eval('grad', values=psi_i)
+        grad = f_grad.eval(pts)                          # columns: dpsi/dR, dpsi/dZ
+        out['Br'][i], out['Bz'][i] = -grad[:, 1] / R, grad[:, 0] / R
         if second:
-            out['dBz_dR'][i] = (fg.eval(pts + dR)[:, 0] / (R + h) - fg.eval(pts - dR)[:, 0] / (R - h)) / (2 * h)
+            out['dBz_dR'][i] = (f_grad.eval(pts + dR)[:, 0] / (R + h)
+                                - f_grad.eval(pts - dR)[:, 0] / (R - h)) / (2 * h)
     return out
 
 
 def disk_points(Rc, Zc, radius, n_rings=3, n_per_ring=8):
-    """Centre plus concentric rings of points covering a disk (the breakdown region)."""
+    """Points [n_pts, 2] covering a disk of radius [m] centred at (Rc, Zc) [m]: the centre plus
+    n_rings rings, ring k holding n_per_ring * k points (odd rings rotated by half a spacing)."""
     pts = [[Rc, Zc]]
     for k in range(1, n_rings + 1):
-        r = radius * k / n_rings
-        th = 2 * np.pi * (np.arange(n_per_ring * k) + 0.5 * (k % 2)) / (n_per_ring * k)
-        pts += [[Rc + r * np.cos(t), Zc + r * np.sin(t)] for t in th]
+        r, n_k = radius * k / n_rings, n_per_ring * k
+        theta = 2 * np.pi * (np.arange(n_k) + 0.5 * (k % 2)) / n_k
+        pts += [[Rc + r * np.cos(t), Zc + r * np.sin(t)] for t in theta]
     return np.array(pts)
 
 
-# ============================================================================ structure segments
-def cell_geometry(P, LC):
-    """Area and centroid of every triangle of the mesh."""
-    v1, v2 = P[LC[:, 1]] - P[LC[:, 0]], P[LC[:, 2]] - P[LC[:, 0]]
-    return 0.5 * np.abs(v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0]), P[LC].mean(axis=1)
-
-
-def _connected_pieces(groups, LC, min_cells):
-    """Split each group of cells into node-connected pieces (a patch must be ONE closed toroidal
-    loop, not two disjoint ones), then merge pieces smaller than min_cells into a piece they touch."""
-    from scipy.sparse.csgraph import connected_components
-    allc = np.concatenate(groups)
-    nn = int(LC.max()) + 1
-    inc = sp.csr_matrix((np.ones(LC[allc].size), (np.repeat(np.arange(len(allc)), LC.shape[1]),
-                                                  LC[allc].ravel())), shape=(len(allc), nn))
-    adj = (inc @ inc.T).tocsr()                          # cells sharing at least one node
-    pos = {c: i for i, c in enumerate(allc)}
-    pieces = []
-    for g in groups:
-        li = np.array([pos[c] for c in g])
-        ncomp, lab = connected_components(adj[li][:, li], directed=False)
-        pieces += [g[lab == j] for j in range(ncomp)]
-    big = [c for c in pieces if len(c) >= min_cells]
-    for c in (c for c in pieces if len(c) < min_cells):
-        touch = set(allc[adj[np.array([pos[x] for x in c])].indices])
-        cand = [j for j, b in enumerate(big) if touch.intersection(b)]
-        if cand:
-            big[cand[0]] = np.concatenate([big[cand[0]], c])
-        else:
-            big.append(c)
-    return big
-
-
-def segment_conductors(P, LC, REG, cond_dict, n_segments, center, min_cells=2, seed=12345):
-    """Split every conducting region (eta > 0) of a TokaMaker mesh into segments.
-
-    Each region is cut into n_segments[name] equal-size patches by k-means clustering of the cell
-    centroids (so a thick region, e.g. a blanket, is also split through its thickness); patches
-    are ordered by poloidal angle about `center`. Every segment is later declared to TokaMaker as
-    a 1-turn coil carrying a 1/R current distribution (uniform E_phi), and its resistance follows
-    from the region's resistivity: R = 2 pi eta / sum(A_cell / R_cell).
-
-    Returns (reg, segments, seg_coils, vac_dict):
-        reg       new region id per mesh cell (each segment gets its own id)
-        segments  list of dicts: name, region, reg_id, cells, eta, R_ohm
-        seg_coils TokaMaker coil_dict entries for the segments
-        vac_dict  the non-conducting regions (TokaMaker cond_dict without the segmented ones)
-    """
-    from scipy.cluster.vq import kmeans2
-    area, cen = cell_geometry(P, LC)
-    reg = REG.copy()
-    next_id = int(REG.max()) + 1
-    cond = {k: v for k, v in cond_dict.items() if v.get('eta', -1.0) > 0}
-    vac_dict = {k: v for k, v in cond_dict.items() if not (v.get('eta', -1.0) > 0)}
-    segments, seg_coils = [], {}
-    for name, info in cond.items():
-        idx = np.where(REG == info['reg_id'])[0]
-        if len(idx) == 0:
-            continue
-        nk = min(int(n_segments[name]), len(idx))
-        _, lab = kmeans2(cen[idx], nk, minit='++', seed=seed, iter=50)
-        order = np.argsort([np.arctan2(*(cen[idx[lab == j]].mean(axis=0) - center)[::-1])
-                            if np.any(lab == j) else 9.0 for j in range(nk)])
-        groups = [idx[lab == j] for j in order if np.any(lab == j)]
-        for j, cells in enumerate(_connected_pieces(groups, LC, min_cells)):
-            rid = info['reg_id'] if j == 0 else next_id
-            next_id += (j > 0)
-            reg[cells] = rid
-            R_ohm = 2 * np.pi * info['eta'] / np.sum(area[cells] / cen[cells, 0])     # J ~ 1/R
-            seg = {'name': f'{name}#{j:03d}', 'region': name, 'reg_id': int(rid), 'cells': cells,
-                   'eta': float(info['eta']), 'R_ohm': float(R_ohm)}
-            segments.append(seg)
-            seg_coils[seg['name']] = {'reg_id': int(rid), 'nturns': 1}
-            if 'allow_xpoints' in info:
-                seg_coils[seg['name']]['allow_xpoints'] = info['allow_xpoints']
-    return reg, segments, seg_coils, vac_dict
-
-
-# ============================================================================ machine model
-class MachineModel:
-    """Coils + segmented structure on a TokaMaker instance that was set up with the segment coils.
-
-    Attributes
-        coil_names, seg_names, unit_names   units = coils followed by segments
-        L        [nu, nu]  mutual inductances (TokaMaker's Lcoils, per-turn basis)
-        R        [nu]      resistances (superconducting coils: 0; segments: from eta)
-        psi_u    [nu, np]  nodal flux of a unit current in each unit (vacuum)
-        coil_lim [nc, 2]   per-turn current limits from a current-density limit J_max
-    """
-
-    def __init__(self, gs, mesh, coil_dict, segments, F0, J_max=40.0e6, log=print):
-        P, LC, REG = mesh
-        self.gs, self.mesh, self.coil_dict, self.segments, self.F0 = gs, mesh, coil_dict, segments, F0
-        self.coil_names = list(coil_dict.keys())
-        self.seg_names = [s['name'] for s in segments]
-        self.unit_names = self.coil_names + self.seg_names
-        self.nturns = np.array([coil_dict[c]['nturns'] for c in self.coil_names], float)
-        # an equilibrium object must exist before current distributions / field evaluations
-        gs.set_coil_currents({self.coil_names[0]: 1.0})
-        gs.solve(vacuum=True)
-        rn = gs.r[:, 0]
-        dist = np.where(rn > 1e-8, 1.0 / np.maximum(rn, 1e-8), 0.0)
-        for s in self.seg_names:                         # uniform E_phi inside each segment
-            gs.set_coil_current_dist(s, dist, normalize=True)
-        ids = [gs.coil_sets[n]['id'] for n in self.unit_names]
-        L = np.array(gs.Lcoils)[np.ix_(ids, ids)]
-        self.L = 0.5 * (L + L.T)
-        log(f'computing the vacuum flux of a unit current in each of {len(self.unit_names)} units ...')
-        self.psi_u = np.array([self.unit_psi({n: 1.0}) for n in self.unit_names])
-        area, _ = cell_geometry(P, LC)
-        self.coil_area = np.array([area[REG == coil_dict[c]['reg_id']].sum() for c in self.coil_names])
-        Imax = J_max * self.coil_area / self.nturns
-        self.coil_lim = np.column_stack([-Imax, Imax])
-        self.R = np.concatenate([np.zeros(self.nc), [s['R_ohm'] for s in segments]])
-
-    def unit_psi(self, currents):
-        """Static vacuum flux [Wb/rad] of a dict of unit currents (all other units zero)."""
-        gs = self.gs
-        gs.set_coil_currents(currents)
-        gs.set_psi(np.zeros(gs.np))
-        return gs.vac_solve().get_psi(normalized=False)
-
-    @property
-    def nc(self):
-        return len(self.coil_names)
-
-    @property
-    def ns(self):
-        return len(self.seg_names)
-
-    def Bphi(self, R):
-        return self.F0 / np.asarray(R)
-
-    def structure_time_constants(self):
-        """L/R eigenvalues of the structure alone [s], slowest first."""
-        nc = self.nc
-        return np.sort(np.linalg.eigvals(np.linalg.solve(np.diag(self.R[nc:]), self.L[nc:, nc:])).real)[::-1]
-
-
-# ============================================================================ circuit model
-class CircuitModel:
-    """M dx/dt + R x = S V.
-
-    State x = [I_circ (one current per driven coil, per-turn A); I_seg (structure segments);
-    I_p (plasma channel, once add_plasma is called)]. Coils listed in `exclude` (substring match)
-    are left open: no current, not in the state. V_max: supply voltage limit [V]. Between time slices the supply voltages V are held
-    constant, and the dynamics are integrated exactly with a matrix exponential (zoh), so there is
-    no time-step error and superconducting (R = 0) circuits need no special treatment."""
-
-    R_OPEN = 1.0e3          # plasma 'resistance' before the channel exists (effectively open)
-
-    def __init__(self, machine, V_max, exclude=()):
-        m = machine
-        nc, ns = m.nc, m.ns
-        keep = [j for j, n in enumerate(m.coil_names) if not any(e in n for e in exclude)]
-        self.circ_names = [m.coil_names[j] for j in keep]
-        self.ncirc = len(keep)
-        T = np.zeros((nc, self.ncirc))
-        T[keep, np.arange(self.ncirc)] = 1.0
-        self.T = T                                       # coil <- circuit incidence
-        L = m.L
-        Lcc, Lcs, Lss = L[:nc, :nc], L[:nc, nc:], L[nc:, nc:]
-        self.M = np.block([[T.T @ Lcc @ T, T.T @ Lcs], [Lcs.T @ T, Lss]])
-        self.Rm = np.diag(np.concatenate([T.T @ m.R[:nc], m.R[nc:]]))
-        self.S = np.vstack([np.eye(self.ncirc), np.zeros((ns, self.ncirc))])
-        self.U = np.block([[T, np.zeros((nc, ns))], [np.zeros((ns, self.ncirc)), np.eye(ns)]])   # units <- state
-        self.nx = self.ncirc + ns
-        self.V_max = np.full(self.ncirc, float(V_max))  # supply voltage limit per circuit [V]
-        self.plasma = None
-        self.Minv = np.linalg.inv(self.M)
-        self._zoh = {}
-
-    def add_plasma(self, plasma):
-        """Append the plasma channel current I_p as one more state. The channel has no supply: it
-        is driven only by the changing flux of the coils and structure, L_p dIp/dt + R_p Ip +
-        sum_u M_pu dI_u/dt = 0. Its resistance is set interval by interval in zoh(dt, Rp)."""
-        n0 = self.nx
-        Mpx = plasma.M_u @ self.U
-        M = np.zeros((n0 + 1, n0 + 1)); M[:n0, :n0] = self.M
-        M[n0, :n0] = M[:n0, n0] = Mpx; M[n0, n0] = plasma.L_p
-        R = np.zeros((n0 + 1, n0 + 1)); R[:n0, :n0] = self.Rm; R[n0, n0] = self.R_OPEN
-        self.M, self.Rm = M, R
-        self.S = np.vstack([self.S, np.zeros((1, self.ncirc))])
-        self.U = np.hstack([self.U, np.zeros((self.U.shape[0], 1))])
-        self.nx, self.ip, self.plasma = n0 + 1, n0, plasma
-        self.Minv = np.linalg.inv(self.M)
-        self._zoh = {}
-
-    def output_matrix(self, G_units, G_plasma=None):
-        """Per-unit response matrix [n_out, nu] (and per-ampere plasma response) -> [n_out, nx]."""
-        C = G_units @ self.U
-        if G_plasma is not None and self.plasma is not None:
-            C[:, self.ip] = G_plasma
-        return C
-
-    def zoh(self, dt, Rp=None):
-        """Exact step x_k = A x_{k-1} + B V_k for voltages held constant over an interval dt
-        (Rp: plasma resistance on the interval). exp([[Ac, Bc], [0, 0]] dt) = [[A, B], [0, I]]."""
-        key = (round(float(dt), 12), None if Rp is None else float(f'{Rp:.6e}'))
-        if key not in self._zoh:
-            n, m = self.nx, self.ncirc
-            Rm = self.Rm
-            if Rp is not None and self.plasma is not None:
-                Rm = Rm.copy(); Rm[self.ip, self.ip] = Rp
-            Z = np.zeros((n + m, n + m))
-            Z[:n, :n], Z[:n, n:] = -self.Minv @ Rm * dt, self.Minv @ self.S * dt
-            E = expm(Z)
-            self._zoh[key] = (E[:n, :n], E[:n, n:])
-        return self._zoh[key]
-
-
-# ============================================================================ early plasma channel
 def _disk_quadrature(Rc, Zc, a, n_r, n_t):
+    """Midpoint quadrature of a disk of radius a [m] centred at (Rc, Zc) [m]: n_r annuli of equal
+    width, n_t points each (odd annuli rotated by half a spacing).
+    Returns (points [n_r * n_t, 2], weights [n_r * n_t]) with area-fraction weights summing to 1."""
     pts, w = [], []
     edges = np.linspace(0, a, n_r + 1)
     for i in range(n_r):
@@ -289,124 +76,372 @@ def _disk_quadrature(Rc, Zc, a, n_r, n_t):
     return np.array(pts), w / w.sum()
 
 
-class ChannelPlasma:
-    """The early plasma as a toroidal ring of uniform current: minor radius a, centred at (Rc, Zc).
+def cell_geometry(P, LC):
+    """(area [m^2] [n_cells], centroid [m] [n_cells, 2]) of the mesh triangles (nodes P, cells LC)."""
+    v1, v2 = P[LC[:, 1]] - P[LC[:, 0]], P[LC[:, 2]] - P[LC[:, 0]]
+    return 0.5 * np.abs(v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0]), P[LC].mean(axis=1)
 
-        L_p = mu0 Rc (ln(8 Rc/a) - 2 + l_i/2)       self-inductance of a ring
-        M_u = 2 pi <psi_u>_channel                  mutual inductance with every coil and segment
-        R_p = eta(Te) 2 pi Rc / (pi a^2)            Spitzer resistance,
-        eta = 5.2e-5 Zeff lnL / Te^1.5  [Ohm m, Te in eV]  parallel Spitzer (NRL Plasma Formulary)
+
+# ============================================================================ structure segments
+def segment_conductors(P, LC, REG, cond_dict, n_segments, center, min_cells=2, seed=12345):
+    """Split every conducting region (eta > 0) of a TokaMaker mesh into segments.
+
+    Each region is cut into n_segments[name] patches by k-means of the cell centroids (so thick
+    regions are also split through their thickness), ordered by poloidal angle about center
+    (R, Z) [m]. Patches that are not node-connected are split (a segment must be ONE toroidal
+    loop) and pieces with < min_cells cells are merged into the first large piece they touch.
+    Each segment is a 1-turn coil with J ~ 1/R, so R_seg = 2 pi eta / sum(A_cell / R_cell) [Ohm].
+
+    Args: P, LC, REG mesh nodes, cells and region id per cell; cond_dict TokaMaker conductor dict
+    {name: {'reg_id', 'eta' [Ohm m], ...}}; n_segments {region name: count}; seed of k-means.
+
+    Returns (reg, segments, seg_coils, vac_dict):
+        reg        new region id per cell (the first segment of a region keeps the region's id)
+        segments   list of dicts: name, region, reg_id, cells, eta [Ohm m], R_ohm [Ohm]
+        seg_coils  TokaMaker coil_dict entries of the segments
+        vac_dict   the non-conducting entries of cond_dict
+    """
+    area, centroid = cell_geometry(P, LC)
+    reg = REG.copy()
+    next_id = int(REG.max()) + 1
+    vac_dict = {k: v for k, v in cond_dict.items() if not (v.get('eta', -1.0) > 0)}
+    segments, seg_coils = [], {}
+    for name, info in cond_dict.items():
+        region_cells = [] if name in vac_dict else np.where(REG == info['reg_id'])[0]
+        if len(region_cells) == 0:
+            continue
+        n_k = min(int(n_segments[name]), len(region_cells))
+        _, label = kmeans2(centroid[region_cells], n_k, minit='++', seed=seed, iter=50)
+        groups = [region_cells[label == j] for j in range(n_k) if np.any(label == j)]
+        dR, dZ = (np.array([centroid[c].mean(axis=0) for c in groups]) - center).T
+        groups = [groups[j] for j in np.argsort(np.arctan2(dZ, dR))]
+        # connected pieces of each patch, as rows of all_cells; adj = cells sharing a node
+        all_cells = np.concatenate(groups)
+        n_all = len(all_cells)
+        incidence = sp.csr_matrix((np.ones(LC[all_cells].size),
+                                   (np.repeat(np.arange(n_all), LC.shape[1]), LC[all_cells].ravel())),
+                                  shape=(n_all, int(LC.max()) + 1))
+        adj = (incidence @ incidence.T).tocsr()
+        pieces, i0 = [], 0
+        for cells in groups:
+            rows = np.arange(i0, i0 + len(cells))
+            i0 += len(cells)
+            n_comp, lab = connected_components(adj[rows][:, rows], directed=False)
+            pieces += [rows[lab == j] for j in range(n_comp)]
+        large = [p for p in pieces if len(p) >= min_cells]
+        for p in pieces:
+            if len(p) < min_cells:
+                touching = set(adj[p].indices)
+                j = next((j for j, big in enumerate(large) if touching.intersection(big)), None)
+                if j is None:
+                    large.append(p)
+                else:
+                    large[j] = np.concatenate([large[j], p])
+        for j, rows in enumerate(large):
+            cells = all_cells[rows]
+            rid = info['reg_id'] if j == 0 else next_id + j - 1
+            reg[cells] = rid
+            R_ohm = 2 * np.pi * info['eta'] / np.sum(area[cells] / centroid[cells, 0])
+            seg_name = f'{name}#{j:03d}'
+            segments.append({'name': seg_name, 'region': name, 'reg_id': int(rid), 'cells': cells,
+                             'eta': float(info['eta']), 'R_ohm': float(R_ohm)})
+            seg_coils[seg_name] = {'reg_id': int(rid), 'nturns': 1,
+                                   **{k: info[k] for k in ('allow_xpoints',) if k in info}}
+        next_id += len(large) - 1
+    return reg, segments, seg_coils, vac_dict
+
+
+# ============================================================================ machine model
+class MachineModel:
+    """Driven coils + segmented structure of a TokaMaker instance set up with the segment coils.
+
+    Args: gs TokaMaker instance; mesh (P, LC, REG); coil_dict the driven coils (no segments);
+    segments from segment_conductors; F0 = R B_phi [T m]; J_max coil current-density limit
+    [A/m^2]; coil_lim optional {coil: (lo, hi)} per-turn current limits [A] overriding J_max;
+    log progress-message callable.
+
+    Attributes: coil_names, seg_names, unit_names (units = coils then segments); nc, ns;
+    nturns [nc]; L [nu, nu] mutual inductances [H] (per-turn basis); R [nu] resistances [Ohm]
+    (coils 0: superconducting); psi_u [nu, n_nodes] vacuum flux [Wb/rad] of 1 A per turn in each
+    unit; coil_area [nc] [m^2]; coil_lim [nc, 2] per-turn current limits (lo, hi) [A].
+    """
+
+    def __init__(self, gs, mesh, coil_dict, segments, F0, J_max=40.0e6, coil_lim=None, log=print):
+        P, LC, REG = mesh
+        self.gs, self.mesh, self.coil_dict, self.segments, self.F0 = gs, mesh, coil_dict, segments, F0
+        self.coil_names = list(coil_dict.keys())
+        self.seg_names = [s['name'] for s in segments]
+        self.unit_names = self.coil_names + self.seg_names
+        self.nc, self.ns = len(self.coil_names), len(self.seg_names)
+        self.nturns = np.array([coil_dict[c]['nturns'] for c in self.coil_names], float)
+        gs.set_coil_currents({self.coil_names[0]: 1.0})  # an equilibrium must exist before the
+        gs.solve(vacuum=True)                            # current distributions / field evaluations
+        r_nodes = gs.r[:, 0]
+        inv_r = np.where(r_nodes > 1e-8, 1.0 / np.maximum(r_nodes, 1e-8), 0.0)
+        for s in self.seg_names:                         # J ~ 1/R: uniform E_phi in each segment
+            gs.set_coil_current_dist(s, inv_r, normalize=True)
+        ids = [gs.coil_sets[n]['id'] for n in self.unit_names]
+        L = np.array(gs.Lcoils)[np.ix_(ids, ids)]
+        self.L = 0.5 * (L + L.T)                         # exact symmetry
+        log(f'computing the vacuum flux of a unit current in each of {len(self.unit_names)} units ...')
+        self.psi_u = np.array([self.unit_psi({n: 1.0}) for n in self.unit_names])
+        area = cell_geometry(P, LC)[0]
+        self.coil_area = np.array([area[REG == coil_dict[c]['reg_id']].sum() for c in self.coil_names])
+        I_max = J_max * self.coil_area / self.nturns
+        self.coil_lim = np.column_stack([-I_max, I_max])
+        for name, lim in (coil_lim or {}).items():
+            self.coil_lim[self.coil_names.index(name)] = lim
+        self.R = np.concatenate([np.zeros(self.nc), [s['R_ohm'] for s in segments]])
+
+    def unit_psi(self, currents):
+        """Vacuum flux [Wb/rad] at the nodes of {unit: current [A per turn]} (other units zero)."""
+        self.gs.set_coil_currents(currents)
+        self.gs.set_psi(np.zeros(self.gs.np))
+        return self.gs.vac_solve().get_psi(normalized=False)
+
+    def Bphi(self, R):
+        """Toroidal field [T] at major radius R [m]."""
+        return self.F0 / np.asarray(R)
+
+    def structure_time_constants(self):
+        """L/R eigenvalues [s] of the structure alone, slowest first."""
+        nc = self.nc
+        return np.sort(np.linalg.eigvals(np.linalg.solve(np.diag(self.R[nc:]), self.L[nc:, nc:])).real)[::-1]
+
+
+# ============================================================================ circuit model
+class CircuitModel:
+    """Lumped circuit M dx/dt + R x = S V of the supplies, structure and plasma channel.
+
+    State x = [I_circ (per circuit, per-turn A); I_seg (segments, A); I_p (A, after add_plasma)].
+    Circuits: default one per coil, coils matching a substring in `exclude` left open; or
+    circuits = {name: {coil: +1 (series) or -1 (anti-series), ...}}; coils in no circuit are open.
+    V_max, V_min (default -V_max) [V] and extra series resistance R_circ [Ohm] are scalars,
+    per-circuit arrays or {circuit: value} dicts (V_max must cover every circuit; circuits left
+    out of V_min get -V_max, out of R_circ get 0).
+    scheme 'zoh' (default): exact for voltages constant over each step (no time-step error, R = 0
+    circuits need no special treatment); 'be': backward Euler (M + R dt) x_k = M x_{k-1} + S V_k dt,
+    for comparison (over-damps eddy currents for steps of order the wall time).
+
+    Attributes: M [H], Rm [Ohm] (diagonal), S supply input matrix, T [nc, ncirc] coil <- circuit,
+    U [nu, nx] unit currents <- state, V_lo, V_hi [V] per circuit, V_max = max |V| per circuit,
+    nx state size, ip index of I_p.
+    """
+
+    R_OPEN = 1.0e3          # plasma 'resistance' [Ohm] before the channel exists (effectively open)
+
+    def __init__(self, machine, V_max, exclude=(), circuits=None, V_min=None, R_circ=0.0, scheme='zoh'):
+        if scheme not in ('zoh', 'be'):
+            raise ValueError(f"scheme must be 'zoh' or 'be', not {scheme!r}")
+        m, nc, ns = machine, machine.nc, machine.ns
+        if circuits is None:
+            circuits = {n: {n: 1.0} for n in m.coil_names if not any(e in n for e in exclude)}
+        names = self.circ_names = list(circuits)
+        self.ncirc = len(names)
+        T = self.T = np.zeros((nc, self.ncirc))
+        for j, name in enumerate(names):
+            for coil, sign in circuits[name].items():
+                T[m.coil_names.index(coil), j] = sign
+        if isinstance(V_max, dict):
+            missing = [n for n in names if n not in V_max]
+            if missing:
+                raise ValueError(f'no supply limit given for circuits {missing}')
+            V_max = [V_max[n] for n in names]
+        self.V_hi = np.full(self.ncirc, V_max, float)
+        if isinstance(V_min, dict):
+            V_min = [V_min.get(n, -v) for n, v in zip(names, self.V_hi)]
+        self.V_lo = -self.V_hi if V_min is None else np.full(self.ncirc, V_min, float)
+        self.V_max = np.maximum(np.abs(self.V_lo), np.abs(self.V_hi))
+        if isinstance(R_circ, dict):
+            R_circ = [R_circ.get(n, 0.0) for n in names]
+        Lcc, Lcs, Lss = m.L[:nc, :nc], m.L[:nc, nc:], m.L[nc:, nc:]
+        self.M = np.block([[T.T @ Lcc @ T, T.T @ Lcs], [Lcs.T @ T, Lss]])
+        # circuit resistance: its coils' (whatever their winding sense) + R_circ
+        R_c = np.abs(T).T @ m.R[:nc] + np.full(self.ncirc, R_circ, float)
+        self.Rm = np.diag(np.concatenate([R_c, m.R[nc:]]))
+        self.S = np.vstack([np.eye(self.ncirc), np.zeros((ns, self.ncirc))])
+        self.U = np.block([[T, np.zeros((nc, ns))], [np.zeros((ns, self.ncirc)), np.eye(ns)]])
+        self.nx, self.scheme, self.plasma = self.ncirc + ns, scheme, None
+        self.Minv = np.linalg.inv(self.M)
+        self._zoh = {}                                   # cache of step matrices
+
+    def add_plasma(self, plasma):
+        """Append the plasma channel current I_p as a state with no supply:
+        L_p dI_p/dt + R_p I_p + sum_u M_pu dI_u/dt = 0, R_p set per step by zoh(dt, Rp) (default R_OPEN)."""
+        M_px = plasma.M_u @ self.U
+        self.M = np.block([[self.M, M_px[:, None]], [M_px, plasma.L_p]])
+        self.Rm = np.diag(np.append(np.diag(self.Rm), self.R_OPEN))
+        self.S, self.U = np.pad(self.S, ((0, 1), (0, 0))), np.pad(self.U, ((0, 0), (0, 1)))
+        self.ip, self.plasma = self.nx, plasma
+        self.nx += 1
+        self.Minv = np.linalg.inv(self.M)
+        self._zoh = {}
+
+    def output_matrix(self, G_units, G_plasma=None):
+        """Per-state output matrix C [n_out, nx] from a per-unit response G_units [n_out, nu] (and
+        the per-ampere plasma response G_plasma [n_out])."""
+        C = G_units @ self.U
+        if G_plasma is not None and self.plasma is not None:
+            C[:, self.ip] = G_plasma
+        return C
+
+    def zoh(self, dt, Rp=None, forcing=None):
+        """Step x_k = A x_{k-1} + B V_k (+ Bw w_k) over dt [s], V (and w) constant on the step.
+
+        Rp: plasma resistance [Ohm] on the step (None: R_OPEN). forcing: optional [nx, q] matrix
+        through which q extra 'voltages' w enter (e.g. a prescribed plasma's flux linkage).
+        Returns (A, B), or (A, B, Bw) with forcing; 'zoh': expm([[-M^-1 R, M^-1 [S, F]], [0, 0]] dt)
+        = [[A, [B, Bw]], [0, I]]. Cached on (dt, Rp, shape and bytes of forcing).
+        """
+        key = (round(float(dt), 12), None if Rp is None else float(f'{Rp:.6e}'),
+               None if forcing is None else (forcing.shape, hash(forcing.tobytes())))
+        if key not in self._zoh:
+            n, m = self.nx, self.ncirc
+            Rm = self.Rm.copy()
+            if Rp is not None and self.plasma is not None:
+                Rm[self.ip, self.ip] = Rp
+            B_in = self.S if forcing is None else np.hstack([self.S, forcing])
+            if self.scheme == 'be':
+                Mi = np.linalg.inv(self.M + Rm * dt)
+                A, B = Mi @ self.M, Mi @ B_in * dt
+            else:
+                Z = np.zeros((n + B_in.shape[1],) * 2)
+                Z[:n, :n], Z[:n, n:] = -self.Minv @ Rm * dt, self.Minv @ B_in * dt
+                E = expm(Z)
+                A, B = E[:n, :n], E[:n, n:]
+            self._zoh[key] = (A, B[:, :m], B[:, m:])[:2 if forcing is None else 3]
+        return self._zoh[key]
+
+
+# ============================================================================ early plasma channel
+class ChannelPlasma:
+    """The early plasma as a toroidal ring of uniform current, minor radius a [m], centred at
+    (Rc, Zc) [m]; li internal inductance, Zeff effective charge, lnL Coulomb logarithm.
+
+        L_p = mu0 Rc (ln(8 Rc/a) - 2 + l_i/2)   self-inductance [H]
+        M_u = 2 pi <psi_u>_channel              mutual inductance with every coil and segment [H]
+        R_p = eta 2 pi Rc / (pi a^2)            resistance [Ohm], with the parallel Spitzer
+        eta = 5.2e-5 Zeff lnL / Te^1.5          resistivity [Ohm m, Te in eV] (NRL Formulary)
     """
 
     def __init__(self, machine, Rc, Zc, a, li=0.5, Zeff=2.0, lnL=LN_LAMBDA):
         self.Rc, self.Zc, self.a, self.li, self.Zeff, self.lnL = Rc, Zc, a, li, Zeff, lnL
         self.qp, self.qw = _disk_quadrature(Rc, Zc, a, n_r=8, n_t=24)
-        psi = eval_fields(machine.gs, machine.psi_u, self.qp)['psi']
-        self.M_u = 2 * np.pi * psi @ self.qw
+        self.M_u = 2 * np.pi * eval_fields(machine.gs, machine.psi_u, self.qp)['psi'] @ self.qw
         self.L_p = MU0 * Rc * (np.log(8 * Rc / a) - 2 + li / 2)
 
     def resistance(self, Te_eV):
+        """Channel resistance [Ohm] at electron temperature Te_eV [eV] (floored at 0.1 eV)."""
         eta = 5.2e-5 * self.Zeff * self.lnL / np.maximum(Te_eV, 0.1) ** 1.5
         return eta * 2 * np.pi * self.Rc / (np.pi * self.a ** 2)
 
     def field_at(self, pts, h=1e-3):
-        """psi, B_R, B_Z per ampere of channel current at pts (TokaMaker sign convention)."""
+        """psi [Wb/rad], B_R, B_Z [T] per ampere of channel current at pts [n_pts, 2]; gradient by
+        central difference with step h [m]."""
         pts = np.atleast_2d(pts)
-        dR = (self.psi_unit(pts + [h, 0]) - self.psi_unit(pts - [h, 0])) / (2 * h)
-        dZ = (self.psi_unit(pts + [0, h]) - self.psi_unit(pts - [0, h])) / (2 * h)
-        return self.psi_unit(pts), -dZ / pts[:, 0], dR / pts[:, 0]
+        dpsi_dR = (self.psi_unit(pts + [h, 0]) - self.psi_unit(pts - [h, 0])) / (2 * h)
+        dpsi_dZ = (self.psi_unit(pts + [0, h]) - self.psi_unit(pts - [0, h])) / (2 * h)
+        return self.psi_unit(pts), -dpsi_dZ / pts[:, 0], dpsi_dR / pts[:, 0]
 
     def psi_unit(self, x):
-        """Flux per ampere at points x: a sum of filaments (TokaMaker's eval_green), where each
-        filament stands for a small uniform-current cell, so points inside the channel see a
-        finite, smooth field instead of the filament's log singularity."""
+        """Flux [Wb/rad] per ampere of channel current at points x [n, 2]: a sum of filaments
+        (eval_green), one per quadrature cell, whose log singularity inside the cell is replaced by
+        the flux of a straight uniform wire of the cell's area (finite, smooth inside the channel)."""
         from OpenFUSIONToolkit.TokaMaker.util import eval_green
         x = np.atleast_2d(np.asarray(x, float))
-        delta = self.a * np.sqrt(self.qw)                # radius of each filament's cell
         q0 = self.qp[0]
-        if not hasattr(self, '_cR'):                     # psi ~ -cR ln(d) near a filament
+        if not hasattr(self, '_cR'):
+            # near a filament psi ~ -cR ln(d): fit cR at the first filament (cR scales with its R)
             d1, d2 = 1e-4, 1e-3
             g = -eval_green(np.array([[q0[0] + d1, q0[1]], [q0[0] + d2, q0[1]]]), q0)
             self._cR = -(g[1] - g[0]) / np.log(d2 / d1)
-        tot = np.zeros(len(x))
-        for q, w, dl in zip(self.qp, self.qw, delta):
+        total = np.zeros(len(x))
+        for q, w, rc in zip(self.qp, self.qw, self.a * np.sqrt(self.qw)):   # rc: radius of the cell's area
             d = np.hypot(x[:, 0] - q[0], x[:, 1] - q[1])
             f = -eval_green(x, q)
-            inn = d < dl
-            if inn.any():                                # uniform-wire core inside the cell
-                di = np.maximum(d[inn], 1e-12)
-                f[inn] += -(self._cR * q[0] / q0[0]) * (np.log(dl) - np.log(di) + 0.5 * (di ** 2 / dl ** 2 - 1))
-            tot += w * f
-        return tot
+            inside = d < rc
+            if inside.any():                             # uniform-wire core
+                di = np.maximum(d[inside], 1e-12)
+                f[inside] += -(self._cR * q[0] / q0[0]) * (np.log(rc) - np.log(di)
+                                                           + 0.5 * (di ** 2 / rc ** 2 - 1))
+            total += w * f
+        return total
 
 
 def Te_burnthrough(t, t_bd, Te0=5.0, Te1=100.0, tau=0.1):
-    """Prescribed electron temperature [eV] of the channel: Te0 at the end of breakdown, rising
-    to Te1 with time constant tau (a placeholder for a burn-through model)."""
+    """Prescribed channel Te [eV] at times t [s]: Te0 until the end of breakdown t_bd [s], then
+    rising towards Te1 with time constant tau [s] (placeholder for a burn-through model)."""
     t = np.asarray(t, float)
     return np.where(t < t_bd, Te0, Te0 + (Te1 - Te0) * (1 - np.exp(-(t - t_bd) / tau)))
 
 
 # ============================================================================ breakdown physics
-TORR = 133.322          # Pa
-# first Townsend coefficient of H2, alpha = A p exp(-B p / E); close to the values tabulated by
-# Raizer, Gas Discharge Physics (1991), A = 5 /(cm Torr), B = 130 V/(cm Torr)
+TORR = 133.322          # 1 Torr in Pa
+# First Townsend coefficient of H2, alpha = A p exp(-B p / E) with p in Torr; close to Raizer, Gas
+# Discharge Physics (1991): A = 5 /(cm Torr), B = 130 V/(cm Torr).
 TOWNSEND_A = 510.0      # 1/(m Torr)
 TOWNSEND_B = 1.25e4     # V/(m Torr)
 
 
 class FieldTracer:
-    """Follows magnetic field lines (poloidal field from a nodal flux + toroidal field F0/R) from a
-    point in both directions until they leave the wall polygon: L_c = L_forward + L_backward."""
+    """Traces field lines of nodal flux psi_nodal [Wb/rad] plus B_phi = |F0|/R (F0 [T m]) from a
+    point until they leave the wall polygon [n, >=2] (R, Z) [m]. Bp_min [T] floors B_pol so the
+    step stays finite near nulls."""
 
     def __init__(self, gs, psi_nodal, F0, wall, Bp_min=1e-6):
         self.fg = gs.get_field_eval('grad', values=np.ascontiguousarray(psi_nodal))
         self.F0, self.wall, self.Bp_min = abs(F0), Path(wall[:, :2]), Bp_min
 
-    def _rhs(self, x, sgn):
-        g = self.fg.eval(x)[:2]
-        br, bz, bt = -g[1] / x[0], g[0] / x[0], self.F0 / x[0]
-        bp = max(np.hypot(br, bz), self.Bp_min)
-        return np.array([sgn * br / bp, sgn * bz / bp]), np.sqrt(bp ** 2 + bt ** 2) / bp
-
     def _rk4(self, x, sgn, dl):
-        k1, w1 = self._rhs(x, sgn)
-        k2, w2 = self._rhs(x + 0.5 * dl * k1, sgn)
-        k3, w3 = self._rhs(x + 0.5 * dl * k2, sgn)
-        k4, w4 = self._rhs(x + dl * k3, sgn)
-        return x + dl / 6 * (k1 + 2 * k2 + 2 * k3 + k4), dl / 6 * (w1 + 2 * w2 + 2 * w3 + w4)
+        """One RK4 step of poloidal length dl [m] along sgn * B_pol: (new position, length along B [m])."""
+        k, w = [], []
+        for c in (0.0, 0.5, 0.5, 1.0):
+            y = x + c * dl * k[-1] if k else x
+            g = self.fg.eval(y)[:2]
+            br, bz, bt = -g[1] / y[0], g[0] / y[0], self.F0 / y[0]
+            bp = max(np.hypot(br, bz), self.Bp_min)
+            k.append(np.array([sgn * br / bp, sgn * bz / bp]))
+            w.append(np.sqrt(bp ** 2 + bt ** 2) / bp)    # dL / dl_pol = |B| / B_pol
+        return x + dl / 6 * (k[0] + 2 * k[1] + 2 * k[2] + k[3]), dl / 6 * (w[0] + 2 * w[1] + 2 * w[2] + w[3])
 
     def trace(self, x0, sgn, dl=0.01, L_max=1e5, n_max=2000):
-        """Length [m] along B to the wall (poloidal step dl; L_max if the line never leaves)."""
+        """Length [m] along B from x0 to the wall in direction sgn (+1/-1), poloidal step dl [m];
+        L_max if longer or not out after n_max steps."""
         x, L = np.array(x0, float), 0.0
         for _ in range(n_max):
-            xn, dL = self._rk4(x, sgn, dl)
-            if not self.wall.contains_point(xn):         # bisect the wall-crossing step
+            x_new, dL = self._rk4(x, sgn, dl)
+            if not self.wall.contains_point(x_new):      # bisect the wall-crossing step
                 lo, hi = 0.0, dl
                 for _ in range(20):
                     mid = 0.5 * (lo + hi)
-                    lo, hi = (mid, hi) if self.wall.contains_point(self._rk4(x, sgn, mid)[0]) else (lo, mid)
+                    if self.wall.contains_point(self._rk4(x, sgn, mid)[0]):
+                        lo = mid
+                    else:
+                        hi = mid
                 return min(L + self._rk4(x, sgn, lo)[1], L_max)
             L += dL
             if L > L_max:
                 return L_max
-            x = xn
+            x = x_new
         return L_max
 
     def connection_length(self, x0, **kw):
+        """Connection length [m] through x0: traces in both directions."""
         return self.trace(x0, +1, **kw) + self.trace(x0, -1, **kw)
 
 
 def townsend_window(E, L, A=TOWNSEND_A, B=TOWNSEND_B):
-    """Range of prefill pressures [Pa] for which an electron avalanche runs away (alpha L >= 1)."""
+    """(p_min, p_max) [Pa] for which an avalanche runs away (alpha L >= 1) at field E [V/m] over
+    connection length L [m], scanned on a log grid 1e-7..1e3 Pa; None if there is none."""
     p = np.logspace(-7, 3, 10000)
-    pt = p / TORR
-    ok = A * pt * L * np.exp(-B * pt / max(E, 1e-9)) >= 1.0
+    p_torr = p / TORR
+    ok = A * p_torr * L * np.exp(-B * p_torr / max(E, 1e-9)) >= 1.0
     return (float(p[ok].min()), float(p[ok].max())) if ok.any() else None
 
 
 def paschen_Emin(p, L, A=TOWNSEND_A, B=TOWNSEND_B):
-    """Minimum E_phi [V/m] for an avalanche at pressure p [Pa] over a length L [m]."""
-    pt = np.asarray(p) / TORR
-    x = A * pt * L
-    return np.where(x > 1, B * pt / np.log(np.maximum(x, 1 + 1e-12)), np.inf)
+    """Minimum E_phi [V/m] for an avalanche (alpha L = 1) at pressure p [Pa] over length L [m];
+    inf where A p L <= 1."""
+    p_torr = np.asarray(p) / TORR
+    x = A * p_torr * L
+    return np.where(x > 1, B * p_torr / np.log(np.maximum(x, 1 + 1e-12)), np.inf)

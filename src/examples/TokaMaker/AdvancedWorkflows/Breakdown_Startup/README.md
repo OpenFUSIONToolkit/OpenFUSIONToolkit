@@ -1,6 +1,6 @@
 # Breakdown and Start-up Design
 
-This folder contains an example of tokamak breakdown and start-up design with TokaMaker. It covers the first two seconds of an ARC V3A discharge: from premagnetised coils in an empty vessel, through breakdown and the early plasma current rise, to a ramp of free-boundary equilibria at 0.57 MA.
+This folder contains an example of tokamak breakdown and start-up design with TokaMaker. It covers the start-up of an ARC V3A discharge, from premagnetised coils in an empty vessel (from t = -2 s), through breakdown and the early plasma current rise, to a ramp of free-boundary equilibria reaching 0.57 MA at 1.8 s.
 
 ## File Overview
 
@@ -9,11 +9,11 @@ This folder contains an example of tokamak breakdown and start-up design with To
   Walks through the workflow step by step, explaining the code and the physics as it goes:
   1. Machine model: the vacuum vessel and blanket are cut into segments, which TokaMaker treats as coils, so it computes every inductance and field map.
   2. Circuit model, integrated exactly between time steps.
-  3. The start-up scenario: breakdown criteria (toroidal electric field and the Lloyd field-line criterion), the early plasma channel, and the hardware limits.
-  4. Stage 1, solved as one convex optimisation problem: premagnetisation, breakdown and the current rise to 100 kA.
+  3. The start-up scenario: breakdown criteria (toroidal electric field and the Lloyd field-line criterion), the early plasma channel with its force balance and a limit on the stray field during burn-through, and the hardware limits (coil currents, supply voltages and slew rate).
+  4. Stage 1, solved as one convex optimisation problem: premagnetisation, breakdown and the current rise to 100 kA, maximising the flux at the plasma boundary at the hand-off.
   5. A check of the breakdown against the avalanche physics (connection length and Townsend criterion).
-  6. Stage 2: a ramp of TokaMaker free-boundary equilibria, coupled to the circuit by Picard iteration and optimised jointly with stage 1.
-  7. Figures of the whole start-up.
+  6. Stage 2: a ramp of TokaMaker free-boundary equilibria, coupled to the circuit by Picard iteration and optimised jointly with stage 1, with the plasma kept limited on the inboard wall.
+  7. Figures of the whole start-up, and an animation written to `ARC_breakdown_startup.gif`.
 
 ### Python Modules
 - **startup_model.py**
@@ -42,6 +42,6 @@ These files support workflows for:
 ---
 
 ## Getting Started
-1. Ensure you have **Python 3.9+**, OFT with `OFT_ROOTPATH` set, and common scientific packages (`numpy`, `scipy`, `matplotlib`, `h5py`, etc.).
+1. Ensure you have **Python 3.9+**, OFT newer than the v26.9 release (for `TokaMaker.setup_model()`) with `OFT_ROOTPATH` set, and common scientific packages (`numpy`, `scipy`, `matplotlib`, `h5py`, etc.).
 2. Install the conic solver Clarabel: `pip install clarabel` (or `pip install -r requirements_Breakdown_Startup.txt`).
-3. Open `ARC_breakdown_startup_ex.ipynb` in **JupyterLab** or **VS Code** and run it from this folder, so it can import the modules and find `../../ARC/`. It takes about 4 minutes on a laptop.
+3. Open `ARC_breakdown_startup_ex.ipynb` in **JupyterLab** or **VS Code** and run it from this folder, so it can import the modules and find `../../ARC/`. It takes about 12 minutes on a laptop.
