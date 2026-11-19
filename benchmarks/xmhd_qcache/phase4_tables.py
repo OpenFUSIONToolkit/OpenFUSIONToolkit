@@ -123,9 +123,9 @@ def run_table(data, title):
     if not cases:
         return
     print('\n### ' + title + '\n')
-    print('| case | cfg | step time (excl. 1st) [s] | run time [s] | Jacobian builds total [s] | builds | precond. update total [s] | '
+    print('| case | cfg | step time (excl. 1st) [s] | run time [s] | Jacobian builds total [s] | builds | '
           'NL residual total [s] | lits | nlits | per-step its = p3 | final B, V, Ti rel. diff vs p3 |')
-    print('|' + '---|'*12)
+    print('|' + '---|'*11)
     for c in cases:
         base = data.get('p3', {}).get(c, [None])[0]
         its0 = [(s['lits'], s['nlits']) for s in base.get('steps', [])] if base else None
@@ -137,11 +137,41 @@ def run_table(data, title):
             same = all(i == its0 for i in its) if its0 is not None else '-'
             diffs = ', '.join(rel(base.get(k) if base else None, medk(recs, k))
                               for k in ('final_norm_B', 'final_norm_V', 'final_norm_Ti'))
-            print('| `{0}` | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} | {10} | {11} |'.format(
+            print('| `{0}` | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} | {10} |'.format(
                 c, cfg, fmt(medk(recs, 'step_time_avg_excl1_s')), fmt(medk(recs, 'run_time_s')),
                 fmt(medk(recs, 'prof_setops_total_s')), fmt(medk(recs, 'prof_setops_n'), '{0:.0f}'),
-                fmt(medk(recs, 'prof_preupdate_total_s')), fmt(medk(recs, 'prof_nlop_total_s')),
+                fmt(medk(recs, 'prof_nlop_total_s')),
                 fmt(medk(recs, 'lits_total'), '{0:.0f}'), fmt(medk(recs, 'nlits_total'), '{0:.0f}'), same, diffs))
+
+
+def cq_table(data, title):
+    '''Experimental coarse-level quadrature (cfg "cq") vs default (cfg "q2pm1")'''
+    print('\n### ' + title + '\n')
+    print('| case | coarse build default [s] | coarse build cq [s] | ratio | fine build default [s] | fine build cq [s] | '
+          'step time default [s] | step time cq [s] | lits default | lits cq | nlits default | nlits cq |')
+    print('|' + '---|'*12)
+    for c in data.get('q2pm1', {}):
+        a, b = data['q2pm1'][c], data.get('cq', {}).get(c, [])
+        if c.endswith('_run'):
+            sa = [sum(lv['total_s'] for lv in r.get('levels', []) if lv['level'] != max(x['level'] for x in r['levels']))
+                  / max(1, r.get('prof_setops_n', 1)) for r in a]
+            sb = [sum(lv['total_s'] for lv in r.get('levels', []) if lv['level'] != max(x['level'] for x in r['levels']))
+                  / max(1, r.get('prof_setops_n', 1)) for r in b]
+            ca, cb = med(sa), med(sb)
+            fa = fb = None
+        else:
+            ca, cb = level_avg(a, 'coarse'), level_avg(b, 'coarse')
+            fa, fb = level_avg(a, 'fine'), level_avg(b, 'fine')
+        print('| `{0}` | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} | {10} | {11} |'.format(
+            c, fmt(ca), fmt(cb), ratio(ca, cb), fmt(fa), fmt(fb), fmt(medk(a, 'step_time_avg_excl1_s')),
+            fmt(medk(b, 'step_time_avg_excl1_s')), fmt(medk(a, 'lits_total'), '{0:.0f}'), fmt(medk(b, 'lits_total'), '{0:.0f}'),
+            fmt(medk(a, 'nlits_total'), '{0:.0f}'), fmt(medk(b, 'nlits_total'), '{0:.0f}')))
+    for c in data.get('q2pm1', {}):
+        if not c.endswith('_run'):
+            continue
+        for cfg in ('q2pm1', 'cq'):
+            for r in data.get(cfg, {}).get(c, []):
+                print('\n`{0}` {1} per-step (lits, nlits): {2}'.format(c, cfg, [(x['lits'], x['nlits']) for x in r.get('steps', [])]))
 
 
 if __name__ == '__main__':
@@ -152,3 +182,4 @@ if __name__ == '__main__':
     build_table(t4, '4 threads: Jacobian build time per call (default matrix)', ['p3', 'q2pm1'])
     mem_table(t4, '4 threads: memory')
     run_table(t4, '4 threads, run mode (5 time steps; NK and MFNK)')
+    cq_table(load('p4ab_cq'), '4 threads: experimental coarse-level quadrature (xmhd_coarse_quad=T, "cq") vs default')

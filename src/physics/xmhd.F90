@@ -460,7 +460,10 @@ LOGICAL :: xmhd_mfnk = .FALSE. !< Use Jacobian free non-linear advance
 !! (FULL mode) for the residual, 2 = quadrature cache (REFERENCE mode) for the residual and the Jacobian (default),
 !! see \ref xmhd::xmhd_resid_qcache "xmhd_resid_qcache" and \ref xmhd::xmhd_jac_qcache "xmhd_jac_qcache"
 INTEGER(i4), PUBLIC :: xmhd_qcache = 2
-!> Form local Jacobian matrices with BLAS `dgemm` (otherwise a cache-blocked loop), see \ref xmhd::xmhd_jac_gemm_nt "xmhd_jac_gemm_nt"
+!> Form local Jacobian matrices with BLAS `dgemm` (otherwise a cache-blocked loop), see \ref xmhd::xmhd_jac_gemm_nt "xmhd_jac_gemm_nt".
+!! `dgemm` is called from every OpenMP thread, so the BLAS must run single-threaded inside OpenMP parallel regions,
+!! as the OpenMP builds of OpenBLAS (`build_libs.py`, `USE_OPENMP=1`) and MKL do. With a pthreads OpenBLAS set
+!! `OPENBLAS_NUM_THREADS=1` (otherwise every small GEMM is threaded and the build does not scale with OpenMP threads).
 LOGICAL, PUBLIC :: xmhd_jac_blas = .TRUE.
 !> Precomputed CSR positions of local Jacobian entries for native matrices: 0 = off (search every
 !! entry), 1 = on (see \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup")
@@ -2654,7 +2657,8 @@ END SUBROUTINE xmhd_jac_contract
 !------------------------------------------------------------------------------
 !> Small GEMM `C = A B^T + beta C` used to form local Jacobian matrices
 !!
-!! Uses BLAS `dgemm` if \ref xmhd_jac_blas is set and a cache-blocked loop otherwise.
+!! Uses BLAS `dgemm` if \ref xmhd_jac_blas is set and a cache-blocked loop otherwise. Called concurrently from
+!! OpenMP threads (see \ref xmhd_jac_blas for the BLAS threading requirement).
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_jac_gemm_nt(m,n,k,a,lda,b,ldb,ib0,beta,c,ldc,ic0)
 INTEGER(i4), INTENT(in) :: m !< Rows of `A` and `C`
