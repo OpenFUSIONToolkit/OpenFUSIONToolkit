@@ -325,6 +325,7 @@ TYPE :: gs_equil
   REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
+  LOGICAL, POINTER, DIMENSION(:) :: split_cells => NULL() !< Cells given the split rule in the current solve (see @ref gs_cell_quad)
   REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_targets => NULL() !< Isoflux target locations
   REAL(r8), POINTER, DIMENSION(:,:) :: saddle_targets => NULL() !< Saddle target locations
   REAL(r8), POINTER, DIMENSION(:,:) :: flux_targets => NULL() !< Flux target locations and values
@@ -1107,6 +1108,8 @@ type(gs_factory), target, intent(in) :: device !< G-S factory/device object
 self%device=>device
 ALLOCATE(self%coil_currs(device%ncoils))
 self%coil_currs=0.d0
+ALLOCATE(self%split_cells(device%fe_rep%mesh%nc))
+self%split_cells=.FALSE.
 CALL device%fe_rep%vec_create(self%psi)
 ! CALL device%fe_rep%vec_create(self%chi)
 end subroutine create_eq_from_factory
@@ -1118,6 +1121,7 @@ class(gs_equil), intent(inout) :: self !< G-S equilibrium object
 class(gs_equil), intent(in) :: source !< Source G-S equilibrium object
 self%device=>source%device
 ALLOCATE(self%coil_currs,SOURCE=source%coil_currs)
+ALLOCATE(self%split_cells,SOURCE=source%split_cells)
 !
 self%isoflux_ntargets=source%isoflux_ntargets
 IF(self%isoflux_ntargets>0)ALLOCATE(self%isoflux_targets,SOURCE=source%isoflux_targets)
@@ -2284,6 +2288,7 @@ tmap_fails=0
 self%nl_its=0
 equil%skip_targets=.FALSE.
 equil%prof_failed=.FALSE.
+equil%split_cells=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -4348,7 +4353,7 @@ END SUBROUTINE gs_split_setup
 !------------------------------------------------------------------------------
 !> Quadrature rule for plasma integrals on `cell`: the FE rule, unless the split rule (@ref gs_split_setup) is set up;
 !! then no points if \f$ \psi \f$ stays below the LCFS, the split rule if the plasma boundary (LCFS or X-point cut)
-!! may cross the cell, else the FE rule
+!! may cross the cell or did earlier in the solve (so the rule cannot switch back and forth), else the FE rule
 !------------------------------------------------------------------------------
 SUBROUTINE gs_cell_quad(self,cell,vals,quad)
 CLASS(gs_equil), INTENT(inout) :: self !< G-S object
@@ -4372,8 +4377,9 @@ DO k=1,3
   msk(k)=gs_test_bounds(self,self%device%fe_rep%mesh%r(1:2,self%device%fe_rep%mesh%lc(k,cell)))
 END DO
 IF(.NOT.ANY(msk))RETURN ! The mask is convex: no plasma in the cell
-IF(ALL(msk).AND.(lo-pad>self%plasma_bounds(1)))RETURN
+IF(ALL(msk).AND.(lo-pad>self%plasma_bounds(1)).AND.(.NOT.self%split_cells(cell)))RETURN
 quad=>self%device%split_quad
+self%split_cells(cell)=.TRUE.
 END SUBROUTINE gs_cell_quad
 !------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
@@ -6313,6 +6319,7 @@ IF(ASSOCIATED(self%mirnov_targets))DEALLOCATE(self%mirnov_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
 IF(ASSOCIATED(self%coil_reg_targets))DEALLOCATE(self%coil_reg_targets)
 IF(ASSOCIATED(self%coil_currs))DEALLOCATE(self%coil_currs)
+IF(ASSOCIATED(self%split_cells))DEALLOCATE(self%split_cells)
 !---Destroy solution fields
 IF(ASSOCIATED(self%psi))THEN
   CALL self%psi%delete()
