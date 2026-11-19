@@ -623,7 +623,7 @@ if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add(0.d0,1.d0,g,-1.d0,w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = r%dot(r)
+gg = MAX(r%dot(r),0.d0) ! Clamp round-off (see Arnoldi step)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -671,14 +671,17 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       call w%add(1.d0,-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    h(i+1,i)=SQRT(w%dot(w))
+    ! Native dot products subtract shared/periodic duplicate entries from the full local sum, so
+    ! after near-complete cancellation (eg. an exact preconditioner) the result can be slightly
+    ! negative; clamp to zero so this is treated as a (lucky) breakdown instead of producing NaN
+    h(i+1,i)=SQRT(MAX(w%dot(w),0.d0))
     IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=w%mdot(v(1:i),i)
       do k=1,i
         call w%add(1.d0,-hdots(k),v(k)%f)
       end do
       h(1:i,i)=h(1:i,i)+hdots(1:i)
-      h(i+1,i)=SQRT(w%dot(w))
+      h(i+1,i)=SQRT(MAX(w%dot(w),0.d0))
     END IF
     IF(h(i+1,i)>0.d0)call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
@@ -737,7 +740,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = r%dot(r)
+  gg = MAX(r%dot(r),0.d0) ! Clamp round-off (see Arnoldi step)
   uu = u%dot(u)
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
@@ -920,7 +923,7 @@ if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = REAL(r%dot(r))
+gg = MAX(REAL(r%dot(r),r8),0.d0) ! Clamp round-off (see Arnoldi step)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -968,14 +971,17 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    ! Native dot products subtract shared/periodic duplicate entries from the full local sum, so
+    ! after near-complete cancellation (eg. an exact preconditioner) the result can be slightly
+    ! negative; clamp to zero so this is treated as a (lucky) breakdown instead of producing NaN
+    h(i+1,i)=SQRT(MAX(REAL(w%dot(w),r8),0.d0))
     IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=CONJG(w%mdot(v(1:i),i))
       do k=1,i
         call w%add((1.d0,0.d0),-hdots(k),v(k)%f)
       end do
       h(1:i,i)=h(1:i,i)+hdots(1:i)
-      h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+      h(i+1,i)=SQRT(MAX(REAL(w%dot(w),r8),0.d0))
     END IF
     IF(ABS(h(i+1,i))>0.d0)call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
@@ -1033,7 +1039,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = REAL(r%dot(r))
+  gg = MAX(REAL(r%dot(r),r8),0.d0) ! Clamp round-off (see Arnoldi step)
   uu = REAL(u%dot(u))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
