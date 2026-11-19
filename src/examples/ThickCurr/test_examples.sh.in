@@ -27,4 +27,5 @@ run_test() {
 run_test slab ThickCurr_slab.ipynb
 
 # Torus cases
-run_test torus ThickCurr_torus.ipynb
+# Note: Not run in CI as this example takes ~20 minutes (most of the time allowed for all examples)
+# run_test torus ThickCurr_torus.ipynb

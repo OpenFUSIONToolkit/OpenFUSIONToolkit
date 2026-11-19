@@ -21,6 +21,8 @@ try:
     coverage.process_startup()
 except ImportError:
     pass
+except Exception as e:  # Do not fail the test if coverage can not be started
+    print('Warning: Unable to start coverage measurement ({0})'.format(e))
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 import oft_testing  # noqa: F401 (sets up path to OFT python package)

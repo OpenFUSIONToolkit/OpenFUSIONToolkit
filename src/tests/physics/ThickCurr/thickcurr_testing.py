@@ -14,6 +14,7 @@ import h5py
 from scipy.optimize import brentq
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
+import oft_testing
 from oft_testing import run_OFT
 
 MU0 = 4.E-7*math.pi
@@ -108,10 +109,12 @@ PRE_XML = {
 def run_driver(config, nproc=1, timeout=180):
     '''Run the Python ThickCurr driver (`thickcurr_driver.py`) with the given configuration, using MPI if
     `nproc > 1`, and return the results written by the driver (None on failure)'''
-    # Coverage configuration path is relative to the root test directory, make absolute for the driver process
+    # Coverage configuration path is relative to the root test directory (not the current directory, which may be
+    # changed by other tests), make absolute for the driver process
     cov_config = os.environ.get('COVERAGE_PROCESS_START', None)
     if (cov_config is not None) and (not os.path.isabs(cov_config)):
-        os.environ['COVERAGE_PROCESS_START'] = os.path.abspath(cov_config)
+        root_test_dir = os.path.dirname(os.path.abspath(oft_testing.__file__))
+        os.environ['COVERAGE_PROCESS_START'] = os.path.join(root_test_dir, cov_config)
     os.chdir(test_dir)
     for filename in ('thickcurr_results.json', 'thickcurr.hist', 'floops.hist'):
         if os.path.exists(filename):
