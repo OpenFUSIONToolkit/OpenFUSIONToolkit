@@ -108,6 +108,44 @@ All equivalence checks are in-process comparisons in `src/tests/physics/MUG/test
   sound p3 MG, `test_MUG_visc.py`, `test_MUG_gyro.py`, `test_MUG_hall.py` pass.
 - Runtime checks (`-fcheck=all` debug build) and valgrind memcheck of cache-path runs report no errors.
 
+### PETSc linear algebra backend
+
+PETSc matrices keep the generic `fem_mat_add_local` assembly (with per-field locks; no position map), and the
+residual is written through `get_local`/`restore_local` on PETSc vectors. Validated with PETSc 3.23.7 (the
+`build_libs.py` default: `--build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --petsc_superlu=1`), MPICH
+4.2.3, GCC 14, OpenMP, `--oft_use_lto=0`, Release; Ubuntu 24.04 cloud VM, 4 vCPUs. PETSc 3.23 is built on the
+integer-handle `mpi` module, so OFT uses the header-based MPI interface.
+
+- **Equivalence** (`test_MUG_qcache.py`, 13 `*_petsc` variants: two- and single-temperature, Hall, viscosity
+  with `nu_par`/`nu_gyro`, floors/solid cells, hex p2, revolved periodic tet/hex, p-MG p3 and p4, 2 MPI ranks
+  with and without p-MG). `xmhd_jac_check` compares the Jacobians of every level through products with three
+  fixed random vectors (the CSR values of PETSc matrices are not accessible; native matrices are also compared
+  entrywise). Residual blocks agree to 2.7e-14 relative to the largest entry of the same equation (1.6e-15
+  relative to the whole residual), diagnostics to 5.7e-16; Jacobian products to 6.8e-16 on all 34 level
+  comparisons. The 35 native variants are unchanged and pass in the same build.
+- **MUG regression suite** (`src/tests/physics/MUG`, defaults incl. `xmhd_qcache=1`): all 141 PETSc variants
+  run. Non-slow, native and PETSc variants together: 204 passed, 26 skipped (excluded combinations, eg.
+  matrix-free with PETSc), 0 failed. Slow PETSc variants (alfven, sound and their Lagrange versions): 33 passed, 40 skipped (excluded combinations).
+  `src/tests/fem`: 584 passed.
+- **Native vs PETSc, run mode** (1 OpenMP thread, block-Jacobi + LU so that both backends factor with SuperLU):
+  linear and nonlinear iteration counts are identical at every time step for tet p2 NK (`tet_p2_run`; linear
+  8/4/25/29/33, nonlinear 5/4/3/3/3) and tet p3 p-MG NK (`tet_p3_mg_run --size 0.5`; linear 6/4/12/15/20,
+  nonlinear 5/4/3/3/4), and with `xmhd_qcache=0` under PETSc (final norms equal to 1e-15). Final norms differ
+  between the backends by 1e-11 (p2) to 3e-9 (p3 p-MG, B) relative. This comes from the initial condition:
+  `xmhd_bench` projects it with CG to `atol=1e-10`, and the native and PETSc CG solutions differ at that level.
+  With the projections converged to 1e-15 the NL residual and Jacobian matvec norms of the initial state agree
+  between the backends to 6e-15 (profile mode, tet p2).
+- **Not #457** (seen during this validation; fixed by separate upstream PRs, applied only locally):
+  - Run-mode PETSc with an XML block-Jacobi preconditioner (`nlocal>0`) crashes in `PCSetUp_ASM`/`ISSort` with
+    PETSc 3.23; fixed by #459. The PETSc runs above used #459 applied locally (native tet p2: this branch
+    alone); the p3 p-MG comparison used #459 and #456 for both backends.
+  - Native p-MG with an exact (SuperLU) LU smoother gives NaN from round-off in the native global reductions,
+    with both implementations and with the position map off. This is also the cause of the native
+    `test_alfven.py::test_nl_r1_p3`, `test_lin_r1_p3` and `test_lin_r1_p3_mpi[False]` failures in SuperLU
+    builds (their PETSc variants pass). All three pass with #456 applied.
+  - Intermittent `free()` segfaults right after setup with an XML MG preconditioner (8 of 8 runs in one
+    environment, 0 of 8 with the fix): undefined pointer outputs of the XML extractors, fixed by #456.
+
 ## Performance
 
 Reference machine: Intel Xeon (Cooper Lake) cloud VM, 4 vCPUs, 15 GB RAM, shared host (run-to-run noise
