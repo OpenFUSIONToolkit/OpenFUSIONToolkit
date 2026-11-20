@@ -32,8 +32,8 @@ direct evaluation on tets for the residual at up to 1.7 GB of extra memory, and 
 
 **BLAS threading.** The Jacobian calls `dgemm` from inside OpenMP parallel regions. The BLAS must run
 single-threaded there: OFT's `build_libs.py` OpenBLAS (single-threaded `USE_THREAD=0` by default,
-`USE_OPENMP=1` with `--oblas_threads`), Ubuntu's `libopenblas0-openmp` and MKL do this; with a pthreads OpenBLAS (Ubuntu's default `libopenblas0-pthread`) set
-`OPENBLAS_NUM_THREADS=1`. With the pthreads build the Jacobian build stopped scaling: tet p4 took 2.33 s at 1
+`USE_OPENMP=1` with `--oblas_threads`), Ubuntu's `libopenblas0-openmp` and MKL do this; with a pthreads
+OpenBLAS (Ubuntu's default `libopenblas0-pthread`) set `OPENBLAS_NUM_THREADS=1`. With the pthreads build the Jacobian build stopped scaling: tet p4 took 2.33 s at 1
 OpenMP thread and 2.21 s at 4 (hex p3: 3.06 s and 2.10 s); with `OPENBLAS_NUM_THREADS=1` it took 0.71 s at 4
 threads (hex p3: 0.94 s).
 
