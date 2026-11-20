@@ -228,12 +228,19 @@ IF(init_field%B0**2<=init_field%bcoef*n_bar*(EXP(zmax/init_field%Ln)-1.d0)) &
 !!
 !! The magnetic field is projected onto the H(Curl) space and the density onto the Lagrange space.
 !! The temperature is uniform and the plasma starts at rest.
+!!
+!! The projection of the magnetic field must be converged with a relative tolerance. The field is supported
+!! almost entirely by its own pressure (\f$ \beta \sim 10^{-3} \f$, and the gravitational drive is smaller
+!! still), so a small relative error in \f$ B \f$ gives a force imbalance much larger than the seeded
+!! perturbation. The right-hand side of the projection is small (it scales with the cell size), so the
+!! absolute tolerance used for the density (`atol=1.d-12`) would stop the solve well before that level.
 NULLIFY(mop)
 CALL hcurl_grad_getmop(xmhd_ML_hcurl_grad%current_level,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
-minv%atol=1.d-12
+minv%atol=0.d0
+minv%rtol=1.d-14
 CALL create_diag_pre(minv%pre)
 CALL xmhd_ML_hcurl_grad%vec_create(u)
 CALL xmhd_ML_hcurl_grad%vec_create(v)
