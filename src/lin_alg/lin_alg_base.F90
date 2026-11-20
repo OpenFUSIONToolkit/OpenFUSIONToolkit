@@ -549,8 +549,9 @@ type, public :: oft_graph
   INTEGER(i8) :: nrg = 0 !< Gobal number of rows
   INTEGER(i8) :: ncg = 0 !< Gobal number of columns
   INTEGER(i4) :: nnz = 0 !< Number of local non-zeros
-  INTEGER(i4), CONTIGUOUS, POINTER, dimension(:) :: kr => NULL() !< Row pointer to column list
-  INTEGER(i4), CONTIGUOUS, POINTER, dimension(:) :: lc => NULL() !< Column list
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr => NULL() !< Row pointer to column list
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc => NULL() !< Column list
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: M => NULL() !< Matrix values (optional)
 end type oft_graph
 !---------------------------------------------------------------------------------
 !> Graph pointer
@@ -573,6 +574,7 @@ type, abstract, public :: oft_matrix
   integer(i4) :: nj = 0 !< Number of column blocks
   integer(i4) :: nrslice = 0 !< Number of owned rows
   integer(i4) :: ncslice = 0 !< Number of owned columns
+  integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
   type(oft_map), pointer, dimension(:) :: i_map => NULL() !< Row block mapping
   type(oft_map), pointer, dimension(:) :: j_map => NULL() !< Column block mapping
   class(oft_vector), pointer :: D => NULL() !< Diagonal entries for scaling

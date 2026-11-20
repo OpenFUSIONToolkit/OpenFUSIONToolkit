@@ -32,10 +32,11 @@ USE oft_quadmesh_type, ONLY: quad_2d_grid, quad_grid_orient
 USE oft_tetmesh_type, ONLY: tet_3d_grid
 USE oft_hexmesh_type, ONLY: hex_3d_grid, hex_grid_forient
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
-USE oft_la_base, ONLY: oft_matrix, oft_graph
+USE oft_la_base, ONLY: oft_matrix, oft_graph, oft_local_mat
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_ml_fem_type, oft_bfem_type, &
   fem_delete, bfem_delete
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
+USE fem_utils, ONLY: fem_map_flag
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -43,6 +44,7 @@ IMPLICIT NONE
 !------------------------------------------------------------------------------
 type, extends(oft_fem_type) :: oft_scalar_fem
   INTEGER(i4) :: inodesp(3,8) !< Needs docs
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: per_vmap => NULL() !< Periodic mapping flag for vector fields
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodesf => NULL() !< Needs docs
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: inodesc => NULL() !< Needs docs
@@ -121,7 +123,8 @@ class(oft_scalar_fem), intent(inout) :: lag_rep
 INTEGER(i4), PARAMETER :: i2(3)=(/2,3,1/),i3(3)=(/3,1,2/)
 INTEGER(i4), PARAMETER :: fc1(4)=(/2,3,1,1/),fc2(4)=(/3,1,2,2/),fc3(4)=(/4,4,4,3/)
 INTEGER(i4), PARAMETER :: ed1(6)=(/1,2,3,2,3,1/),ed2(6)=(/4,4,4,3,1,2/)
-INTEGER(i4) :: i,k,l,m,el,jc
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: vert_flag,edge_flag,face_flag,bc_tmp
+INTEGER(i4) :: i,k,l,m,el,jc,per_ind
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j,emap
 REAL(r8) :: v,goptmp(3,4),norm(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: pc
@@ -180,6 +183,70 @@ DO i=1,mesh%nbc
       END SELECT
   END DO
 END DO
+!---
+ALLOCATE(lag_rep%per_vmap(lag_rep%ne))
+lag_rep%per_vmap=0
+IF(lag_rep%mesh%periodic%revolved)THEN
+  ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne),face_flag(mesh%nf),bc_tmp(lag_rep%ne))
+  vert_flag=.FALSE.
+  edge_flag=.FALSE.
+  face_flag=.FALSE.
+  DO i=1,mesh%np
+    IF(SQRT(mesh%r(2,i)**2+mesh%r(3,i)**2)<1.d-8)vert_flag(i)=.TRUE.
+  END DO
+  DO i=1,mesh%ne
+    IF(vert_flag(mesh%le(1,i)).AND.vert_flag(mesh%le(2,i)))edge_flag(i)=.TRUE.
+  END DO
+  CALL fem_map_flag(lag_rep, vert_flag, edge_flag, face_flag, bc_tmp)
+  DO i=1,lag_rep%ne
+    IF(bc_tmp(i))lag_rep%per_vmap(i)=3
+  END DO
+  !
+  vert_flag=.FALSE.
+  edge_flag=.FALSE.
+  face_flag=.FALSE.
+  DO i=1,mesh%nbf
+    l = mesh%lbf(i)
+    IF(mesh%bfs(i)==-2)THEN
+      vert_flag(mesh%lf(:,l))=.TRUE.
+      edge_flag(ABS(mesh%lfe(:,l)))=.TRUE.
+      face_flag(l)=.TRUE.
+    END IF
+  END DO
+  DO i=1,mesh%np
+    IF(lag_rep%per_vmap(i)==3)vert_flag(i)=.FALSE.
+  END DO
+  DO i=1,mesh%ne
+    IF(.NOT.(vert_flag(mesh%le(1,i)).OR.vert_flag(mesh%le(2,i))))edge_flag(i)=.FALSE.
+  END DO
+  CALL fem_map_flag(lag_rep, vert_flag, edge_flag, face_flag, bc_tmp)
+  DO i=1,mesh%nbc
+    !---Check if boundary cell
+    l=mesh%lbc(i)
+    !---Get local to global DOF mapping
+    call lag_rep%ncdofs(l,j)
+    IF(ANY(mesh%r(3,mesh%lc(:,l))>0.d0))THEN
+      per_ind=1
+    ELSE
+      per_ind=2
+    END IF
+    !---
+    DO m=1,lag_rep%nce
+      IF(.NOT.bc_tmp(j(m)))CYCLE
+      SELECT CASE(lag_rep%cmap(m)%type)
+        CASE(1)
+          lag_rep%per_vmap(j(m))=per_ind
+        CASE(2)
+          lag_rep%per_vmap(j(m))=per_ind
+        CASE(3)
+          lag_rep%per_vmap(j(m))=per_ind
+        CASE DEFAULT
+          CYCLE
+        END SELECT
+    END DO
+  END DO
+  DEALLOCATE(vert_flag,edge_flag,face_flag,bc_tmp)
+END IF
 !---
 CALL oft_global_stitch(lag_rep%linkage,sn(1,:),1)
 CALL oft_global_stitch(lag_rep%linkage,sn(2,:),1)
@@ -1629,6 +1696,224 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_npos
+!------------------------------------------------------------------------------
+!> Unpack Lagrange vector field, accounting for periodicity
+!!
+!! Maps vectors from (n,t1,t2)->(x,y,z) on rotated periodic boundaries
+!------------------------------------------------------------------------------
+SUBROUTINE lagrange_vector_unpack(fe_rep,vals,elem_first)
+CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
+REAL(r8), INTENT(inout) :: vals(:,:) !< Local FE weights
+LOGICAL, OPTIONAL, INTENT(in) :: elem_first !< Elements indexed first?
+INTEGER(i4) :: i,j
+LOGICAL :: apply_trans
+CLASS(oft_scalar_fem), POINTER :: self
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_unpack",__FILE__)
+IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
+apply_trans=.FALSE.
+IF(PRESENT(elem_first))apply_trans=elem_first
+IF(apply_trans)THEN
+  !$omp parallel do private(i)
+  DO j=1,self%nbe
+    i=self%lbe(j)
+    IF(self%per_vmap(i)==1)THEN
+      vals(i,:)=MATMUL(self%mesh%periodic%vmap_mats(:,:,1),vals(i,:))
+    ELSE IF(self%per_vmap(i)==2)THEN
+      vals(i,:)=MATMUL(self%mesh%periodic%vmap_mats(:,:,2),vals(i,:))
+    END IF
+  END DO
+ELSE
+  !$omp parallel do private(i)
+  DO j=1,self%nbe
+    i=self%lbe(j)
+    IF(self%per_vmap(i)==1)THEN
+      vals(:,i)=MATMUL(self%mesh%periodic%vmap_mats(:,:,1),vals(:,i))
+    ELSE IF(self%per_vmap(i)==2)THEN
+      vals(:,i)=MATMUL(self%mesh%periodic%vmap_mats(:,:,2),vals(:,i))
+    END IF
+  END DO
+END IF
+END SUBROUTINE lagrange_vector_unpack
+!------------------------------------------------------------------------------
+!> Repack Lagrange vector field, accounting for periodicity
+!!
+!! Maps vectors from (x,y,z)->(n,t1,t2) on rotated periodic boundaries
+!------------------------------------------------------------------------------
+SUBROUTINE lagrange_vector_repack(fe_rep,vals,elem_first)
+CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
+REAL(r8), INTENT(inout) :: vals(:,:) !< Local FE weights
+LOGICAL, OPTIONAL, INTENT(in) :: elem_first !< Elements indexed first?
+INTEGER(i4) :: i,j
+LOGICAL :: apply_trans
+CLASS(oft_scalar_fem), POINTER :: self
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_repack",__FILE__)
+IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
+apply_trans=.FALSE.
+IF(PRESENT(elem_first))apply_trans=elem_first
+IF(apply_trans)THEN
+  !$omp parallel do private(i)
+  DO j=1,self%nbe
+    i=self%lbe(j)
+    IF(self%per_vmap(i)==1)THEN
+      vals(i,:)=MATMUL(vals(i,:),self%mesh%periodic%vmap_mats(:,:,1))
+    ELSE IF(self%per_vmap(i)==2)THEN
+      vals(i,:)=MATMUL(vals(i,:),self%mesh%periodic%vmap_mats(:,:,2))
+    END IF
+  END DO
+ELSE
+  !$omp parallel do private(i)
+  DO j=1,self%nbe
+    i=self%lbe(j)
+    IF(self%per_vmap(i)==1)THEN
+      vals(:,i)=MATMUL(vals(:,i),self%mesh%periodic%vmap_mats(:,:,1))
+    ELSE IF(self%per_vmap(i)==2)THEN
+      vals(:,i)=MATMUL(vals(:,i),self%mesh%periodic%vmap_mats(:,:,2))
+    END IF
+  END DO
+END IF
+END SUBROUTINE lagrange_vector_repack
+!------------------------------------------------------------------------------
+!> Transform the columns of local vector matrices for rotated periodic boundaries
+!!
+!! Right-multiplies the vector components of each boundary column by the periodic
+!! rotation, so the matrix acts on (n,t1,t2) weights for those elements
+!------------------------------------------------------------------------------
+SUBROUTINE lagrange_vector_packcols(fe_rep,mtmp,elems)
+CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
+TYPE(oft_local_mat), INTENT(inout) :: mtmp(3) !< Local matrix terms
+INTEGER(i4), INTENT(in) :: elems(:) !< Column indices
+INTEGER(i4) :: i,j,k
+REAL(r8) :: vtmp(3)
+CLASS(oft_scalar_fem), POINTER :: self
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_packcols",__FILE__)
+IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
+DO j=1,self%nce
+  i=elems(j)
+  IF(.NOT.self%be(i))CYCLE
+  IF(self%per_vmap(i)==1)THEN
+    DO k=1,SIZE(mtmp(1)%m,DIM=1)
+      vtmp=[mtmp(1)%m(k,j),mtmp(2)%m(k,j),mtmp(3)%m(k,j)]
+      vtmp=MATMUL(vtmp,self%mesh%periodic%vmap_mats(:,:,1))
+      mtmp(1)%m(k,j)=vtmp(1)
+      mtmp(2)%m(k,j)=vtmp(2)
+      mtmp(3)%m(k,j)=vtmp(3)
+    END DO
+  ELSE IF(self%per_vmap(i)==2)THEN
+    DO k=1,SIZE(mtmp(1)%m,DIM=1)
+      vtmp=[mtmp(1)%m(k,j),mtmp(2)%m(k,j),mtmp(3)%m(k,j)]
+      vtmp=MATMUL(vtmp,self%mesh%periodic%vmap_mats(:,:,2))
+      mtmp(1)%m(k,j)=vtmp(1)
+      mtmp(2)%m(k,j)=vtmp(2)
+      mtmp(3)%m(k,j)=vtmp(3)
+    END DO
+  END IF
+END DO
+END SUBROUTINE lagrange_vector_packcols
+!------------------------------------------------------------------------------
+!> Transform the rows of local vector matrices for rotated periodic boundaries
+!!
+!! Projects the vector components of each boundary row onto (n,t1,t2)
+!------------------------------------------------------------------------------
+SUBROUTINE lagrange_vector_packrows(fe_rep,mtmp,elems)
+CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
+TYPE(oft_local_mat), INTENT(inout) :: mtmp(3) !< Local matrix terms
+INTEGER(i4), INTENT(in) :: elems(:) !< Row indices
+INTEGER(i4) :: i,j,k
+REAL(r8) :: vtmp(3)
+CLASS(oft_scalar_fem), POINTER :: self
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_packrows",__FILE__)
+IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
+DO j=1,self%nce
+  i=elems(j)
+  IF(.NOT.self%be(i))CYCLE
+  IF(self%per_vmap(i)==1)THEN
+    DO k=1,SIZE(mtmp(1)%m,DIM=2)
+      vtmp=[mtmp(1)%m(j,k),mtmp(2)%m(j,k),mtmp(3)%m(j,k)]
+      vtmp=MATMUL(vtmp,self%mesh%periodic%vmap_mats(:,:,1))
+      mtmp(1)%m(j,k)=vtmp(1)
+      mtmp(2)%m(j,k)=vtmp(2)
+      mtmp(3)%m(j,k)=vtmp(3)
+    END DO
+  ELSE IF(self%per_vmap(i)==2)THEN
+    DO k=1,SIZE(mtmp(1)%m,DIM=2)
+      vtmp=[mtmp(1)%m(j,k),mtmp(2)%m(j,k),mtmp(3)%m(j,k)]
+      vtmp=MATMUL(vtmp,self%mesh%periodic%vmap_mats(:,:,2))
+      mtmp(1)%m(j,k)=vtmp(1)
+      mtmp(2)%m(j,k)=vtmp(2)
+      mtmp(3)%m(j,k)=vtmp(3)
+    END DO
+  END IF
+END DO
+END SUBROUTINE lagrange_vector_packrows
+!------------------------------------------------------------------------------
+!> Transform the rows and columns of a local 3x3 block vector matrix for rotated periodic boundaries
+!!
+!! Rows are projected onto (n,t1,t2) and columns act on (n,t1,t2) weights for
+!! elements on rotated periodic boundaries
+!------------------------------------------------------------------------------
+SUBROUTINE lagrange_vector_packblock(fe_rep,mtmp,elems)
+CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
+TYPE(oft_local_mat), INTENT(inout) :: mtmp(3,3) !< Local matrix terms
+INTEGER(i4), INTENT(in) :: elems(:) !< Row indices
+INTEGER(i4) :: i,j,k,ki,jr,jc
+REAL(r8) :: tmp1(3,3),vmapr(3,3),vmapc(3,3)
+REAL(r8), PARAMETER :: eye(3,3) = RESHAPE([1.d0,0.d0,0.d0,0.d0,1.d0,0.d0,0.d0,0.d0,1.d0],[3,3])
+CLASS(oft_scalar_fem), POINTER :: self
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_packblock",__FILE__)
+IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
+DO j=1,self%nce
+  i=elems(j)
+  IF(self%per_vmap(i)==1)THEN
+    vmapr=self%mesh%periodic%vmap_matsT(:,:,1)
+  ELSE IF(self%per_vmap(i)==2)THEN
+    vmapr=self%mesh%periodic%vmap_matsT(:,:,2)
+  ELSE
+    vmapr=eye
+  END IF
+  DO k=1,self%nce
+    ki=elems(k)
+    IF(self%per_vmap(ki)==1)THEN
+      vmapc=self%mesh%periodic%vmap_mats(:,:,1)
+    ELSE IF(self%per_vmap(ki)==2)THEN
+      vmapc=self%mesh%periodic%vmap_mats(:,:,2)
+    ELSE
+      vmapc=eye
+    END IF
+    DO jr=1,3
+      DO jc=1,3
+        tmp1(jr,jc)=mtmp(jr,jc)%m(j,k)
+      END DO
+    END DO
+    tmp1=MATMUL(vmapr,MATMUL(tmp1,vmapc))
+    DO jr=1,3
+      DO jc=1,3
+        mtmp(jr,jc)%m(j,k)=tmp1(jr,jc)
+      END DO
+    END DO
+  END DO
+END DO
+END SUBROUTINE lagrange_vector_packblock
+!------------------------------------------------------------------------------
+!> Transform a 3x3 vector coupling matrix at one element for rotated periodic boundaries
+!!
+!! Applies the rotation to both rows and columns if element `i` is on a rotated
+!! periodic boundary
+!------------------------------------------------------------------------------
+SUBROUTINE lagrange_vector_transmat(fe_rep,mtmp,i)
+CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
+REAL(r8), INTENT(inout) :: mtmp(3,3) !< Local matrix terms
+INTEGER(i4), INTENT(in) :: i !< Row indices
+REAL(r8) :: vtmp(3)
+CLASS(oft_scalar_fem), POINTER :: self
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_transmat",__FILE__)
+IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
+IF(.NOT.self%be(i))RETURN
+IF(self%per_vmap(i)==1)THEN
+  mtmp=MATMUL(self%mesh%periodic%vmap_matsT(:,:,1),MATMUL(mtmp,self%mesh%periodic%vmap_mats(:,:,1)))
+ELSE IF(self%per_vmap(i)==2)THEN
+  mtmp=MATMUL(self%mesh%periodic%vmap_matsT(:,:,2),MATMUL(mtmp,self%mesh%periodic%vmap_mats(:,:,2)))
+END IF
+END SUBROUTINE lagrange_vector_transmat
 !------------------------------------------------------------------------------
 !> Destroy boundary FE object
 !------------------------------------------------------------------------------

@@ -44,15 +44,17 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
   create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_operators, ONLY: lag_setup_interp
 !---H1 FE space (Grad(H^1) subspace)
 USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
+USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd, h1_setup_interp
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc, hcurl_grad_setup_interp
 !---Physics
 USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
-USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
+USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, xmhd_minlev, &
   den_floor, temp_floor, xmhd_sub_fields, xmhd_ML_hcurl, &
   xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
 IMPLICIT NONE
@@ -72,6 +74,7 @@ TYPE(oft_taylor_hmodes) :: taylor_states
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2
+INTEGER(i4) :: minlev = -1
 REAL(r8) :: b0_scale = 1.E-1_r8
 REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
@@ -89,17 +92,26 @@ CLOSE(io_unit)
 ! Setup grid
 !------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
+IF((minlev<mg_mesh%mgdim).AND.(minlev/=-1))CALL oft_abort("Only polynomial MG currently supported for xMHD","main",__FILE__)
 !------------------------------------------------------------------------------
 ! Build FE structures
 !------------------------------------------------------------------------------
 !--- Lagrange
-CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
+ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
+CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
+CALL lag_setup_interp(xmhd_ML_lagrange)
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=-1)
+ALLOCATE(xmhd_ML_H1)
+CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=minlev)
+CALL h1_setup_interp(xmhd_ML_H1)
 !--- H(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=-1)
+ALLOCATE(xmhd_ML_hcurl)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev)
+CALL hcurl_setup_interp(xmhd_ML_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,-1)
+ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)
+CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev=minlev)
+CALL hcurl_grad_setup_interp(xmhd_ML_hcurl_grad,xmhd_ML_H1)
 h1_zerogrnd%ML_H1_rep=>xmhd_ML_H1grad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!
@@ -137,8 +149,7 @@ linv%its=-2
 CALL create_bjacobi_pre(linv%pre,-1)
 DEALLOCATE(linv%pre%pre)
 CALL create_ilu_pre(linv%pre%pre)
-divout%solver=>linv
-divout%bc=>h1_zerogrnd
+CALL divout%setup(xmhd_ML_hcurl_grad,'grnd',solver=linv)
 divout%keep_boundary=.TRUE.
 !------------------------------------------------------------------------------
 ! Setup initial conditions
@@ -208,6 +219,7 @@ temp_floor = t0*1.d-2
 xmhd_taxis=3
 oft_env%pm=pm
 !---Run simulation
+xmhd_minlev=minlev
 CALL xmhd_run(ic_fields)
 !---Finalize enviroment
 CALL oft_finalize
@@ -221,58 +233,7 @@ END PROGRAM MUG_sph_heat
 !! Some annotation of the options is provided inline below, for more information on the
 !! available options in the `xmhd_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
 !!
-!!\verbatim
-!!&runtime_options
-!! ppn=1
-!! debug=0
-!!/
-!!
-!!&mesh_options
-!! meshname='test'
-!! cad_type=0
-!! nlevels=2
-!! nbase=1
-!! grid_order=2
-!! fix_boundary=T
-!!/
-!!
-!!&native_mesh_options
-!! filename='cyl_heat.h5'
-!!/
-!!
-!!&sph_heat_options
-!! order=3
-!! b0_scale=1.e-1
-!! n0=1.e19
-!! t0=6.
-!! plot_run=F
-!!/
-!!
-!!&xmhd_options
-!! xmhd_ohmic=T      ! Include Ohmic heating
-!! xmhd_visc_heat=T  ! Include viscous heating
-!! bbc='bc'          ! Perfectly-conducting BC for B-field
-!! vbc='all'         ! Zero-flow BC for velocity
-!! nbc='d'           ! Dirichlet BC for density
-!! tbc='d'           ! Dirichlet BC for temperature
-!! dt=2.e-7          ! Maximum time step
-!! eta=25.           ! Resistivity at reference temperature (Spitzer-like)
-!! eta_temp=6.       ! Reference temperature for resistivity
-!! nu_par=400.       ! Fluid viscosity
-!! d_dens=10.        ! Density diffusion
-!! kappa_par=1.E4    ! Parallel thermal conduction (fixed)
-!! kappa_perp=1.E2   ! Perpendicular thermal conduction (fixed)
-!! nsteps=2000       ! Number of time steps to take
-!! rst_freq=10       ! Restart file frequency
-!! lin_tol=1.E-9     ! Linear solver tolerance
-!! nl_tol=1.E-5      ! Non-linear solver tolerance
-!! xmhd_mfnk=T       ! Use matrix-free Jacobian operator
-!! rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
-!! ittarget=40       ! Target for # of linear iterations per time step
-!! mu_ion=2.         ! Ion mass (atomic units)
-!! xmhd_prefreq=20   ! Preconditioner update frequency
-!!/
-!!\endverbatim
+! OFT_DOC_INCLUDE: oft.in
 !!
 !!\subsection doc_mug_sph_ex2_input_solver Solver specification
 !!
@@ -282,20 +243,7 @@ END PROGRAM MUG_sph_heat
 !! Currently, this preconditioner method is the suggested starting preconditioner for all
 !! time-dependent MHD solves.
 !!
-!!```xml
-!!<oft>
-!!  <xmhd>
-!!    <pre type="gmres">
-!!      <its>8</its>
-!!      <nrits>8</nrits>
-!!      <pre type="block_jacobi">
-!!        <nlocal>-1</nlocal>
-!!        <solver type="ilu"></solver>
-!!      </pre>
-!!    </pre>
-!!  </xmhd>
-!!</oft>
-!!```
+! OFT_DOC_INCLUDE: oft_in.xml
 !!
 !! This solver can be used by specifying both the FORTRAN input and XML input files
 !! to the executable as below.
@@ -349,25 +297,7 @@ END PROGRAM MUG_sph_heat
 !! A suitable mesh for this example, with radius of 1m and height of 1m, can be created using
 !! the CUBIT script below.
 !!
-!!\verbatim
-!!reset
-!!
-!!create Cylinder height 1 radius 1
-!!
-!!volume 1 scheme Tetmesh
-!!set tetmesher interior points on
-!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
-!!set tetmesher boundary recovery  off
-!!volume 1 size .2
-!!mesh volume 1
-!!
-!!set duplicate block elements off
-!!block 1 add volume 1
-!!block 1 element type tetra10
-!!
-!!set large exodus file on
-!!export Genesis  "cyl_heat.g" overwrite block 1
-!!\endverbatim
+! OFT_DOC_INCLUDE: cyl_heat.jou
 !!
 !! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_cubit.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
@@ -381,23 +311,7 @@ END PROGRAM MUG_sph_heat
 !! If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
 !! geometry script below.
 !!
-!!\verbatim
-!!Coherence;
-!!Point(1) = {0, 0, 0, 1.0};
-!!Point(2) = {1, 0, 0, 1.0};
-!!Point(3) = {0, 1, 0, 1.0};
-!!Point(4) = {-1, 0, 0, 1.0};
-!!Point(5) = {0, -1, 0, 1.0};
-!!Circle(1) = {2, 1, 3};
-!!Circle(2) = {3, 1, 4};
-!!Circle(3) = {4, 1, 5};
-!!Circle(4) = {5, 1, 2};
-!!Line Loop(5) = {2, 3, 4, 1};
-!!Plane Surface(6) = {5};
-!!Extrude {0, 0, 1} {
-!!  Surface{6};
-!!}
-!!\endverbatim
+! OFT_DOC_INCLUDE: cyl_heat.geo
 !!
 !! To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
 !! `cyl_heat.geo` and run the following command.

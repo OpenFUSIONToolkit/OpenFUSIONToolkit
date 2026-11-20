@@ -26,6 +26,11 @@ oft_in_template = """
  mesh_type={4}
 /
 
+&cube_options
+ mesh_type={4}
+ ni=4,4,4
+/
+
 &test_mapping_options
  order={5}
 /
@@ -70,6 +75,15 @@ def test_find_quad(grid_type):
     assert check_result('mapping_find.results')
 
 #============================================================================
+# Test runner for find_cell test on a cube (structured tets or hexes)
+@pytest.mark.coverage
+@pytest.mark.parametrize("grid_type", (1, 2))
+@pytest.mark.parametrize("order", (1, 2))
+def test_find_cube(grid_type, order):
+    assert mapping_setup(1,1,order,92,'find',grid_type=grid_type)
+    assert check_result('mapping_find.results')
+
+#============================================================================
 # Test runner for jacobian tests on linear elements
 @pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
@@ -101,7 +115,7 @@ oft_in_2d_template = """
  cad_type={0}
  nlevels={1}
  nbase={1}
- grid_order=1
+ grid_order={3}
 /
 
 &sphere_options
@@ -121,14 +135,29 @@ oft_in_2d_template = """
 """
 
 #============================================================================
+# Test runner for 2D (triangle) jacobian tests (the 2D Hessian does not support quads)
+def jac_2d_setup(cad_type, elem_order, grid_order):
+    os.chdir(test_dir)
+    with open('oft.in', 'w+') as fid:
+        fid.write(oft_in_2d_template.format(cad_type, 2, elem_order, grid_order))
+    return run_OFT("./test_mapping_jac_2d", 1, 60)
+
+#============================================================================
 # Test runner for 2D (triangle) jacobian tests on linear elements
-# (the 2D Hessian does not support curved triangles or quads)
 @pytest.mark.coverage
 @pytest.mark.parametrize("cad_type", (91, 92))
 @pytest.mark.parametrize("elem_order", (2, 3, 4))
 def test_jac_2d_lin(cad_type, elem_order):
-    os.chdir(test_dir)
-    with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_2d_template.format(cad_type, 2, elem_order))
-    assert run_OFT("./test_mapping_jac_2d", 1, 60)
+    assert jac_2d_setup(cad_type, elem_order, 1)
+    assert check_result('mapping_jac.results')
+
+#============================================================================
+# Test runner for 2D (triangle) jacobian tests on quadratic elements
+# (curved boundary cells on the circle mesh; on the square mesh all cells
+# use the quadratic mapping, with straight edges)
+@pytest.mark.coverage
+@pytest.mark.parametrize("cad_type", (91, 92))
+@pytest.mark.parametrize("elem_order", (2, 3, 4))
+def test_jac_2d_quad(cad_type, elem_order):
+    assert jac_2d_setup(cad_type, elem_order, 2)
     assert check_result('mapping_jac.results')

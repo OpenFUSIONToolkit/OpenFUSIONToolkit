@@ -1,6 +1,7 @@
 import subprocess
 import multiprocessing
 import queue
+import signal
 import time
 import os
 import sys
@@ -28,24 +29,46 @@ def run_command(command, cwd=None):
     return outs, errs, errcode
 
 
-def run_OFT(command, nproc, timeout, return_stdout=False):
+def kill_process_group(pid):
+    '''Kill the process group led by `pid` (started with `start_new_session=True`), if any of it is still running'''
+    try:
+        os.killpg(pid.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run_OFT(command, nproc, timeout, return_stdout=False, expect_abort=None):
+    '''Run OFT `command` on `nproc` processes with a `timeout` (in seconds) and check that it succeeded
+
+    Returns `True` if the run succeeded (and its standard output if `return_stdout`). A run fails if it times
+    out, exits with a non-zero error code, or reports an error or warning. If `expect_abort` is given, the run
+    must instead exit with a non-zero error code and report `expect_abort` in its error output (eg. from
+    `oft_abort`).
+    '''
     if nproc > 1:
         if env_flag('OFT_HAVE_MPI'):
             command = "mpirun --map-by :OVERSUBSCRIBE -np {0} {1}".format(nproc, command)
         else:
             pytest.skip("Not compiled with MPI")
-    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Run in a new session so a timeout can kill the whole process group (shell, mpirun, and ranks). The group
+    # is then outside the terminal's foreground group, so an interrupt (Ctrl-C) must also kill it explicitly
+    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           start_new_session=True)
     # Increase timeout if testing in debug configuration
     if env_flag('OFT_DEBUG_TEST'):
         timeout *= 4
-    # Wait for process to complete or timeout
-    timeout *= 10
-    while (pid.poll() is None) and (timeout > 0):
-        time.sleep(0.1)
-        timeout -= 1
-    if timeout <= 0:
-        pid.kill()
-    outs, errs = pid.communicate()
+    # Wait for process to complete or timeout, reading the output as it arrives; waiting without reading
+    # deadlocks once the output fills the pipe buffer (64 KB)
+    timed_out = False
+    try:
+        outs, errs = pid.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        kill_process_group(pid)
+        outs, errs = pid.communicate()
+    except BaseException:
+        kill_process_group(pid)
+        raise
     errcode = pid.poll()
     #
     std_out = outs.decode()
@@ -57,6 +80,12 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
     print("ERRCODE = {0}".format(errcode))
     print("========== END OFT OUTPUT ==========")
     #
+    if timed_out:
+        print("FAILED: OFT timed out after {0} s".format(timeout))
+        if return_stdout:
+            return False, std_out
+        else:
+            return False
     if std_out.find('Not compiled with PETSc') > -1:
         pytest.skip("Not compiled with PETSc")
         if return_stdout:
@@ -69,6 +98,18 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
             return True, std_out
         else:
             return True
+    if expect_abort is not None:
+        result = True
+        if errcode == 0:
+            print("FAILED: OFT exited normally, but an error was expected!")
+            result = False
+        elif std_err.find(expect_abort) < 0:
+            print("FAILED: expected OFT error not found!")
+            result = False
+        if return_stdout:
+            return result, std_out
+        else:
+            return result
     if errcode != 0:
         if (errcode == 143) or (errcode == 15):
             warnings.warn("WARNING: OFT exited with error code 143 (external SIGTERM)")
