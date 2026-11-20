@@ -41,10 +41,17 @@ AdvancedWorkflows/
 │   ├── requirements_NT_Ballooning_GPEC.txt
 │   └── README.md
 │
-└── GPEC_Coupling/
-    ├── kink_tearing_stability.ipynb
-    ├── g147131.02300_DIIID_KEFIT
-    ├── g147131.02300_DIIID_KEFIT_corrected.kin
-    ├── requirements_GPEC_Coupling.txt
+├── GPEC_Coupling/
+│   ├── kink_tearing_stability.ipynb
+│   ├── g147131.02300_DIIID_KEFIT
+│   ├── g147131.02300_DIIID_KEFIT_corrected.kin
+│   ├── requirements_GPEC_Coupling.txt
+│   └── README.md
+│
+└── VARYPED/
+    ├── D3Dlike_VARYPED_ex.ipynb
+    ├── DIIID_mesh.h5
+    ├── TkMkr_D3Dlike_Hmode_BSamp=1.0.geqdsk
+    ├── TkMkr_D3Dlike_Hmode_BSamp=1.0.peqdsk
     └── README.md
-
+```
