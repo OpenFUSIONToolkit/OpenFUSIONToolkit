@@ -167,12 +167,20 @@ IF(init_field%B0**2<=init_field%bcoef*n_bar*(EXP(zmax/init_field%Ln)-1.d0)) &
 !!
 !! The magnetic field is projected onto the vector Lagrange space and the density onto the Lagrange space.
 !! The temperature is uniform and the plasma starts at rest.
+!!
+!! The projection of the magnetic field must be converged with a relative tolerance. The field is supported
+!! almost entirely by its own pressure (\f$ \beta \sim 10^{-3} \f$, and the gravitational drive is smaller
+!! still), so a relative error of \f$ 10^{-7} \f$ in \f$ B \f$ already gives a force imbalance that is much
+!! larger than the seeded perturbation. The right-hand side of the vector Lagrange projection scales with the
+!! cell volume (\f$ \sim 10^{-6} \f$ here), so the absolute tolerance used for the density
+!! (`atol=1.d-12`) stops the solve after a few iterations at that level of error.
 NULLIFY(mop)
 CALL oft_lag_vgetmop(xmhd_ML_vlagrange%current_level,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
-minv%atol=1.d-12
+minv%atol=0.d0
+minv%rtol=1.d-14
 CALL create_diag_pre(minv%pre)
 CALL xmhd_ML_vlagrange%vec_create(u)
 CALL xmhd_ML_vlagrange%vec_create(v)

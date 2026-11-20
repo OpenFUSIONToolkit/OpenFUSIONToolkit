@@ -51,9 +51,10 @@
 !! the cells in \f$ x \f$ and \f$ z \f$), so it is numerical and still under investigation. For
 !! \f$ \beta \le 2 \times 10^{-3} \f$ the gravitational mode dominates and its growth rate agrees with
 !! Eq. 15 to within about 2%. At these lower \f$ \beta \f$ the runs may still fail near the end (the time
-!! step collapses once the kinetic energy reaches about \f$ 10^{-9} \f$). This, and the second mode at higher
-!! \f$ \beta \f$, can bias the fit in `run_scan.py`, which uses the last 30% of each run, so check the
-!! kinetic energy history in `xmhd.hist` before trusting a measured growth rate.
+!! step collapses once the kinetic energy reaches about \f$ 10^{-9} \f$). To avoid this late stage, and the
+!! second mode at higher \f$ \beta \f$, `run_scan.py` fits \f$ \ln E_k \f$ only over the exponential growth
+!! phase, the longest part of the run where its slope is constant to within 10% (`--fit-tol`), and prints
+!! that window. Still check the kinetic energy history in `xmhd.hist` before trusting a measured growth rate.
 !!
 !!\section doc_mug_gyro_grav_ex_code Code walk through
 !!

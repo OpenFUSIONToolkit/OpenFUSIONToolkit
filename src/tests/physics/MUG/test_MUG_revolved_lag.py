@@ -70,22 +70,6 @@ oft_in_template = """
 /
 """
 
-# Multigrid preconditioner with GMRES/Jacobi smoothing on each level
-mg_xml = """<oft>
-  <xmhd>
-    <pre type="mg">
-      <smoother direction="up">
-        <solver type="gmres">
-          <its>4</its>
-          <nrits>4</nrits>
-          <pre type="jacobi"></pre>
-        </solver>
-      </smoother>
-    </pre>
-  </xmhd>
-</oft>
-"""
-
 # Allowed RMS velocity (relative to the wall Alfven speed) and relative change in B, well above the round-off level
 # (~1E-8) reached when the vector fields are rotated correctly across the periodic boundaries
 vel_tol = 1.E-6
@@ -95,8 +79,9 @@ b_tol = 1.E-6
 def revolved_case(bbc, vbc, nbase=1, nlevels=1, minlev=2, nu_mhd='-1', nproc=1):
     '''Write the input and mesh for the Z-pinch equilibrium and run test_MUG_revolved_lag
 
-    The FE levels run from `minlev` to the mesh levels plus one (quadratic elements); a multigrid preconditioner
-    (`mg_xml`) is used if there is more than one.
+    The FE levels run from `minlev` to the mesh levels plus one (quadratic elements); the standard multigrid
+    preconditioner (`oft_in_xmhd_mg.xml`: GMRES smoother with block-Jacobi/LU on each level) is used if there is
+    more than one.
     '''
     os.chdir(test_dir)
     write_mesh('revolved_tet.h5', x_wedge, 'tet')
@@ -106,9 +91,7 @@ def revolved_case(bbc, vbc, nbase=1, nlevels=1, minlev=2, nu_mhd='-1', nproc=1):
         os.remove('revolved.results')
     xml_file = 'oft_in_xmhd.xml'
     if nlevels+1 > minlev:
-        xml_file = 'oft_in_revolved_mg.xml'
-        with open(xml_file, 'w+') as fid:
-            fid.write(mg_xml)
+        xml_file = 'oft_in_xmhd_mg.xml'
     return run_OFT("./test_MUG_revolved_lag oft.in {0}".format(xml_file), nproc, 600)
 
 

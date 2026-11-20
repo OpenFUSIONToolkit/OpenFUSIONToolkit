@@ -12,6 +12,29 @@ Run the scan of growth rate against β from a directory containing the built `MU
 python run_scan.py --plot
 ```
 
+The growth rate is fit over the exponential growth phase of the kinetic energy: the longest part of the
+run where d ln(E_k)/dt is constant to within ±10% (`--fit-tol`). This excludes the initial transient and
+the late blow-up or saturation, and the window used is printed for each case. `--fit-frac 0.3` restores the
+previous fit over the last 30% of each run, and `--no-run` refits the results of a previous scan. The
+perturbation amplitude can be changed with `--eps` (default: `eps` in `oft.in`).
+
+## Lagrange variant
+
+`MUG_gyro_grav_lag` (`MUG_gyro_grav_lag.F90`, `doc_mug_gyro_grav_lag_ex`) runs the same case with the
+Lagrange-only xMHD module (`xmhd_lag`):
+
+```bash
+python run_scan.py --exe ./MUG_gyro_grav_lag --plot
+```
+
+The initial magnetic field must be projected onto the vector Lagrange space with a relative tolerance. The
+plasma is supported almost entirely by magnetic pressure, so a relative error of 1e-7 in B is already a
+force imbalance much larger than the seeded perturbation (`eps=1e-8`). The right-hand side of that
+projection scales with the cell volume (about 1e-6 here), so an absolute tolerance of 1e-12 stops the solve
+at that level of error. That gave an initial kinetic energy of about 1e-15, independent of `eps`, which
+buried the gravitational mode for β ≥ 1e-3. The example now converges the projection to a relative
+residual of 1e-14, which puts the discrete equilibrium closer to force balance than the H(Curl) example.
+
 ## Open items
 
 - **Hall term.** With `xmhd_hall=T` a faster mode (γ ≈ 0.045 Ω_i) overtakes the gravitational mode.
