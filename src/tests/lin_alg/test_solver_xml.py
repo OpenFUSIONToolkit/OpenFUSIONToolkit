@@ -182,7 +182,7 @@ def test_gmres_petsc_asm_mpi(nlocal, overlap, full_node, iteration_count):
 #============================================================================
 # PETSc GASM with node subdomains spanning both processes (ppn=2), using a
 # symmetric Jacobi sub-solver as the subdomain matrices are parallel
-# (nlocal=-1 uses field-based subdomains, which do not support overlap)
+# (nlocal=-1 uses field-based subdomains; the XML input sets overlap=0 for nlocal=-1)
 @pytest.mark.mpi
 @pytest.mark.parametrize("nlocal,overlap,iteration_count", (
     (-1, 0, 42),
