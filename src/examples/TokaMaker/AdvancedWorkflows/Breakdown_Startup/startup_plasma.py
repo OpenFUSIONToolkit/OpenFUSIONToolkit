@@ -644,8 +644,9 @@ class FieldLineMap:
             breakdown       any mid-plane line breaks down (region='midplane') / any tube (region='all')
             plasma [nZ, nR] the plasma region: tubes that broke down (those through the mid-plane points,
                             or every tube with region='all'), tubes through the mid-plane points in
-                            `sustained` [n_mid] (lines that broke down at an earlier map) while they are
-                            open (O29), plus every closed tube (when something broke down here, or
+                            `sustained` [n_mid] (lines that broke down at an earlier map, the 'sustained'
+                            option of run_with_field_lines; a held line that has closed counts as a
+                            closed line), plus every closed tube (when something broke down here, or
                             plasma_exists: a plasma from an earlier breakdown); and its
                             Vp [m^3], A [m^2], R_vol, Z_vol (centre of mass of the cross-section),
                             r_vol (distance from it to the first wall), kappa = min(A/(pi r^2),
@@ -667,7 +668,7 @@ class FieldLineMap:
         opn = ins & ~closed
         lo, hi = psi[ins].min(), psi[ins].max()
         gpsi = self.RR * np.sqrt(BR ** 2 + BZ ** 2) * max(self.dR, self.dZ)         # psi change across a cell
-        dpsi = max((hi - lo) / n_bands, 2.0 * np.percentile(gpsi[opn if opn.any() else ins], 90))
+        dpsi = max((hi - lo) / n_bands, 2.0 * np.percentile(gpsi[opn if opn.any() else ins], 90), 1e-30)
         n_bands = max(int(np.ceil((hi - lo) / dpsi)), 1)              # open tubes >= ~2 cells wide (90 %)
         band = np.where(ins, np.minimum(((psi - lo) / dpsi).astype(int), n_bands - 1), -1)
         key = np.where(ins, 2 * band + closed, -1)                   # open and closed cells in separate tubes
@@ -730,22 +731,35 @@ class FieldLineMap:
         if sustained is not None:
             mid['held'] |= np.asarray(sustained, bool) & mid['open'] & np.isfinite(Lm)
         tm = mid['tube']
+        # each held mid-plane line stands for the open cells connected to it with psi half-way to its
+        # neighbours' (K22's 50 lines sample the region; a tube is narrower than the point spacing on a fine
+        # grid, review cycle 2)
+        from scipy import ndimage
+        pm = np.interp(Rm, self.R, psi[k])                          # psi at the points (the end lines reach the wall)
+        half = np.concatenate([[-np.inf if pm[1] >= pm[0] else np.inf], (pm[1:] + pm[:-1]) / 2,
+                               [np.inf if pm[-1] >= pm[-2] else -np.inf]])
+        strips = np.zeros_like(opn)
+        for i in np.where(mid['held'] & (tm >= 0))[0]:
+            a = np.nanmin([half[i], half[i + 1], pm[i], psi[km[i], jm[i]]])
+            b = np.nanmax([half[i], half[i + 1], pm[i], psi[km[i], jm[i]]])
+            lab, _ = ndimage.label(opn & (psi >= a) & (psi <= b))
+            if lab[km[i], jm[i]]:
+                strips |= lab == lab[km[i], jm[i]]
         take = np.zeros(nt, bool)
         if region == 'midplane':
-            take[tm[mid['held'] & (tm >= 0)]] = True
             breakdown = bool(mid['bd'].any())
         else:
             take |= bd
-            take[tm[mid['held'] & (tm >= 0)]] = True
             breakdown = bool(bd.any())
         if breakdown or plasma_exists:
             take |= ~is_open                                         # closed lines count once there is plasma
-        plasma = np.isin(tube, np.where(take)[0])
+        plasma = np.isin(tube, np.where(take)[0]) | strips
         out = {'tube': tube, 'tubes': {'open': is_open, 'L': L, 'Epar': Ep, 'ET': ET, 'bd': bd, 'V': V, 'A': A},
                'mid': mid, 'breakdown': breakdown, 'plasma': plasma, 'dpsi': dpsi}
         out.update(self.shape(plasma))
-        out['f_closed'] = float(V[take & ~is_open].sum() / max(V[take].sum(), 1e-300))
-        in_pl = take[tm] & (tm >= 0)                                 # mid-plane lines inside the plasma
+        w = np.where(plasma, self.RR, 0.0)
+        out['f_closed'] = float(w[closed].sum() / max(w.sum(), 1e-300))
+        in_pl = plasma[km, jm] & (tm >= 0)                           # mid-plane lines inside the plasma
         if region == 'midplane':
             in_pl &= mid['held'] | ~mid['open']
         op = in_pl & mid['open'] & np.isfinite(mid['L'])
@@ -814,28 +828,37 @@ class FieldLineMap:
 def _closed_cells(psi, inside, edge):
     """[nZ, nR] True where the psi contour through the cell is closed: its superlevel or its sublevel
     connected set (4-neighbour, cells inside the wall) does not reach a cell next to the wall
-    (union-find with cells added in psi order, both ways)."""
+    (union-find with cells added in psi order, both ways; cells of equal psi are added as one group
+    and judged after it is merged)."""
     nZ, nR = psi.shape
     cells = np.flatnonzero(inside.ravel())
     p, e = psi.ravel(), edge.ravel()
     out = np.zeros(psi.size, bool)
     for sgn in (1.0, -1.0):
         parent, touch, done = np.arange(psi.size), e.copy(), np.zeros(psi.size, bool)
-        for c in cells[np.argsort(-sgn * p[cells], kind='stable')]:
-            done[c] = True
-            i, j = divmod(c, nR)
-            for n in ((c - nR) if i > 0 else -1, (c + nR) if i < nZ - 1 else -1, (c - 1) if j > 0 else -1,
-                      (c + 1) if j < nR - 1 else -1):
-                if n >= 0 and done[n]:
-                    r = n
-                    while parent[r] != r:
-                        r = parent[r]
-                    while parent[n] != r:                          # path compression
-                        parent[n], n = r, parent[n]
-                    if r != c:
-                        parent[r] = c
-                        touch[c] |= touch[r]
-            out[c] |= not touch[c]
+
+        def find(n):
+            r = n
+            while parent[r] != r:
+                r = parent[r]
+            while parent[n] != r:                                  # path compression
+                parent[n], n = r, parent[n]
+            return r
+        order = cells[np.argsort(-sgn * p[cells], kind='stable')]
+        new = np.flatnonzero(np.r_[True, p[order][1:] != p[order][:-1]])
+        for g0, g1 in zip(new, np.r_[new[1:], len(order)]):
+            for c in order[g0:g1]:
+                done[c] = True
+                i, j = divmod(c, nR)
+                for n in ((c - nR) if i > 0 else -1, (c + nR) if i < nZ - 1 else -1, (c - 1) if j > 0 else -1,
+                          (c + 1) if j < nR - 1 else -1):
+                    if n >= 0 and done[n]:
+                        r, rc = find(n), find(c)
+                        if r != rc:
+                            parent[r] = rc
+                            touch[rc] |= touch[r]
+            for c in order[g0:g1]:
+                out[c] |= not touch[find(c)]
     return out.reshape(psi.shape)
 
 
@@ -862,9 +885,20 @@ def _dist_to_polygon(x, poly):
 
 
 # ============================================================================ the DYON workflow (K22)
+def geometry_between(ga, gb, ta, dt):
+    """geometry(t, Ip) for PlasmaModel.run from map geometry ga to gb over [ta, ta + dt]: linear in each
+    quantity, harmonic in Lf (1/Lf, the loss rate, is linear); held at gb after ta + dt."""
+    def geometry(tt, Ip):
+        s = min(max((tt - ta) / dt, 0.0), 1.0)
+        g = {k: ga[k] + s * (gb[k] - ga[k]) for k in ga}
+        g['Lf'] = 1.0 / (1.0 / ga['Lf'] + s * (1.0 / gb['Lf'] - 1.0 / ga['Lf']))
+        return g
+    return geometry
+
+
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
-                         n_mid=50, Z_mid=0.0, log=None):
+                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -877,43 +911,50 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
 
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
-    the last to the last (1/Lf, the loss rate, for Lf), a lag of one interval, so it is continuous for
-    the BDF solver.
+    the last to the last (1/Lf, the loss rate, for Lf; geometry_between), a lag of one interval, so it is
+    continuous for the BDF solver. The output is at the map times and half-way between them.
 
-    Lines that broke down stay in the plasma (O29): a mid-plane line that met the Townsend criterion at
-    any map since breakdown stays in the plasma region while it is open (K22 re-evaluates the
-    criterion every map but does not say that a plasma on a line is lost when E falls below E_T; the
-    plasma's own back-EMF lowers E right after breakdown). If the region is still empty the last
-    geometry is held.
+    Plasma region after breakdown (O29): hold='k22' (default, K22 fig. 4 caption: particles are on the
+    lines that are closed or meet the Townsend criterion, re-evaluated at every map; ITPA 2026 sec. 5:
+    as the neutrals deplete fewer open lines meet it and the closed volume replaces them). 'sustained'
+    (a departure, not in K22): a mid-plane line that met the criterion at any map since breakdown stays
+    in the plasma while it is open, with no release. If the region is empty the last geometry is held.
+    Townsend pressure after breakdown: pressure='neutral' (default) the fuel neutrals of the model,
+    n_0 T_n / 2 (molecules, the inverse of K22 eq. 18), so depletion turns lines off; 'fill' p_fill.
 
     A given y0 gets the structure currents of the vacuum phase at t_bd.
 
     Returns a dict: 't_bd' (None if no breakdown before t_end), 'out' (the plasma model's output arrays,
     concatenated; None without breakdown), 'status' (0, or the solver's status where it stopped),
-    'message', 't_stop' (the last time reached), 'maps' (per map time: t, Vp, R_vol, Z_vol, r_vol,
+    'message', 't_stop' (the last time reached; status -2: the model raised ValueError, eg. L_p below
+    the structure coupling M_ps M_ss^-1 M_sp when the region's R_vol is far from Rp, O27), 'maps' (per map time: t, p (the Townsend pressure), Vp, R_vol, Z_vol, r_vol,
     kappa, Lf, L_open, f_open, f_closed, n_bd (mid-plane lines broken down at that map), n_held (lines
     in the plasma), breakdown).
     """
     if Rp is None:
         raise ValueError('Rp (the plasma current position, the circuit filament radius) must be given')
+    if hold not in ('k22', 'sustained') or pressure not in ('neutral', 'fill'):
+        raise ValueError(f'unknown hold {hold!r} or pressure {pressure!r}')
     circ = model.circuit
     nc = circ.nc
     keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed')
-    maps = {k: [] for k in ('t', 'n_bd', 'n_held', 'breakdown') + keys}
+    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown') + keys}
     held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
     log = log or (lambda *a: None)
 
-    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False):
+    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False, p=p_fill):
         nonlocal held
         I_u = np.concatenate([I_coil(t), I_s])
         dI_u = np.concatenate([circ.coil_rate(t), dI_s])
         psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, Rp, Zp)
-        o = fmap.analyze(psi, Ephi, p_fill, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form,
-                         plasma_exists=plasma_exists, sustained=held if plasma_exists else None)
-        if plasma_exists or o['breakdown']:
+        sus = held if plasma_exists and hold == 'sustained' else None
+        o = fmap.analyze(psi, Ephi, p, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form,
+                         plasma_exists=plasma_exists, sustained=sus)
+        if hold == 'sustained' and (plasma_exists or o['breakdown']):
             held = held | o['mid']['held']
         maps['t'].append(t)
+        maps['p'].append(p)
         maps['n_bd'].append(int(o['mid']['bd'].sum()))
         maps['n_held'].append(int(o['mid']['held'].sum()))
         maps['breakdown'].append(o['breakdown'])
@@ -950,22 +991,20 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     outs, y, t, status, message = [], y0, t_bd, 0, 'reached t_end'
     while t < t_end - 1e-12:
         t1 = min(t + dt_map, t_end)
-        ga, gb, ta = dict(g_prev), dict(g_last), t
-
-        def geometry(tt, Ip, ga=ga, gb=gb, ta=ta):
-            s = min(max((tt - ta) / dt_map, 0.0), 1.0)
-            g = {k: ga[k] + s * (gb[k] - ga[k]) for k in ga}
-            g['Lf'] = 1.0 / (1.0 / ga['Lf'] + s * (1.0 / gb['Lf'] - 1.0 / ga['Lf']))
-            return g
-        o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, t1])
+        geometry = geometry_between(dict(g_prev), dict(g_last), t, dt_map)
+        try:
+            o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, 0.5 * (t + t1), t1])
+        except ValueError as e:                                      # eg. L_p below the structure coupling (O27)
+            o_run = {'status': -2, 'message': str(e)}
         if o_run['status'] != 0:
             status, message = o_run['status'], o_run['message']
             log(f'solver stopped at {t * 1e3:.1f} ms: {message}')
             break
-        outs.append({k: v[-1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
+        outs.append({k: v[1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
         y, t = o_run['y'][-1], t1
         tt = model.terms(t, y)
-        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True)
+        p_now = tt['n0'][0] * model.T_n * EV / 2 if pressure == 'neutral' else p_fill
+        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True, p=p_now)
         g_prev = g_last
         if o['Vp'] > 0:
             g_last = geo_of(o)
