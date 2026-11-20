@@ -4346,7 +4346,7 @@ class(xmhd_interp), intent(inout) :: self !< Interpolation object
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-real(r8), intent(out) :: val(:) !< Reconstructed field at f [26-40] (Te, N2 and J2 entries only written when SIZE(val) allows)
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [26-40, depending on enabled fields]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc,k
 real(r8) :: b0(3),j0(3),cgop(3,6),Te,dTe(3),tmp,vtmp(3)
@@ -4500,17 +4500,17 @@ val(15:17)=dlf0(:,4) ! dN / dx_j
 val(18:20)=dlf0(:,5) ! dTi /dx_j
 val(21:23)=b0
 val(24:26)=j0
-!---Optional fields at fixed offsets, written only if they fit in val (unused entries are zeroed)
-IF(SIZE(val)>26)val(27:)=0.d0
-IF(xmhd_two_temp.AND.(SIZE(val)>=30))THEN
+!---Optional fields at fixed offsets (entries for disabled fields are zeroed)
+val(27:)=0.d0 ! Zero-length when only the base fields are requested
+IF(xmhd_two_temp)THEN
   val(27) = Te
   val(28:30) = dTe
 END IF
-IF((n2_ind>0).AND.(SIZE(val)>=34))THEN
+IF(n2_ind>0)THEN
   val(31) = N2
   val(32:34) = dN2
 END IF
-IF((j2_ind>0).AND.(SIZE(val)>=40))THEN
+IF(j2_ind>0)THEN
   val(35:37) = J2
   val(38:40) = J2c
 END IF
