@@ -5466,7 +5466,7 @@ END IF
 !--- interpolation objects
 CALL Bfield%delete
 CALL Jfield%delete
-CALL J2field%delete
+IF(j2_ind>0)CALL J2field%delete
 DEALLOCATE(bvout)
 DEBUG_STACK_POP
 end subroutine xmhd_plot
