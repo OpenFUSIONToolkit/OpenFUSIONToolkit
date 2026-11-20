@@ -366,7 +366,7 @@ end if
 if(associated(self%pre))call u%new(s)
 if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
-uu = MAX(u%dot(u),0.d0)
+uu = clamp_nonneg(u%dot(u))
 if(uu==0.d0)then
   alfa=1.d0; f=0.d0
   call q%set(0.d0)
@@ -387,7 +387,7 @@ if(associated(self%pre))then
   call p%add(0.d0,1.d0,s)
 end if
 gg = g%dot(p)
-ggin = MAX(g%dot(g),0.d0) ! Clamp round-off (see GMRES Arnoldi step)
+ggin = clamp_nonneg(g%dot(g)) ! Clamp round-off (see GMRES Arnoldi step)
 100 FORMAT (I6,3ES14.6)
 110 FORMAT (I6,4ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,f,SQRT(uu),SQRT(ggin)
@@ -437,13 +437,13 @@ do k=1,max_its
   gg=g%dot(q)
   ! Without preconditioning or orthogonalization q==g, so skip the redundant reduction
   if(associated(self%pre).OR.associated(self%orthog))then
-    ggnew = MAX(g%dot(g),0.d0)
+    ggnew = clamp_nonneg(g%dot(g))
   else
-    ggnew = MAX(gg,0.d0)
+    ggnew = clamp_nonneg(gg)
   end if
   beta=gg/ggold
   if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.oft_env%pm)THEN
-    uu=MAX(u%dot(u),0.d0) ! Only needed for output
+    uu=clamp_nonneg(u%dot(u)) ! Only needed for output
     if(oft_env%head_proc)write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
   END IF
   if(k==its)exit
@@ -617,13 +617,13 @@ allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
 allocate(hdots(nrits+1),vw(nrits+1),znorm(nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
-uu = MAX(u%dot(u),0.d0)
+uu = clamp_nonneg(u%dot(u))
 IF(uu>0.d0)call A%apply(u,w)
 if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add(0.d0,1.d0,g,-1.d0,w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = MAX(r%dot(r),0.d0) ! Clamp round-off (see Arnoldi step)
+gg = clamp_nonneg(r%dot(r)) ! Clamp round-off (see Arnoldi step)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -656,7 +656,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
-    IF(res_u_tol>0.d0)znorm(i)=SQRT(MAX(z(i)%f%dot(z(i)%f),0.d0))
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(clamp_nonneg(z(i)%f%dot(z(i)%f)))
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration (CGS with selective re-orthogonalization)
@@ -666,22 +666,22 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     vw(i+1)%f=>w
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=hdots(1:i)
-    wnorm0=SQRT(MAX(hdots(i+1),0.d0))
+    wnorm0=SQRT(clamp_nonneg(hdots(i+1)))
     do k=1,i
       call w%add(1.d0,-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    ! Native dot products subtract shared/periodic duplicate entries from the full local sum, so
-    ! after near-complete cancellation (eg. an exact preconditioner) the result can be slightly
-    ! negative; clamp to zero so this is treated as a (lucky) breakdown instead of producing NaN
-    h(i+1,i)=SQRT(MAX(w%dot(w),0.d0))
+    ! Safety net: after near-complete cancellation (eg. an exact preconditioner) clamp any
+    ! negative round-off in the self dot-product to zero, so this is treated as a (lucky)
+    ! breakdown instead of producing NaN. NaN itself is preserved so failures still propagate.
+    h(i+1,i)=SQRT(clamp_nonneg(w%dot(w)))
     IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=w%mdot(v(1:i),i)
       do k=1,i
         call w%add(1.d0,-hdots(k),v(k)%f)
       end do
       h(1:i,i)=h(1:i,i)+hdots(1:i)
-      h(i+1,i)=SQRT(MAX(w%dot(w),0.d0))
+      h(i+1,i)=SQRT(clamp_nonneg(w%dot(w)))
     END IF
     IF(h(i+1,i)>0.d0)call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
@@ -714,7 +714,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
         do k=1,i
           call w%add(1.d0,hdots(k),z(k)%f)
         end do
-        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(MAX(w%dot(w),0.d0)))
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(clamp_nonneg(w%dot(w))))
         IF(inner_conv)EXIT
       END IF
     END IF
@@ -740,8 +740,8 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = MAX(r%dot(r),0.d0) ! Clamp round-off (see Arnoldi step)
-  uu = MAX(u%dot(u),0.d0)
+  gg = clamp_nonneg(r%dot(r)) ! Clamp round-off (see Arnoldi step)
+  uu = clamp_nonneg(u%dot(u))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
@@ -917,13 +917,13 @@ allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
 allocate(hdots(nrits+1),vw(nrits+1),znorm(nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
-uu = MAX(REAL(u%dot(u),r8),0.d0)
+uu = clamp_nonneg(REAL(u%dot(u),r8))
 IF(uu>0.d0)call A%apply(u,w)
 if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = MAX(REAL(r%dot(r),r8),0.d0) ! Clamp round-off (see Arnoldi step)
+gg = clamp_nonneg(REAL(r%dot(r),r8)) ! Clamp round-off (see Arnoldi step)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -956,7 +956,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
-    IF(res_u_tol>0.d0)znorm(i)=SQRT(MAX(REAL(z(i)%f%dot(z(i)%f),r8),0.d0))
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(clamp_nonneg(REAL(z(i)%f%dot(z(i)%f),r8)))
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration (CGS with selective re-orthogonalization)
@@ -966,22 +966,22 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     vw(i+1)%f=>w
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=CONJG(hdots(1:i)) ! mdot gives w^H v_k
-    wnorm0=SQRT(MAX(REAL(hdots(i+1),r8),0.d0))
+    wnorm0=SQRT(clamp_nonneg(REAL(hdots(i+1),r8)))
     do k=1,i
       call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    ! Native dot products subtract shared/periodic duplicate entries from the full local sum, so
-    ! after near-complete cancellation (eg. an exact preconditioner) the result can be slightly
-    ! negative; clamp to zero so this is treated as a (lucky) breakdown instead of producing NaN
-    h(i+1,i)=SQRT(MAX(REAL(w%dot(w),r8),0.d0))
+    ! Safety net: after near-complete cancellation (eg. an exact preconditioner) clamp any
+    ! negative round-off in the self dot-product to zero, so this is treated as a (lucky)
+    ! breakdown instead of producing NaN. NaN itself is preserved so failures still propagate.
+    h(i+1,i)=SQRT(clamp_nonneg(REAL(w%dot(w),r8)))
     IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=CONJG(w%mdot(v(1:i),i))
       do k=1,i
         call w%add((1.d0,0.d0),-hdots(k),v(k)%f)
       end do
       h(1:i,i)=h(1:i,i)+hdots(1:i)
-      h(i+1,i)=SQRT(MAX(REAL(w%dot(w),r8),0.d0))
+      h(i+1,i)=SQRT(clamp_nonneg(REAL(w%dot(w),r8)))
     END IF
     IF(ABS(h(i+1,i))>0.d0)call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
@@ -1014,7 +1014,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
         do k=1,i
           call w%add((1.d0,0.d0),hdots(k),z(k)%f)
         end do
-        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(MAX(REAL(w%dot(w),r8),0.d0)))
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(clamp_nonneg(REAL(w%dot(w),r8))))
         IF(inner_conv)EXIT
       END IF
     END IF
@@ -1039,8 +1039,8 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = MAX(REAL(r%dot(r),r8),0.d0) ! Clamp round-off (see Arnoldi step)
-  uu = MAX(REAL(u%dot(u),r8),0.d0)
+  gg = clamp_nonneg(REAL(r%dot(r),r8)) ! Clamp round-off (see Arnoldi step)
+  uu = clamp_nonneg(REAL(u%dot(u),r8))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
@@ -1420,8 +1420,8 @@ outer: do i=0,its
     call self%A%apply(u,v)
     call v%add(1.d0,-1.d0,g)
     IF(ASSOCIATED(self%bc))call self%bc%apply(v)
-    res=MAX(v%dot(v),0.d0)
-    uu=MAX(u%dot(u),0.d0)
+    res=clamp_nonneg(v%dot(v))
+    uu=clamp_nonneg(u%dot(u))
     if(oft_env%head_proc)met_time=met_time+mytimer%tock()
     if((res<resp).OR.(.NOT.self%backtrack))exit ! If residual has decreased exit
     !---If residual has reached an acceptable value exit
@@ -1877,8 +1877,8 @@ REAL(r8) :: uu,res
 real(r8), pointer :: vals(:)
 IF(oft_env%head_proc)WRITE(*,'(2X,A,A,I4)')'Residual ',stage,self%level
 IF(self%report_err==1)THEN
-  res = SQRT(MAX(g%dot(g),0.d0))
-  uu = SQRT(MAX(u%dot(u),0.d0))
+  res = SQRT(clamp_nonneg(g%dot(g)))
+  uu = SQRT(clamp_nonneg(u%dot(u)))
   IF(oft_env%head_proc)WRITE(*,'(4X,2ES14.6)')uu,res
 ELSE IF(self%report_err==2)THEN
   CALL u%new(gtmp)
@@ -1888,12 +1888,12 @@ ELSE IF(self%report_err==2)THEN
     vals=0.d0
     CALL u%get_local(vals,i)
     CALL gtmp%restore_local(vals,i)
-    uu = SQRT(MAX(gtmp%dot(gtmp),0.d0))
+    uu = SQRT(clamp_nonneg(gtmp%dot(gtmp)))
     CALL gtmp%set(0.d0)
     vals=0.d0
     CALL g%get_local(vals,i)
     CALL gtmp%restore_local(vals,i)
-    res = SQRT(MAX(gtmp%dot(gtmp),0.d0))
+    res = SQRT(clamp_nonneg(gtmp%dot(gtmp)))
     IF(oft_env%head_proc)WRITE(*,'(4X,2ES14.6)')uu,res
   END DO
   CALL gtmp%delete()

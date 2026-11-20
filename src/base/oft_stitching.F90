@@ -33,7 +33,7 @@ TYPE :: oft_seam
   INTEGER(i4) :: nproc_con = 0 !< Number of connections to other processors
   INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: leo => NULL() !< List of boundary element ownership
-  INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: own => NULL() !< Ownership weight (1/0) for each local element (built on first reduction)
+  INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: own => NULL() !< Ownership weight (1/0) for each local element (built on first reduction, which must occur outside of OpenMP parallel regions)
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: be => NULL() !< Boundary element flag
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lbe => NULL() !< List of boundary elements in full vector
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lie => NULL() !< List of interior elements in full vector
@@ -94,87 +94,89 @@ CONTAINS
 !! negative values for self dot-products. A 0/1 integer weight is used instead of a
 !! logical mask as the resulting multiply vectorizes with GCC, while a masked
 !! selection (MERGE/IF) does not.
+!!
+!! @note Weights are built lazily on the first reduction with a given seam. This is
+!! not thread safe, so it aborts if called from within an OpenMP parallel region.
 !---------------------------------------------------------------------------------
-subroutine seam_build_own(self,n)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: n !< Length of local arrays
-integer(i4) :: i
+SUBROUTINE seam_build_own(self,n)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+INTEGER(i4) :: i
 DEBUG_STACK_PUSH
-!$omp critical (oft_seam_own_init)
-IF(self%nown/=n)THEN
-  IF(ASSOCIATED(self%own))DEALLOCATE(self%own)
-  ALLOCATE(self%own(n))
-  self%own=1_c_int8_t
-  DO i=1,self%nbe
-    IF(.NOT.self%leo(i))self%own(self%lbe(i))=0_c_int8_t
-  END DO
-  self%nown=n
-END IF
-!$omp end critical (oft_seam_own_init)
+!---Lazy initialization is not thread safe
+IF(omp_in_parallel())CALL oft_abort('Ownership weights must be built outside of a parallel region', &
+  'seam_build_own',__FILE__)
+IF(ASSOCIATED(self%own))DEALLOCATE(self%own)
+ALLOCATE(self%own(n))
+self%own=1_c_int8_t
+DO i=1,self%nbe
+  IF(.NOT.self%leo(i))self%own(self%lbe(i))=0_c_int8_t
+END DO
+self%nown=n
 DEBUG_STACK_POP
-end subroutine seam_build_own
+END SUBROUTINE seam_build_own
 !---------------------------------------------------------------------------------
 !> Local owned-only real(r8) dot product (explicit-shape arrays allow vectorization)
 !---------------------------------------------------------------------------------
-function owned_dp_r8(a,b,w,n) result(c)
-integer(i4), intent(in) :: n !< Length of local arrays
-real(r8), intent(in) :: a(n) !< Local vector 1 for dot_product
-real(r8), intent(in) :: b(n) !< Local vector 2 for dot_product
-integer(c_int8_t), intent(in) :: w(n) !< Ownership weights (1/0)
-integer(i4) :: i
-real(r8) :: c
+FUNCTION owned_dp_r8(a,b,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+REAL(r8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
+REAL(r8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+REAL(r8) :: c
 c=0.d0
 !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-do i=1,n
+DO i=1,n
   c=c+a(i)*b(i)*REAL(w(i),r8)
-end do
-end function owned_dp_r8
+END DO
+END FUNCTION owned_dp_r8
 !---------------------------------------------------------------------------------
 !> Local owned-only complex(c8) dot product (explicit-shape arrays allow vectorization)
 !---------------------------------------------------------------------------------
-function owned_dp_c8(a,b,w,n) result(c)
-integer(i4), intent(in) :: n !< Length of local arrays
-complex(c8), intent(in) :: a(n) !< Local vector 1 for dot_product
-complex(c8), intent(in) :: b(n) !< Local vector 2 for dot_product
-integer(c_int8_t), intent(in) :: w(n) !< Ownership weights (1/0)
-integer(i4) :: i
-complex(c8) :: c
+FUNCTION owned_dp_c8(a,b,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+COMPLEX(c8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
+COMPLEX(c8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+COMPLEX(c8) :: c
 c=(0.d0,0.d0)
 !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-do i=1,n
+DO i=1,n
   c=c+CONJG(a(i))*b(i)*REAL(w(i),r8)
-end do
-end function owned_dp_c8
+END DO
+END FUNCTION owned_dp_c8
 !---------------------------------------------------------------------------------
 !> Local owned-only real(r8) sum (explicit-shape arrays allow vectorization)
 !---------------------------------------------------------------------------------
-function owned_sum_r8(a,w,n) result(c)
-integer(i4), intent(in) :: n !< Length of local array
-real(r8), intent(in) :: a(n) !< Local data for reduction
-integer(c_int8_t), intent(in) :: w(n) !< Ownership weights (1/0)
-integer(i4) :: i
-real(r8) :: c
+FUNCTION owned_sum_r8(a,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local array
+REAL(r8), INTENT(in) :: a(n) !< Local data for reduction
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+REAL(r8) :: c
 c=0.d0
 !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-do i=1,n
+DO i=1,n
   c=c+a(i)*REAL(w(i),r8)
-end do
-end function owned_sum_r8
+END DO
+END FUNCTION owned_sum_r8
 !---------------------------------------------------------------------------------
 !> Local owned-only complex(c8) sum (explicit-shape arrays allow vectorization)
 !---------------------------------------------------------------------------------
-function owned_sum_c8(a,w,n) result(c)
-integer(i4), intent(in) :: n !< Length of local array
-complex(c8), intent(in) :: a(n) !< Local data for reduction
-integer(c_int8_t), intent(in) :: w(n) !< Ownership weights (1/0)
-integer(i4) :: i
-complex(c8) :: c
+FUNCTION owned_sum_c8(a,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local array
+COMPLEX(c8), INTENT(in) :: a(n) !< Local data for reduction
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+COMPLEX(c8) :: c
 c=(0.d0,0.d0)
 !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-do i=1,n
+DO i=1,n
   c=c+a(i)*REAL(w(i),r8)
-end do
-end function owned_sum_c8
+END DO
+END FUNCTION owned_sum_c8
 !---------------------------------------------------------------------------------
 !> real(r8) dot_product implementation of \ref oft_stitching::oft_global_reduction
 !---------------------------------------------------------------------------------
