@@ -44,7 +44,8 @@ for tetrahedra at p=3) and can be limited with `xmhd_jac_posmap_maxmb`.
 
 \b BLAS \b threading: the Jacobian forms its local matrices with many small BLAS `dgemm` calls from inside
 OpenMP parallel regions. The BLAS library must therefore run single-threaded inside OpenMP regions, which the
-OpenMP builds of OpenBLAS (as built by `build_libs.py`, or `libopenblas0-openmp` on Debian/Ubuntu) and MKL do
+OpenBLAS built by `build_libs.py` (single-threaded, `USE_THREAD=0`, by default; OpenMP, `USE_OPENMP=1`, with
+`--oblas_threads`), other OpenMP builds of OpenBLAS (eg. `libopenblas0-openmp` on Debian/Ubuntu) and MKL do
 automatically. With a pthreads-threaded OpenBLAS (eg. the default `libopenblas0-pthread` package on Ubuntu) set
 `OPENBLAS_NUM_THREADS=1` when running MUG with OpenMP. Otherwise every small GEMM is threaded as well and the
 Jacobian build stops scaling with the number of OpenMP threads.
