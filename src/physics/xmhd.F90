@@ -586,8 +586,9 @@ CONTAINS
 !! | `xmhd_coarse_quad=F` | **Experimental, off by default**: integrate the Jacobian of coarse polynomial MG levels with their own (lower order) quadrature rule instead of the finest level's. Changes the preconditioner, not the solution; MG convergence has only been checked on simple cases | bool |
 !!
 !! @note **BLAS threading.** The Jacobian forms its local matrices with many small BLAS `dgemm` calls from
-!! inside OpenMP parallel regions, so the BLAS library must run single-threaded there. OpenMP builds of
-!! OpenBLAS (as built by `build_libs.py`, or Ubuntu's `libopenblas0-openmp`) and MKL do this automatically. With
+!! inside OpenMP parallel regions, so the BLAS library must run single-threaded there. The OpenBLAS built by
+!! `build_libs.py` (single-threaded, `USE_THREAD=0`, by default; OpenMP, `USE_OPENMP=1`, with `--oblas_threads`),
+!! other OpenMP builds of OpenBLAS (eg. Ubuntu's `libopenblas0-openmp`) and MKL do this automatically. With
 !! a pthreads-threaded OpenBLAS (eg. Ubuntu's default `libopenblas0-pthread`) set `OPENBLAS_NUM_THREADS=1`,
 !! otherwise every small GEMM is threaded and the Jacobian build stops scaling with the number of OpenMP threads.
 !
