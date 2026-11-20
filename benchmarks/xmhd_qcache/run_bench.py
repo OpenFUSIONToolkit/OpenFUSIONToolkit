@@ -416,6 +416,8 @@ def machine_info(args):
     except (OSError, subprocess.CalledProcessError):
         pass
     try:
+        if args.build_dir is None:  # Explicit --exe only
+            raise OSError
         with open(os.path.join(args.build_dir, 'CMakeCache.txt')) as fid:
             for line in fid:
                 if line.startswith(('CMAKE_Fortran_COMPILER:', 'CMAKE_BUILD_TYPE:', 'OFT_USE_MPI:', 'CMAKE_HOME_DIRECTORY:')):
