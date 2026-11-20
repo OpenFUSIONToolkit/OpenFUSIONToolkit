@@ -152,12 +152,13 @@ class(cc_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [SIZE(val)] (entries beyond SIZE(bcc,1) are zeroed)
+integer(i4) :: n
 DEBUG_STACK_PUSH
 !---
-IF(SIZE(val)<SIZE(self%bcc,DIM=1))CALL oft_abort("Output array too small.", &
-  "cc_interp_apply",__FILE__)
-val(1:SIZE(self%bcc,DIM=1))=self%bcc(:,cell)
+n=MIN(SIZE(val),SIZE(self%bcc,1))
+val(1:n)=self%bcc(1:n,cell)
+IF(SIZE(val)>n)val(n+1:)=0.d0
 DEBUG_STACK_POP
 end subroutine cc_interp_apply
 !------------------------------------------------------------------------------

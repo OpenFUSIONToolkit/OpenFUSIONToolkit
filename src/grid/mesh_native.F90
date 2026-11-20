@@ -971,10 +971,7 @@ DO i=1,mesh%nbe
     IF(ALL(pt_e>0))THEN
         IF(ALL(pt_e==mesh%le(:,j)))CYCLE ! Skip "uncopied" periodic edges
         ind=ABS(mesh_local_findedge(mesh,pt_e))
-        IF(ind==0)THEN
-            CALL oft_abort('Unmatched periodic edge','native_set_periodic',__FILE__)
-        END IF
-        mesh%periodic%le(j)=ind
+        mesh%periodic%le(j)=ind ! Unmatched edges (0) are reported after the parallel region
     END IF
 END DO
 !---Flag periodic faces
@@ -984,18 +981,23 @@ DO i=1,mesh%nbf
     pt_f=mesh%periodic%lp(mesh%lf(:,j))
     IF(ALL(pt_f>0))THEN
         ind=ABS(mesh_local_findface(mesh,pt_f))
-        IF(ind==0)THEN
-            CALL oft_abort('Unmatched periodic face','native_set_periodic',__FILE__)
-        END IF
-        mesh%periodic%lf(j)=ind
-        mesh%bfs(i)=-2
-        !---Revolved periodicity is only supported about the x-axis
-        CALL check_revolved_face(j)
-        CALL check_revolved_face(ind)
+        mesh%periodic%lf(j)=ind ! Unmatched faces (0) are reported after the parallel region
+        IF(ind>0)mesh%bfs(i)=-2
     END IF
 END DO
 deallocate(pt_f)
 !$omp end parallel
+!---Errors are checked outside the parallel region, so that at most one thread aborts
+IF(ANY(mesh%periodic%le==0))CALL oft_abort('Unmatched periodic edge','native_set_periodic',__FILE__)
+IF(ANY(mesh%periodic%lf==0))CALL oft_abort('Unmatched periodic face','native_set_periodic',__FILE__)
+!---Revolved periodicity is only supported about the x-axis
+DO i=1,mesh%nbf
+    j = mesh%lbf(i)
+    IF(mesh%periodic%lf(j)>0)THEN
+        CALL check_revolved_face(j)
+        CALL check_revolved_face(mesh%periodic%lf(j))
+    END IF
+END DO
 !---Remove "uncopied" periodic points
 DO i=1,mesh%nbp
     j=mesh%lbp(i)
@@ -1034,12 +1036,20 @@ CONTAINS
 SUBROUTINE periodic_face_normal(face,norm)
 INTEGER(i4), INTENT(in) :: face !< Boundary face index
 REAL(r8), INTENT(out) :: norm(3) !< Outward unit normal
-INTEGER(i4) :: cface
-REAL(r8) :: fcoords(mesh%cell_nf)
+INTEGER(i4) :: cface,k
+REAL(r8) :: fcoords(mesh%cell_nf),ftmp(mesh%cell_nf)
 DO cface=1,mesh%cell_nf
     IF(mesh%lcf(cface,mesh%lfc(1,face))==face)EXIT
 END DO
-fcoords=1.d0/3.d0; fcoords(cface)=0.d0
+!---Evaluate at the face center (average of its corners in logical coordinates), where the
+!---logical-coordinate gradient is normal to the face for any cell type
+fcoords=0.d0
+DO k=1,mesh%face_np
+    ftmp=0.d0
+    CALL mesh%vlog(mesh%cell_fc(k,cface),ftmp)
+    fcoords=fcoords+ftmp
+END DO
+fcoords=fcoords/REAL(mesh%face_np,r8)
 CALL mesh%snormal(mesh%lfc(1,face),cface,fcoords,norm)
 END SUBROUTINE periodic_face_normal
 !> Abort if a periodic face is not normal to z and its plane does not contain the x-axis

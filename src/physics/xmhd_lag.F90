@@ -315,7 +315,7 @@ CHARACTER(LEN=1) :: nbc = 'd' !< Density BC ('d','n')
 CHARACTER(LEN=1) :: tbc = 'd' !< Temperature BC ('d','n')
 CHARACTER(LEN=3) :: visc_type = 'kin' !< Viscosity type ('kin','iso','ani')
 INTEGER(i4) :: visc_itype = 1 !< Viscosity type flag (1->kin,2->iso,3->ani)
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_reg !< Solid region flag for each mesh region (valid on all MG levels)
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: reg_solid !< Solid region flag for each mesh region (valid on all MG levels)
 !---Physical parameters
 REAL(r8) :: jac_dt = 1.E-3_r8 !< Time step
 REAL(r8) :: k_db = 1._r8 !< Divergence cleaning term
@@ -1600,7 +1600,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Handle solid region
     !------------------------------------------------------------------------------
-    IF(solid_reg(mesh%reg(i)))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       eta_curr=eta_reg(mesh%reg(i))
       c1 = eta_curr*jac_dt*det
       do li=1,3
@@ -2490,7 +2490,7 @@ DO level=levelin,xmhd_minlev,-1
   !
   ALLOCATE(j_lag(oft_lagrange%nce))
   DO i=1,mesh%nc
-    IF(solid_reg(mesh%reg(i)))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       CALL oft_lagrange%ncdofs(i,j_lag)
       node_flag(j_lag)=1.d0
     END IF
@@ -2524,10 +2524,10 @@ DEBUG_STACK_PUSH
 ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
-  ALLOCATE(eta_reg(mesh%nreg),solid_reg(mesh%nreg))
+  ALLOCATE(eta_reg(mesh%nreg),reg_solid(mesh%nreg))
 END IF
 eta_reg=-1.d0
-solid_reg=.FALSE.
+reg_solid=.FALSE.
 IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
@@ -2582,9 +2582,9 @@ IF(xmhd_root_node%associated())THEN
 END IF
 !
 xmhd_rw=.FALSE.
-solid_reg=(reg_types==2)
+reg_solid=(reg_types==2)
 DO i=1,mesh%nc
-  IF(solid_reg(mesh%reg(i)))THEN
+  IF(reg_solid(mesh%reg(i)))THEN
     xmhd_rw=.TRUE.
     EXIT
   END IF
@@ -2890,7 +2890,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Compute F (u) for solid region
     !------------------------------------------------------------------------------
-    IF(solid_reg(mesh%reg(i)))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       IF(xmhd_adv_b)THEN
         !---Eta J
         eta_curr=eta_reg(mesh%reg(i))
@@ -3194,7 +3194,7 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
   !$omp critical(xmhderr_red)
   !---Lagrange rows (B,V,n,T)
-  IF(solid_reg(mesh%reg(i)))THEN
+  IF(reg_solid(mesh%reg(i)))THEN
     DO jr=1,oft_lagrange%nce
       bout(:,j_lag(jr)) = bout(:,j_lag(jr)) + b_loc(jr,:)
     END DO
@@ -3463,7 +3463,7 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
 ! Compute mass matrix
 !------------------------------------------------------------------------------
-    IF(solid_reg(mesh%reg(i)))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       do jr=1,oft_lagrange%nce
         b_loc(:,jr) = b_loc(:,jr) + lag_rop(jr)*u0%B*det
       end do
