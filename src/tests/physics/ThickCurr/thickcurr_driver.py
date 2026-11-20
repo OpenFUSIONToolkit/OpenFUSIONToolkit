@@ -97,6 +97,14 @@ def main(config):
             sensor_hist = tc_model.load_history('floops.hist')
             results['hist_signals1'] = [float(sensor_hist[name][-1]) for name in sensor_obj['names']]
             results['hist_t1'] = float(sensor_hist['time'][-1])
+    #---Failed eigenvalue solve (no converged modes) followed by a successful solve with the same model
+    elif config['case'] == 'eigs_fail':
+        try:
+            tc_model.get_eigs(config.get('nev', 5), max_its=1, tol=1.E-30)
+            results['error'] = None
+        except Exception as e:
+            results['error'] = str(e)
+        results['tau'] = tc_model.get_eigs(config.get('nev', 5)).tolist()
     #---Create, destroy, and recreate models in the same process
     elif config['case'] == 'recreate':
         # First model: direct solver from XML, eigenmode plots, time advance, and plotting

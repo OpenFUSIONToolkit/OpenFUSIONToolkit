@@ -394,18 +394,21 @@ END SUBROUTINE thickcurr_f_get_energy
 !---------------------------------------------------------------------------------
 !> Compute slowest decaying eigenmodes
 !---------------------------------------------------------------------------------
-SUBROUTINE thickcurr_f_eigs(tc_ptr,nev,tau_ptr,shift,save_plot,max_its,nconv,error_str) BIND(C,NAME="thickcurr_f_eigs")
+SUBROUTINE thickcurr_f_eigs(tc_ptr,nev,tau_ptr,shift,save_plot,max_its,tol,nconv,error_str) BIND(C,NAME="thickcurr_f_eigs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tc_ptr !< Pointer to ThickCurr object
 INTEGER(c_int), VALUE, INTENT(in) :: nev !< Number of eigenvalues to compute
 TYPE(c_ptr), VALUE, INTENT(in) :: tau_ptr !< Decay times [nev] (output)
 REAL(c_double), VALUE, INTENT(in) :: shift !< Shift for eigenvalue solve (<=0 to use time step)
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_plot !< Save eigenmodes for plotting?
 INTEGER(c_int), VALUE, INTENT(in) :: max_its !< Maximum number of eigensolver iterations (<=0 for default)
+REAL(c_double), VALUE, INTENT(in) :: tol !< Eigensolver tolerance (<=0 for default)
 INTEGER(c_int), INTENT(out) :: nconv !< Number of converged eigenvalues
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(r8), POINTER, DIMENSION(:) :: tau
-INTEGER(i4) :: its
+INTEGER(i4) :: its,ierr
+REAL(r8) :: tol_l
 LOGICAL :: plot_flag
+CHARACTER(LEN=OFT_ERROR_SLEN) :: err_msg
 TYPE(thickcurr_py), POINTER :: self
 IF(.NOT.thickcurr_ccast(tc_ptr,self,error_str))RETURN
 #ifndef HAVE_ARPACK
@@ -417,10 +420,16 @@ plot_flag=save_plot
 nconv=0
 its=1000
 IF(max_its>0)its=max_its
+tol_l=1.d-8
+IF(tol>0.d0)tol_l=tol
 IF(shift>0.d0)THEN
-  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,shift=shift,nconv=nconv,max_its=its)
+  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,tol=tol_l,shift=shift,nconv=nconv,max_its=its,ierr=ierr)
 ELSE
-  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,nconv=nconv,max_its=its)
+  CALL thickcurr_eigs(nev,tau,save_plot=plot_flag,tol=tol_l,nconv=nconv,max_its=its,ierr=ierr)
+END IF
+IF(ierr<0)THEN
+  WRITE(err_msg,'(A,I4,A)')'Eigenvalue solve failed (ARPACK error code ',ierr,'), eg. no eigenvalues converged'
+  CALL copy_string(TRIM(err_msg),error_str)
 END IF
 END SUBROUTINE thickcurr_f_eigs
 !---------------------------------------------------------------------------------

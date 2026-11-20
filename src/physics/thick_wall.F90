@@ -1399,8 +1399,10 @@ END SUBROUTINE eig_amat_apply
 !!
 !! If only some modes converge a warning is printed, only the converged modes are
 !! saved, and the decay times of the remaining modes are set to zero (see `nconv`).
+!! If the solve fails (eg. no modes converge) the run is aborted, unless `ierr` is
+!! present, in which case the ARPACK error code is returned in `ierr`.
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift,nconv,max_its)
+SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol,shift,nconv,max_its,ierr)
 INTEGER(i4), INTENT(in) :: nev !< Number of eigenvalues to compute
 REAL(r8), INTENT(out) :: tau(nev) !< Decay times for each mode (largest first) [s]
 TYPE(oft_vector_ptr), OPTIONAL, INTENT(inout) :: vecs(nev) !< Eigenvectors (optional, created if not associated)
@@ -1409,6 +1411,7 @@ REAL(r8), OPTIONAL, INTENT(in) :: tol !< Eigensolver tolerance (optional)
 REAL(r8), OPTIONAL, INTENT(in) :: shift !< Shift [s] (optional, default: \f$ \theta \Delta t \f$)
 INTEGER(i4), OPTIONAL, INTENT(out) :: nconv !< Number of converged modes (optional)
 INTEGER(i4), OPTIONAL, INTENT(in) :: max_its !< Maximum number of eigensolver iterations (optional, default: 1000)
+INTEGER(i4), OPTIONAL, INTENT(out) :: ierr !< Error flag, ARPACK error code (<0) if the solve failed (optional, abort if not present)
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i,nconv_l
 CHARACTER(LEN=OFT_SLEN) :: conv_msg
@@ -1462,7 +1465,24 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A,ES11.3)')'Shift      = ',dt_eff
 END IF
 CALL arsolver%apply(u,alam)
-IF(arsolver%info<0)CALL oft_abort("Eigenvalue solve failed","thickcurr_eigs",__FILE__)
+IF(PRESENT(ierr))ierr=0
+IF(arsolver%info<0)THEN
+  IF(.NOT.PRESENT(ierr))CALL oft_abort("Eigenvalue solve failed","thickcurr_eigs",__FILE__)
+  !---Return error to caller (eg. no eigenvalues converged)
+  ierr=arsolver%info
+  tau=0.d0
+  IF(PRESENT(nconv))nconv=0
+  IF(oft_env%head_proc)WRITE(*,'(A)')'============================'
+  CALL u%delete
+  DEALLOCATE(u)
+  CALL arsolver%delete
+  IF(reshift)THEN
+    CALL thickcurr_build_lhs(tc_theta*tc_dt)
+    CALL tc_solver%update(.FALSE.)
+  END IF
+  DEBUG_STACK_POP
+  RETURN
+END IF
 !---Check for partial convergence (non-converged modes are zeroed and placed last by ARPACK)
 nconv_l=nev
 IF((arsolver%info>0).AND.(arsolver%info<nev))THEN
@@ -1544,6 +1564,7 @@ DEBUG_STACK_POP
 #else
 tau=0.d0
 IF(PRESENT(nconv))nconv=0
+IF(PRESENT(ierr))ierr=-1
 CALL oft_abort("Subroutine requires ARPACK","thickcurr_eigs",__FILE__)
 #endif
 END SUBROUTINE thickcurr_eigs

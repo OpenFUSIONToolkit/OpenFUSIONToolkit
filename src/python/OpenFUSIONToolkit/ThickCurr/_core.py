@@ -331,7 +331,7 @@ class ThickCurr():
         self._check_error(error_string)
         return energy.value
 
-    def get_eigs(self,neigs,shift=None,save_plot=False,max_its=None):
+    def get_eigs(self,neigs,shift=None,save_plot=False,max_its=None,tol=None):
         r'''! Compute the slowest decaying eigenmodes (L/R time constants) of the model
 
         The eigenvalue problem is solved using a shift, which by default is the (effective) time step
@@ -342,14 +342,19 @@ class ThickCurr():
         @param shift Shift for eigenvalue solve [s] (default: time step)
         @param save_plot Save eigenmodes to plot files (`eigs` subdirectory, mode index as "time")
         @param max_its Maximum number of eigensolver iterations (default: 1000)
+        @param tol Eigensolver convergence tolerance (default: 1E-8)
         @result Decay times (slowest first) [s] `(nconv)`, where `nconv <= neigs` is the number of converged modes
+
+        @note If only some modes converge a `RuntimeWarning` is issued and only the converged modes are returned. If the
+        solve fails (eg. no modes converge within `max_its`) an exception is raised and the model remains usable.
         '''
         self._check_setup()
         tau = numpy.zeros((neigs,), dtype=numpy.float64)
         nconv = c_int()
         error_string = self._oft_env.get_c_errorbuff()
         thickcurr_f_eigs(self._tc_ptr,c_int(neigs),tau,c_double(-1.0 if shift is None else shift),c_bool(save_plot),
-                         c_int(-1 if max_its is None else max_its),ctypes.byref(nconv),error_string)
+                         c_int(-1 if max_its is None else max_its),c_double(-1.0 if tol is None else tol),
+                         ctypes.byref(nconv),error_string)
         self._check_error(error_string)
         if nconv.value < neigs:
             warnings.warn('Only {0} of {1} eigenvalues converged, returning converged values only'.format(nconv.value,neigs),

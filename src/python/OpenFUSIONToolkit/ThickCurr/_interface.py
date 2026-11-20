@@ -41,9 +41,9 @@ thickcurr_f_set_field = ctypes_subroutine(oftpy_lib.thickcurr_f_set_field,
 thickcurr_f_get_energy = ctypes_subroutine(oftpy_lib.thickcurr_f_get_energy,
     [c_void_p, c_double_ptr, c_char_p])
 
-# thickcurr_f_eigs(tc_ptr,nev,tau,shift,save_plot,max_its,nconv,error_str)
+# thickcurr_f_eigs(tc_ptr,nev,tau,shift,save_plot,max_its,tol,nconv,error_str)
 thickcurr_f_eigs = ctypes_subroutine(oftpy_lib.thickcurr_f_eigs,
-    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_bool, c_int, c_int_ptr, c_char_p])
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_bool, c_int, c_double, c_int_ptr, c_char_p])
 
 # thickcurr_f_run(tc_ptr,sensor_ptr,t_final,error_str)
 thickcurr_f_run = ctypes_subroutine(oftpy_lib.thickcurr_f_run,

@@ -176,6 +176,22 @@ def test_eigs_partial():
         assert min(abs(val-mode)/mode for mode in modes) < 2.E-2, "tau_{0} = {1} is not a valid mode".format(i+1, val)
 
 
+@pytest.mark.coverage
+def test_eigs_fail():
+    '''Eigenvalue solve where no modes converge (max_its=1 with a tolerance below machine precision), checking that a recoverable
+    error is raised and that a subsequent eigenvalue solve with the same model succeeds.'''
+    write_box_mesh(MESH_FILE, (4, 4, 4))
+    config = {'case': 'eigs_fail', 'mesh_file': MESH_FILE, 'eta': [ETA], 'order': 2, 'dt': 5.E-2, 'nev': 5}
+    results = run_driver(config)
+    assert results is not None
+    assert results['error'] is not None, "No error raised for failed eigenvalue solve"
+    assert 'Eigenvalue solve failed' in results['error']
+    tau_exp = [box_tau(ETA, (1, 1, 0))]*3 + [box_tau(ETA, (1, 1, 1))]*2
+    assert len(results['tau']) == 5
+    for i, (val, val_exp) in enumerate(zip(results['tau'], tau_exp)):
+        assert check_value("tau_{0}".format(i+1), val, val_exp, 2.E-2)
+
+
 @pytest.mark.mpi
 def test_eigs_mpi():
     '''Slowest decay times of a conducting cube on two MPI processes, driven from Python.'''
