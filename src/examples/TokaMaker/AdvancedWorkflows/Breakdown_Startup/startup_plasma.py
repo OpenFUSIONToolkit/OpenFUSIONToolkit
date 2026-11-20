@@ -12,6 +12,8 @@ DYON: H.-T. Kim, PhD thesis, Imperial College London (2013); Kim et al., Nucl. F
     WallModel               recycling and sputtering yields (thesis ch. 5)
     PlasmaModel             0D energy and particle balance of electrons, ions and every charge state,
                             with neutral screening, transport and the plasma-current circuit
+    PlasmaCircuit           the vessel (segment) currents and I_p driven by given coil currents,
+                            integrated with the plasma model (K22 eq. 5-7)
 
 Atomic data: OPEN-ADAS adf11 files (H.P. Summers, The ADAS User Manual), downloaded on first use
 into ADAS_DIR ($OFT_ADAS_DIR, default ~/.cache/oft_breakdown_startup/adas). They are not shipped:
@@ -184,6 +186,70 @@ class WallModel:
         return self.yields.get((incident, released), 0.0)
 
 
+# ============================================================================ circuit (K22 eq. 5-7)
+class PlasmaCircuit:
+    """Passive (segment) currents I_s and the plasma current I_p driven by given coil currents
+    (control-room mode, K22 eq. 5):
+
+        [M_ss  M_sp] d [I_s]   [R_s   0 ] [I_s]     [M_sc] dI_c     [    0    ]
+        [M_ps  L_p ] - [I_p] + [ 0   R_p] [I_p] = - [M_pc] ----  -  [dL_p/dt I_p]
+                     dt                                     dt
+
+    Coil currents I_coil [nt, nc] (per turn, linear between the times t_coil [s]); L_units [nu, nu] and
+    R_seg [ns] the machine's unit inductances (per turn) and segment resistances; M_p [nu] the mutual
+    inductance of 1 A of plasma current with 1 A per turn in each unit. The plasma's position is fixed
+    here (K22 prescribes it; its d M_p/dt terms are not included). L_p, R_p come from the plasma model.
+
+    The loop voltage induced at the plasma by the coils and the structure (K22 eq. 7, fixed position)
+    is V_ext = -(M_pc dI_c/dt + M_ps dI_s/dt).
+    """
+
+    def __init__(self, L_units, R_seg, nc, M_p, t_coil, I_coil):
+        self.nc, self.ns = nc, len(R_seg)
+        self.M_ss, self.M_sc = L_units[nc:, nc:], L_units[nc:, :nc]
+        self.M_ps, self.M_pc = np.asarray(M_p)[nc:], np.asarray(M_p)[:nc]
+        self.R_s = np.asarray(R_seg, float)
+        self.t_coil, self.I_coil = np.asarray(t_coil, float), np.asarray(I_coil, float)
+        self.dI_coil = np.diff(self.I_coil, axis=0) / np.diff(self.t_coil)[:, None]
+        Kss = np.linalg.inv(self.M_ss)
+        self.K_ss, self.K_sp, self.M_ps_K = Kss, Kss @ self.M_ps, self.M_ps @ Kss
+        self.schur0 = float(self.M_ps @ self.K_sp)             # M_ps M_ss^-1 M_sp
+
+    @classmethod
+    def from_machine(cls, machine, t_coil, I_coil, R=None, Z=0.0, channel=None):
+        """From a startup_model.MachineModel: the plasma as a filament at (R, Z) (K22 eq. 9:
+        M_pu = 2 pi psi_u(R, Z)), or as a ChannelPlasma (its disk-averaged M_u)."""
+        if channel is not None:
+            M_p = channel.M_u
+        else:
+            from startup_model import eval_fields
+            M_p = 2 * np.pi * eval_fields(machine.gs, machine.psi_u, np.array([[R, Z]]))['psi'][:, 0]
+        return cls(machine.L, machine.R[machine.nc:], machine.nc, M_p, t_coil, I_coil)
+
+    def coil_rate(self, t):
+        """dI_c/dt [nc] on the interval holding t (constant between the given times)."""
+        k = int(np.clip(np.searchsorted(self.t_coil, t, side='right') - 1, 0, len(self.dI_coil) - 1))
+        return self.dI_coil[k]
+
+    def derivs(self, t, I_s, I_p, Rp, Lp, dLp):
+        """(dI_s/dt, dI_p/dt, V_ext) at time t."""
+        dIc = self.coil_rate(t)
+        r_s = -self.M_sc @ dIc - self.R_s * I_s
+        r_p = -self.M_pc @ dIc - Rp * I_p - dLp * I_p
+        dIp = (r_p - self.M_ps_K @ r_s) / (Lp - self.schur0)
+        dIs = self.K_ss @ r_s - self.K_sp * dIp
+        V_ext = -(self.M_pc @ dIc + self.M_ps @ dIs)
+        return dIs, dIp, V_ext
+
+    def vacuum(self, t0, t1, I_s0=None, rtol=1e-8):
+        """Segment currents [ns] at t1 with no plasma, starting from I_s0 (default 0) at t0."""
+        def f(t, I_s):
+            return self.K_ss @ (-self.M_sc @ self.coil_rate(t) - self.R_s * I_s)
+        x0 = np.zeros(self.ns) if I_s0 is None else I_s0
+        sol = solve_ivp(f, (t0, t1), x0, method='BDF', rtol=rtol, atol=1e-6, max_step=np.min(np.diff(self.t_coil)) * 50)
+        return sol.y[:, -1]
+
+
 # ============================================================================ 0D plasma model
 def plasma_inductance(R, a, kappa, li, form='circular'):
     """Plasma self-inductance [H] of an ellipse (R, a, kappa): 'circular' mu0 R (ln(8R/a) - 2 + li/2)
@@ -224,14 +290,16 @@ class PlasmaModel:
         fixed_T          (Te, Ti) to hold the temperatures fixed (tests), else None
         paux             callable t -> absorbed auxiliary power [W] (thesis eq. 7.4), or None
         fuelling         callable t -> external fuel atoms per second (already times the efficiency), or None
+        circuit          PlasmaCircuit: I_p and the segment currents I_s (appended to y) driven by the
+                         coil currents (M3, K22 eq. 5); None: I_p driven by a prescribed loop voltage
 
     The geometry is a callable geometry(t, Ip) -> dict with R, a, kappa, Vp [m, m, -, m^3], Bphi [T at R],
     and either Lf [m] (connection length: tau_par = Lf/Cs, thesis eq. 3.49) or tau_par [s]; the loop
-    voltage is a callable vloop(t) [V] at the plasma (M2; M3 replaces it by the coil and vessel circuits).
+    voltage is a callable vloop(t) [V] at the plasma when there is no circuit.
     """
 
     def __init__(self, fuel='d', impurities=('c', 'o'), wall=None, V_V=35.0, T_n=0.026, lnL=10.0, li=0.5,
-                 inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None):
+                 inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None, circuit=None):
         self.species = [AtomicSpecies(fuel)] + [AtomicSpecies(x) for x in impurities]
         self.names = [s.name for s in self.species]
         self.wall = wall or WallModel()
@@ -243,14 +311,17 @@ class PlasmaModel:
             self.slices.append(slice(k, k + s.Z + 1))
             k += s.Z + 1
         self.iEe, self.iEi, self.iIp = k, k + 1, k + 2
-        self.n_state = k + 3
+        self.circuit, self.iIs = circuit, k + 3
+        self.n_state = k + 3 + (0 if circuit is None else circuit.ns)
+        self.vloop = None
 
     # ------------------------------------------------------------------ initial state
-    def initial_state(self, p0, geo, Te0=1.0, Ti0=None, gamma0=None, impurity_fraction=None, Ip0=0.0):
+    def initial_state(self, p0, geo, Te0=1.0, Ti0=None, gamma0=None, impurity_fraction=None, Ip0=0.0, I_s0=None):
         """y0 for a fill of D2 (or H2) at pressure p0 [Pa] and temperature T_n, fully dissociated:
         n_fill = 2 p0 / T_n [atoms/m^3] (K20 eq. 1; K22 eq. 18). A fraction gamma0 (default 2e-3 Te0^1.5,
         K20 sec. 2.1) of the atoms in the plasma volume is ionized, the rest of the fill stays neutral.
-        impurity_fraction {name: f}: f n_fill V_V neutral impurity atoms (eg. {'o': 0.001})."""
+        impurity_fraction {name: f}: f n_fill V_V neutral impurity atoms (eg. {'o': 0.001}).
+        I_s0: segment currents at the start (with a circuit; eg. PlasmaCircuit.vacuum), default 0."""
         Ti0 = self.T_n if Ti0 is None else Ti0
         gamma0 = 2e-3 * Te0 ** 1.5 if gamma0 is None else gamma0
         n_fill = 2 * p0 / (self.T_n * EV)
@@ -263,6 +334,8 @@ class PlasmaModel:
         y[self.iEe] = 1.5 * EV * Te0 * N1
         y[self.iEi] = 1.5 * EV * Ti0 * N1
         y[self.iIp] = Ip0
+        if self.circuit is not None and I_s0 is not None:
+            y[self.iIs:] = I_s0
         self.n_fill = n_fill
         return y
 
@@ -357,12 +430,16 @@ class PlasmaModel:
         P_econ = 1.5 * ne * Te * EV / tau
         ni = Ni / Vp
         P_icon = 1.5 * ni * Ti * EV / tau
-        dy = np.concatenate(dN + [np.zeros(3)])
+        dy = np.concatenate(dN + [np.zeros(self.n_state - self.iEe)])
         if self.fixed_T is None:
             dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ)
             dy[self.iEi] = Vp * (P_equi - P_cx - P_icon)
-        V = self.vloop(t)
-        dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp
+        if self.circuit is None:
+            V = self.vloop(t)
+            dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp
+        else:
+            dIs, dy[self.iIp], V = self.circuit.derivs(t, y[self.iIs:], Ip, Rp, Lp, dLp)
+            dy[self.iIs:] = dIs
         return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
                 'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
                 'Rp': Rp, 'Lp': Lp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
@@ -372,14 +449,18 @@ class PlasmaModel:
         return self.terms(t, y)['dy']
 
     def run(self, geometry, vloop, y0, t_span, t_eval=None, rtol=1e-6, max_step=np.inf):
-        """Integrate from y0 over t_span [s] (BDF, the counterpart of DYON's ode15s). Returns a dict of
-        arrays over the output times: every scalar of terms(), plus 'y' [n_t, n_state] and 'status'."""
+        """Integrate from y0 over t_span [s] (BDF, the counterpart of DYON's ode15s); vloop [V] callable,
+        or None with a circuit. Returns a dict of arrays over the output times: every scalar of terms()
+        ('Vloop' is the voltage induced at the plasma by coils and structure with a circuit), plus
+        'y' [n_t, n_state] and 'status'."""
         self.geometry, self.vloop = geometry, vloop
         scale = np.abs(y0).copy()
         for sl in self.slices:
             scale[sl] = max(np.abs(y0[sl]).sum(), 1.0)
         scale[self.iEe] = scale[self.iEi] = max(abs(y0[self.iEe]), 1e-12)
         scale[self.iIp] = 1.0
+        if self.circuit is not None:
+            scale[self.iIs:] = 1.0
         sol = solve_ivp(self.rhs, t_span, y0, method='BDF', t_eval=t_eval, rtol=rtol, atol=1e-9 * scale,
                         max_step=max_step)
         out = {'t': sol.t, 'y': sol.y.T, 'status': sol.status, 'message': sol.message}
