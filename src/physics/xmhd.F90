@@ -278,7 +278,7 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: xmhd_mat_mask !< Matrix block mask
 LOGICAL :: xmhd_bnorm_force = .TRUE. !< Force B-norm to zero in cleaning
 CHARACTER(LEN=2) :: bbc = 'bc' !< Magnetic field BC ('bc','ic')
 CHARACTER(LEN=4) :: vbc = 'all' !< Velocity BC ('all','norm','tang')
-LOGICAL :: xmhd_vbcdir = .FALSE. !< Velocity projected BC flag (set from per-node BC types in xmhd_set_bc)
+LOGICAL :: xmhd_vbcdir = .FALSE. !< Velocity projected BC flag (OR of per-node BC types over all levels, see xmhd_set_bc)
 CHARACTER(LEN=1) :: nbc = 'd' !< Density BC ('d','n')
 CHARACTER(LEN=1) :: tbc = 'd' !< Temperature BC ('d','n')
 CHARACTER(LEN=3) :: visc_type = 'kin' !< Viscosity type ('kin','iso')
@@ -2752,6 +2752,7 @@ do level=levelin,xmhd_minlev,-1
 end do
 !---Setup solid node flags
 NULLIFY(node_flag,vectmp)
+xmhd_vbcdir=.FALSE. ! Accumulated over all levels in xmhd_set_bc
 DO level=levelin,xmhd_minlev,-1
   call xmhd_set_level(level)
   !
@@ -3053,7 +3054,7 @@ END IF
 DO i=1,oft_lagrange%ne
   IF((oft_lagrange%per_vmap(i)==3).AND.(oft_xmhd_ops%v_bc_type(i)==0))oft_xmhd_ops%v_bc_type(i)=-1
 END DO
-xmhd_vbcdir=ANY(oft_xmhd_ops%v_bc_type>1)
+xmhd_vbcdir=xmhd_vbcdir.OR.ANY(oft_xmhd_ops%v_bc_type>1) ! Accumulate over levels (reset in xmhd_alloc_ops)
 !------------------------------------------------------------------------------
 ! Apply boundary condition to n
 !------------------------------------------------------------------------------
@@ -4345,7 +4346,7 @@ class(xmhd_interp), intent(inout) :: self !< Interpolation object
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-real(r8), intent(out) :: val(:) !< Reconstructed field at f [40] (Te, N2 and J2 entries only written when SIZE(val) allows)
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [26-40] (Te, N2 and J2 entries only written when SIZE(val) allows)
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc,k
 real(r8) :: b0(3),j0(3),cgop(3,6),Te,dTe(3),tmp,vtmp(3)
@@ -4499,25 +4500,19 @@ val(15:17)=dlf0(:,4) ! dN / dx_j
 val(18:20)=dlf0(:,5) ! dTi /dx_j
 val(21:23)=b0
 val(24:26)=j0
-IF(SIZE(val)>=40)THEN
-  val(27:40) = 0.d0
-  IF(xmhd_two_temp)THEN
-    val(27) = Te
-    val(28:30) = dTe
-  END IF
-  IF(n2_ind>0)THEN
-    val(31) = N2
-    val(32:34) = dN2
-  END IF
-  IF(j2_ind>0)THEN
-    val(35:37) = J2
-    val(38:40) = J2c
-  END IF
-ELSE IF(SIZE(val)>=30)THEN
-  IF(xmhd_two_temp)THEN
-    val(27) = Te
-    val(28:30) = dTe
-  END IF
+!---Optional fields at fixed offsets, written only if they fit in val (unused entries are zeroed)
+IF(SIZE(val)>26)val(27:)=0.d0
+IF(xmhd_two_temp.AND.(SIZE(val)>=30))THEN
+  val(27) = Te
+  val(28:30) = dTe
+END IF
+IF((n2_ind>0).AND.(SIZE(val)>=34))THEN
+  val(31) = N2
+  val(32:34) = dN2
+END IF
+IF((j2_ind>0).AND.(SIZE(val)>=40))THEN
+  val(35:37) = J2
+  val(38:40) = J2c
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_interp_apply
@@ -4574,7 +4569,11 @@ CALL full_interp%setup(mesh)
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_hcurl%order
-nfields=40 ! Average all interpolated fields (see xmhd_interp_apply) for consistent packed layout
+!---Size cell-centered storage to the last enabled field in the packed layout (see xmhd_interp_apply)
+nfields=26
+IF(xmhd_two_temp)nfields=30
+IF(n2_ind>0)nfields=34
+IF(j2_ind>0)nfields=40
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
 !------------------------------------------------------------------------------
