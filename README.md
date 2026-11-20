@@ -44,7 +44,7 @@ Pre-built container images capable of running Open FUSION Toolkit via python scr
 ### Installation from source
 The framework and its components can also be built from source using the instructions provided on [the wiki](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki).
 
-**NOTE:** OFT calls BLAS from inside OpenMP parallel regions. When building against a system OpenBLAS, use its OpenMP variant (eg. `libopenblas-openmp-dev` on Debian/Ubuntu) or set `OPENBLAS_NUM_THREADS=1` at run time; with a pthreads-threaded OpenBLAS, threaded runs (eg. the MUG Jacobian build) do not scale with the number of OpenMP threads. The OpenBLAS built by `build_libs.py` is already an OpenMP build.
+**NOTE:** OFT calls BLAS from inside OpenMP parallel regions. When building against a system OpenBLAS, use its OpenMP variant (eg. `libopenblas-openmp-dev` on Debian/Ubuntu) or set `OPENBLAS_NUM_THREADS=1` at run time; with a pthreads-threaded OpenBLAS, threaded runs (eg. the MUG Jacobian build) do not scale with the number of OpenMP threads. The OpenBLAS built by `build_libs.py` is single-threaded by default (`USE_THREAD=0`; `--oblas_threads` builds the OpenMP variant, `USE_OPENMP=1`), and both run single-threaded inside OpenMP regions.
 
 **NOTE:** To use the python interfaces for a binary or source install add the `python` directory for your installation to your `PYTHONPATH` environment variable.
 
