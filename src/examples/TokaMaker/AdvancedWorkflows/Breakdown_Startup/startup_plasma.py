@@ -337,6 +337,19 @@ class PlasmaModel:
         fuelling         callable t -> external fuel atoms per second (already times the efficiency), or None
         circuit          PlasmaCircuit: I_p and the segment currents I_s (appended to y) driven by the
                          coil currents (M3, K22 eq. 5); None: I_p driven by a prescribed loop voltage
+        T_cx             energy [eV] of the fuel atoms in the plasma (charge exchange, penetration); None: T_n
+                         (DYON). With a D2 fill the atoms come from electron-impact dissociation and carry
+                         Franck-Condon energies (~2-3 eV per atom); option, a departure (prefill study)
+        E_dis            electron energy [eV] paid per fuel atom ionized for its dissociation from D2 (binding
+                         2.26 eV + the Franck-Condon energy); 0: DYON (fully dissociated fill)
+        neutrals         'uniform' (DYON: one well-mixed vessel reservoir, n_0 = N_0 / (gamma V_V), screening by
+                         the penetration depth) or 'kinetic' (option, prefill study): neutrals enter the plasma at
+                         the one-way thermal flux n_out v/4 across its surface A_p and are ionized inside, so the
+                         density inside is n_in = n_out k / (k + ne S_0), k = v A_p / (4 V_p) (quasi-steady: the
+                         neutral transit time a/v ~ 0.4 ms); N_0 = n_out (V_V - V_p) + n_in V_p; the fuel enters as
+                         D2 (H2) molecules at T_n (v of the molecule, 2 atoms each), impurities as atoms
+        dis_per_cx       also pay E_dis per charge exchange of a fuel atom (each CX replaces the atom by a newly
+                         dissociated one: strict energy conservation, the pessimistic bound); False: per ionization
         shrink           when V_p falls: 'compress' (K22 eq. 8: the ions and their energy stay, so the
                          densities rise) or 'lose' (O38, a departure: the ions of the volume leaving the
                          plasma go to the wall with their thermal energy at |dV_p/dt| / V_p, recycled
@@ -349,7 +362,11 @@ class PlasmaModel:
 
     def __init__(self, fuel='d', impurities=('c', 'o'), wall=None, V_V=35.0, T_n=0.026, lnL=10.0, li=0.5,
                  inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None, circuit=None,
-                 shrink='compress'):
+                 shrink='compress', T_cx=None, E_dis=0.0, dis_per_cx=False,
+                 neutrals='uniform'):
+        if neutrals not in ('uniform', 'kinetic'):
+            raise ValueError(f'unknown neutrals {neutrals!r}')
+        self.T_cx, self.E_dis, self.dis_per_cx, self.neutrals = (T_n if T_cx is None else T_cx), E_dis, dis_per_cx, neutrals
         if shrink not in ('compress', 'lose'):
             raise ValueError(f'unknown shrink {shrink!r}')
         self.shrink = shrink
@@ -413,7 +430,8 @@ class PlasmaModel:
         # neutral screening (thesis sec. 3.4.6): penetration depth lambda = v_n / (ne S_0)
         Vn, gam = [], []
         for s, rs in zip(self.species, r):
-            v_n = np.sqrt(8 * self.T_n * EV / (np.pi * s.mass_amu * AMU))       # mean thermal speed (O8)
+            Tv = self.T_cx if s is self.species[0] else self.T_n
+            v_n = np.sqrt(8 * Tv * EV / (np.pi * s.mass_amu * AMU))             # mean thermal speed (O8)
             lam = v_n / (ne * rs['S'][0])
             if self.screening and lam < a:
                 Vn.append(Vp * (1 - (1 - lam / a) ** 2))     # = 2 pi R pi kappa (a^2 - (a-lam)^2) for a torus
@@ -421,6 +439,15 @@ class PlasmaModel:
                 Vn.append(Vp)
             gam.append(1 - (Vp - Vn[-1]) / self.V_V)
         n0 = [n[0] / (g * self.V_V) for n, g in zip(N, gam)]
+        if self.neutrals == 'kinetic':                        # influx-limited neutrals inside the plasma
+            A_p = 4 * np.pi ** 2 * R * a * np.sqrt((1 + kappa ** 2) / 2)
+            Vo = max(self.V_V - Vp, 1e-3)
+            for i, (s, rs) in enumerate(zip(self.species, r)):
+                m_n = (2 if i == 0 else 1) * s.mass_amu * AMU
+                k_in = np.sqrt(8 * self.T_n * EV / (np.pi * m_n)) * A_p / (4 * Vp)
+                f_in = k_in / (k_in + ne * rs['S'][0])
+                n0[i] = N[i][0] / (Vo + Vp * f_in) * f_in   # n_in
+                Vn[i], gam[i] = Vp, 1.0
         nz = [n / Vp for n in N]                              # entry 0 unused for ions
         # transport (thesis eq. 3.49-3.54; K22 eq. 17)
         Cs = np.sqrt((Te + Ti) * EV / self.m_fuel)
@@ -440,7 +467,7 @@ class PlasmaModel:
         # sources and powers
         f = 0                                                 # fuel index
         dN = [np.zeros(len(n)) for n in N]
-        P_iz = P_rad = P_equi = P_cx = 0.0
+        P_iz = P_rad = P_equi = P_cx = P_fc = 0.0
         cx_sum = 0.0                                          # sum over impurity ions of cx n  [1/s] per fuel neutral
         for i, (s, rs) in enumerate(zip(self.species, r)):
             Z, W = s.Z, s.W
@@ -454,7 +481,9 @@ class PlasmaModel:
                 rec = Vp * al[z] * ne * nz[i][z + 1]              # recombinations per second, z+1 -> z
                 dN[i][z] += rec - ion
                 dN[i][z + 1] += ion - rec
-                P_iz += V_src * S[z] * W[z] * EV * ne * dens / Vp
+                P_iz += V_src * S[z] * (W[z] + (self.E_dis if (i == 0 and z == 0) else 0.0)) * EV * ne * dens / Vp
+                if i == 0 and z == 0:                             # new fuel ions bring the atoms' energy (0 in DYON)
+                    P_fc += 1.5 * (self.T_cx - self.T_n) * EV * ion / Vp
                 P_rad += V_src * plt[z] * ne * dens / Vp
                 P_rad += (prb[z] - al[z] * W[z] * EV) * ne * nz[i][z + 1]
             # equilibration (thesis eq. 3.33) and ion transport loss
@@ -462,7 +491,7 @@ class PlasmaModel:
             P_equi += EQUI_COEF * (Te - Ti) * ne * self.lnL / Te ** 1.5 * np.dot(zz ** 2, nz[i][1:]) / s.mass_amu
             dN[i][1:] -= N[i][1:] / tau
             if i == f:
-                P_cx += (Vn[f] / Vp) * 1.5 * (Ti - self.T_n) * EV * n0[f] * cx[0] * nz[f][1]
+                P_cx += (Vn[f] / Vp) * 1.5 * (Ti - self.T_cx) * EV * n0[f] * cx[0] * nz[f][1]
                 continue
             # charge exchange of impurity ions with fuel neutrals (in V_n of the fuel): z -> z-1, D0 -> D+
             cxe = Vn[f] * cx * n0[f] * nz[i][1:]                  # [Z] events per second from charge z
@@ -471,9 +500,11 @@ class PlasmaModel:
             cx_sum += cxe.sum()
             # ion energy: only 1+ -> 0 removes a hot ion (replaced by a cold D+); for z >= 2 the impurity
             # ion stays in the plasma (thesis eq. 3.38 sums the 1+ states only; O25)
-            P_cx += 1.5 * (Ti - self.T_n) * EV * cxe[0] / Vp
+            P_cx += 1.5 * (Ti - self.T_cx) * EV * cxe[0] / Vp
         dN[f][0] -= cx_sum
         dN[f][1] += cx_sum
+        if self.dis_per_cx:                                   # fuel-fuel and impurity CX events
+            P_iz += self.E_dis * EV * (Vn[f] * n0[f] * cx_rate[f][0] * nz[f][1] + cx_sum) / Vp
         # wall: fuel recycling (+ external fuelling) and impurity release by every ion species
         out = [N[i][1:].sum() / tau for i in range(len(self.species))]       # ions to the wall [1/s]
         shrink = max(-(g2['Vp'] - Vp) / h, 0.0) / Vp if self.shrink == 'lose' else 0.0     # [1/s] (O38)
@@ -494,7 +525,7 @@ class PlasmaModel:
         dy = np.concatenate(dN + [np.zeros(self.n_state - self.iEe)])
         if self.fixed_T is None:
             dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ) - shrink * y[self.iEe]
-            dy[self.iEi] = Vp * (P_equi - P_cx - P_icon) - shrink * y[self.iEi]
+            dy[self.iEi] = Vp * (P_equi + P_fc - P_cx - P_icon) - shrink * y[self.iEi]
         if self.circuit is None:
             V = self.vloop(t)
             dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp_eff
@@ -504,7 +535,7 @@ class PlasmaModel:
         return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
                 'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
                 'Rp': Rp, 'Lp': Lp, 'Lp_eff': Lp_eff, 'dLp_dt': dLp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
-                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_icon': P_icon, 'Vp': Vp,
+                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_fc': P_fc, 'P_icon': P_icon, 'Vp': Vp,
                 'shrink_rate': shrink}
 
     def rhs(self, t, y):
