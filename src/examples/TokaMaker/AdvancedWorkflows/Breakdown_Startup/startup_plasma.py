@@ -270,12 +270,17 @@ class PlasmaCircuit:
 # ============================================================================ 0D plasma model
 def plasma_inductance(R, a, kappa, li, form='circular'):
     """Plasma self-inductance [H] of an ellipse (R, a, kappa): 'circular' mu0 R (ln(8R/a) - 2 + li/2)
-    (thesis eq. 3.13); 'k22' K22 eq. 14 as printed, mu0 R (ln(8R/(a kappa^2)) + li/2 - 2); 'k22_st'
+    (thesis eq. 3.13); 'k22' K22 eq. 14 as printed, mu0 R (ln(8R/(a kappa^2)) + li/2 - 2) (negative for
+    the elongated early plasmas of DIII-D, kappa ~ 4 at r ~ 0.25 m: O32); 'sqrt_kappa' the textbook
+    elongated form mu0 R (ln(8R/(a sqrt(kappa))) + li/2 - 2) (a sqrt(kappa): the radius of the ellipse's
+    area); 'k22_st'
     K22 eq. 15-16 (low aspect ratio, after Hirshman & Neilson 1986)."""
     if form == 'circular':
         return MU0 * R * (np.log(8 * R / a) - 2 + li / 2)
     if form == 'k22':
         return MU0 * R * (np.log(8 * R / (a * kappa ** 2)) + li / 2 - 2)
+    if form == 'sqrt_kappa':
+        return MU0 * R * (np.log(8 * R / (a * np.sqrt(kappa))) + li / 2 - 2)
     if form == 'k22_st':
         e = a / R
         fA = (1 + 1.81 * np.sqrt(e) + 2.05 * e) * np.log(8 / e) - (2 + 9.25 * np.sqrt(e) - 1.21 * e)
@@ -621,7 +626,8 @@ class FieldLineMap:
         B = np.sqrt(BR ** 2 + BZ ** 2 + Bphi ** 2)
         return self._contours(psi, Ephi, B, BR, BZ, Bphi / B * Ephi)['through'](pts)
 
-    def analyze(self, psi, Ephi, p, n_bands=400, n_mid=50, Z_mid=0.0, region='midplane', tau_form='loss_fraction'):
+    def analyze(self, psi, Ephi, p, n_bands=400, n_mid=50, Z_mid=0.0, region='midplane', tau_form='loss_fraction',
+                plasma_exists=False):
         """Field-line analysis of (psi, E_phi) at prefill pressure p [Pa]. Returns a dict:
             tube [nZ, nR]   flux-tube label per cell (-1 outside); tubes: per tube 'open', 'L' [m]
                             (inf when closed), 'Epar' [V/m] (|<E_par>|), 'ET' [V/m] (K22 eq. 13),
@@ -630,7 +636,8 @@ class FieldLineMap:
                             'open', 'L', 'Epar', 'ET', 'bd'
             breakdown       any mid-plane line breaks down (region='midplane') / any tube (region='all')
             plasma [nZ, nR] the plasma region: tubes that broke down (those through the mid-plane points,
-                            or every tube with region='all') plus every closed tube; and its
+                            or every tube with region='all') plus every closed tube (when something broke
+                            down here, or plasma_exists: a plasma from an earlier breakdown); and its
                             Vp [m^3], A [m^2], R_vol, Z_vol (centre of mass of the cross-section),
                             r_vol (distance from it to the first wall), kappa = min(A/(pi r^2),
                             (Z_max - Z_min)/(2 r)) (K22 sec. 2.2), f_closed (volume fraction closed)
@@ -707,7 +714,7 @@ class FieldLineMap:
         else:
             take |= bd
             breakdown = bool(bd.any())
-        if breakdown:
+        if breakdown or plasma_exists:
             take |= ~is_open                                         # closed lines count once there is plasma
         plasma = np.isin(tube, np.where(take)[0])
         out = {'tube': tube, 'tubes': {'open': is_open, 'L': L, 'Epar': Ep, 'ET': ET, 'bd': bd, 'V': V, 'A': A},
@@ -829,11 +836,12 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
     log = log or (lambda *a: None)
 
-    def analyze(t, I_s, dI_s, Ip, dIp):
+    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False):
         I_u = np.concatenate([I_coil(t), I_s])
         dI_u = np.concatenate([circ.coil_rate(t), dI_s])
         psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, Rp, Zp)
-        o = fmap.analyze(psi, Ephi, p_fill, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form)
+        o = fmap.analyze(psi, Ephi, p_fill, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form,
+                         plasma_exists=plasma_exists)
         maps['t'].append(t)
         maps['n_bd'].append(int(o['mid']['bd'].sum()))
         maps['breakdown'].append(o['breakdown'])
@@ -879,7 +887,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         outs.append({k: v[-1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
         y, t = o_run['y'][-1], t1
         tt = model.terms(t, y)
-        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp])
+        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True)
         g_prev = g_last
         if o['Vp'] > 0:
             g_last = geo_of(o)
