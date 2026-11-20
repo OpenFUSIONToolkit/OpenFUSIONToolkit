@@ -9,6 +9,9 @@ DYON: H.-T. Kim, PhD thesis, Imperial College London (2013); Kim et al., Nucl. F
 
     AtomicSpecies           ADAS iso-nuclear rates and powers of one element, per charge state
     fractional_abundance    charge-state balance with a transport loss (coronal for tau -> inf)
+    WallModel               recycling and sputtering yields (thesis ch. 5)
+    PlasmaModel             0D energy and particle balance of electrons, ions and every charge state,
+                            with neutral screening, transport and the plasma-current circuit
 
 Atomic data: OPEN-ADAS adf11 files (H.P. Summers, The ADAS User Manual), downloaded on first use
 into ADAS_DIR ($OFT_ADAS_DIR, default ~/.cache/oft_breakdown_startup/adas). They are not shipped:
@@ -20,7 +23,14 @@ import os
 import urllib.request
 
 import numpy as np
+from scipy.integrate import solve_ivp
 from scipy.interpolate import RegularGridInterpolator
+
+EV = 1.602176634e-19        # J per eV
+AMU = 1.66053907e-27        # kg
+MU0 = 4e-7 * np.pi
+ETA_SPITZER = 5.2649e-5     # parallel Spitzer resistivity coefficient [Ohm m eV^1.5] (K20 sec. 2.3.1)
+EQUI_COEF = 7.75e-34        # electron-ion equilibration [W m^3 eV^0.5 amu] (thesis eq. 3.33)
 
 ADAS_DIR = os.environ.get('OFT_ADAS_DIR', os.path.join(os.path.expanduser('~'), '.cache', 'oft_breakdown_startup', 'adas'))
 ADAS_URL = 'https://open.adas.ac.uk/download/adf11/{cls}/{name}.dat'
@@ -150,3 +160,231 @@ def fractional_abundance(sp, Te, ne, tau=np.inf):
     rhs = np.zeros(Z + 1)
     rhs[-1] = 1.0
     return np.linalg.solve(A, rhs)
+
+
+# ============================================================================ wall
+CARBON_WALL = {('d', 'c'): 0.03, ('h', 'c'): 0.03, ('o', 'o'): 1.0, ('o', 'c'): 1.0, ('c', 'c'): 0.0}
+"""Yields Y[(incident ion, released atom)] of a carbon wall (thesis table 5.1; K22 table 1): chemical
+sputtering of C by D ions 0.03, O ions release CO (one O and one C), C ions are not recycled."""
+
+
+class WallModel:
+    """Plasma-wall interaction. fuel_recycling c = (c1, c2, c3): Y_D^D(t) = c1 - c2 (1 - exp(-t/c3))
+    (thesis eq. 5.8; (1, 0, 1) is Y = 1); yields {(incident, released): Y} for impurity release by ions
+    of any species (constant yields, thesis sec. 5.4.1). Unlisted pairs are 0."""
+
+    def __init__(self, fuel_recycling=(1.0, 0.0, 1.0), yields=None):
+        self.c, self.yields = fuel_recycling, dict(yields or {})
+
+    def fuel_yield(self, t):
+        c1, c2, c3 = self.c
+        return c1 - c2 * (1.0 - np.exp(-max(t, 0.0) / c3))
+
+    def Y(self, incident, released):
+        return self.yields.get((incident, released), 0.0)
+
+
+# ============================================================================ 0D plasma model
+def plasma_inductance(R, a, kappa, li, form='circular'):
+    """Plasma self-inductance [H] of an ellipse (R, a, kappa): 'circular' mu0 R (ln(8R/a) - 2 + li/2)
+    (thesis eq. 3.13); 'k22' K22 eq. 14 as printed, mu0 R (ln(8R/(a kappa^2)) + li/2 - 2); 'k22_st'
+    K22 eq. 15-16 (low aspect ratio, after Hirshman & Neilson 1986)."""
+    if form == 'circular':
+        return MU0 * R * (np.log(8 * R / a) - 2 + li / 2)
+    if form == 'k22':
+        return MU0 * R * (np.log(8 * R / (a * kappa ** 2)) + li / 2 - 2)
+    if form == 'k22_st':
+        e = a / R
+        fA = (1 + 1.81 * np.sqrt(e) + 2.05 * e) * np.log(8 / e) - (2 + 9.25 * np.sqrt(e) - 1.21 * e)
+        fB = 0.73 * np.sqrt(e) * (1 + 2 * e ** 4 - 6 * e ** 5 + 3.7 * e ** 6)
+        return MU0 * R * (fA * (1 - e) / (1 - e + fB * kappa) + li / 2)
+    raise ValueError(f'unknown inductance form {form!r}')
+
+
+class PlasmaModel:
+    """0D plasma initiation model (DYON: thesis ch. 3 and 5; K20; K22 eq. 6-8, 17).
+
+    State (inventories, so particles are conserved exactly and a changing plasma volume dilutes
+    densities as K22 eq. 8 does): for the fuel and each impurity the neutral atoms in the vessel and the
+    ions of every charge state in the plasma, then the electron and ion thermal energies [J] of the
+    plasma volume, then I_p [A]:
+        y = [N_0, N_1..N_Z (fuel), N_0..N_Z (each impurity), E_e, E_i, I_p]
+    Neutral density of species A: N_0 / (gamma_A V_V), with gamma_A = 1 - (V_p - V_n^A)/V_V the
+    neutral-volume coefficient (thesis eq. 3.66); ion densities N_z / V_p.
+
+    Arguments:
+        fuel             'd' or 'h'
+        impurities       sequence of 'c', 'o', 'n', 'be'
+        wall             WallModel
+        V_V              vessel volume [m^3]
+        T_n              neutral (and charge-exchange product) temperature [eV]
+        lnL              Coulomb logarithm (DYON: 10, K20 sec. 2.3.1)
+        li               internal inductance; inductance: plasma_inductance form
+        screening        neutral screening on (thesis sec. 3.4.6)
+        fixed_T          (Te, Ti) to hold the temperatures fixed (tests), else None
+        paux             callable t -> absorbed auxiliary power [W] (thesis eq. 7.4), or None
+        fuelling         callable t -> external fuel atoms per second (already times the efficiency), or None
+
+    The geometry is a callable geometry(t, Ip) -> dict with R, a, kappa, Vp [m, m, -, m^3], Bphi [T at R],
+    and either Lf [m] (connection length: tau_par = Lf/Cs, thesis eq. 3.49) or tau_par [s]; the loop
+    voltage is a callable vloop(t) [V] at the plasma (M2; M3 replaces it by the coil and vessel circuits).
+    """
+
+    def __init__(self, fuel='d', impurities=('c', 'o'), wall=None, V_V=35.0, T_n=0.026, lnL=10.0, li=0.5,
+                 inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None):
+        self.species = [AtomicSpecies(fuel)] + [AtomicSpecies(x) for x in impurities]
+        self.names = [s.name for s in self.species]
+        self.wall = wall or WallModel()
+        self.V_V, self.T_n, self.lnL, self.li, self.inductance = V_V, T_n, lnL, li, inductance
+        self.screening, self.fixed_T, self.paux, self.fuelling = screening, fixed_T, paux, fuelling
+        self.m_fuel = self.species[0].mass_amu * AMU
+        self.slices, k = [], 0                               # slice of y holding species i (charge states 0..Z)
+        for s in self.species:
+            self.slices.append(slice(k, k + s.Z + 1))
+            k += s.Z + 1
+        self.iEe, self.iEi, self.iIp = k, k + 1, k + 2
+        self.n_state = k + 3
+
+    # ------------------------------------------------------------------ initial state
+    def initial_state(self, p0, geo, Te0=1.0, Ti0=None, gamma0=None, impurity_fraction=None, Ip0=0.0):
+        """y0 for a fill of D2 (or H2) at pressure p0 [Pa] and temperature T_n, fully dissociated:
+        n_fill = 2 p0 / T_n [atoms/m^3] (K20 eq. 1; K22 eq. 18). A fraction gamma0 (default 2e-3 Te0^1.5,
+        K20 sec. 2.1) of the atoms in the plasma volume is ionized, the rest of the fill stays neutral.
+        impurity_fraction {name: f}: f n_fill V_V neutral impurity atoms (eg. {'o': 0.001})."""
+        Ti0 = self.T_n if Ti0 is None else Ti0
+        gamma0 = 2e-3 * Te0 ** 1.5 if gamma0 is None else gamma0
+        n_fill = 2 * p0 / (self.T_n * EV)
+        y = np.zeros(self.n_state)
+        N1 = gamma0 * n_fill * geo['Vp']
+        y[self.slices[0].start] = n_fill * self.V_V - N1
+        y[self.slices[0].start + 1] = N1
+        for i, s in enumerate(self.species[1:], 1):
+            y[self.slices[i].start] = (impurity_fraction or {}).get(s.name, 0.0) * n_fill * self.V_V
+        y[self.iEe] = 1.5 * EV * Te0 * N1
+        y[self.iEi] = 1.5 * EV * Ti0 * N1
+        y[self.iIp] = Ip0
+        self.n_fill = n_fill
+        return y
+
+    # ------------------------------------------------------------------ physics
+    def terms(self, t, y):
+        """Every term of the model at (t, y): densities, temperatures, rates, powers, sources, and the
+        derivative 'dy'. Powers are per unit plasma volume [W/m^3]."""
+        Ip = y[self.iIp]
+        geo = self.geometry(t, Ip)
+        R, a, kappa, Vp, Bphi = geo['R'], geo['a'], geo['kappa'], geo['Vp'], geo['Bphi']
+        N = [np.maximum(y[sl], 0.0) for sl in self.slices]
+        Ne = sum(np.dot(np.arange(len(n)), n) for n in N)
+        Ni = sum(n[1:].sum() for n in N)
+        ne = max(Ne / Vp, 1.0)
+        if self.fixed_T is None:
+            Te = max(y[self.iEe] / (1.5 * EV * max(Ne, 1.0)), 1e-3)
+            Ti = max(y[self.iEi] / (1.5 * EV * max(Ni, 1.0)), 1e-4)
+        else:
+            Te, Ti = self.fixed_T
+        r = [s.rates(Te, ne) for s in self.species]
+        cx_rate = [s.rates(Ti, ne)['cx'] for s in self.species]   # ion-neutral reaction: at Ti (O23)
+        # neutral screening (thesis sec. 3.4.6): penetration depth lambda = v_n / (ne S_0)
+        Vn, gam = [], []
+        for s, rs in zip(self.species, r):
+            v_n = np.sqrt(8 * self.T_n * EV / (np.pi * s.mass_amu * AMU))       # mean thermal speed (O8)
+            lam = v_n / (ne * rs['S'][0])
+            if self.screening and lam < a:
+                Vn.append(Vp * (1 - (1 - lam / a) ** 2))     # = 2 pi R pi kappa (a^2 - (a-lam)^2) for a torus
+            else:
+                Vn.append(Vp)
+            gam.append(1 - (Vp - Vn[-1]) / self.V_V)
+        n0 = [n[0] / (g * self.V_V) for n, g in zip(N, gam)]
+        nz = [n / Vp for n in N]                              # entry 0 unused for ions
+        # transport (thesis eq. 3.49-3.54; K22 eq. 17)
+        Cs = np.sqrt((Te + Ti) * EV / self.m_fuel)
+        tau_par = geo['tau_par'] if 'tau_par' in geo else geo['Lf'] / Cs
+        tau_perp = 8 * a ** 2 * abs(Bphi) / Te
+        tau = 1.0 / (1.0 / tau_par + 1.0 / tau_perp)
+        # resistance and inductance
+        Zeff = sum(np.dot(np.arange(len(n)) ** 2, n) for n in N) / max(Ne, 1.0)
+        eta = ETA_SPITZER * Zeff * self.lnL / max(Te, 0.05) ** 1.5         # [Ohm m]
+        Rp = eta * 2 * R / (kappa * a ** 2)
+        Lp = plasma_inductance(R, a, kappa, self.li, self.inductance)
+        h = 1e-6
+        g2 = self.geometry(t + h, Ip)
+        dLp = (plasma_inductance(g2['R'], g2['a'], g2['kappa'], self.li, self.inductance) - Lp) / h
+        # sources and powers
+        f = 0                                                 # fuel index
+        dN = [np.zeros(len(n)) for n in N]
+        P_iz = P_rad = P_equi = P_cx = 0.0
+        cx_sum = 0.0                                          # sum over impurity ions of cx n  [1/s] per fuel neutral
+        for i, (s, rs) in enumerate(zip(self.species, r)):
+            Z, W = s.Z, s.W
+            S, al, plt, prb = rs['S'], rs['alpha'], rs['plt'], rs['prb']
+            cx = cx_rate[i]
+            # ionization and recombination between z and z+1 (z = 0: neutrals in V_n)
+            for z in range(Z):
+                V_src = Vn[i] if z == 0 else Vp
+                dens = n0[i] if z == 0 else nz[i][z]
+                ion = V_src * S[z] * ne * dens                    # ionizations per second, z -> z+1
+                rec = Vp * al[z] * ne * nz[i][z + 1]              # recombinations per second, z+1 -> z
+                dN[i][z] += rec - ion
+                dN[i][z + 1] += ion - rec
+                P_iz += V_src * S[z] * W[z] * EV * ne * dens / Vp
+                P_rad += V_src * plt[z] * ne * dens / Vp
+                P_rad += (prb[z] - al[z] * W[z] * EV) * ne * nz[i][z + 1]
+            # equilibration (thesis eq. 3.33) and ion transport loss
+            zz = np.arange(1, Z + 1)
+            P_equi += EQUI_COEF * (Te - Ti) * ne * self.lnL / Te ** 1.5 * np.dot(zz ** 2, nz[i][1:]) / s.mass_amu
+            dN[i][1:] -= N[i][1:] / tau
+            if i == f:
+                P_cx += (Vn[f] / Vp) * 1.5 * (Ti - self.T_n) * EV * n0[f] * cx[0] * nz[f][1]
+                continue
+            # charge exchange of impurity ions with fuel neutrals (in V_n of the fuel): z -> z-1, D0 -> D+
+            cxe = Vn[f] * cx * n0[f] * nz[i][1:]                  # [Z] events per second from charge z
+            dN[i][1:] -= cxe
+            dN[i][:-1] += cxe
+            cx_sum += cxe.sum()
+            P_cx += 1.5 * (Ti - self.T_n) * EV * cxe.sum() / Vp       # each CX event replaces a hot ion (O25)
+        dN[f][0] -= cx_sum
+        dN[f][1] += cx_sum
+        # wall: fuel recycling (+ external fuelling) and impurity release by every ion species
+        out = [N[i][1:].sum() / tau for i in range(len(self.species))]       # ions to the wall [1/s]
+        dN[f][0] += self.wall.fuel_yield(t) * out[f]
+        if self.fuelling is not None:
+            dN[f][0] += self.fuelling(t)
+        for i, s in enumerate(self.species[1:], 1):
+            dN[i][0] += sum(self.wall.Y(A, s.name) * o for A, o in zip(self.names, out))
+        # energy
+        P_oh = Ip ** 2 * Rp / Vp
+        P_aux = 0.0 if self.paux is None else self.paux(t) / Vp
+        P_econ = 1.5 * ne * Te * EV / tau
+        ni = Ni / Vp
+        P_icon = 1.5 * ni * Ti * EV / tau
+        dy = np.concatenate(dN + [np.zeros(3)])
+        if self.fixed_T is None:
+            dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ)
+            dy[self.iEi] = Vp * (P_equi - P_cx - P_icon)
+        V = self.vloop(t)
+        dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp
+        return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
+                'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
+                'Rp': Rp, 'Lp': Lp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
+                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_icon': P_icon, 'Vp': Vp}
+
+    def rhs(self, t, y):
+        return self.terms(t, y)['dy']
+
+    def run(self, geometry, vloop, y0, t_span, t_eval=None, rtol=1e-6, max_step=np.inf):
+        """Integrate from y0 over t_span [s] (BDF, the counterpart of DYON's ode15s). Returns a dict of
+        arrays over the output times: every scalar of terms(), plus 'y' [n_t, n_state] and 'status'."""
+        self.geometry, self.vloop = geometry, vloop
+        scale = np.abs(y0).copy()
+        for sl in self.slices:
+            scale[sl] = max(np.abs(y0[sl]).sum(), 1.0)
+        scale[self.iEe] = scale[self.iEi] = max(abs(y0[self.iEe]), 1e-12)
+        scale[self.iIp] = 1.0
+        sol = solve_ivp(self.rhs, t_span, y0, method='BDF', t_eval=t_eval, rtol=rtol, atol=1e-9 * scale,
+                        max_step=max_step)
+        out = {'t': sol.t, 'y': sol.y.T, 'status': sol.status, 'message': sol.message}
+        rows = [self.terms(tk, yk) for tk, yk in zip(sol.t, sol.y.T)]
+        for k, v in rows[0].items():
+            if np.isscalar(v):
+                out[k] = np.array([row[k] for row in rows])
+        return out
