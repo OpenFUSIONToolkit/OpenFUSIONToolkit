@@ -337,6 +337,10 @@ class PlasmaModel:
         fuelling         callable t -> external fuel atoms per second (already times the efficiency), or None
         circuit          PlasmaCircuit: I_p and the segment currents I_s (appended to y) driven by the
                          coil currents (M3, K22 eq. 5); None: I_p driven by a prescribed loop voltage
+        shrink           when V_p falls: 'compress' (K22 eq. 8: the ions and their energy stay, so the
+                         densities rise) or 'lose' (O38, a departure: the ions of the volume leaving the
+                         plasma go to the wall with their thermal energy at |dV_p/dt| / V_p, recycled
+                         like the transport losses; densities and temperatures are unchanged by it)
 
     The geometry is a callable geometry(t, Ip) -> dict with R, a, kappa, Vp [m, m, -, m^3], Bphi [T at R],
     and either Lf [m] (connection length: tau_par = Lf/Cs, thesis eq. 3.49) or tau_par [s]; the loop
@@ -344,7 +348,11 @@ class PlasmaModel:
     """
 
     def __init__(self, fuel='d', impurities=('c', 'o'), wall=None, V_V=35.0, T_n=0.026, lnL=10.0, li=0.5,
-                 inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None, circuit=None):
+                 inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None, circuit=None,
+                 shrink='compress'):
+        if shrink not in ('compress', 'lose'):
+            raise ValueError(f'unknown shrink {shrink!r}')
+        self.shrink = shrink
         self.species = [AtomicSpecies(fuel)] + [AtomicSpecies(x) for x in impurities]
         self.names = [s.name for s in self.species]
         self.wall = wall or WallModel()
@@ -468,6 +476,10 @@ class PlasmaModel:
         dN[f][1] += cx_sum
         # wall: fuel recycling (+ external fuelling) and impurity release by every ion species
         out = [N[i][1:].sum() / tau for i in range(len(self.species))]       # ions to the wall [1/s]
+        shrink = max(-(g2['Vp'] - Vp) / h, 0.0) / Vp if self.shrink == 'lose' else 0.0     # [1/s] (O38)
+        for i in range(len(self.species)):
+            dN[i][1:] -= N[i][1:] * shrink
+            out[i] += N[i][1:].sum() * shrink
         dN[f][0] += self.wall.fuel_yield(t) * out[f]
         if self.fuelling is not None:
             dN[f][0] += self.fuelling(t)
@@ -481,8 +493,8 @@ class PlasmaModel:
         P_icon = 1.5 * ni * Ti * EV / tau
         dy = np.concatenate(dN + [np.zeros(self.n_state - self.iEe)])
         if self.fixed_T is None:
-            dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ)
-            dy[self.iEi] = Vp * (P_equi - P_cx - P_icon)
+            dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ) - shrink * y[self.iEe]
+            dy[self.iEi] = Vp * (P_equi - P_cx - P_icon) - shrink * y[self.iEi]
         if self.circuit is None:
             V = self.vloop(t)
             dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp_eff
@@ -492,7 +504,8 @@ class PlasmaModel:
         return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
                 'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
                 'Rp': Rp, 'Lp': Lp, 'Lp_eff': Lp_eff, 'dLp_dt': dLp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
-                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_icon': P_icon, 'Vp': Vp}
+                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_icon': P_icon, 'Vp': Vp,
+                'shrink_rate': shrink}
 
     def rhs(self, t, y):
         return self.terms(t, y)['dy']
@@ -612,7 +625,9 @@ class FieldLineMap:
 
     def mutual(self, R, Z):
         """M_p [nu]: mutual inductance of a filament at (R, Z) with 1 A per turn in each unit,
-        2 pi psi_u(R, Z) (K22 eq. 9), bilinear in the unit maps."""
+        2 pi psi_u(R, Z) (K22 eq. 9), bilinear in the unit maps (inside the grid only)."""
+        if not (self.R[0] <= R <= self.R[-1] and self.Z[0] <= Z <= self.Z[-1]):
+            raise ValueError(f'({R}, {Z}) is outside the map grid')
         i = int(np.clip(np.searchsorted(self.R, R) - 1, 0, len(self.R) - 2))
         j = int(np.clip(np.searchsorted(self.Z, Z) - 1, 0, len(self.Z) - 2))
         u, v = (R - self.R[i]) / (self.R[i + 1] - self.R[i]), (Z - self.Z[j]) / (self.Z[j + 1] - self.Z[j])
@@ -774,31 +789,39 @@ class FieldLineMap:
         # each held mid-plane line stands for the open flux that crosses the mid-plane nearer to it than to
         # its neighbours (K22's 50 lines sample the region; a tube is narrower than the point spacing on a
         # fine grid, review cycle 2): on each side, psi half-way to the neighbour's, or psi at the wall for
-        # the end lines; where psi along the mid-plane has an extremum between two points, up to the
-        # extremum. A cell belongs if its psi span (centre +- half the change across it) overlaps, so a
-        # strip narrower than a cell stays connected along its line (review cycle 3).
+        # the end lines and next to a gap in the mid-plane row; where psi along the mid-plane has an
+        # extremum between two points, up to the extremum. Its cells: those whose centre psi lies in that
+        # range, connected to the line through cells whose psi span (centre +- half the change across
+        # them) overlaps it, 8-neighbour, so a strip narrower than a cell stays connected along its line
+        # without taking a cell column from its neighbours (review cycles 3, 4).
         from scipy import ndimage
         pm = np.interp(Rm, self.R, psi[k])                          # psi at the points
-        Rw, pw = self.R[row[[0, -1]]], psi[k, row[[0, -1]]]           # the wall ends of the mid-plane row
-        Rx, px = np.concatenate([[Rw[0]], Rm, [Rw[1]]]), np.concatenate([[pw[0]], pm, [pw[1]]])
+        Rx = np.concatenate([[self.R[row[0]]], Rm, [self.R[row[-1]]]])
+        px = np.concatenate([[psi[k, row[0]]], pm, [psi[k, row[-1]]]])
         lo_s, hi_s = np.minimum(px[:-1], px[1:]), np.maximum(px[:-1], px[1:])       # the n_mid + 1 gaps
-        edge = (px[:-1] + px[1:]) / 2
-        edge[[0, -1]] = pw                                          # the end lines reach the wall
+        e_up = (px[:-1] + px[1:]) / 2                                # bound for the point below each gap
+        e_dn = e_up.copy()                                           # bound for the point above it
+        e_dn[0], e_up[-1] = px[0], px[-1]                            # the end lines reach the wall
         ext = []
-        for g in range(n_mid + 1):                                   # psi extremum overshooting the gap ends
-            seg = psi[k, row[(self.R[row] > Rx[g]) & (self.R[row] < Rx[g + 1])]]
+        for g in range(n_mid + 1):
+            jj = np.where((self.R > Rx[g]) & (self.R < Rx[g + 1]))[0]
+            inn = ins[k, jj]
+            if g not in (0, n_mid) and len(jj) and not inn.all():    # the wall crosses the mid-plane here
+                e_up[g] = psi[k, jj[np.argmin(inn)] - 1] if inn[0] else px[g]
+                e_dn[g] = psi[k, jj[len(inn) - 1 - np.argmin(inn[::-1])] + 1] if inn[-1] else px[g + 1]
+            seg = psi[k, jj[inn]]                                    # psi extremum overshooting the gap ends
             ext.append((min(seg.min(), lo_s[g]), max(seg.max(), hi_s[g])) if len(seg) else (lo_s[g], hi_s[g]))
         span = 0.5 * gpsi
         strips = np.zeros_like(opn)
         for i in np.where(mid['held'] & (tm >= 0))[0]:
             r = [pm[i], psi[km[i], jm[i]]]
-            for g in (i, i + 1):                                     # the gaps below and above point i
+            for g, e in ((i, e_dn[i]), (i + 1, e_up[i + 1])):        # the gaps below and above point i
                 over = ext[g][0] < lo_s[g] or ext[g][1] > hi_s[g]
-                r += [x for x in ext[g] if (x < lo_s[g] or x > hi_s[g])] + [pm[i]] if over else [edge[g]]
+                r += [x for x in ext[g] if (x < lo_s[g] or x > hi_s[g])] if over else [e]
             a, b = min(r), max(r)
-            lab, _ = ndimage.label(opn & (psi + span >= a) & (psi - span <= b))
+            lab, _ = ndimage.label(opn & (psi + span >= a) & (psi - span <= b), structure=np.ones((3, 3)))
             if lab[km[i], jm[i]]:
-                strips |= lab == lab[km[i], jm[i]]
+                strips |= (lab == lab[km[i], jm[i]]) & (psi >= a) & (psi <= b)
         take = np.zeros(nt, bool)
         if region == 'midplane':
             breakdown = bool(mid['bd'].any())
@@ -952,7 +975,7 @@ def geometry_between(ga, gb, ta, dt):
 
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
-                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', log=None):
+                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', tau_pos=5e-3, log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -963,10 +986,16 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     structure and the plasma current, with its own -M dI_p/dt (K22 eq. 10).
 
     Plasma current position (O27): position='fixed' (default) a filament held at (Rp, Zp), which must be
-    the circuit's filament position (K22 prescribes the position); 'region' a filament at the centre of
-    the plasma region (R_vol, Z_vol) of each map, moving linearly between maps with the geometry's lag
-    (the circuit's M_p from FieldLineMap.mutual, with its d M_p/dt terms: PlasmaCircuit.move; Rp, Zp are
-    then not used, and the circuit's own M_p is restored on return).
+    the circuit's filament position (K22 prescribes the position); 'region' (a departure: K22 prescribes
+    R, Z, the magnetic axis once surfaces close) a filament that relaxes toward the area centre of the
+    plasma region (R_vol, Z_vol) with time constant tau_pos [s] (starting there at breakdown), moving
+    linearly between maps with the geometry's lag (the circuit's M_p from FieldLineMap.mutual, with its
+    d M_p/dt terms: PlasmaCircuit.move; Rp, Zp are then not used, and the circuit's own M_p is restored on
+    return, also on an exception). The relaxation keeps the filament's speed independent of dt_map: the
+    region can flicker between maps (lines on and off the Townsend criterion), and following it map by
+    map gave a motion voltage ~1/dt_map (review cycle 4). The returned 'out' holds the terms at the
+    moving position; model.terms after the run uses the restored filament.
+    No force balance: the mechanical work I_p dM_p/dt . I_u is not in the plasma energy.
 
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
@@ -1057,31 +1086,35 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     log(f'breakdown at {t_bd * 1e3:.1f} ms: {maps["n_bd"][-1]} mid-plane lines, V_p = {o["Vp"]:.2f} m^3, '
         f'R_vol = {o["R_vol"]:.2f} m, L_f = {o["Lf"]:.0f} m')
     outs, y, t, status, message = [], y0, t_bd, 0, 'reached t_end'
-    while t < t_end - 1e-12:
-        t1 = min(t + dt_map, t_end)
-        geometry = geometry_between(dict(g_prev), dict(g_last), t, dt_map)
-        if position == 'region':
-            circ.move(fmap.mutual(*P_prev), fmap.mutual(*P_last), t, dt_map)
-        try:
-            o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, 0.5 * (t + t1), t1])
-        except ValueError as e:                                      # eg. L_p below the structure coupling (O27)
-            o_run = {'status': -2, 'message': str(e)}
-        if o_run['status'] != 0:
-            status, message = o_run['status'], o_run['message']
-            log(f'solver stopped at {t * 1e3:.1f} ms: {message}')
-            break
-        outs.append({k: v[1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
-        y, t = o_run['y'][-1], t1
-        tt = model.terms(t, y)
-        p_now = tt['n0'][0] * model.T_n * EV / 2 if pressure == 'neutral' else p_fill
-        vel = ((P_last[0] - P_prev[0]) / dt_map, (P_last[1] - P_prev[1]) / dt_map) if position == 'region' else (0.0, 0.0)
-        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True,
-                    p=p_now, pos=P_last, vel=vel)
-        g_prev, P_prev = g_last, P_last
-        if o['Vp'] > 0:
-            g_last = geo_of(o)
-            P_last = (Rp, Zp) if position == 'fixed' else (o['R_vol'], o['Z_vol'])
-    circ.move(M_saved[0], M_saved[1], M_saved[2], M_saved[3])
+    try:
+        while t < t_end - 1e-12:
+            t1 = min(t + dt_map, t_end)
+            geometry = geometry_between(dict(g_prev), dict(g_last), t, dt_map)
+            if position == 'region':
+                circ.move(fmap.mutual(*P_prev), fmap.mutual(*P_last), t, t1 - t)
+            try:
+                o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, 0.5 * (t + t1), t1])
+            except ValueError as e:                                      # eg. L_p below the structure coupling (O27)
+                o_run = {'status': -2, 'message': str(e)}
+            if o_run['status'] != 0:
+                status, message = o_run['status'], o_run['message']
+                log(f'solver stopped at {t * 1e3:.1f} ms: {message}')
+                break
+            outs.append({k: v[1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
+            y, t0, t = o_run['y'][-1], t, t1
+            tt = model.terms(t, y)
+            p_now = tt['n0'][0] * model.T_n * EV / 2 if pressure == 'neutral' else p_fill
+            vel = ((P_last[0] - P_prev[0]) / (t1 - t0), (P_last[1] - P_prev[1]) / (t1 - t0)) if position == 'region' else (0.0, 0.0)
+            o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True,
+                        p=p_now, pos=P_last, vel=vel)
+            g_prev, P_prev = g_last, P_last
+            if o['Vp'] > 0:
+                g_last = geo_of(o)
+                if position == 'region':
+                    w = min(dt_map / tau_pos, 1.0)
+                    P_last = (P_last[0] + w * (o['R_vol'] - P_last[0]), P_last[1] + w * (o['Z_vol'] - P_last[1]))
+    finally:
+        circ.move(M_saved[0], M_saved[1], M_saved[2], M_saved[3])
     out = {k: np.concatenate([d[k] for d in outs]) for k in outs[0]} if outs else None
     return {'t_bd': t_bd, 'out': out, 'status': status, 'message': message, 't_stop': t,
             'maps': {k: np.array(v) for k, v in maps.items()}}
