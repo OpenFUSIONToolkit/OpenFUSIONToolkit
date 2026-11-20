@@ -210,23 +210,41 @@ class PlasmaCircuit:
 
     Coil currents I_coil [nt, nc] (per turn, linear between the times t_coil [s]); L_units [nu, nu] and
     R_seg [ns] the machine's unit inductances (per turn) and segment resistances; M_p [nu] the mutual
-    inductance of 1 A of plasma current with 1 A per turn in each unit. The plasma's position is fixed
-    here (K22 prescribes it; its d M_p/dt terms are not included). L_p, R_p come from the plasma model.
+    inductance of 1 A of plasma current with 1 A per turn in each unit. L_p, R_p come from the plasma model.
 
-    The loop voltage induced at the plasma by the coils and the structure (K22 eq. 7, fixed position)
-    is V_ext = -(M_pc dI_c/dt + M_ps dI_s/dt).
+    The plasma's position is fixed (M_p constant) unless move() sets M_p(t) linear over an interval;
+    then the d M_p/dt terms of K22 eq. 5 are added: -dM_sp/dt I_p to the structure rows and
+    -(dM_ps/dt I_s + dM_pc/dt I_c) to the plasma row. The loop voltage induced at the plasma by the coils
+    and the structure (K22 eq. 7) is V_ext = -(M_pc dI_c/dt + M_ps dI_s/dt + dM_pc/dt I_c + dM_ps/dt I_s).
     """
 
     def __init__(self, L_units, R_seg, nc, M_p, t_coil, I_coil):
         self.nc, self.ns = nc, len(R_seg)
         self.M_ss, self.M_sc = L_units[nc:, nc:], L_units[nc:, :nc]
-        self.M_ps, self.M_pc = np.asarray(M_p)[nc:], np.asarray(M_p)[:nc]
         self.R_s = np.asarray(R_seg, float)
         self.t_coil, self.I_coil = np.asarray(t_coil, float), np.asarray(I_coil, float)
         self.dI_coil = np.diff(self.I_coil, axis=0) / np.diff(self.t_coil)[:, None]
-        Kss = np.linalg.inv(self.M_ss)
-        self.K_ss, self.K_sp, self.M_ps_K = Kss, Kss @ self.M_ps, self.M_ps @ Kss
+        self.K_ss = np.linalg.inv(self.M_ss)
+        self.move(M_p, M_p, 0.0, 1.0)
+
+    def move(self, M_a, M_b, ta, dt):
+        """M_p [nu] linear from M_a at ta to M_b at ta + dt, held at M_b after (M_a at and before ta)."""
+        M_a, M_b = np.asarray(M_a, float), np.asarray(M_b, float)
+        self._M = (M_a, M_b, ta, dt, not np.array_equal(M_a, M_b))
+        self._set(M_a, np.zeros_like(M_a))
+
+    def _set(self, M_p, dM_p):
+        self.M_p, self.dM_p = M_p, dM_p
+        self.M_ps, self.M_pc = M_p[self.nc:], M_p[:self.nc]
+        self.K_sp, self.M_ps_K = self.K_ss @ self.M_ps, self.M_ps @ self.K_ss
         self.schur0 = float(self.M_ps @ self.K_sp)             # M_ps M_ss^-1 M_sp
+
+    def at(self, t):
+        """Set M_p and dM_p/dt for time t (move())."""
+        M_a, M_b, ta, dt, moving = self._M
+        if moving:
+            s = (t - ta) / dt
+            self._set(M_a + min(max(s, 0.0), 1.0) * (M_b - M_a), (M_b - M_a) / dt * (0.0 <= s <= 1.0))
 
     @classmethod
     def from_machine(cls, machine, t_coil, I_coil, R=None, Z=0.0, channel=None):
@@ -247,15 +265,20 @@ class PlasmaCircuit:
     def derivs(self, t, I_s, I_p, Rp, Lp, dLp):
         """(dI_s/dt, dI_p/dt, V_ext) at time t. Lp is the coefficient of dI_p/dt in d(L_p I_p)/dt
         (L_p + I_p dL_p/dI_p when the geometry depends on I_p), dLp the explicit dL_p/dt."""
+        self.at(t)
         dIc = self.coil_rate(t)
-        r_s = -self.M_sc @ dIc - self.R_s * I_s
-        r_p = -self.M_pc @ dIc - Rp * I_p - dLp * I_p
+        dM, V_move = self.dM_p, 0.0
+        if self._M[4]:
+            I_c = np.array([np.interp(t, self.t_coil, self.I_coil[:, j]) for j in range(self.nc)])
+            V_move = -(dM[:self.nc] @ I_c + dM[self.nc:] @ I_s)
+        r_s = -self.M_sc @ dIc - self.R_s * I_s - dM[self.nc:] * I_p
+        r_p = -self.M_pc @ dIc - Rp * I_p - dLp * I_p + V_move
         if Lp <= self.schur0:
             raise ValueError(f'L_p = {Lp:.3e} H <= M_ps M_ss^-1 M_sp = {self.schur0:.3e} H: the plasma is not '
                              'decoupled from the structure (filament too close to it, or L_p too small)')
         dIp = (r_p - self.M_ps_K @ r_s) / (Lp - self.schur0)
         dIs = self.K_ss @ r_s - self.K_sp * dIp
-        V_ext = -(self.M_pc @ dIc + self.M_ps @ dIs)
+        V_ext = -(self.M_pc @ dIc + self.M_ps @ dIs) + V_move
         return dIs, dIp, V_ext
 
     def vacuum(self, t0, t1, I_s0=None, rtol=1e-8):
@@ -489,8 +512,11 @@ class PlasmaModel:
             scale[self.iIs:] = 1.0
         sol = solve_ivp(self.rhs, t_span, y0, method='BDF', t_eval=t_eval, rtol=rtol, atol=1e-9 * scale,
                         max_step=max_step)
-        out = {'t': sol.t, 'y': sol.y.T, 'status': sol.status, 'message': sol.message}
-        rows = [self.terms(tk, yk) for tk, yk in zip(sol.t, sol.y.T)]
+        out = {'t': np.asarray(sol.t), 'y': np.asarray(sol.y).reshape(len(y0), -1).T, 'status': sol.status,
+               'message': sol.message}
+        if len(out['t']) == 0:                                       # failed before the first output time
+            return out
+        rows = [self.terms(tk, yk) for tk, yk in zip(out['t'], out['y'])]
         for k, v in rows[0].items():
             if np.isscalar(v):
                 out[k] = np.array([row[k] for row in rows])
@@ -549,6 +575,8 @@ class FieldLineMap:
         from matplotlib.path import Path
         self.R, self.Z = np.asarray(R, float), np.asarray(Z, float)
         self.dR, self.dZ = self.R[1] - self.R[0], self.Z[1] - self.Z[0]
+        if not (np.allclose(np.diff(self.R), self.dR) and np.allclose(np.diff(self.Z), self.dZ)):
+            raise ValueError('FieldLineMap needs a uniform grid')
         self.RR, self.ZZ = np.meshgrid(self.R, self.Z)
         self.wall = np.asarray(wall, float)[:, :2]
         self.inside = Path(self.wall).contains_points(np.column_stack([self.RR.ravel(), self.ZZ.ravel()])).reshape(self.RR.shape)
@@ -581,6 +609,16 @@ class FieldLineMap:
                   + (filament_psi(self.RR, self.ZZ, Rp, Zp + h) - filament_psi(self.RR, self.ZZ, Rp, Zp - h)) / (2 * h) * dZp)
             dpsi = dpsi + dIp * g + Ip * dg
         return psi, -dpsi / self.RR
+
+    def mutual(self, R, Z):
+        """M_p [nu]: mutual inductance of a filament at (R, Z) with 1 A per turn in each unit,
+        2 pi psi_u(R, Z) (K22 eq. 9), bilinear in the unit maps."""
+        i = int(np.clip(np.searchsorted(self.R, R) - 1, 0, len(self.R) - 2))
+        j = int(np.clip(np.searchsorted(self.Z, Z) - 1, 0, len(self.Z) - 2))
+        u, v = (R - self.R[i]) / (self.R[i + 1] - self.R[i]), (Z - self.Z[j]) / (self.Z[j + 1] - self.Z[j])
+        P = self.psi_units
+        return 2 * np.pi * ((1 - u) * (1 - v) * P[:, j, i] + u * (1 - v) * P[:, j, i + 1]
+                            + (1 - u) * v * P[:, j + 1, i] + u * v * P[:, j + 1, i + 1])
 
     def bfield(self, psi):
         """(B_R, B_Z, B_phi) grids [T] of a flux grid (second-order differences)."""
@@ -712,6 +750,8 @@ class FieldLineMap:
         ET = townsend_field(p, L)
         bd = is_open & np.isfinite(L) & (Ep >= ET)
         # mid-plane lines (K22: 50 radial points on the mid-plane): the contour through each point
+        if n_mid < 2:
+            raise ValueError('n_mid must be at least 2')
         k = np.argmin(np.abs(self.Z - Z_mid))
         row = np.where(ins[k])[0]
         if len(row) == 0:
@@ -731,18 +771,32 @@ class FieldLineMap:
         if sustained is not None:
             mid['held'] |= np.asarray(sustained, bool) & mid['open'] & np.isfinite(Lm)
         tm = mid['tube']
-        # each held mid-plane line stands for the open cells connected to it with psi half-way to its
-        # neighbours' (K22's 50 lines sample the region; a tube is narrower than the point spacing on a fine
-        # grid, review cycle 2)
+        # each held mid-plane line stands for the open flux that crosses the mid-plane nearer to it than to
+        # its neighbours (K22's 50 lines sample the region; a tube is narrower than the point spacing on a
+        # fine grid, review cycle 2): on each side, psi half-way to the neighbour's, or psi at the wall for
+        # the end lines; where psi along the mid-plane has an extremum between two points, up to the
+        # extremum. A cell belongs if its psi span (centre +- half the change across it) overlaps, so a
+        # strip narrower than a cell stays connected along its line (review cycle 3).
         from scipy import ndimage
-        pm = np.interp(Rm, self.R, psi[k])                          # psi at the points (the end lines reach the wall)
-        half = np.concatenate([[-np.inf if pm[1] >= pm[0] else np.inf], (pm[1:] + pm[:-1]) / 2,
-                               [np.inf if pm[-1] >= pm[-2] else -np.inf]])
+        pm = np.interp(Rm, self.R, psi[k])                          # psi at the points
+        Rw, pw = self.R[row[[0, -1]]], psi[k, row[[0, -1]]]           # the wall ends of the mid-plane row
+        Rx, px = np.concatenate([[Rw[0]], Rm, [Rw[1]]]), np.concatenate([[pw[0]], pm, [pw[1]]])
+        lo_s, hi_s = np.minimum(px[:-1], px[1:]), np.maximum(px[:-1], px[1:])       # the n_mid + 1 gaps
+        edge = (px[:-1] + px[1:]) / 2
+        edge[[0, -1]] = pw                                          # the end lines reach the wall
+        ext = []
+        for g in range(n_mid + 1):                                   # psi extremum overshooting the gap ends
+            seg = psi[k, row[(self.R[row] > Rx[g]) & (self.R[row] < Rx[g + 1])]]
+            ext.append((min(seg.min(), lo_s[g]), max(seg.max(), hi_s[g])) if len(seg) else (lo_s[g], hi_s[g]))
+        span = 0.5 * gpsi
         strips = np.zeros_like(opn)
         for i in np.where(mid['held'] & (tm >= 0))[0]:
-            a = np.nanmin([half[i], half[i + 1], pm[i], psi[km[i], jm[i]]])
-            b = np.nanmax([half[i], half[i + 1], pm[i], psi[km[i], jm[i]]])
-            lab, _ = ndimage.label(opn & (psi >= a) & (psi <= b))
+            r = [pm[i], psi[km[i], jm[i]]]
+            for g in (i, i + 1):                                     # the gaps below and above point i
+                over = ext[g][0] < lo_s[g] or ext[g][1] > hi_s[g]
+                r += [x for x in ext[g] if (x < lo_s[g] or x > hi_s[g])] + [pm[i]] if over else [edge[g]]
+            a, b = min(r), max(r)
+            lab, _ = ndimage.label(opn & (psi + span >= a) & (psi - span <= b))
             if lab[km[i], jm[i]]:
                 strips |= lab == lab[km[i], jm[i]]
         take = np.zeros(nt, bool)
@@ -898,7 +952,7 @@ def geometry_between(ga, gb, ta, dt):
 
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
-                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', log=None):
+                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -906,8 +960,13 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     analysed every dt_map at the effective prefill pressure p_fill [Pa]; at the first time a line meets
     the Townsend criterion (K22 sec. 2.2; O6) the plasma model starts from the K22 initial state (fill,
     Te0, gamma0, impurity_fraction) unless y0 is given. Thereafter each map uses the coils, the
-    structure and the plasma current, with its own -M dI_p/dt (K22 eq. 10), held at (Rp, Zp) (K22
-    prescribes the position, O27; default the circuit's filament position must be given).
+    structure and the plasma current, with its own -M dI_p/dt (K22 eq. 10).
+
+    Plasma current position (O27): position='fixed' (default) a filament held at (Rp, Zp), which must be
+    the circuit's filament position (K22 prescribes the position); 'region' a filament at the centre of
+    the plasma region (R_vol, Z_vol) of each map, moving linearly between maps with the geometry's lag
+    (the circuit's M_p from FieldLineMap.mutual, with its d M_p/dt terms: PlasmaCircuit.move; Rp, Zp are
+    then not used, and the circuit's own M_p is restored on return).
 
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
@@ -920,34 +979,40 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     (a departure, not in K22): a mid-plane line that met the criterion at any map since breakdown stays
     in the plasma while it is open, with no release. If the region is empty the last geometry is held.
     Townsend pressure after breakdown: pressure='neutral' (default) the fuel neutrals of the model,
-    n_0 T_n / 2 (molecules, the inverse of K22 eq. 18), so depletion turns lines off; 'fill' p_fill.
+    n_0 T_n / 2 (molecules, the inverse of K22 eq. 18): depletion turns short lines off, but it lowers
+    E_T on lines long enough that A p L > e (left of the Paschen minimum); 'fill' p_fill.
+
+    Convergence in dt_map (review cycle 3): with the geometry one map behind, results converge slowly in
+    dt_map (toy machine, I_p at 2 ms: 1922, 2430, 2693, 2855, 3098 A at 2, 1, 0.5, 0.25, 0.125 ms; at
+    20 ms ~92 A for dt_map <= 0.5 ms, 102 at 1 ms). K22's 1 ms is not converged (O37).
 
     A given y0 gets the structure currents of the vacuum phase at t_bd.
 
     Returns a dict: 't_bd' (None if no breakdown before t_end), 'out' (the plasma model's output arrays,
     concatenated; None without breakdown), 'status' (0, or the solver's status where it stopped),
     'message', 't_stop' (the last time reached; status -2: the model raised ValueError, eg. L_p below
-    the structure coupling M_ps M_ss^-1 M_sp when the region's R_vol is far from Rp, O27), 'maps' (per map time: t, p (the Townsend pressure), Vp, R_vol, Z_vol, r_vol,
+    the structure coupling M_ps M_ss^-1 M_sp when the region's R_vol is far from Rp, O27), 'maps' (per map time: t, p (the Townsend pressure), Rp, Zp (the filament), Vp, R_vol, Z_vol, r_vol,
     kappa, Lf, L_open, f_open, f_closed, n_bd (mid-plane lines broken down at that map), n_held (lines
     in the plasma), breakdown).
     """
-    if Rp is None:
+    if Rp is None and position == 'fixed':
         raise ValueError('Rp (the plasma current position, the circuit filament radius) must be given')
-    if hold not in ('k22', 'sustained') or pressure not in ('neutral', 'fill'):
-        raise ValueError(f'unknown hold {hold!r} or pressure {pressure!r}')
+    if hold not in ('k22', 'sustained') or pressure not in ('neutral', 'fill') or position not in ('fixed', 'region'):
+        raise ValueError(f'unknown hold {hold!r}, pressure {pressure!r} or position {position!r}')
     circ = model.circuit
+    M_saved = circ._M
     nc = circ.nc
     keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed')
-    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown') + keys}
+    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp') + keys}
     held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
     log = log or (lambda *a: None)
 
-    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False, p=p_fill):
+    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False, p=p_fill, pos=(Rp, Zp), vel=(0.0, 0.0)):
         nonlocal held
         I_u = np.concatenate([I_coil(t), I_s])
         dI_u = np.concatenate([circ.coil_rate(t), dI_s])
-        psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, Rp, Zp)
+        psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, pos[0], pos[1], vel[0], vel[1])
         sus = held if plasma_exists and hold == 'sustained' else None
         o = fmap.analyze(psi, Ephi, p, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form,
                          plasma_exists=plasma_exists, sustained=sus)
@@ -955,6 +1020,8 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
             held = held | o['mid']['held']
         maps['t'].append(t)
         maps['p'].append(p)
+        maps['Rp'].append(pos[0] if pos[0] is not None else np.nan)
+        maps['Zp'].append(pos[1])
         maps['n_bd'].append(int(o['mid']['bd'].sum()))
         maps['n_held'].append(int(o['mid']['held'].sum()))
         maps['breakdown'].append(o['breakdown'])
@@ -982,6 +1049,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         return {'t_bd': None, 'out': None, 'status': 0, 'message': 'no breakdown', 't_stop': t_end,
                 'maps': {k: np.array(v) for k, v in maps.items()}}
     g_prev = g_last = geo_of(o)
+    P_prev = P_last = (Rp, Zp) if position == 'fixed' else (o['R_vol'], o['Z_vol'])
     if y0 is None:
         y0 = model.initial_state(p_fill, g_last, Te0=Te0, gamma0=gamma0, impurity_fraction=impurity_fraction)
     y0 = np.array(y0, float)
@@ -992,6 +1060,8 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     while t < t_end - 1e-12:
         t1 = min(t + dt_map, t_end)
         geometry = geometry_between(dict(g_prev), dict(g_last), t, dt_map)
+        if position == 'region':
+            circ.move(fmap.mutual(*P_prev), fmap.mutual(*P_last), t, dt_map)
         try:
             o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, 0.5 * (t + t1), t1])
         except ValueError as e:                                      # eg. L_p below the structure coupling (O27)
@@ -1004,10 +1074,14 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         y, t = o_run['y'][-1], t1
         tt = model.terms(t, y)
         p_now = tt['n0'][0] * model.T_n * EV / 2 if pressure == 'neutral' else p_fill
-        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True, p=p_now)
-        g_prev = g_last
+        vel = ((P_last[0] - P_prev[0]) / dt_map, (P_last[1] - P_prev[1]) / dt_map) if position == 'region' else (0.0, 0.0)
+        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True,
+                    p=p_now, pos=P_last, vel=vel)
+        g_prev, P_prev = g_last, P_last
         if o['Vp'] > 0:
             g_last = geo_of(o)
+            P_last = (Rp, Zp) if position == 'fixed' else (o['R_vol'], o['Z_vol'])
+    circ.move(M_saved[0], M_saved[1], M_saved[2], M_saved[3])
     out = {k: np.concatenate([d[k] for d in outs]) for k in outs[0]} if outs else None
     return {'t_bd': t_bd, 'out': out, 'status': status, 'message': message, 't_stop': t,
             'maps': {k: np.array(v) for k, v in maps.items()}}
