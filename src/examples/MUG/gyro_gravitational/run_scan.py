@@ -10,8 +10,8 @@
 # Usage (from the directory containing MUG_gyro_grav, oft.in, and oft_in.xml):
 #   python run_scan.py [--beta 1.E-4 1.E-3 ...] [--no-gyro] [--hall] [--eps EPS] [--plot]
 #
-# The growth rate is fit over the exponential growth phase of the kinetic energy (see growth_rate). For the
-# Lagrange variant use a larger perturbation, eg. --exe ./MUG_gyro_grav_lag --eps 1.E-5 (see the docs).
+# The growth rate is fit over the exponential growth phase of the kinetic energy (see growth_rate). Use
+# --exe ./MUG_gyro_grav_lag for the Lagrange variant.
 import argparse
 import os
 import re
@@ -193,8 +193,7 @@ def main():
     parser.add_argument('--np', type=int, default=1, help='Number of MPI processes per run')
     parser.add_argument('--exe', default='./MUG_gyro_grav', help='Path to the MUG_gyro_grav executable')
     parser.add_argument('--eps', type=float, default=None,
-                        help='Relative amplitude of the density perturbation (default: "eps" in oft.in; '
-                        'use 1.E-5 with MUG_gyro_grav_lag, see the docs)')
+                        help='Relative amplitude of the density perturbation (default: "eps" in oft.in)')
     parser.add_argument('--fit-frac', type=float, default=None,
                         help='Fit the last FIT_FRAC of each run instead of the exponential growth phase')
     parser.add_argument('--fit-tol', type=float, default=0.1,

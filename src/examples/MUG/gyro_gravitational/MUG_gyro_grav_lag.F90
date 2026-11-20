@@ -18,7 +18,13 @@
 !! \endverbatim
 !!
 !! The only differences from \ref doc_mug_gyro_grav_ex are the FE spaces that are constructed and the
-!! projection of the initial magnetic field onto the vector Lagrange space.
+!! projection of the initial magnetic field onto the vector Lagrange space. That projection must be converged
+!! with a relative tolerance (see \ref doc_mug_gyro_grav_lag_ex_code_ic), or the force imbalance of the discrete
+!! equilibrium exceeds the seeded perturbation (`eps`) and hides the gravitational mode for
+!! \f$ \beta \gtrsim 10^{-3} \f$. With the projection converged, the initial kinetic energy from the
+!! imbalance is about \f$ 3 \times 10^{-24} \f$ (about \f$ 2 \times 10^{-23} \f$ with the default `eps`), and
+!! the measured growth rates agree with those of \ref doc_mug_gyro_grav_ex and with Eq. 15 (without the Hall
+!! term) to about 1%. A larger perturbation can still be set with `run_scan.py --eps`.
 !!
 !!\section doc_mug_gyro_grav_lag_ex_code Code walk through
 !!

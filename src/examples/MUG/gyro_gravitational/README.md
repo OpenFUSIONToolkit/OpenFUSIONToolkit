@@ -47,6 +47,10 @@ residual of 1e-14, which puts the discrete equilibrium closer to force balance t
   homogeneous plasma. It hides the gravitational mode for β ≳ 2.5e-3, and at lower β the runs fail late
   (the time step collapses) once the kinetic energy reaches about 1e-9. The Hall-term mode above may
   share its cause.
+- **H(Curl) projection tolerance.** `MUG_gyro_grav.F90` still projects the initial field with an absolute
+  tolerance (1e-12). Converging it with a relative tolerance lowers the kinetic energy after the first step
+  from about 5e-20 to 2e-23. This may also weaken the imbalance-seeded gyroviscous mode described above; it
+  has not been changed or rechecked yet.
 - **Linearized model.** `xmhd_lin_run` cannot be used for this case: its operator drops the density
   dependence of J×B/n, which provides the buoyancy drive when the equilibrium is supported by a field
   gradient.
