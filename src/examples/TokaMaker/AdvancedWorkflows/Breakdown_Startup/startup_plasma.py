@@ -50,13 +50,14 @@ ADAS_FILES = {
 }
 # Ionization energies of charge state z -> z+1 [eV]: NIST Atomic Spectra Database (retrieved 2026-11-19)
 IONIZATION_EV = {
-    'h': [13.598434599702], 'd': [13.598434599702],
+    'h': [13.598434599702], 'd': [13.602134],
     'be': [9.322699, 18.21115, 153.896205, 217.71858459],
     'c': [11.2602880, 24.383143, 47.88778, 64.49352, 392.09056, 489.99320779],
     'n': [14.53413, 29.60125, 47.4453, 77.4735, 97.8901, 552.06741, 667.0461377],
     'o': [13.618055, 35.12112, 54.93554, 77.41350, 113.8990, 138.1189, 739.32697, 871.4099138],
 }
-MASS_AMU = {'h': 1.00794, 'd': 2.01410, 'be': 9.01218, 'c': 12.0107, 'n': 14.0067, 'o': 15.9994}
+T_RATE_MIN = 0.02           # rates are extrapolated (log-log) below the ADAS tables down to this [eV] (~room temperature)
+MASS_AMU = {'h': 1.007825, 'd': 2.014102, 'be': 9.01218, 'c': 12.0107, 'n': 14.0067, 'o': 15.9994}
 
 
 def adas_file(name):
@@ -69,8 +70,9 @@ def adas_file(name):
             text = r.read().decode('latin-1')
         if 'DOCTYPE' in text[:200] or '/' not in text.split('\n')[0]:     # OPEN-ADAS answers a missing file with a web page
             raise FileNotFoundError(f'{name}: not an adf11 file at {url}')
-        with open(path, 'w') as f:
+        with open(path + '.part', 'w') as f:                  # atomic: a broken download leaves no cache file
             f.write(text)
+        os.replace(path + '.part', path)
     return path
 
 
@@ -112,8 +114,12 @@ class AtomicSpecies:
         'cx'   [Z, ...]  charge-exchange recombination with neutral H/D, z -> z-1, entry z-1   [m^3/s]
         'plt'  [Z, ...]  line power of charge state z, z = 0..Z-1             [W m^3]
         'prb'  [Z, ...]  recombination + bremsstrahlung power of z, entry z-1 [W m^3]
-    Interpolation is linear in (log T, log ne) and clamped at the table edges. ccd tables are
-    evaluated at the temperature given (which temperature belongs there is a model choice)."""
+    Interpolation is linear in (log T, log ne). Below the lowest tabulated temperature (0.2 eV for the
+    96 files, 1 eV for ccd89) it extrapolates linearly in log-log down to T_RATE_MIN, and clamps there;
+    it clamps in density and above the table. ccd tables are evaluated at the temperature given (which
+    temperature belongs there is a model choice). The ccd89 tables have no threshold for endothermic
+    capture (eg. Be1+ + H -> Be + H+, 4.3 eV: 6e-16 m^3/s at 1-3 eV, where the ccd96 C1+ channel gives
+    ~1e-21); for those channels ccd89 is multiplied by exp(-dE/T), dE = W_H - W_(z-1) > 0."""
 
     def __init__(self, name):
         self.name = name.lower()
@@ -123,13 +129,16 @@ class AtomicSpecies:
         self.tables, self._interp = {}, {}
         for kind, fname in files.items():
             t = self.tables[kind] = read_adf11(adas_file(fname))
-            if t['z_max'] != self.Z or len(t['blocks']) != self.Z:
-                raise ValueError(f'{fname}: {len(t["blocks"])} blocks for Z = {self.Z}')
-            self._interp[kind] = [RegularGridInterpolator((t['logT'], t['logne']), b) for b in t['blocks']]
+            if t['z_max'] != self.Z or list(t['z1']) != list(range(1, self.Z + 1)):
+                raise ValueError(f'{fname}: blocks Z1 = {list(t["z1"])} for Z = {self.Z}')
+            self._interp[kind] = [RegularGridInterpolator((t['logT'], t['logne']), b, bounds_error=False, fill_value=None)
+                                  for b in t['blocks']]
+        dE = IONIZATION_EV['h'][0] - self.W                      # endothermicity of capture by z+1 -> z [eV]
+        self.cx_threshold = np.where(dE > 0, dE, 0.0) if files['ccd'].startswith('ccd89') else np.zeros(self.Z)
 
     def _eval(self, kind, Te, ne):
         t = self.tables[kind]
-        lT = np.clip(np.log10(np.maximum(Te, 1e-30)), t['logT'][0], t['logT'][-1])
+        lT = np.clip(np.log10(np.maximum(Te, 1e-30)), min(np.log10(T_RATE_MIN), t['logT'][0]), t['logT'][-1])
         ln = np.clip(np.log10(np.maximum(ne, 1e-30)), t['logne'][0], t['logne'][-1])
         lT, ln = np.broadcast_arrays(lT, ln)
         pts = np.stack([lT.ravel(), ln.ravel()], axis=-1)
@@ -137,7 +146,11 @@ class AtomicSpecies:
 
     def rates(self, Te, ne):
         Te, ne = np.asarray(Te, float), np.asarray(ne, float)
-        return {'S': self._eval('scd', Te, ne), 'alpha': self._eval('acd', Te, ne), 'cx': self._eval('ccd', Te, ne),
+        cx = self._eval('ccd', Te, ne)
+        if self.cx_threshold.any():
+            T = np.maximum(Te, T_RATE_MIN)
+            cx = cx * np.exp(-self.cx_threshold.reshape((-1,) + (1,) * T.ndim) / T)
+        return {'S': self._eval('scd', Te, ne), 'alpha': self._eval('acd', Te, ne), 'cx': cx,
                 'plt': self._eval('plt', Te, ne), 'prb': self._eval('prb', Te, ne)}
 
 
@@ -232,10 +245,14 @@ class PlasmaCircuit:
         return self.dI_coil[k]
 
     def derivs(self, t, I_s, I_p, Rp, Lp, dLp):
-        """(dI_s/dt, dI_p/dt, V_ext) at time t."""
+        """(dI_s/dt, dI_p/dt, V_ext) at time t. Lp is the coefficient of dI_p/dt in d(L_p I_p)/dt
+        (L_p + I_p dL_p/dI_p when the geometry depends on I_p), dLp the explicit dL_p/dt."""
         dIc = self.coil_rate(t)
         r_s = -self.M_sc @ dIc - self.R_s * I_s
         r_p = -self.M_pc @ dIc - Rp * I_p - dLp * I_p
+        if Lp <= self.schur0:
+            raise ValueError(f'L_p = {Lp:.3e} H <= M_ps M_ss^-1 M_sp = {self.schur0:.3e} H: the plasma is not '
+                             'decoupled from the structure (filament too close to it, or L_p too small)')
         dIp = (r_p - self.M_ps_K @ r_s) / (Lp - self.schur0)
         dIs = self.K_ss @ r_s - self.K_sp * dIp
         V_ext = -(self.M_pc @ dIc + self.M_ps @ dIs)
@@ -379,9 +396,11 @@ class PlasmaModel:
         eta = ETA_SPITZER * Zeff * self.lnL / max(Te, 0.05) ** 1.5         # [Ohm m]
         Rp = eta * 2 * R / (kappa * a ** 2)
         Lp = plasma_inductance(R, a, kappa, self.li, self.inductance)
-        h = 1e-6
-        g2 = self.geometry(t + h, Ip)
-        dLp = (plasma_inductance(g2['R'], g2['a'], g2['kappa'], self.li, self.inductance) - Lp) / h
+        h, hI = 1e-6, max(1.0, 1e-6 * abs(Ip))
+        g2, g3 = self.geometry(t + h, Ip), self.geometry(t, Ip + hI)
+        dLp = (plasma_inductance(g2['R'], g2['a'], g2['kappa'], self.li, self.inductance) - Lp) / h      # dL_p/dt at fixed I_p
+        dLdI = (plasma_inductance(g3['R'], g3['a'], g3['kappa'], self.li, self.inductance) - Lp) / hI
+        Lp_eff = Lp + Ip * dLdI          # d(L_p I_p)/dt = (L_p + I_p dL_p/dI_p) dI_p/dt + (dL_p/dt) I_p
         # sources and powers
         f = 0                                                 # fuel index
         dN = [np.zeros(len(n)) for n in N]
@@ -414,7 +433,9 @@ class PlasmaModel:
             dN[i][1:] -= cxe
             dN[i][:-1] += cxe
             cx_sum += cxe.sum()
-            P_cx += 1.5 * (Ti - self.T_n) * EV * cxe.sum() / Vp       # each CX event replaces a hot ion (O25)
+            # ion energy: only 1+ -> 0 removes a hot ion (replaced by a cold D+); for z >= 2 the impurity
+            # ion stays in the plasma (thesis eq. 3.38 sums the 1+ states only; O25)
+            P_cx += 1.5 * (Ti - self.T_n) * EV * cxe[0] / Vp
         dN[f][0] -= cx_sum
         dN[f][1] += cx_sum
         # wall: fuel recycling (+ external fuelling) and impurity release by every ion species
@@ -436,13 +457,13 @@ class PlasmaModel:
             dy[self.iEi] = Vp * (P_equi - P_cx - P_icon)
         if self.circuit is None:
             V = self.vloop(t)
-            dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp
+            dy[self.iIp] = (V - Rp * Ip - dLp * Ip) / Lp_eff
         else:
-            dIs, dy[self.iIp], V = self.circuit.derivs(t, y[self.iIs:], Ip, Rp, Lp, dLp)
+            dIs, dy[self.iIp], V = self.circuit.derivs(t, y[self.iIs:], Ip, Rp, Lp_eff, dLp)
             dy[self.iIs:] = dIs
         return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
                 'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
-                'Rp': Rp, 'Lp': Lp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
+                'Rp': Rp, 'Lp': Lp, 'Lp_eff': Lp_eff, 'dLp_dt': dLp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
                 'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_icon': P_icon, 'Vp': Vp}
 
     def rhs(self, t, y):
