@@ -148,6 +148,8 @@ type, extends(flux_func) :: linterp_flux_func
   real(8), pointer, dimension(:) :: yp => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: y => NULL() !< Needs docs
   class(flux_func), pointer :: phi_wrapper => NULL() !< Enclosing @ref phi_flux_wrapper if `x` is on \f$ \hat{\Phi} \f$
+  logical :: cubic = .FALSE. !< Not-a-knot cubic spline through [0,`x`], [`y0`,`yp`] (C2) instead of linear
+  real(8), allocatable, dimension(:) :: m !< Spline slopes at [0,`x`] (`cubic` only) [0:npsi]
 contains
   !> Delete profile
   procedure :: delete => linterp_delete
@@ -222,16 +224,21 @@ end type wesson_flux_func
 !! 1 at the axis) as a cubic Hermite interpolant through flux surfaces with slopes
 !! \f$ J = d\hat{\Phi}/d\hat{\psi} = q/Q \f$. One map (`gs_equil%torflux`, created by @ref torflux_attach or `copy`)
 !! is shared by all @ref phi_flux_wrapper profiles of an equilibrium and rebuilt from q by `update`.
+!! If an attached profile is `cubic`, beyond the first surface the map is instead the exact integral of the
+!! not-a-knot cubic spline of \f$ q - b \ln(1-\hat{\psi}) \f$ (b = 0 unless diverted), so \f$ J \f$ is C2.
 !------------------------------------------------------------------------------
 TYPE, EXTENDS(gs_torflux_map) :: torflux_map
   LOGICAL :: active = .FALSE. !< Any profile attached? (see @ref torflux_setup)
   LOGICAL :: settle = .TRUE. !< Settle surface placement fully on the next update
+  LOGICAL :: cubic = .FALSE. !< Any attached profile `cubic`? (spline map from the next update)
   INTEGER(i4) :: ns = 0 !< Number of surfaces (identity map if < 2)
   INTEGER(i4) :: stamp = 0 !< Incremented on each map update
   REAL(r8) :: Q = 1.d0 !< \f$ \int_0^1 q d\hat{\psi} \f$
+  REAL(r8) :: bq = 0.d0 !< \f$ b/Q \f$ (spline map)
   REAL(r8), POINTER, DIMENSION(:) :: psis => NULL() !< \f$ 1-\hat{\psi} \f$ of each surface (ascending)
   REAL(r8), POINTER, DIMENSION(:) :: phihat => NULL() !< \f$ 1-\hat{\Phi} \f$ of each surface
   REAL(r8), POINTER, DIMENSION(:) :: jac => NULL() !< \f$ d\hat{\Phi}/d\hat{\psi} = q/Q \f$ of each surface
+  REAL(r8), POINTER, DIMENSION(:) :: dr => NULL() !< Spline slopes of \f$ J - (b/Q)\ln(1-\hat{\psi}) \f$ at surfaces 2:ns (spline map only)
   REAL(r8), POINTER, DIMENSION(:) :: nodes => NULL() !< Profile nodes the surfaces were placed for
   INTEGER(i4), POINTER, DIMENSION(:) :: bin => NULL() !< First interval of each uniform \f$ 1-\hat{\psi} \f$ bin
 CONTAINS
@@ -1004,6 +1011,7 @@ CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%yp,filename,path//'/YVALS')
 CALL hdf5_write(self%y0,filename,path//'/Y0')
+CALL linterp_save_interp(self,filename,path)
 end subroutine linterp_save_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -1011,7 +1019,7 @@ end subroutine linterp_save_hdf5
 subroutine linterp_save_txt(self,io_unit)
 class(linterp_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'linterp'
+WRITE(io_unit,*)'linterp'//linterp_interp_token(self)
 WRITE(io_unit,*)self%npsi,self%y0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%yp
@@ -1111,6 +1119,8 @@ SELECT TYPE(new)
     new%x=self%x
     new%yp=self%yp
     new%y=self%y
+    new%cubic=self%cubic
+    IF(ALLOCATED(self%m))new%m=self%m
 END SELECT
 end subroutine linterp_copy
 !------------------------------------------------------------------------------
@@ -1123,6 +1133,7 @@ self%ndofs=0
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+IF(ALLOCATED(self%m))DEALLOCATE(self%m)
 end subroutine linterp_delete
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -1140,7 +1151,9 @@ END IF
 b=0.d0
 IF(psihat<0.d0)RETURN
 !
-if(psihat<=self%x(1))then
+if(self%cubic.AND.(psihat<self%x(self%npsi)))then
+  b = linterp_cubic(self,psihat,-1)
+else if(psihat<=self%x(1))then
   b = psihat*(.5d0*psihat)/self%x(1)*(self%yp(1)-self%y0) + psihat*self%y0
 else if(psihat>=self%x(self%npsi))then
   b=self%y(self%npsi)+self%yp(self%npsi)*(psihat-self%x(self%npsi))
@@ -1173,7 +1186,9 @@ END IF
 b=0.d0
 IF(psihat<0.d0)RETURN
 !
-if(psihat<=self%x(1))then
+if(self%cubic.AND.(psihat<self%x(self%npsi)))then
+  b = linterp_cubic(self,psihat,0)
+else if(psihat<=self%x(1))then
   x = psihat/self%x(1)
   b = self%y0 + (self%yp(1)-self%y0)*x
 else if(psihat>=self%x(self%npsi))then
@@ -1204,7 +1219,9 @@ END IF
 b=0.d0
 IF(psihat<0.d0)RETURN
 !
-if(psihat<=self%x(1))then
+if(self%cubic.AND.(psihat<self%x(self%npsi)))then
+  b = linterp_cubic(self,psihat,1)/(self%plasma_bounds(2)-self%plasma_bounds(1))
+else if(psihat<=self%x(1))then
   x = 1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/self%x(1)
   b = (self%yp(1)-self%y0)*x
 else if(psihat>=self%x(self%npsi))then
@@ -1233,7 +1250,6 @@ end subroutine linterp_update
 function linterp_cofs_update(self,c) result(ierr)
 class(linterp_flux_func), intent(inout) :: self
 real(8), intent(in) :: c(:)
-real(8) :: x,xp
 integer(4) :: ierr
 integer(4) :: i,offset
 !---
@@ -1242,20 +1258,7 @@ IF(self%ndofs==self%npsi-1)offset=1
 DO i=1,self%ndofs
   self%yp(i+offset)=c(i)
 END DO
-!---
-DO i=1,self%npsi
-  x=self%x(i)
-  !---
-  IF(i==1)THEN
-    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
-  ELSE
-    xp=self%x(i-1)
-    self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
-               + xp*self%yp(i-1))
-    self%y(i)=x*(.5d0*x - xp)/(x - xp)*(self%yp(i) - self%yp(i-1)) + x*self%yp(i-1)
-    self%y(i)=self%y(i) + self%y(i-1)
-  END IF
-END DO
+CALL linterp_integrate(self)
 IF(oft_debug_print(2))THEN
   WRITE(*,'(2A)')oft_indent,'Update Linterp:'
   CALL oft_increase_indent
@@ -1282,6 +1285,97 @@ DO i=1,self%ndofs
 END DO
 end subroutine linterp_cofs_get
 !------------------------------------------------------------------------------
+!> Integrals `y` of the profile from 0 to each node and, if `cubic`, the spline slopes `m`
+!------------------------------------------------------------------------------
+SUBROUTINE linterp_integrate(self)
+CLASS(linterp_flux_func), INTENT(inout) :: self
+REAL(r8) :: x,xp
+INTEGER(i4) :: i
+IF(self%cubic)THEN
+  IF(self%npsi<3)CALL oft_abort('Cubic profiles need at least 3 nodes','linterp_integrate',__FILE__)
+  IF((self%x(1)<=0.d0).OR.ANY(self%x(2:self%npsi)<=self%x(1:self%npsi-1))) &
+    CALL oft_abort('Cubic profile nodes must be positive and increasing','linterp_integrate',__FILE__)
+  IF(ALLOCATED(self%m))DEALLOCATE(self%m)
+  ALLOCATE(self%m(0:self%npsi))
+  CALL cubic_slopes([0.d0,self%x],[self%y0,self%yp],self%m)
+  DO i=1,self%npsi
+    IF(i==1)THEN
+      self%y(1)=hermite_seg(self%y0,self%yp(1),self%m(0),self%m(1),self%x(1),1.d0,-1)
+    ELSE
+      self%y(i)=self%y(i-1)+hermite_seg(self%yp(i-1),self%yp(i),self%m(i-1),self%m(i), &
+        self%x(i)-self%x(i-1),1.d0,-1)
+    END IF
+  END DO
+  RETURN
+END IF
+DO i=1,self%npsi
+  x=self%x(i)
+  !---
+  IF(i==1)THEN
+    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+  ELSE
+    xp=self%x(i-1)
+    self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
+               + xp*self%yp(i-1))
+    self%y(i)=x*(.5d0*x - xp)/(x - xp)*(self%yp(i) - self%yp(i-1)) + x*self%yp(i-1)
+    self%y(i)=self%y(i) + self%y(i-1)
+  END IF
+END DO
+END SUBROUTINE linterp_integrate
+!------------------------------------------------------------------------------
+!> Cubic spline (`cubic`) at \f$ \hat{\psi} < \f$ `x(npsi)`: integral from 0 (`k`=-1), value (0)
+!! or derivative in \f$ \hat{\psi} \f$ (1)
+!------------------------------------------------------------------------------
+FUNCTION linterp_cubic(self,psihat,k) RESULT(b)
+CLASS(linterp_flux_func), INTENT(in) :: self
+REAL(r8), INTENT(in) :: psihat
+INTEGER(i4), INTENT(in) :: k
+REAL(r8) :: b,xa,ya
+INTEGER(i4) :: i
+i=1
+DO WHILE(psihat>self%x(i))
+  i=i+1
+END DO
+IF(i==1)THEN
+  xa=0.d0; ya=self%y0
+ELSE
+  xa=self%x(i-1); ya=self%yp(i-1)
+END IF
+b=hermite_seg(ya,self%yp(i),self%m(i-1),self%m(i),self%x(i)-xa,(psihat-xa)/(self%x(i)-xa),k)
+IF((k==-1).AND.(i>1))b=b+self%y(i-1)
+END FUNCTION linterp_cubic
+!------------------------------------------------------------------------------
+!> Switch a linterp-family profile to the cubic spline (eg. after loading it), see @ref linterp_flux_func::cubic
+!------------------------------------------------------------------------------
+SUBROUTINE linterp_set_cubic(F)
+CLASS(flux_func), INTENT(inout) :: F
+SELECT TYPE(F)
+  CLASS IS(linterp_flux_func)
+    F%cubic=.TRUE.
+    CALL linterp_integrate(F)
+  CLASS DEFAULT
+    CALL oft_abort('Cubic interpolation needs a linterp, mlinterp or jphi profile','linterp_set_cubic',__FILE__)
+END SELECT
+END SUBROUTINE linterp_set_cubic
+!------------------------------------------------------------------------------
+!> Save the interpolation of a linterp-family profile to HDF5 (`INTERP` = 1 if cubic, absent if linear)
+!------------------------------------------------------------------------------
+SUBROUTINE linterp_save_interp(self,filename,path)
+CLASS(linterp_flux_func), INTENT(in) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
+IF(self%cubic)CALL hdf5_write(1_i4,filename,path//'/INTERP')
+END SUBROUTINE linterp_save_interp
+!------------------------------------------------------------------------------
+!> Interpolation token for the first line of a saved text profile (" cubic", empty if linear)
+!------------------------------------------------------------------------------
+FUNCTION linterp_interp_token(self) RESULT(tok)
+CLASS(linterp_flux_func), INTENT(in) :: self
+CHARACTER(LEN=:), ALLOCATABLE :: tok
+tok=''
+IF(self%cubic)tok=' cubic'
+END FUNCTION linterp_interp_token
+!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 subroutine mlinterp_save_hdf5(self,filename,path)
@@ -1294,6 +1388,7 @@ CALL hdf5_write(self%weights,filename,path//'/WEIGHTS')
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%yp_basis,filename,path//'/YVALS_BASIS')
+CALL linterp_save_interp(self,filename,path)
 end subroutine mlinterp_save_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -1302,7 +1397,7 @@ subroutine mlinterp_save_txt(self,io_unit)
 class(mlinterp_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
 integer(4) :: i
-WRITE(io_unit,*)'mlinterp'
+WRITE(io_unit,*)'mlinterp'//linterp_interp_token(self)
 WRITE(io_unit,*)self%npsi
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%nbasis
@@ -1414,6 +1509,8 @@ SELECT TYPE(new)
     new%x=self%x
     new%yp=self%yp
     new%y=self%y
+    new%cubic=self%cubic
+    IF(ALLOCATED(self%m))new%m=self%m
     new%nbasis=self%nbasis
     ALLOCATE(new%weights(new%nbasis-1),new%yp_basis(new%npsi+1,new%nbasis))
     new%weights=self%weights
@@ -1431,6 +1528,7 @@ self%nbasis=0
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+IF(ALLOCATED(self%m))DEALLOCATE(self%m)
 IF(ASSOCIATED(self%weights))DEALLOCATE(self%weights)
 IF(ASSOCIATED(self%yp_basis))DEALLOCATE(self%yp_basis)
 end subroutine mlinterp_delete
@@ -1448,7 +1546,6 @@ end subroutine mlinterp_update
 function mlinterp_cofs_update(self,c) result(ierr)
 class(mlinterp_flux_func), intent(inout) :: self
 real(8), intent(in) :: c(:)
-real(8) :: x,xp
 integer(4) :: ierr
 integer(4) :: i
 !---
@@ -1461,19 +1558,7 @@ DO i=2,self%nbasis
 END DO
 ! WRITE(*,*)'mLinterp set: ',self%y0
 ! WRITE(*,*)'  yp: ',self%yp
-!---
-DO i=1,self%npsi
-  x=self%x(i)
-  IF(i==1)THEN
-    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
-  ELSE
-    xp=self%x(i-1)
-    self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
-               + xp*self%yp(i-1))
-    self%y(i)=x*(.5d0*x - xp)/(x - xp)*(self%yp(i) - self%yp(i-1)) + x*self%yp(i-1)
-    self%y(i)=self%y(i) + self%y(i-1)
-  END IF
-END DO
+CALL linterp_integrate(self)
 IF(oft_debug_print(2))THEN
   WRITE(*,'(2A)')oft_indent,'Update Multi-linear interpolator:'
   CALL oft_increase_indent
@@ -1693,6 +1778,10 @@ SELECT TYPE(F)
       TYPE IS(torflux_map)
         F%map=>map
         map%active=.TRUE.
+        SELECT TYPE(rep=>F%phi_rep)
+          CLASS IS(linterp_flux_func)
+            map%cubic=map%cubic.OR.rep%cubic
+        END SELECT
     END SELECT
 END SELECT
 END SUBROUTINE torflux_attach
@@ -1706,6 +1795,7 @@ IF(ASSOCIATED(gseq%torflux))THEN
   SELECT TYPE(map=>gseq%torflux)
     TYPE IS(torflux_map)
       map%active=.FALSE. ! Set again by any profile on toroidal flux
+      map%cubic=.FALSE. ! Set again by any cubic profile on toroidal flux
       IF(PRESENT(resettle))map%settle=map%settle.OR.resettle
   END SELECT
 END IF
@@ -2080,6 +2170,15 @@ hi=lo+1
 !---Cubic Hermite on [lo,hi]
 h=self%psis(hi)-self%psis(lo)
 u=(psihat-self%psis(lo))/h
+!---Spline map: J is the spline of the regular part of q/Q plus its log term
+IF(ASSOCIATED(self%dr).AND.(lo>1))THEN
+  pa=self%jac(lo)-self%bq*LOG(self%psis(lo)); pb=self%jac(hi)-self%bq*LOG(self%psis(hi))
+  phihat=self%phihat(lo) + hermite_seg(pa,pb,self%dr(lo),self%dr(hi),h,u,-1) &
+    + self%bq*(xlogx(psihat)-xlogx(self%psis(lo)))
+  jac=hermite_seg(pa,pb,self%dr(lo),self%dr(hi),h,u,0) + self%bq*LOG(psihat)
+  IF(PRESENT(djac))djac=hermite_seg(pa,pb,self%dr(lo),self%dr(hi),h,u,1) + self%bq/psihat
+  RETURN
+END IF
 pa=self%phihat(lo); pb=self%phihat(hi)
 ma=self%jac(lo)*h; mb=self%jac(hi)*h
 phihat=(2.d0*u**3-3.d0*u**2+1.d0)*pa + (u**3-2.d0*u**2+u)*ma &
@@ -2133,6 +2232,7 @@ CLASS(torflux_map), INTENT(inout) :: self
 IF(ASSOCIATED(self%psis))DEALLOCATE(self%psis)
 IF(ASSOCIATED(self%phihat))DEALLOCATE(self%phihat)
 IF(ASSOCIATED(self%jac))DEALLOCATE(self%jac)
+IF(ASSOCIATED(self%dr))DEALLOCATE(self%dr)
 IF(ASSOCIATED(self%nodes))DEALLOCATE(self%nodes)
 IF(ASSOCIATED(self%bin))DEALLOCATE(self%bin)
 self%ns=0
@@ -2149,12 +2249,14 @@ ALLOCATE(torflux_map::new_gs%torflux)
 SELECT TYPE(new=>new_gs%torflux)
   TYPE IS(torflux_map)
     new%Q=self%Q
+    new%bq=self%bq
     new%ns=self%ns
     new%stamp=self%stamp
     IF(self%ns>0)THEN
       ALLOCATE(new%psis,SOURCE=self%psis)
       ALLOCATE(new%phihat,SOURCE=self%phihat)
       ALLOCATE(new%jac,SOURCE=self%jac)
+      IF(ASSOCIATED(self%dr))ALLOCATE(new%dr,SOURCE=self%dr)
       CALL tmap_index(new)
     END IF
     IF(ASSOCIATED(self%nodes))ALLOCATE(new%nodes,SOURCE=self%nodes)
@@ -2328,12 +2430,16 @@ DO ip=1,npass
     !---Integrate r = q - b*ln(s) by Hermite quadrature and b*ln(s) exactly
     r(1)=q(1)
     r(2:n)=q(2:n)-b*LOG(psis(2:n))
-    DO i=3,n-2
-      dq(i)=fd_deriv(psis(i-1:i+1),r(i-1:i+1),2)
-    END DO
-    dq(2)=fd_deriv(psis(2:4),r(2:4),1)
-    dq(n-1)=fd_deriv(psis(n-2:n),r(n-2:n),2)
-    dq(n)=fd_deriv(psis(n-2:n),r(n-2:n),3)
+    IF(self%cubic)THEN
+      CALL cubic_slopes(psis(2:n),r(2:n),dq(2:n)) ! Spline map: its own slopes
+    ELSE
+      DO i=3,n-2
+        dq(i)=fd_deriv(psis(i-1:i+1),r(i-1:i+1),2)
+      END DO
+      dq(2)=fd_deriv(psis(2:4),r(2:4),1)
+      dq(n-1)=fd_deriv(psis(n-2:n),r(n-2:n),2)
+      dq(n)=fd_deriv(psis(n-2:n),r(n-2:n),3)
+    END IF
     cum(1)=0.d0
     IF(gseq%diverted)THEN
       cum(2)=r(2)*psis(2)+b*xlogx(psis(2))
@@ -2361,6 +2467,12 @@ DO ip=1,npass
     self%psis=psis
     self%phihat=cum/cum(n)
     self%jac=q/cum(n)
+    self%bq=b/cum(n)
+    IF(ASSOCIATED(self%dr))DEALLOCATE(self%dr)
+    IF(self%cubic)THEN
+      ALLOCATE(self%dr(2:n))
+      self%dr=dq(2:n)/cum(n)
+    END IF
     self%stamp=self%stamp+1
     CALL tmap_index(self)
     IF(gseq%I%coord()==0)EXIT
@@ -2410,7 +2522,7 @@ CALL oft_warn('Toroidal flux map update failed ('//reason//'), keeping previous 
 gseq%torflux_ierr=1
 CALL build_all_fint
 END SUBROUTINE tmap_failed
-!---Collect the nodes of a wrapped profile (piecewise-linear profiles only)
+!---Collect the nodes of a wrapped profile (linterp family, linear or cubic)
 SUBROUTINE add_nodes(F)
 CLASS(flux_func), POINTER, INTENT(in) :: F
 IF(.NOT.ASSOCIATED(F))RETURN
@@ -2422,12 +2534,6 @@ SELECT TYPE(F)
     END SELECT
 END SELECT
 END SUBROUTINE add_nodes
-!---Antiderivative of ln(s)
-PURE FUNCTION xlogx(s) RESULT(v)
-REAL(r8), INTENT(in) :: s
-REAL(r8) :: v
-v=s*LOG(s)-s
-END FUNCTION xlogx
 !---Replace failed traces (g=-1.d99) by linear interpolation, .FALSE. if too few remain
 FUNCTION fill_failed() RESULT(ok)
 LOGICAL :: ok
@@ -2494,6 +2600,46 @@ DO i=2,SIZE(x)
 END DO
 x=x(1:m)
 END SUBROUTINE sort_unique
+!------------------------------------------------------------------------------
+!> Slopes at the knots of the not-a-knot cubic spline through (`x`,`y`) (`x` increasing, at least 4 knots)
+!------------------------------------------------------------------------------
+SUBROUTINE cubic_slopes(x,y,m)
+REAL(r8), INTENT(in) :: x(:),y(:)
+REAL(r8), INTENT(out) :: m(:)
+TYPE(spline_type) :: spl
+CALL spline_alloc(spl,SIZE(x)-1,1)
+spl%xs=x
+spl%fs(:,1)=y
+CALL spline_fit(spl,"not-a-knot")
+m=spl%fs1(:,1)
+CALL spline_dealloc(spl)
+END SUBROUTINE cubic_slopes
+!------------------------------------------------------------------------------
+!> Cubic Hermite segment of width `h` (end values `ya`, `yb`, slopes `ma`, `mb`) at `t` in [0,1]:
+!! integral from the segment start (`k`=-1), value (0) or derivative (1)
+!------------------------------------------------------------------------------
+PURE FUNCTION hermite_seg(ya,yb,ma,mb,h,t,k) RESULT(b)
+REAL(r8), INTENT(in) :: ya,yb,ma,mb,h,t
+INTEGER(i4), INTENT(in) :: k
+REAL(r8) :: b
+SELECT CASE(k)
+  CASE(-1)
+    b=h*(ya*t*(1.d0-t**2+t**3/2.d0) + yb*t**3*(1.d0-t/2.d0) &
+      + h*(ma*t**2*(.5d0-2.d0*t/3.d0+t**2/4.d0) + mb*t**3*(t/4.d0-1.d0/3.d0)))
+  CASE(0)
+    b=ya*(1.d0-3.d0*t**2+2.d0*t**3) + yb*t**2*(3.d0-2.d0*t) + h*(ma*t*(1.d0-t)**2 + mb*t**2*(t-1.d0))
+  CASE DEFAULT
+    b=6.d0*t*(t-1.d0)*(ya-yb)/h + ma*(1.d0-t)*(1.d0-3.d0*t) + mb*t*(3.d0*t-2.d0)
+END SELECT
+END FUNCTION hermite_seg
+!------------------------------------------------------------------------------
+!> Antiderivative of \f$ \ln s \f$
+!------------------------------------------------------------------------------
+PURE FUNCTION xlogx(s) RESULT(v)
+REAL(r8), INTENT(in) :: s
+REAL(r8) :: v
+v=s*LOG(s)-s
+END FUNCTION xlogx
 !------------------------------------------------------------------------------
 !> Quadratic (3-point Lagrange) interpolation/extrapolation
 !------------------------------------------------------------------------------
