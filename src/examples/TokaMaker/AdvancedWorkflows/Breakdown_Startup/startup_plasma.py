@@ -31,6 +31,9 @@ from scipy.interpolate import RegularGridInterpolator
 EV = 1.602176634e-19        # J per eV
 AMU = 1.66053907e-27        # kg
 MU0 = 4e-7 * np.pi
+ME = 9.1093837e-31           # kg
+EPS0 = 8.8541878128e-12     # F/m
+C_LIGHT = 2.99792458e8      # m/s
 ETA_SPITZER = 5.2649e-5     # parallel Spitzer resistivity coefficient [Ohm m eV^1.5] (K20 sec. 2.3.1)
 EQUI_COEF = 7.75e-34        # electron-ion equilibration [W m^3 eV^0.5 amu] (thesis eq. 3.33)
 
@@ -347,7 +350,22 @@ class PlasmaModel:
                          the one-way thermal flux n_out v/4 across its surface A_p and are ionized inside, so the
                          density inside is n_in = n_out k / (k + ne S_0), k = v A_p / (4 V_p) (quasi-steady: the
                          neutral transit time a/v ~ 0.4 ms); N_0 = n_out (V_V - V_p) + n_in V_p; the fuel enters as
-                         D2 (H2) molecules at T_n (v of the molecule, 2 atoms each), impurities as atoms
+                         D2 (H2) molecules at T_n (v of the molecule, 2 atoms each), impurities as atoms;
+                         or 'sol' (two-zone core/edge option): as 'kinetic', but the neutrals first cross a
+                         scrape-off layer of open lines outside the plasma region, of width
+                         delta = sqrt(D_perp L_sol / C_s) (D_perp = T_e / (8 B), DYON's tau_perp convention;
+                         L_sol from geometry 'L_sol', the open lines next to the region, else L_sol below).
+                         A fraction 1 - exp(-delta / lambda) (lambda = v / (ne S_0)) is ionized there; those
+                         ions reach the wall in L_sol / C_s and recycle, so they do not fuel the core, but
+                         the electrons pay their ionization and line radiation (P_sol). SOL T_e, n_e: the
+                         core values (0D)
+        L_sol            connection length [m] of the scrape-off layer when the geometry gives none
+        ec               electron cyclotron heating (option): dict(P=callable t -> injected power [W], freq [Hz]
+                         (110e9), harmonic (2), R_wall (wall reflectivity for multiple passes, 0.9), c (pi)).
+                         Absorbed power P f with f = (1 - exp(-tau)) / (1 - R_wall exp(-tau)) and the single-pass
+                         optical depth tau = c (w_pe / w)^2 (T_e / m_e c^2) (w R / c) (low-density X2, Bornatici
+                         et al. 1983 scaling; the prefactor c is order unity); f = 0 unless the resonance
+                         R_res = harmonic e B_phi R / (m_e w) lies in [R - a, R + a]. Added to paux
         dis_per_cx       also pay E_dis per charge exchange of a fuel atom (each CX replaces the atom by a newly
                          dissociated one: strict energy conservation, the pessimistic bound); False: per ionization
         shrink           when V_p falls: 'compress' (K22 eq. 8: the ions and their energy stay, so the
@@ -363,8 +381,10 @@ class PlasmaModel:
     def __init__(self, fuel='d', impurities=('c', 'o'), wall=None, V_V=35.0, T_n=0.026, lnL=10.0, li=0.5,
                  inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None, circuit=None,
                  shrink='compress', T_cx=None, E_dis=0.0, dis_per_cx=False,
-                 neutrals='uniform'):
-        if neutrals not in ('uniform', 'kinetic'):
+                 neutrals='uniform', L_sol=30.0, ec=None):
+        self.L_sol = L_sol
+        self.ec = None if ec is None else dict({'freq': 110e9, 'harmonic': 2, 'R_wall': 0.9, 'c': np.pi}, **ec)
+        if neutrals not in ('uniform', 'kinetic', 'sol'):
             raise ValueError(f'unknown neutrals {neutrals!r}')
         self.T_cx, self.E_dis, self.dis_per_cx, self.neutrals = (T_n if T_cx is None else T_cx), E_dis, dis_per_cx, neutrals
         if shrink not in ('compress', 'lose'):
@@ -439,14 +459,25 @@ class PlasmaModel:
                 Vn.append(Vp)
             gam.append(1 - (Vp - Vn[-1]) / self.V_V)
         n0 = [n[0] / (g * self.V_V) for n, g in zip(N, gam)]
-        if self.neutrals == 'kinetic':                        # influx-limited neutrals inside the plasma
+        sol_iz = [0.0] * len(self.species)                    # ionizations per second in the SOL (recycled)
+        delta_sol = 0.0
+        if self.neutrals in ('kinetic', 'sol'):               # influx-limited neutrals inside the plasma
             A_p = 4 * np.pi ** 2 * R * a * np.sqrt((1 + kappa ** 2) / 2)
             Vo = max(self.V_V - Vp, 1e-3)
+            if self.neutrals == 'sol':
+                L_sol = geo.get('L_sol', np.nan)
+                L_sol = L_sol if np.isfinite(L_sol) and L_sol > 0 else self.L_sol
+                Cs0 = np.sqrt((Te + Ti) * EV / self.m_fuel)
+                delta_sol = np.sqrt(Te / (8 * abs(Bphi)) * L_sol / Cs0)
             for i, (s, rs) in enumerate(zip(self.species, r)):
                 m_n = (2 if i == 0 else 1) * s.mass_amu * AMU
-                k_in = np.sqrt(8 * self.T_n * EV / (np.pi * m_n)) * A_p / (4 * Vp)
+                v_in = np.sqrt(8 * self.T_n * EV / (np.pi * m_n))
+                k_in = v_in * A_p / (4 * Vp)
                 f_in = k_in / (k_in + ne * rs['S'][0])
-                n0[i] = N[i][0] / (Vo + Vp * f_in) * f_in   # n_in
+                att = np.exp(-delta_sol * ne * rs['S'][0] / v_in)            # transmitted through the SOL
+                n_out = N[i][0] / (Vo + Vp * att * f_in)
+                n0[i] = n_out * att * f_in                   # n_in
+                sol_iz[i] = (1 - att) * k_in * Vp * n_out
                 Vn[i], gam[i] = Vp, 1.0
         nz = [n / Vp for n in N]                              # entry 0 unused for ions
         # transport (thesis eq. 3.49-3.54; K22 eq. 17)
@@ -467,12 +498,14 @@ class PlasmaModel:
         # sources and powers
         f = 0                                                 # fuel index
         dN = [np.zeros(len(n)) for n in N]
-        P_iz = P_rad = P_equi = P_cx = P_fc = 0.0
+        P_iz = P_rad = P_equi = P_cx = P_fc = P_sol = 0.0
         cx_sum = 0.0                                          # sum over impurity ions of cx n  [1/s] per fuel neutral
         for i, (s, rs) in enumerate(zip(self.species, r)):
             Z, W = s.Z, s.W
             S, al, plt, prb = rs['S'], rs['alpha'], rs['plt'], rs['prb']
             cx = cx_rate[i]
+            if sol_iz[i] > 0:                                 # SOL ionization of the influx: energy only
+                P_sol += sol_iz[i] * ((W[0] + (self.E_dis if i == 0 else 0.0)) * EV + plt[0] / S[0]) / Vp
             # ionization and recombination between z and z+1 (z = 0: neutrals in V_n)
             for z in range(Z):
                 V_src = Vn[i] if z == 0 else Vp
@@ -519,12 +552,21 @@ class PlasmaModel:
         # energy
         P_oh = Ip ** 2 * Rp / Vp
         P_aux = 0.0 if self.paux is None else self.paux(t) / Vp
+        f_ec = 0.0
+        if self.ec is not None:
+            ec = self.ec
+            w = 2 * np.pi * ec['freq']
+            R_res = ec['harmonic'] * EV * abs(Bphi) * R / (ME * w)
+            if R - a <= R_res <= R + a:
+                tau_ec = ec['c'] * ne * EV ** 2 / (EPS0 * ME * w ** 2) * Te * EV / (ME * C_LIGHT ** 2) * w * R / C_LIGHT
+                f_ec = (1 - np.exp(-tau_ec)) / (1 - ec['R_wall'] * np.exp(-tau_ec))
+            P_aux += f_ec * ec['P'](t) / Vp
         P_econ = 1.5 * ne * Te * EV / tau
         ni = Ni / Vp
         P_icon = 1.5 * ni * Ti * EV / tau
         dy = np.concatenate(dN + [np.zeros(self.n_state - self.iEe)])
         if self.fixed_T is None:
-            dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ) - shrink * y[self.iEe]
+            dy[self.iEe] = Vp * (P_oh + P_aux - P_iz - P_rad - P_equi - P_econ - P_sol) - shrink * y[self.iEe]
             dy[self.iEi] = Vp * (P_equi + P_fc - P_cx - P_icon) - shrink * y[self.iEi]
         if self.circuit is None:
             V = self.vloop(t)
@@ -535,7 +577,7 @@ class PlasmaModel:
         return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
                 'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
                 'Rp': Rp, 'Lp': Lp, 'Lp_eff': Lp_eff, 'dLp_dt': dLp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
-                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_fc': P_fc, 'P_icon': P_icon, 'Vp': Vp,
+                'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_fc': P_fc, 'P_sol': P_sol, 'delta_sol': delta_sol, 'f_ec': f_ec, 'P_icon': P_icon, 'Vp': Vp,
                 'shrink_rate': shrink}
 
     def rhs(self, t, y):
@@ -736,6 +778,8 @@ class FieldLineMap:
                             r_vol (distance from it to the first wall), kappa = min(A/(pi r^2),
                             (Z_max - Z_min)/(2 r)) (K22 sec. 2.2), f_closed (volume fraction closed)
             L_open          mean length of the open mid-plane lines in the plasma [m] (K22 eq. 17)
+            L_sol           mean length of the open mid-plane lines next to the plasma region, on either
+                            side (the scrape-off layer; nan if none), for PlasmaModel(neutrals='sol')
             f_open          their fraction of the mid-plane lines in the plasma
             Lf              effective parallel length for tau_par = Lf / C_s: 'loss_fraction' L_open /
                             f_open (only the open fraction loses particles; closed lines have
@@ -872,6 +916,10 @@ class FieldLineMap:
             in_pl &= mid['held'] | ~mid['open']
         op = in_pl & mid['open'] & np.isfinite(mid['L'])
         out['f_open'] = float(op.sum() / max(in_pl.sum(), 1))
+        ip = np.where(plasma[km, jm] & (tm >= 0))[0]                 # SOL: open mid-plane lines next to the region
+        Ls = [mid['L'][j] for j in ((ip.min() - 1, ip.max() + 1) if ip.size else ())
+              if 0 <= j < n_mid and mid['open'][j] and np.isfinite(mid['L'][j])]
+        out['L_sol'] = float(np.mean(Ls)) if Ls else np.nan
         out['L_open'] = float(mid['L'][op].mean()) if op.any() else np.inf
         if not op.any():
             out['Lf'] = np.inf
@@ -1062,7 +1110,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     circ = model.circuit
     M_saved = circ._M
     nc = circ.nc
-    keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed')
+    keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed', 'L_sol')
     maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp') + keys}
     held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
@@ -1091,7 +1139,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
 
     def geo_of(o):
         return {'R': o['R_vol'], 'a': o['r_vol'], 'kappa': o['kappa'], 'Vp': o['Vp'], 'Bphi': abs(fmap.F0) / o['R_vol'],
-                'Lf': min(o['Lf'], 1e7)}
+                'Lf': min(o['Lf'], 1e7), 'L_sol': o['L_sol']}
 
     # vacuum until the first Townsend breakdown
     f = lambda t, I: circ.K_ss @ (-circ.M_sc @ circ.coil_rate(t) - circ.R_s * I)
