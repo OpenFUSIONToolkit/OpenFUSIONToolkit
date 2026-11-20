@@ -43,16 +43,18 @@
 !! not change with the time step or element order, so it is not the gravitational instability and is
 !! still under investigation.
 !!
-!! \warning Even without the Hall term, a second mode, seeded by the small force imbalance of the discrete
-!! equilibrium, grows at \f$ \gamma \approx 0.0066 \Omega_i \f$ for all \f$ \beta \f$ at the default
-!! resolution. It dominates the late stage of runs for \f$ \beta \gtrsim 2.5 \times 10^{-3} \f$, where the
-!! gravitational mode is slow or stable. It needs both gyroviscosity and a non-uniform equilibrium,
-!! but not gravity, and it grows faster at higher resolution (\f$ \gamma \approx 0.019 \Omega_i \f$ with twice
-!! the cells in \f$ x \f$ and \f$ z \f$), so it is numerical and still under investigation. For
-!! \f$ \beta \le 2 \times 10^{-3} \f$ the gravitational mode dominates and its growth rate agrees with
-!! Eq. 15 to within about 2%. At these lower \f$ \beta \f$ the runs may still fail near the end (the time
-!! step collapses once the kinetic energy reaches about \f$ 10^{-9} \f$). To avoid this late stage, and the
-!! second mode at higher \f$ \beta \f$, `run_scan.py` fits \f$ \ln E_k \f$ only over the exponential growth
+!! \warning Even without the Hall term, a second mode grows at \f$ \gamma \approx 0.007 \Omega_i \f$ for all
+!! \f$ \beta \f$ at the default resolution. It grows from round-off: with no perturbation (`eps=0`) and the
+!! initial field projection converged (kinetic energy after the first step about \f$ 2 \times 10^{-26} \f$),
+!! it reaches the same amplitude as with the default `eps`, so tightening the initial force balance does
+!! not remove it. It overtakes the gravitational mode late in runs with \f$ \beta \gtrsim 2.5 \times 10^{-3} \f$,
+!! where that mode is slow or stable (at \f$ \beta = 3 \times 10^{-3} \f$, stable by Eq. 15, the fit returns this
+!! mode). It needs both gyroviscosity and a non-uniform equilibrium, but not gravity, and it grows faster at
+!! higher resolution (\f$ \gamma \approx 0.019 \Omega_i \f$ with twice the cells in \f$ x \f$ and \f$ z \f$),
+!! so it is numerical and still under investigation. For \f$ \beta \le 2.5 \times 10^{-3} \f$ the measured
+!! growth rate agrees with Eq. 15 to within about 2%. Runs may still fail near the end (at
+!! \f$ \beta = 10^{-3} \f$ the time step collapses once the kinetic energy reaches about \f$ 10^{-9} \f$).
+!! To avoid this late stage, and the second mode at higher \f$ \beta \f$, `run_scan.py` fits \f$ \ln E_k \f$ only over the exponential growth
 !! phase, the longest part of the run where its slope is constant to within 10% (`--fit-tol`), and prints
 !! that window. Still check the kinetic energy history in `xmhd.hist` before trusting a measured growth rate.
 !!
