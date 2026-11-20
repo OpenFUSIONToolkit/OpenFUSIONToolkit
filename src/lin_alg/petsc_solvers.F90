@@ -1591,8 +1591,9 @@ end subroutine asprecond_setup
 !! object array (`[PETSC_NULL_IS]`) to `NULL`, which causes PETSc to use
 !! invalid index sets.
 !!
-!! @note On exit the index sets in `is_parts` have been destroyed (references
-!! are retained by the preconditioner)
+!! @note On exit the index sets in `is_parts` have been destroyed. This is safe
+!! for all supported PETSc versions (3.20+), as `PCASMSetLocalSubdomains` takes
+!! its own reference to each index set.
 !------------------------------------------------------------------------------
 SUBROUTINE asm_set_local_subdomains(pc,mat,overlap,is_parts)
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
@@ -1624,8 +1625,9 @@ END SUBROUTINE asm_set_local_subdomains
 !! `MatIncreaseOverlapSplit`, instead of passing `PETSC_NULL_IS` (see
 !! @ref asm_set_local_subdomains).
 !!
-!! @note On exit the index sets in `is_parts` have been destroyed (references
-!! are retained by the preconditioner)
+!! @note On exit the index sets in `is_parts` have been destroyed. This is safe
+!! for all supported PETSc versions (3.20+), as `PCGASMSetSubdomains` takes
+!! its own reference to each index set.
 !------------------------------------------------------------------------------
 SUBROUTINE gasm_set_subdomains(pc,mat,overlap,is_parts)
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object

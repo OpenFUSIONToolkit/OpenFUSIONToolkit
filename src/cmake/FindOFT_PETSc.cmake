@@ -8,8 +8,8 @@
 #    OFT_PETSc_FOUND
 #    OFT_PETSc_INCLUDE_DIRS
 #    OFT_PETSc_LIBRARIES
-#    OFT_PETSc_VERSION_MAJOR
-#    OFT_PETSc_VERSION_MINOR
+#    OFT_PETSc_VER_MAJOR
+#    OFT_PETSc_VER_MINOR
 #
 # Additionally the following packages may be found
 #

@@ -8,7 +8,7 @@ from oft_testing import run_OFT
 # Basic template for input file
 oft_in_template = """
 &runtime_options
- ppn=1
+ ppn={2}
  debug=0
  test_run=T
  use_petsc={0}
@@ -34,14 +34,14 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc=False, nprocs=1):
+def xml_setup(xml_file, petsc=False, nprocs=1, ppn=1):
     os.chdir(test_dir)
     petsc_flag=('T' if petsc else 'F')
     nbase = 3
     if nprocs > 1:
         nbase = 2 # Distribute finest level for MPI runs
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(petsc_flag,nbase))
+        fid.write(oft_in_template.format(petsc_flag,nbase,ppn))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
     return run_OFT("./test_solver_xml oft.in oft_in.xml", nprocs, 60)
@@ -134,7 +134,7 @@ def test_cg_jacobi(petsc_flag):
 @pytest.mark.parametrize("nlocal,overlap,iteration_count", (
     (-1, 0, 1),
     (2, 0, 100),
-    (2, 1, 1),
+    pytest.param(2, 1, 1, marks=pytest.mark.coverage),
 ))
 def test_gmres_petsc_asm(nlocal, overlap, iteration_count):
     xml_file = """
@@ -153,7 +153,7 @@ def test_gmres_petsc_asm(nlocal, overlap, iteration_count):
 
 #============================================================================
 # PETSc additive Schwarz/block Jacobi with explicitly defined local subdomains (MPI)
-# (full_node=1 uses node-spanning subdomains with PCGASM)
+# (full_node=1 uses node subdomains with PCGASM, but with ppn=1 each node is a single process)
 @pytest.mark.mpi
 @pytest.mark.parametrize("nlocal,overlap,full_node,iteration_count", (
     (-1, 0, 0, 38),
@@ -177,4 +177,30 @@ def test_gmres_petsc_asm_mpi(nlocal, overlap, full_node, iteration_count):
     """.format(nlocal, overlap, full_node)
     converged_error = 0.6394036978170452
     assert xml_setup(xml_file,petsc=True,nprocs=2)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# PETSc GASM with node subdomains spanning both processes (ppn=2), using a
+# symmetric Jacobi sub-solver as the subdomain matrices are parallel
+# (nlocal=-1 uses field-based subdomains, which do not support overlap)
+@pytest.mark.mpi
+@pytest.mark.parametrize("nlocal,overlap,iteration_count", (
+    (-1, 0, 42),
+    pytest.param(1, 1, 39, marks=pytest.mark.coverage),
+))
+def test_gmres_petsc_gasm_node_mpi(nlocal, overlap, iteration_count):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>{0}</nlocal>
+            <overlap>{1}</overlap>
+            <full_node>1</full_node>
+            <solver type="sjacobi"><its>2</its></solver>
+        </pre>
+    </solver>
+    """.format(nlocal, overlap)
+    converged_error = 0.6394036978170452
+    assert xml_setup(xml_file,petsc=True,nprocs=2,ppn=2)
     assert validate_result(iteration_count,converged_error)
