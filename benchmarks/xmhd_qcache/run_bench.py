@@ -37,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OFT_IN = """&runtime_options
  ppn=1
  debug={debug}
+ use_petsc={petsc}
 /
 
 &mesh_options
@@ -217,7 +218,7 @@ def write_inputs(case, run_dir, src_dir, args):
     xmhd_extra = ''.join(' {0}\n'.format(o) for o in args.xmhd_opt)
     bench_extra = ''.join(' {0}\n'.format(o) for o in args.bench_opt)
     with open(os.path.join(run_dir, 'oft.in'), 'w') as fid:
-        fid.write(OFT_IN.format(debug=args.debug, mesh_options=mesh['mesh_options'],
+        fid.write(OFT_IN.format(debug=args.debug, petsc='T' if args.petsc else 'F', mesh_options=mesh['mesh_options'],
                                 extra_mesh_groups=mesh['extra_mesh_groups'], order=case['order'],
                                 minlev=fe_minlev(case), mode=case['mode'], prof_reps=case['prof_reps'],
                                 lam=mesh['lam'], bench_extra=bench_extra, dt=case['dt'], nsteps=max(1, case['nsteps']),
@@ -473,6 +474,8 @@ def main():
                         help='Extra entry for &xmhd_bench_options (repeatable)')
     parser.add_argument('--pre', default='ilu', choices=('ilu', 'lu'),
                         help='Local solver in block-Jacobi preconditioner/smoother (lu: SuperLU, slow at p>=3)')
+    parser.add_argument('--petsc', action='store_true',
+                        help='Use the PETSc linear algebra backend (use_petsc=T; OFT must be built with PETSc)')
     parser.add_argument('--prof-reps', default=None,
                         help='Override profile-mode repetitions "builds,nlops_per_build,matvecs_per_nlop" '
                              '(eg. 5,0,0 for builds only; 1,100,0 for NL residual only)')
@@ -511,7 +514,7 @@ def main():
     out = args.out or os.path.join(HERE, 'results', args.tag + '.json')
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     meta = machine_info(args)
-    meta.update({'prof_reps': args.prof_reps, 'pre': args.pre, 'size': args.size, 'tag': args.tag, 'exe': exe, 'xmhd_opt': args.xmhd_opt, 'bench_opt': args.bench_opt})
+    meta.update({'prof_reps': args.prof_reps, 'pre': args.pre, 'petsc': args.petsc, 'size': args.size, 'tag': args.tag, 'exe': exe, 'xmhd_opt': args.xmhd_opt, 'bench_opt': args.bench_opt})
     records = []
     for case in cases:
         print('Running {0} ...'.format(case['name']), flush=True)

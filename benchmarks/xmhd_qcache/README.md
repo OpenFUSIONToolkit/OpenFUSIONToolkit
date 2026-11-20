@@ -76,6 +76,8 @@ Useful options:
   functions to exercise those code paths).
 - `--pre {ilu,lu}`: local solver of the block-Jacobi preconditioner/MG smoother. `lu` needs >8 GB and >10 min to
   factor the p=3 run case on 4 cores.
+- `--petsc`: use the PETSc linear algebra backend (`use_petsc=T`; OFT must be built with PETSc). The same XML
+  preconditioners are used (block-Jacobi becomes PETSc's additive Schwarz without overlap).
 - `--perf` (with `--perf-exe` if `perf` is not on `PATH`): wrap serial cases in `perf record` and write
   `perf_report.txt` (self time) and `perf_children.txt` next to `output.log`.
 - `--debug 1`: OFT debug output, which includes per-level Jacobian build times for every call.

@@ -4838,17 +4838,19 @@ END SUBROUTINE xmhd_qcache_check
 !! Builds the Jacobians of all levels (\ref xmhd_set_ops) at the state `u` in three configurations:
 !! (1) `xmhd_qcache=0` without the position map (direct evaluation, assembly by searching the CSR column
 !! lists: the reference), (2) `xmhd_qcache=1` with the position map (the default), and (3) `xmhd_qcache=0`
-!! with the position map. For configurations 2 and 3 it prints, for every level with a native matrix, the
-!! maximum entrywise difference relative to the largest entry of the same row (`rel_row`) and of the whole
-!! matrix (`rel_global`), and the relative 2-norm difference of the products with two fixed pseudo-random
-!! vectors (`rel_matvec`): `XMHD_JCHECK level=... cfgs=1:k ...`, and finally the largest `rel_row`
-!! (`XMHD_JCHECK max_rel`). The matrix structure must be identical (it is shared).
+!! with the position map. For configurations 2 and 3 it prints, for every level, the relative 2-norm
+!! difference of the products with three fixed pseudo-random vectors (`rel_matvec`, through the generic
+!! matrix interface) and, for native matrices, the maximum entrywise difference relative to the largest
+!! entry of the same row (`rel_row`) and of the whole matrix (`rel_global`; both -1 for other matrix
+!! types, eg. PETSc): `XMHD_JCHECK level=... cfgs=1:k ... matrix=native|generic ...`, and finally the
+!! largest difference (`XMHD_JCHECK max_rel`). The matrix structure must be identical (it is shared).
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_jac_check(u)
 CLASS(oft_vector), TARGET, INTENT(inout) :: u !< State to build the Jacobians at
-INTEGER(i4), PARAMETER :: cfg_mode(3)=[0,1,0],cfg_pm(3)=[0,1,1],nvec=2
+INTEGER(i4), PARAMETER :: cfg_mode(3)=[0,1,0],cfg_pm(3)=[0,1,1],nvec=3
 INTEGER(i4) :: icfg,level,nlev,l,i,r,k,pm_save,iv
 REAL(r8) :: rel_row,rel_glob,rel_mv,dmax,amax,maxrel,dnorm,anorm
+LOGICAL :: native
 REAL(r8), POINTER, DIMENSION(:) :: vtmp
 TYPE(oft_1d_real), ALLOCATABLE :: mref(:)
 TYPE(oft_vector_ptr), ALLOCATABLE :: xv(:,:),yref(:,:),ytmp(:)
@@ -4881,17 +4883,24 @@ DO icfg=1,3
   CALL xmhd_set_ops(u)
   DO l=1,nlev
     level=xmhd_level-l+1
-    SELECT TYPE(Jac=>oft_xmhd_ops_ML(level)%J)
-    CLASS IS(oft_native_matrix)
-      IF(icfg==1)THEN
+    !---Reference: products with the test vectors (any matrix type) and the native CSR values
+    IF(icfg==1)THEN
+      DO iv=1,nvec
+        CALL oft_xmhd_ops_ML(level)%J%apply(xv(iv,l)%f,yref(iv,l)%f)
+      END DO
+      SELECT TYPE(Jac=>oft_xmhd_ops_ML(level)%J)
+      CLASS IS(oft_native_matrix)
         ALLOCATE(mref(l)%v(Jac%nnz))
         mref(l)%v=Jac%M(1:Jac%nnz)
-        DO iv=1,nvec
-          CALL Jac%apply(xv(iv,l)%f,yref(iv,l)%f)
-        END DO
-        CYCLE
-      END IF
-      !---Entrywise differences relative to the row and matrix maxima
+      END SELECT
+      CYCLE
+    END IF
+    !---Entrywise differences relative to the row and matrix maxima (native matrices only)
+    native=.FALSE.
+    rel_row=-1.d0; rel_glob=-1.d0
+    SELECT TYPE(Jac=>oft_xmhd_ops_ML(level)%J)
+    CLASS IS(oft_native_matrix)
+      native=.TRUE.
       rel_row=0.d0; dmax=0.d0; amax=0.d0
       DO r=1,Jac%nr
         IF(Jac%kr(r+1)<=Jac%kr(r))CYCLE
@@ -4906,23 +4915,33 @@ DO icfg=1,3
           rel_row=MAX(rel_row,dnorm)
         END IF
       END DO
+    END SELECT
+    IF(native)THEN ! Same matrix type on every rank
       rel_row=oft_mpi_max(rel_row)
       dmax=oft_mpi_max(dmax); amax=oft_mpi_max(amax)
       rel_glob=dmax/MAX(amax,TINY(amax))
-      !---Products with the test vectors
-      rel_mv=0.d0
-      DO iv=1,nvec
-        CALL Jac%apply(xv(iv,l)%f,ytmp(l)%f)
-        CALL ytmp(l)%f%add(1.d0,-1.d0,yref(iv,l)%f)
-        dnorm=ytmp(l)%f%norm(2)
-        anorm=yref(iv,l)%f%norm(2)
-        rel_mv=MAX(rel_mv,dnorm/MAX(anorm,TINY(anorm)))
-      END DO
-      maxrel=MAX(maxrel,rel_row,rel_mv)
-      IF(oft_env%head_proc)WRITE(*,'(A,I3,A,I1,A,I1,A,I1,A,I1,A,3ES12.4)')'XMHD_JCHECK level=',level, &
-        ' cfgs=1:',icfg,' modes=',cfg_mode(1),':',cfg_mode(icfg),' posmap=',cfg_pm(icfg), &
-        ' rel_row,rel_global,rel_matvec ',rel_row,rel_glob,rel_mv
-    END SELECT
+    END IF
+    !---Products with the test vectors
+    rel_mv=0.d0
+    DO iv=1,nvec
+      CALL oft_xmhd_ops_ML(level)%J%apply(xv(iv,l)%f,ytmp(l)%f)
+      CALL ytmp(l)%f%add(1.d0,-1.d0,yref(iv,l)%f)
+      dnorm=ytmp(l)%f%norm(2)
+      anorm=yref(iv,l)%f%norm(2)
+      rel_mv=MAX(rel_mv,dnorm/MAX(anorm,TINY(anorm)))
+    END DO
+    maxrel=MAX(maxrel,rel_row,rel_mv)
+    IF(oft_env%head_proc)THEN
+      IF(native)THEN
+        WRITE(*,'(A,I3,A,I1,A,I1,A,I1,A,I1,A,3ES12.4)')'XMHD_JCHECK level=',level, &
+          ' cfgs=1:',icfg,' modes=',cfg_mode(1),':',cfg_mode(icfg),' posmap=',cfg_pm(icfg), &
+          ' matrix=native rel_row,rel_global,rel_matvec ',rel_row,rel_glob,rel_mv
+      ELSE
+        WRITE(*,'(A,I3,A,I1,A,I1,A,I1,A,I1,A,3ES12.4)')'XMHD_JCHECK level=',level, &
+          ' cfgs=1:',icfg,' modes=',cfg_mode(1),':',cfg_mode(icfg),' posmap=',cfg_pm(icfg), &
+          ' matrix=generic rel_row,rel_global,rel_matvec ',rel_row,rel_glob,rel_mv
+      END IF
+    END IF
   END DO
 END DO
 IF(oft_env%head_proc)WRITE(*,'(A,ES12.4)')'XMHD_JCHECK max_rel ',maxrel

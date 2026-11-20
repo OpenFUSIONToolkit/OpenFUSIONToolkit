@@ -10,7 +10,9 @@
 # values and the floor flags. It then builds the Jacobian of every level with xmhd_qcache=0 (searching the CSR
 # column lists, the reference), xmhd_qcache=1 with the precomputed CSR position map (the default) and
 # xmhd_qcache=0 with the position map, and reports entrywise differences relative to the row maximum and the
-# differences of products with random vectors.
+# differences of products with random vectors. The *_petsc variants run the same checks with the PETSc linear
+# algebra backend (use_petsc=T): the residual blocks on PETSc vectors, and the Jacobians through products with
+# random vectors only (the CSR values of PETSc matrices are not accessible).
 import os
 import re
 import sys
@@ -24,6 +26,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
+ use_petsc={petsc}
 /
 
 &mesh_options
@@ -123,14 +126,17 @@ def revolved_mesh(cell_type):
 
 
 def parse_jcheck(output):
-    '''Parse XMHD_JCHECK lines into a list of (level, cfgs, rel_row, rel_global, rel_matvec)'''
+    '''Parse XMHD_JCHECK lines into a list of (level, cfgs, matrix, rel_row, rel_global, rel_matvec)
+
+    matrix is 'native' (entrywise and product differences) or 'generic' (products only, rel_row=rel_global=-1)'''
     results = []
     for line in output.splitlines():
         if line.startswith('XMHD_JCHECK level='):
             level = int(re.search(r'level=\s*(\d+)', line).group(1))
             cfgs = re.search(r'cfgs=(\S+)', line).group(1)
+            matrix = re.search(r'matrix=(\S+)', line).group(1)
             rel_row, rel_glob, rel_mv = (float(v) for v in line.split()[-3:])
-            results.append((level, cfgs, rel_row, rel_glob, rel_mv))
+            results.append((level, cfgs, matrix, rel_row, rel_glob, rel_mv))
     return results
 
 
@@ -157,16 +163,19 @@ def parse_qcheck(output):
     return blocks, diags, flags, max_rel
 
 
-def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True):
+def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False):
     '''Write the input, run the equivalence check, and validate the reported differences
 
     nlevels is the expected number of Jacobian levels (polynomial levels on the finest mesh); jac=False
-    skips the Jacobian comparison (memory-heavy configurations)'''
+    skips the Jacobian comparison (memory-heavy configurations); petsc=True uses the PETSc linear algebra
+    backend (skipped if OFT is not compiled with PETSc), where the Jacobians are compared through products
+    with random vectors only'''
     if not jac:
         bench += " jac_check=F\n"
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(order=order, minlev=minlev, xmhd=xmhd, bench=bench, **mesh))
+        fid.write(oft_in_template.format(order=order, minlev=minlev, xmhd=xmhd, bench=bench,
+                                         petsc='T' if petsc else 'F', **mesh))
     with open('oft_in_qcache.xml', 'w+') as fid:
         fid.write(oft_in_xml)
     status, output = run_OFT("./xmhd_bench oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
@@ -206,7 +215,14 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
         assert len(set(r[0] for r in jres)) == nlevels
     else:
         assert len(jres) == 0
-    for level, cfgs, rel_row, rel_glob, rel_mv in jres:
+    # The backend must be the requested one (PETSc matrices have no entrywise comparison)
+    matrix_exp = 'generic' if petsc else 'native'
+    for level, cfgs, matrix, rel_row, rel_glob, rel_mv in jres:
+        if matrix != matrix_exp:
+            print('FAILED: Jacobian level={0} matrix type {1}, expected {2}'.format(level, matrix, matrix_exp))
+            passed = False
+        if petsc:
+            rel_row = 0.
         if (rel_row > jac_row_tol) or (rel_mv > jac_matvec_tol):
             print('FAILED: Jacobian level={0} cfgs={1} rel_row={2:.3E} rel_matvec={3:.3E}'.format(
                 level, cfgs, rel_row, rel_mv))
@@ -312,3 +328,51 @@ def test_qcache_mpi2():
     '''Residual implementations agree on a mesh distributed over 2 MPI ranks'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
     assert qcheck_case(cube_mesh(2, nlevels=2), 3, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", nproc=2)
+
+
+#============================================================================
+# PETSc linear algebra backend: the residual blocks on PETSc vectors and the Jacobians (all levels) through products
+# with random vectors. Two-temperature (base) and single-temperature models, Hall, viscosity with parallel and
+# gyroviscous terms, floors and solid cells, hexes, revolved periodicity, p-multigrid and 2 MPI ranks.
+@pytest.mark.parametrize("physics", ['base', 'single_temp_hall', 'two_temp_hall_equil', 'iso_gyro', 'kin_gyro_nopar',
+                                     'floors_solid'])
+def test_qcache_petsc_tet_p2(physics):
+    '''Residual and Jacobian implementations agree on straight tets (p=2) with PETSc'''
+    xmhd, bench = physics_cases[physics]
+    assert qcheck_case(cube_mesh(2), 2, xmhd=xmhd, bench=bench, petsc=True)
+
+
+def test_qcache_petsc_hex_p2():
+    '''Residual and Jacobian implementations agree on hexes (p=2) with Hall, hyper terms and shaping with PETSc'''
+    xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n nu_gyro=1.0\n"
+    assert qcheck_case(cube_mesh(2, hex_mesh=True), 2, xmhd=xmhd, bench=" shaping=T\n", petsc=True)
+
+
+@pytest.mark.parametrize("cell_type", ['tet', 'hex'])
+def test_qcache_petsc_revolved(cell_type):
+    '''Residual and Jacobian implementations agree on a revolved periodic wedge with PETSc'''
+    assert qcheck_case(revolved_mesh(cell_type), 2, xmhd=" vbc='norm'\n", petsc=True)
+
+
+def test_qcache_petsc_pmg():
+    '''Jacobians agree on all levels of a p-multigrid hierarchy (p=3, 2) with PETSc'''
+    assert qcheck_case(cube_mesh(2), 3, minlev=2, nlevels=2, petsc=True)
+
+
+def test_qcache_petsc_pmg_p4():
+    '''Jacobians agree on all levels of a p-multigrid hierarchy (p=4, 3, 2) with Hall, hyper terms, shaping and
+    solid cells with PETSc'''
+    xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
+    assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3,
+                       petsc=True)
+
+
+@pytest.mark.mpi
+@pytest.mark.parametrize("pmg", [False, True])
+def test_qcache_petsc_mpi2(pmg):
+    '''Residual and Jacobian implementations agree on a mesh distributed over 2 MPI ranks with PETSc, on the finest
+    level (p=3) or on all levels of a p-multigrid hierarchy (p=3, 2)'''
+    xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
+    minlev, nlevels = (3, 2) if pmg else (-1, 1)
+    assert qcheck_case(cube_mesh(2, nlevels=2), 3, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", nproc=2,
+                       minlev=minlev, nlevels=nlevels, petsc=True)
