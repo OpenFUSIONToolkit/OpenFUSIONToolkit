@@ -504,9 +504,11 @@ TOWNSEND_A, TOWNSEND_B = 510.0, 1.25e4     # 1/(m Torr), V/(m Torr): K22 eq. 13 
 
 def townsend_field(p, L):
     """E_Townsend [V/m] for pressure p [Pa] over an open line of length L [m] (K22 eq. 13):
-    1.25e4 p[Torr] / ln(510 p[Torr] L) = 93.758 p / ln(3.825 p L); inf where 510 p L <= 1."""
+    1.25e4 p[Torr] / ln(510 p[Torr] L) = 93.758 p / ln(3.825 p L); inf where 510 p L <= 1, and where L is
+    not finite (closed lines, or no line found: no Townsend breakdown)."""
     pt = np.asarray(p, float) / TORR
-    x = TOWNSEND_A * pt * np.asarray(L, float)
+    L = np.asarray(L, float)
+    x = TOWNSEND_A * pt * np.where(np.isfinite(L), L, 0.0)
     return np.where(x > 1.0, TOWNSEND_B * pt / np.log(np.maximum(x, 1.0 + 1e-12)), np.inf)
 
 
@@ -531,12 +533,16 @@ class FieldLineMap:
     [nu, nZ, nR] optional unit flux maps (1 A per turn in each unit)); from_machine builds the unit
     maps of a startup_model.MachineModel by TokaMaker interpolation.
 
-    Lines and flux tubes (the 'contour' method, used for the volume): field lines lie on psi contours,
-    so the band of the grid between psi_j and psi_j + dpsi, split into connected pieces, is a set of
-    flux tubes. A tube touching the wall is open. With poloidal width dpsi/(R B_p), its length along B
-    is L = sum(dA R |B|) / dpsi, its length-weighted parallel field <E_par> = sum(dA R |B| E_par) /
-    sum(dA R |B|) (K22 eq. 12 is the mean over equal steps along B, the same weighting), its volume
-    sum(2 pi R dA). trace() follows single lines with K22's Euler steps (eq. 11) or RK4, as reference.
+    Lines and flux tubes (the 'contour' method, used for the volume): field lines lie on psi contours.
+    Open or closed is decided per cell by topology: the contour through a cell is closed when its
+    superlevel or its sublevel connected set does not reach the wall (exact on the grid, any |grad psi|,
+    either sign; _closed_cells). The band of the grid between psi_j and psi_j + dpsi, split into
+    connected pieces (open and closed cells apart), is a set of flux tubes; dpsi is at least two cells'
+    psi change over 90 % of the open cells. An open tube takes the length L = int |B|/B_p dl_pol and the
+    length-weighted parallel field <E_par> (K22 eq. 12: the mean over equal steps along B) of the
+    band-centre contour crossing it, extended to the wall polygon; a tube no contour crosses has L
+    unknown (nan) and cannot break down. Volume sum(2 pi R dA). trace() follows single lines with K22's
+    Euler steps (eq. 11) or RK4, as reference.
     """
 
     def __init__(self, R, Z, wall, F0, psi_units=None):
@@ -562,7 +568,7 @@ class FieldLineMap:
         psi = eval_fields(machine.gs, machine.psi_u, np.column_stack([RR.ravel(), ZZ.ravel()]))['psi']
         return cls(R, Z, wall, machine.F0, psi.reshape(len(psi), len(Z), len(R)))
 
-    def fields(self, I_u, dI_u, Ip=0.0, dIp=0.0, Rp=None, Zp=None, dRp=0.0, dZp=0.0):
+    def fields(self, I_u, dI_u, Ip=0.0, dIp=0.0, Rp=None, Zp=0.0, dRp=0.0, dZp=0.0):
         """(psi, E_phi) grids [Wb/rad, V/m] of unit currents I_u [nu] (per turn) changing at dI_u [A/s],
         plus a plasma filament Ip [A] at (Rp, Zp) moving at (dRp, dZp) [m/s] (K22 eq. 9-10)."""
         psi = np.tensordot(I_u, self.psi_units, 1)
@@ -614,8 +620,9 @@ class FieldLineMap:
             L, E, cl = np.full(len(pts), np.nan), np.zeros(len(pts)), np.zeros(len(pts), bool)
             for i, x in enumerate(pts):
                 lines = [l for l in gen.lines(float(f_psi((x[1], x[0])))) if len(l) > 1]
-                if lines:
-                    L[i], E[i], cl[i] = stats(min(lines, key=lambda l: np.min(np.hypot(*(l - x).T))))
+                d = [np.min(np.hypot(*(l - x).T)) for l in lines]
+                if lines and min(d) < 1.5 * max(self.dR, self.dZ):         # the contour through x, not another
+                    L[i], E[i], cl[i] = stats(lines[int(np.argmin(d))])
             return L, E, cl
         return {'gen': gen, 'stats': stats, 'through': through}
 
@@ -627,7 +634,7 @@ class FieldLineMap:
         return self._contours(psi, Ephi, B, BR, BZ, Bphi / B * Ephi)['through'](pts)
 
     def analyze(self, psi, Ephi, p, n_bands=400, n_mid=50, Z_mid=0.0, region='midplane', tau_form='loss_fraction',
-                plasma_exists=False):
+                plasma_exists=False, sustained=None):
         """Field-line analysis of (psi, E_phi) at prefill pressure p [Pa]. Returns a dict:
             tube [nZ, nR]   flux-tube label per cell (-1 outside); tubes: per tube 'open', 'L' [m]
                             (inf when closed), 'Epar' [V/m] (|<E_par>|), 'ET' [V/m] (K22 eq. 13),
@@ -636,8 +643,10 @@ class FieldLineMap:
                             'open', 'L', 'Epar', 'ET', 'bd'
             breakdown       any mid-plane line breaks down (region='midplane') / any tube (region='all')
             plasma [nZ, nR] the plasma region: tubes that broke down (those through the mid-plane points,
-                            or every tube with region='all') plus every closed tube (when something broke
-                            down here, or plasma_exists: a plasma from an earlier breakdown); and its
+                            or every tube with region='all'), tubes through the mid-plane points in
+                            `sustained` [n_mid] (lines that broke down at an earlier map) while they are
+                            open (O29), plus every closed tube (when something broke down here, or
+                            plasma_exists: a plasma from an earlier breakdown); and its
                             Vp [m^3], A [m^2], R_vol, Z_vol (centre of mass of the cross-section),
                             r_vol (distance from it to the first wall), kappa = min(A/(pi r^2),
                             (Z_max - Z_min)/(2 r)) (K22 sec. 2.2), f_closed (volume fraction closed)
@@ -652,67 +661,82 @@ class FieldLineMap:
         B = np.sqrt(BR ** 2 + BZ ** 2 + Bphi ** 2)
         Epar = Bphi / B * Ephi
         ins = self.inside
+        if not np.isfinite(psi[ins]).all():
+            raise ValueError('psi is not finite inside the wall')
+        closed = _closed_cells(psi, ins, self.edge)                  # closed lines, by topology
+        opn = ins & ~closed
         lo, hi = psi[ins].min(), psi[ins].max()
         gpsi = self.RR * np.sqrt(BR ** 2 + BZ ** 2) * max(self.dR, self.dZ)         # psi change across a cell
-        dpsi = max((hi - lo) / n_bands, 2.0 * np.median(gpsi[ins]))   # tubes at least ~2 cells wide
-        n_bands = max(int(np.ceil((hi - lo) / dpsi)), 1)
+        dpsi = max((hi - lo) / n_bands, 2.0 * np.percentile(gpsi[opn if opn.any() else ins], 90))
+        n_bands = max(int(np.ceil((hi - lo) / dpsi)), 1)              # open tubes >= ~2 cells wide (90 %)
         band = np.where(ins, np.minimum(((psi - lo) / dpsi).astype(int), n_bands - 1), -1)
-        # connected pieces of each band: 4-neighbour links between inside cells of the same band
+        key = np.where(ins, 2 * band + closed, -1)                   # open and closed cells in separate tubes
+        # connected pieces of each band: 4-neighbour links between inside cells of the same key
         import scipy.sparse as sps
         from scipy.sparse.csgraph import connected_components
-        idx = np.arange(band.size).reshape(band.shape)
-        same_h = (band[:, :-1] == band[:, 1:]) & (band[:, :-1] >= 0)
-        same_v = (band[:-1, :] == band[1:, :]) & (band[:-1, :] >= 0)
+        idx = np.arange(key.size).reshape(key.shape)
+        same_h = (key[:, :-1] == key[:, 1:]) & (key[:, :-1] >= 0)
+        same_v = (key[:-1, :] == key[1:, :]) & (key[:-1, :] >= 0)
         i0 = np.concatenate([idx[:, :-1][same_h], idx[:-1, :][same_v]])
         i1 = np.concatenate([idx[:, 1:][same_h], idx[1:, :][same_v]])
-        G = sps.coo_matrix((np.ones(len(i0)), (i0, i1)), shape=(band.size, band.size))
+        G = sps.coo_matrix((np.ones(len(i0)), (i0, i1)), shape=(key.size, key.size))
         _, lab = connected_components(G, directed=False)
-        lab = lab.reshape(band.shape)
         cells = np.where(ins.ravel())[0]
         uniq, tube_c = np.unique(lab.ravel()[cells], return_inverse=True)
-        tube = np.full(band.shape, -1)
+        tube = np.full(key.shape, -1)
         tube.ravel()[cells] = tube_c
         nt = len(uniq)
         V = np.bincount(tube_c, 2 * np.pi * self.RR.ravel()[cells] * self.dA, nt)
         A = np.bincount(tube_c, np.full(len(cells), self.dA), nt)
+        is_open = np.bincount(tube_c, closed.ravel()[cells], nt) == 0
         ctr = self._contours(psi, Ephi, B, BR, BZ, Epar)
         stats = ctr['stats']
-        def tube_at(x):
-            j, k = int(round((x[0] - self.R[0]) / self.dR)), int(round((x[1] - self.Z[0]) / self.dZ))
-            return tube[min(max(k, 0), tube.shape[0] - 1), min(max(j, 0), tube.shape[1] - 1)]
-
-        L, Ep = np.full(nt, np.nan), np.zeros(nt)
-        is_open = np.ones(nt, bool)     # closed only where a closed contour is found; a tube without a contour
-                                        # (a fragment where the band is narrower than a cell) is open, L unknown
+        cell_of = lambda x: (np.clip(np.rint((x[..., 1] - self.Z[0]) / self.dZ).astype(int), 0, len(self.Z) - 1),
+                             np.clip(np.rint((x[..., 0] - self.R[0]) / self.dR).astype(int), 0, len(self.R) - 1))
+        L, Ep = np.where(is_open, np.nan, np.inf), np.zeros(nt)      # open tubes no contour reaches: L unknown
         for jb in range(n_bands):                                   # one contour per band, at its centre
             for line in ctr['gen'].lines(lo + (jb + 0.5) * dpsi):
                 if len(line) < 2:
                     continue
-                t = tube_at(line[len(line) // 2])
-                if t < 0:
+                kk, jj = cell_of(line)
+                ok = (band[kk, jj] == jb) & opn[kk, jj]
+                if not ok.any():
                     continue
                 Lt, Et, cl = stats(line)
-                if np.isnan(L[t]) or (np.isfinite(Lt) and Lt > L[t]):
-                    L[t], Ep[t], is_open[t] = Lt, Et, not cl
-        ET = townsend_field(p, np.where(np.isnan(L), np.inf, L))
-        bd = is_open & (Ep >= ET)
+                if cl:
+                    continue
+                for t in np.unique(tube[kk[ok], jj[ok]]):           # every open piece of the band it crosses
+                    if np.isnan(L[t]) or Lt > L[t]:
+                        L[t], Ep[t] = Lt, Et
+        ET = townsend_field(p, L)
+        bd = is_open & np.isfinite(L) & (Ep >= ET)
         # mid-plane lines (K22: 50 radial points on the mid-plane): the contour through each point
         k = np.argmin(np.abs(self.Z - Z_mid))
         row = np.where(ins[k])[0]
+        if len(row) == 0:
+            raise ValueError(f'no grid cell inside the wall at Z_mid = {Z_mid}')
         Rm = np.linspace(self.R[row[0]] + self.dR / 2, self.R[row[-1]] - self.dR / 2, n_mid)
         pts = np.column_stack([Rm, np.full(n_mid, self.Z[k])])
-        Lm, Em, cm = ctr['through'](pts)
-        mid = {'R': Rm, 'tube': np.array([tube_at(x) for x in pts]), 'open': ~cm, 'L': Lm, 'Epar': Em}
-        mid['tube'][np.isnan(Lm)] = -1                               # no contour (eg. at a psi extremum)
-        mid['ET'] = townsend_field(p, np.where(np.isnan(mid['L']), np.inf, mid['L']))
-        mid['bd'] = mid['open'] & (mid['Epar'] >= mid['ET'])
+        km, jm = cell_of(pts)
+        Lm, Em, _ = ctr['through'](pts)
+        cm = closed[km, jm]                                         # open / closed by topology
+        Lm = np.where(cm, np.inf, Lm)
+        Lm[~ins[km, jm]] = np.nan                                   # outside the wall (a gap at the mid-plane)
+        mid = {'R': Rm, 'tube': tube[km, jm].copy(), 'open': ~cm, 'L': Lm, 'Epar': Em}
+        mid['tube'][np.isnan(Lm)] = -1                               # outside, or no contour found
+        mid['ET'] = townsend_field(p, Lm)
+        mid['bd'] = mid['open'] & np.isfinite(Lm) & (Em >= mid['ET'])
+        mid['held'] = mid['bd'].copy()                               # in the plasma: broke down now or before (O29)
+        if sustained is not None:
+            mid['held'] |= np.asarray(sustained, bool) & mid['open'] & np.isfinite(Lm)
         tm = mid['tube']
         take = np.zeros(nt, bool)
         if region == 'midplane':
-            take[tm[mid['bd'] & (tm >= 0)]] = True
+            take[tm[mid['held'] & (tm >= 0)]] = True
             breakdown = bool(mid['bd'].any())
         else:
             take |= bd
+            take[tm[mid['held'] & (tm >= 0)]] = True
             breakdown = bool(bd.any())
         if breakdown or plasma_exists:
             take |= ~is_open                                         # closed lines count once there is plasma
@@ -723,8 +747,8 @@ class FieldLineMap:
         out['f_closed'] = float(V[take & ~is_open].sum() / max(V[take].sum(), 1e-300))
         in_pl = take[tm] & (tm >= 0)                                 # mid-plane lines inside the plasma
         if region == 'midplane':
-            in_pl &= mid['bd'] | ~mid['open']
-        op = in_pl & mid['open']
+            in_pl &= mid['held'] | ~mid['open']
+        op = in_pl & mid['open'] & np.isfinite(mid['L'])
         out['f_open'] = float(op.sum() / max(in_pl.sum(), 1))
         out['L_open'] = float(mid['L'][op].mean()) if op.any() else np.inf
         if not op.any():
@@ -762,10 +786,11 @@ class FieldLineMap:
         wall = Path(self.wall)
         v = lambda x: np.array([fR((x[1], x[0])), fZ((x[1], x[0]))])
         x0 = np.asarray(x0, float)
-        n_tot, E_sum = 1, float(fE((x0[1], x0[0])))
+        n_tot, E_sum, L_end = 1, float(fE((x0[1], x0[0]))), 0.0
         for sgn in (1.0, -1.0):
             x, s_pol = x0.copy(), 0.0
             for _ in range(int(L_max / dl)):
+                x_old = x
                 if scheme == 'euler':
                     step = dl * v(x)
                 else:
@@ -774,14 +799,44 @@ class FieldLineMap:
                 x = x + sgn * step
                 s_pol += np.hypot(*step)
                 if not wall.contains_point(x):
+                    s = np.hypot(*step)                             # the part of the last step inside the wall
+                    L_end += dl * min(_ray_to_polygon(x_old, sgn * step / max(s, 1e-300), self.wall) / max(s, 1e-300), 1.0)
                     break
                 n_tot += 1
                 E_sum += float(fE((x[1], x[0])))
-                if s_pol > 4 * max(self.dR, np.hypot(*step)) and np.hypot(*(x - x0)) < max(np.hypot(*step), 0.5 * self.dR):
+                if s_pol > 4 * max(self.dR, np.hypot(*step)) and np.hypot(*(x - x0)) < max(4 * np.hypot(*step), 0.5 * self.dR):
                     return np.inf, abs(E_sum / n_tot), True
             else:
                 return np.inf, abs(E_sum / n_tot), False
-        return (n_tot - 1) * dl, abs(E_sum / n_tot), False
+        return (n_tot - 1) * dl + L_end, abs(E_sum / n_tot), False
+
+
+def _closed_cells(psi, inside, edge):
+    """[nZ, nR] True where the psi contour through the cell is closed: its superlevel or its sublevel
+    connected set (4-neighbour, cells inside the wall) does not reach a cell next to the wall
+    (union-find with cells added in psi order, both ways)."""
+    nZ, nR = psi.shape
+    cells = np.flatnonzero(inside.ravel())
+    p, e = psi.ravel(), edge.ravel()
+    out = np.zeros(psi.size, bool)
+    for sgn in (1.0, -1.0):
+        parent, touch, done = np.arange(psi.size), e.copy(), np.zeros(psi.size, bool)
+        for c in cells[np.argsort(-sgn * p[cells], kind='stable')]:
+            done[c] = True
+            i, j = divmod(c, nR)
+            for n in ((c - nR) if i > 0 else -1, (c + nR) if i < nZ - 1 else -1, (c - 1) if j > 0 else -1,
+                      (c + 1) if j < nR - 1 else -1):
+                if n >= 0 and done[n]:
+                    r = n
+                    while parent[r] != r:
+                        r = parent[r]
+                    while parent[n] != r:                          # path compression
+                        parent[n], n = r, parent[n]
+                    if r != c:
+                        parent[r] = c
+                        touch[c] |= touch[r]
+            out[c] |= not touch[c]
+    return out.reshape(psi.shape)
 
 
 def _ray_to_polygon(x, d, poly):
@@ -822,28 +877,45 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
 
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
-    the last to the last (a lag of one interval), so it is continuous for the BDF solver. If the region
-    is empty after breakdown the last geometry is held (O29).
+    the last to the last (1/Lf, the loss rate, for Lf), a lag of one interval, so it is continuous for
+    the BDF solver.
+
+    Lines that broke down stay in the plasma (O29): a mid-plane line that met the Townsend criterion at
+    any map since breakdown stays in the plasma region while it is open (K22 re-evaluates the
+    criterion every map but does not say that a plasma on a line is lost when E falls below E_T; the
+    plasma's own back-EMF lowers E right after breakdown). If the region is still empty the last
+    geometry is held.
+
+    A given y0 gets the structure currents of the vacuum phase at t_bd.
 
     Returns a dict: 't_bd' (None if no breakdown before t_end), 'out' (the plasma model's output arrays,
-    concatenated), 'maps' (per map time: t, Vp, R_vol, Z_vol, r_vol, kappa, Lf, L_open, f_open,
-    f_closed, n_bd (mid-plane lines broken down), breakdown).
+    concatenated; None without breakdown), 'status' (0, or the solver's status where it stopped),
+    'message', 't_stop' (the last time reached), 'maps' (per map time: t, Vp, R_vol, Z_vol, r_vol,
+    kappa, Lf, L_open, f_open, f_closed, n_bd (mid-plane lines broken down at that map), n_held (lines
+    in the plasma), breakdown).
     """
+    if Rp is None:
+        raise ValueError('Rp (the plasma current position, the circuit filament radius) must be given')
     circ = model.circuit
     nc = circ.nc
     keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed')
-    maps = {k: [] for k in ('t', 'n_bd', 'breakdown') + keys}
+    maps = {k: [] for k in ('t', 'n_bd', 'n_held', 'breakdown') + keys}
+    held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
     log = log or (lambda *a: None)
 
     def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False):
+        nonlocal held
         I_u = np.concatenate([I_coil(t), I_s])
         dI_u = np.concatenate([circ.coil_rate(t), dI_s])
         psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, Rp, Zp)
         o = fmap.analyze(psi, Ephi, p_fill, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form,
-                         plasma_exists=plasma_exists)
+                         plasma_exists=plasma_exists, sustained=held if plasma_exists else None)
+        if plasma_exists or o['breakdown']:
+            held = held | o['mid']['held']
         maps['t'].append(t)
         maps['n_bd'].append(int(o['mid']['bd'].sum()))
+        maps['n_held'].append(int(o['mid']['held'].sum()))
         maps['breakdown'].append(o['breakdown'])
         for k in keys:
             maps[k].append(o[k] if k in o else np.nan)
@@ -866,23 +938,29 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         t += dt_map
     if t_bd is None:
         log(f'no Townsend breakdown in {t_start * 1e3:.0f}..{t_end * 1e3:.0f} ms at p = {p_fill * 1e3:.3f} mPa')
-        return {'t_bd': None, 'out': None, 'maps': {k: np.array(v) for k, v in maps.items()}}
+        return {'t_bd': None, 'out': None, 'status': 0, 'message': 'no breakdown', 't_stop': t_end,
+                'maps': {k: np.array(v) for k, v in maps.items()}}
     g_prev = g_last = geo_of(o)
     if y0 is None:
-        y0 = model.initial_state(p_fill, g_last, Te0=Te0, gamma0=gamma0, impurity_fraction=impurity_fraction, I_s0=I_s)
+        y0 = model.initial_state(p_fill, g_last, Te0=Te0, gamma0=gamma0, impurity_fraction=impurity_fraction)
+    y0 = np.array(y0, float)
+    y0[model.iIs:] = I_s                                             # the structure currents of the vacuum phase
     log(f'breakdown at {t_bd * 1e3:.1f} ms: {maps["n_bd"][-1]} mid-plane lines, V_p = {o["Vp"]:.2f} m^3, '
         f'R_vol = {o["R_vol"]:.2f} m, L_f = {o["Lf"]:.0f} m')
-    outs, y, t = [], y0, t_bd
+    outs, y, t, status, message = [], y0, t_bd, 0, 'reached t_end'
     while t < t_end - 1e-12:
         t1 = min(t + dt_map, t_end)
         ga, gb, ta = dict(g_prev), dict(g_last), t
 
         def geometry(tt, Ip, ga=ga, gb=gb, ta=ta):
             s = min(max((tt - ta) / dt_map, 0.0), 1.0)
-            return {k: ga[k] + s * (gb[k] - ga[k]) for k in ga}
+            g = {k: ga[k] + s * (gb[k] - ga[k]) for k in ga}
+            g['Lf'] = 1.0 / (1.0 / ga['Lf'] + s * (1.0 / gb['Lf'] - 1.0 / ga['Lf']))
+            return g
         o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, t1])
         if o_run['status'] != 0:
-            log(f'solver stopped at {t * 1e3:.1f} ms: {o_run["message"]}')
+            status, message = o_run['status'], o_run['message']
+            log(f'solver stopped at {t * 1e3:.1f} ms: {message}')
             break
         outs.append({k: v[-1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
         y, t = o_run['y'][-1], t1
@@ -892,4 +970,5 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         if o['Vp'] > 0:
             g_last = geo_of(o)
     out = {k: np.concatenate([d[k] for d in outs]) for k in outs[0]} if outs else None
-    return {'t_bd': t_bd, 'out': out, 'maps': {k: np.array(v) for k, v in maps.items()}}
+    return {'t_bd': t_bd, 'out': out, 'status': status, 'message': message, 't_stop': t,
+            'maps': {k: np.array(v) for k, v in maps.items()}}
