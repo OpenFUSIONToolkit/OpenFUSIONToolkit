@@ -576,6 +576,51 @@ class FieldLineMap:
         dpsi_dZ, dpsi_dR = np.gradient(psi, self.dZ, self.dR)
         return -dpsi_dZ / self.RR, dpsi_dR / self.RR, self.F0 / self.RR
 
+    def _contours(self, psi, Ephi, B, BR, BZ, Epar):
+        """Contour machinery of one (psi, E_phi): L and <E_par> along psi contours (polylines, linear in
+        each grid cell): L = int |B|/B_p dl_pol, <E_par> = int E_par |B|/B_p dl_pol / L (K22 eq. 12, equal
+        steps along B). A contour that closes on itself is a closed line (L = inf); one that ends at the
+        masked wall is open and is extended along its end segments to the wall polygon (the masked
+        contour stops within a cell of it)."""
+        from contourpy import contour_generator
+        from scipy.interpolate import RegularGridInterpolator
+        Bp = np.sqrt(BR ** 2 + BZ ** 2)
+        f_w = RegularGridInterpolator((self.Z, self.R), B / np.maximum(Bp, 1e-12), bounds_error=False, fill_value=None)
+        f_e = RegularGridInterpolator((self.Z, self.R), Epar, bounds_error=False, fill_value=None)
+        f_psi = RegularGridInterpolator((self.Z, self.R), psi, bounds_error=False, fill_value=None)
+        gen = contour_generator(self.R, self.Z, np.ma.masked_array(psi, ~self.inside))
+
+        def stats(line):
+            closed = len(line) > 3 and np.hypot(*(line[0] - line[-1])) < 1e-9
+            if not closed:
+                ends = []
+                for e0, e1 in ((line[0], line[1]), (line[-1], line[-2])):
+                    d = e0 - e1
+                    d = d / max(np.hypot(*d), 1e-300)
+                    ends.append(e0 + d * _ray_to_polygon(e0, d, self.wall))
+                line = np.vstack([ends[0], line, ends[1]])
+            mp, ds = 0.5 * (line[1:] + line[:-1]), np.hypot(*np.diff(line, axis=0).T)
+            w = ds * f_w(mp[:, ::-1])
+            Lr = w.sum()
+            return (np.inf if closed else Lr), abs(np.sum(w * f_e(mp[:, ::-1]))) / max(Lr, 1e-300), closed
+
+        def through(pts):
+            pts = np.atleast_2d(pts)
+            L, E, cl = np.full(len(pts), np.nan), np.zeros(len(pts)), np.zeros(len(pts), bool)
+            for i, x in enumerate(pts):
+                lines = [l for l in gen.lines(float(f_psi((x[1], x[0])))) if len(l) > 1]
+                if lines:
+                    L[i], E[i], cl[i] = stats(min(lines, key=lambda l: np.min(np.hypot(*(l - x).T))))
+            return L, E, cl
+        return {'gen': gen, 'stats': stats, 'through': through}
+
+    def lines_through(self, psi, Ephi, pts):
+        """(L [m] (inf if closed, nan if no contour), |<E_par>| [V/m], closed) of the field lines through
+        the points pts [n, 2], by the contour method."""
+        BR, BZ, Bphi = self.bfield(psi)
+        B = np.sqrt(BR ** 2 + BZ ** 2 + Bphi ** 2)
+        return self._contours(psi, Ephi, B, BR, BZ, Bphi / B * Ephi)['through'](pts)
+
     def analyze(self, psi, Ephi, p, n_bands=400, n_mid=50, Z_mid=0.0, region='midplane', tau_form='loss_fraction'):
         """Field-line analysis of (psi, E_phi) at prefill pressure p [Pa]. Returns a dict:
             tube [nZ, nR]   flux-tube label per cell (-1 outside); tubes: per tube 'open', 'L' [m]
@@ -623,30 +668,8 @@ class FieldLineMap:
         nt = len(uniq)
         V = np.bincount(tube_c, 2 * np.pi * self.RR.ravel()[cells] * self.dA, nt)
         A = np.bincount(tube_c, np.full(len(cells), self.dA), nt)
-        # L and <E_par> along psi contours (polylines, linear in each grid cell): L = int |B|/B_p dl_pol,
-        # <E_par> = int E_par |B|/B_p dl_pol / L (K22 eq. 12, equal steps along B); a contour that
-        # closes on itself is a closed line (L = inf); one that ends at the masked wall is open
-        from contourpy import contour_generator
-        from scipy.interpolate import RegularGridInterpolator
-        Bp = np.sqrt(BR ** 2 + BZ ** 2)
-        f_w = RegularGridInterpolator((self.Z, self.R), B / np.maximum(Bp, 1e-12), bounds_error=False, fill_value=None)
-        f_e = RegularGridInterpolator((self.Z, self.R), Epar, bounds_error=False, fill_value=None)
-        gen = contour_generator(self.R, self.Z, np.ma.masked_array(psi, ~ins))
-
-        def stats(line):
-            closed = len(line) > 3 and np.hypot(*(line[0] - line[-1])) < 1e-9
-            if not closed:              # the masked contour stops within a cell of the wall: extend both ends to it
-                ends = []
-                for e0, e1 in ((line[0], line[1]), (line[-1], line[-2])):
-                    d = e0 - e1
-                    d = d / max(np.hypot(*d), 1e-300)
-                    ends.append(e0 + d * _ray_to_polygon(e0, d, self.wall))
-                line = np.vstack([ends[0], line, ends[1]])
-            mp, ds = 0.5 * (line[1:] + line[:-1]), np.hypot(*np.diff(line, axis=0).T)
-            w = ds * f_w(mp[:, ::-1])
-            Lr = w.sum()
-            return (np.inf if closed else Lr), abs(np.sum(w * f_e(mp[:, ::-1]))) / max(Lr, 1e-300), closed
-
+        ctr = self._contours(psi, Ephi, B, BR, BZ, Epar)
+        stats = ctr['stats']
         def tube_at(x):
             j, k = int(round((x[0] - self.R[0]) / self.dR)), int(round((x[1] - self.Z[0]) / self.dZ))
             return tube[min(max(k, 0), tube.shape[0] - 1), min(max(j, 0), tube.shape[1] - 1)]
@@ -655,7 +678,7 @@ class FieldLineMap:
         is_open = np.ones(nt, bool)     # closed only where a closed contour is found; a tube without a contour
                                         # (a fragment where the band is narrower than a cell) is open, L unknown
         for jb in range(n_bands):                                   # one contour per band, at its centre
-            for line in gen.lines(lo + (jb + 0.5) * dpsi):
+            for line in ctr['gen'].lines(lo + (jb + 0.5) * dpsi):
                 if len(line) < 2:
                     continue
                 t = tube_at(line[len(line) // 2])
@@ -670,19 +693,10 @@ class FieldLineMap:
         k = np.argmin(np.abs(self.Z - Z_mid))
         row = np.where(ins[k])[0]
         Rm = np.linspace(self.R[row[0]] + self.dR / 2, self.R[row[-1]] - self.dR / 2, n_mid)
-        f_psi = RegularGridInterpolator((self.Z, self.R), psi)
-        mid = {'R': Rm, 'tube': np.zeros(n_mid, int), 'open': np.zeros(n_mid, bool), 'L': np.zeros(n_mid),
-               'Epar': np.zeros(n_mid)}
-        for i, r in enumerate(Rm):
-            x = np.array([r, self.Z[k]])
-            lines = [l for l in gen.lines(float(f_psi((x[1], x[0])))) if len(l) > 1]
-            mid['tube'][i] = tube_at(x)
-            if not lines:                                            # no contour (eg. at a psi extremum)
-                mid['L'][i], mid['tube'][i] = np.nan, -1
-                continue
-            line = min(lines, key=lambda l: np.min(np.hypot(*(l - x).T)))
-            mid['L'][i], mid['Epar'][i], cl = stats(line)
-            mid['open'][i] = not cl
+        pts = np.column_stack([Rm, np.full(n_mid, self.Z[k])])
+        Lm, Em, cm = ctr['through'](pts)
+        mid = {'R': Rm, 'tube': np.array([tube_at(x) for x in pts]), 'open': ~cm, 'L': Lm, 'Epar': Em}
+        mid['tube'][np.isnan(Lm)] = -1                               # no contour (eg. at a psi extremum)
         mid['ET'] = townsend_field(p, np.where(np.isnan(mid['L']), np.inf, mid['L']))
         mid['bd'] = mid['open'] & (mid['Epar'] >= mid['ET'])
         tm = mid['tube']
@@ -783,3 +797,91 @@ def _dist_to_polygon(x, poly):
     ab = b - a
     t = np.clip(np.einsum('ij,ij->i', x - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-300), 0, 1)
     return float(np.min(np.hypot(*(a + t[:, None] * ab - x).T)))
+
+
+# ============================================================================ the DYON workflow (K22)
+def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
+                         gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
+                         n_mid=50, Z_mid=0.0, log=None):
+    """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
+    from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
+
+    Before breakdown the structure currents follow the coils (vacuum). From t_start the map is
+    analysed every dt_map at the effective prefill pressure p_fill [Pa]; at the first time a line meets
+    the Townsend criterion (K22 sec. 2.2; O6) the plasma model starts from the K22 initial state (fill,
+    Te0, gamma0, impurity_fraction) unless y0 is given. Thereafter each map uses the coils, the
+    structure and the plasma current, with its own -M dI_p/dt (K22 eq. 10), held at (Rp, Zp) (K22
+    prescribes the position, O27; default the circuit's filament position must be given).
+
+    Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
+    parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
+    the last to the last (a lag of one interval), so it is continuous for the BDF solver. If the region
+    is empty after breakdown the last geometry is held (O29).
+
+    Returns a dict: 't_bd' (None if no breakdown before t_end), 'out' (the plasma model's output arrays,
+    concatenated), 'maps' (per map time: t, Vp, R_vol, Z_vol, r_vol, kappa, Lf, L_open, f_open,
+    f_closed, n_bd (mid-plane lines broken down), breakdown).
+    """
+    circ = model.circuit
+    nc = circ.nc
+    keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed')
+    maps = {k: [] for k in ('t', 'n_bd', 'breakdown') + keys}
+    I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
+    log = log or (lambda *a: None)
+
+    def analyze(t, I_s, dI_s, Ip, dIp):
+        I_u = np.concatenate([I_coil(t), I_s])
+        dI_u = np.concatenate([circ.coil_rate(t), dI_s])
+        psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, Rp, Zp)
+        o = fmap.analyze(psi, Ephi, p_fill, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form)
+        maps['t'].append(t)
+        maps['n_bd'].append(int(o['mid']['bd'].sum()))
+        maps['breakdown'].append(o['breakdown'])
+        for k in keys:
+            maps[k].append(o[k] if k in o else np.nan)
+        return o
+
+    def geo_of(o):
+        return {'R': o['R_vol'], 'a': o['r_vol'], 'kappa': o['kappa'], 'Vp': o['Vp'], 'Bphi': abs(fmap.F0) / o['R_vol'],
+                'Lf': min(o['Lf'], 1e7)}
+
+    # vacuum until the first Townsend breakdown
+    f = lambda t, I: circ.K_ss @ (-circ.M_sc @ circ.coil_rate(t) - circ.R_s * I)
+    I_s = circ.vacuum(circ.t_coil[0], t_start)
+    t, o, t_bd = t_start, None, None
+    while t <= t_end + 1e-12:
+        o = analyze(t, I_s, f(t, I_s), 0.0, 0.0)
+        if o['breakdown'] and o['Vp'] > 0:
+            t_bd = t
+            break
+        I_s = solve_ivp(f, (t, t + dt_map), I_s, method='BDF', rtol=1e-8, atol=1e-6).y[:, -1]
+        t += dt_map
+    if t_bd is None:
+        log(f'no Townsend breakdown in {t_start * 1e3:.0f}..{t_end * 1e3:.0f} ms at p = {p_fill * 1e3:.3f} mPa')
+        return {'t_bd': None, 'out': None, 'maps': {k: np.array(v) for k, v in maps.items()}}
+    g_prev = g_last = geo_of(o)
+    if y0 is None:
+        y0 = model.initial_state(p_fill, g_last, Te0=Te0, gamma0=gamma0, impurity_fraction=impurity_fraction, I_s0=I_s)
+    log(f'breakdown at {t_bd * 1e3:.1f} ms: {maps["n_bd"][-1]} mid-plane lines, V_p = {o["Vp"]:.2f} m^3, '
+        f'R_vol = {o["R_vol"]:.2f} m, L_f = {o["Lf"]:.0f} m')
+    outs, y, t = [], y0, t_bd
+    while t < t_end - 1e-12:
+        t1 = min(t + dt_map, t_end)
+        ga, gb, ta = dict(g_prev), dict(g_last), t
+
+        def geometry(tt, Ip, ga=ga, gb=gb, ta=ta):
+            s = min(max((tt - ta) / dt_map, 0.0), 1.0)
+            return {k: ga[k] + s * (gb[k] - ga[k]) for k in ga}
+        o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, t1])
+        if o_run['status'] != 0:
+            log(f'solver stopped at {t * 1e3:.1f} ms: {o_run["message"]}')
+            break
+        outs.append({k: v[-1:] if len(outs) else v for k, v in o_run.items() if isinstance(v, np.ndarray)})
+        y, t = o_run['y'][-1], t1
+        tt = model.terms(t, y)
+        o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp])
+        g_prev = g_last
+        if o['Vp'] > 0:
+            g_last = geo_of(o)
+    out = {k: np.concatenate([d[k] for d in outs]) for k in outs[0]} if outs else None
+    return {'t_bd': t_bd, 'out': out, 'maps': {k: np.array(v) for k, v in maps.items()}}
