@@ -4574,8 +4574,11 @@ CALL full_interp%setup(mesh)
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_hcurl%order
+!---Number of packed interpolation fields (last index used by `xmhd_interp_apply`)
 nfields=26
 IF(xmhd_two_temp)nfields=30
+IF(n2_ind>0)nfields=34
+IF(j2_ind>0)nfields=40
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
 !------------------------------------------------------------------------------

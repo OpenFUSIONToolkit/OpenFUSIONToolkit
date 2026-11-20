@@ -155,7 +155,9 @@ real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
 real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
 DEBUG_STACK_PUSH
 !---
-val=self%bcc(:,cell)
+IF(SIZE(val)<SIZE(self%bcc,DIM=1))CALL oft_abort("Output array too small.", &
+  "cc_interp_apply",__FILE__)
+val(1:SIZE(self%bcc,DIM=1))=self%bcc(:,cell)
 DEBUG_STACK_POP
 end subroutine cc_interp_apply
 !------------------------------------------------------------------------------

@@ -4066,10 +4066,11 @@ CALL full_interp%setup(mesh)
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_lagrange%order
-nfields=26
-IF(xmhd_two_temp)nfields=30
-IF(n2_ind>0)nfields=nfields+1
-IF(j2_ind>0)nfields=nfields+1
+!---Number of packed interpolation fields (last index used by `xmhd_interp_apply`)
+nfields=27
+IF(xmhd_two_temp)nfields=31
+IF(n2_ind>0)nfields=35
+IF(j2_ind>0)nfields=41
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
 !------------------------------------------------------------------------------
@@ -4089,10 +4090,10 @@ do i=levelin,minlev,-1
   else
     !---Create cell centered storage
     if(ASSOCIATED(fullcctmp))DEALLOCATE(fullcctmp)
-    allocate(fullcctmp(26,mesh%nc))
+    allocate(fullcctmp(nfields,mesh%nc))
     !---Transfer from distributed to local grid
     if(xmhd_ML_lagrange%level==xmhd_ML_lagrange%blevel)then
-      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,26)
+      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,nfields)
     !---Average values to over child cells
     else
       !$omp parallel do private(k)
