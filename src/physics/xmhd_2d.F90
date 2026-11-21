@@ -171,6 +171,7 @@ integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
 real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
+CALL check_settings(self)
 !---------------------------------------------------------------------------
 ! Create solver fields
 !---------------------------------------------------------------------------
@@ -387,7 +388,7 @@ CALL self%setup_bc()
 !---------------------------------------------------------------------------
 IF(self%cyl_flag)CALL oft_abort( &
         "Cylindrical mode not currently supported for linear solve","run_lin_simulation",__FILE__)
-
+CALL check_settings(self)
 
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
@@ -546,6 +547,31 @@ IF(maxextrap>0)THEN
 END IF
 END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------
+!> Check that required material properties and settings are valid
+!!
+!! Material properties default to -1 and must be set for every region that is not
+!! ignored (`ignore_rmask`). In cylindrical geometry only a uniform background field
+!! along \f$ \hat{Z} \f$ is a valid (divergence- and curl-free) field.
+!---------------------------------------------------------------------------
+SUBROUTINE check_settings(self)
+CLASS(oft_xmhd_2d_sim), INTENT(in) :: self !< Simulation object
+INTEGER(i4) :: i
+DO i=1,SIZE(self%ignore_rmask)
+  IF(self%ignore_rmask(i))CYCLE
+  IF(self%m_i(i)<=0.d0)CALL oft_abort("Ion mass must be positive","check_settings",__FILE__)
+  IF(self%nu(i)<0.d0)CALL oft_abort("Viscosity not set or negative","check_settings",__FILE__)
+  IF(self%eta(i,1)<0.d0)CALL oft_abort("In-plane resistivity not set or negative","check_settings",__FILE__)
+  IF(self%eta(i,2)<=0.d0)CALL oft_abort("Out-of-plane resistivity must be positive","check_settings",__FILE__)
+  IF(.NOT.self%incomp)THEN
+    IF(self%D_diff(i)<0.d0)CALL oft_abort("Particle diffusivity not set or negative","check_settings",__FILE__)
+    IF(self%chi(i)<0.d0)CALL oft_abort("Thermal diffusivity not set or negative","check_settings",__FILE__)
+    IF(self%gamma(i)<=1.d0)CALL oft_abort("Adiabatic index must be greater than 1","check_settings",__FILE__)
+  END IF
+END DO
+IF(self%cyl_flag.AND.((self%B_0(1)/=0.d0).OR.(self%B_0(2)/=0.d0)))CALL oft_abort( &
+  "Only a Z-directed background field (B_0) is supported in cylindrical geometry","check_settings",__FILE__)
+END SUBROUTINE check_settings
+!---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
 !---------------------------------------------------------------------------
 SUBROUTINE mfun_apply(self,a,b)
@@ -559,7 +585,6 @@ REAL(r8) :: diag_vals(5), B_0(3), gamma, eta(2)
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
                               n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
-REAL(r8), POINTER, DIMENSION(:) :: psi_vac_weights
 quad=>oft_blagrange%quad
 NULLIFY(n_weights, vel_weights, T_weights, psi_weights, by_weights, &
 n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res)
@@ -576,9 +601,7 @@ CALL a%get_local(vtmp, 4)
 CALL a%get_local(T_weights,5)
 CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
-!---Get vacuum poloidal flux offset (added to the psi field reconstruction)
-NULLIFY(psi_vac_weights)
-CALL self%parent_sim%psi_vac%get_local(psi_vac_weights)
+!---The vacuum flux (psi_vac) is part of the equilibrium only, so it is not added to the perturbation
 
 B_0 = self%parent_sim%B_0
 cyl_flag = self%parent_sim%cyl_flag
@@ -629,7 +652,7 @@ DO i=1,mesh%nc
   ELSE
     T_weights_loc = T_weights(cell_dofs)
   END IF
-  psi_weights_loc = psi_weights(cell_dofs) + psi_vac_weights(cell_dofs)
+  psi_weights_loc = psi_weights(cell_dofs)
   by_weights_loc = by_weights(cell_dofs)
 
   !Set constant values
@@ -746,7 +769,6 @@ self%diag_vals=oft_mpi_sum(diag_vals,5)
 !---Cleanup remaining storage
 DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
         n_weights,vel_weights, T_weights, psi_weights, by_weights)
-DEALLOCATE(psi_vac_weights)
 end subroutine mfun_apply
 !---------------------------------------------------------------------------
 !> Compute the NL error function, where we are solving F(x) = 0
@@ -929,6 +951,10 @@ DO i=1,mesh%nc
     END IF
     !---Compute local function contributions
     IF (incomp) THEN
+      ! The divergence constraint is algebraic, so it is only applied at the new time level
+      ! (dt>0). Omitting it from explicit (RHS) evaluations (dt<=0) enforces div(V^{n+1})=0
+      ! instead of div(V^{n+1})=div(V^n).
+      IF(self%dt>0.d0)THEN
       DO jr=1,oft_blagrange_p%nce
         !---Continuity
         IF (cyl_flag) THEN
@@ -939,6 +965,7 @@ DO i=1,mesh%nc
             + basis_vals_p(jr)*div_vel*int_factor
         END IF
       END DO
+      END IF
     ELSE
       DO jr=1,oft_blagrange%nce
         !---Temperature
@@ -1035,7 +1062,7 @@ DO i=1,mesh%nc
         res_loc(jr, 6) = res_loc(jr, 6) &
         + basis_vals(jr)*psi*int_factor/(eta(2)*(coords(1)+gs_epsilon)) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*int_factor/(eta(2)*(coords(1)+gs_epsilon)) &
-        + basis_vals(jr)*self%dt*tmp1(2)*int_factor/(eta(2)*(coords(1)+gs_epsilon)) &
+        + basis_vals(jr)*self%dt*tmp1(2)*int_factor/eta(2) & ! R*(B_0 x V)_phi, weighted by 1/(eta*R)
         + self%dt*DOT_PRODUCT(basis_grads(:,jr), dpsi_0)*int_factor/(coords(1)+gs_epsilon)
       ELSE
         res_loc(jr, 6) = res_loc(jr, 6) &
@@ -1054,14 +1081,20 @@ DO i=1,mesh%nc
         + self%dt*basis_vals(jr)*dvel(3,3)*by*int_factor/(coords(1)+gs_epsilon) &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, dby)*int_factor/(coords(1)+gs_epsilon) &
         - self%dt*basis_vals(jr)*vel(1)*by*int_factor/(coords(1)+gs_epsilon)**2 &
-        + self%dt*eta(1)*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor/(coords(1)+gs_epsilon)
+        + self%dt*eta(1)*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor/(coords(1)+gs_epsilon) &
+        ! Curvature part of R^2*B_pol.grad(V_phi/R): -B_R*V_phi = dpsi/dZ*V_phi/R
+        - self%dt*basis_vals(jr)*dpsi(3)*vel(2)*int_factor/(coords(1)+gs_epsilon)**2 &
+        ! Background field (Z-directed only): R*B_0.grad(V_phi)
+        - self%dt*basis_vals(jr)*DOT_PRODUCT(B_0, dvel(2,:))*int_factor
       ELSE
         res_loc(jr, 7) = res_loc(jr, 7) &
         + basis_vals(jr)*by*int_factor &
         + basis_vals(jr)*self%dt*tmp1(2)*int_factor &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dby)*int_factor &
         + basis_vals(jr)*self%dt*by*div_vel*int_factor &
-        + self%dt*eta(1)*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor
+        + self%dt*eta(1)*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor &
+        ! Background field: B_0.grad(V_y) - B_0y*div(V)
+        - basis_vals(jr)*self%dt*(DOT_PRODUCT(B_0, dvel(2,:)) - B_0(2)*div_vel)*int_factor
       END IF
     END DO
   END DO
@@ -1185,7 +1218,7 @@ LOGICAL :: curved
 INTEGER(i4) :: k, l, m, ik, jr, jc
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs, cell_dofs_p
 REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dby(3),dvel(3,3),div_vel
-REAL(r8) :: jac_mat(3,4),jac_det,int_factor,btmp(3),tmp2(3),tmp3(3),coords(3)
+REAL(r8) :: jac_mat(3,4),jac_det,int_factor,btmp(3),tmp2(3),tmp3(3),coords(3),rfac
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals, basis_vals_p,n_weights_loc,T_weights_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: psi_weights_loc,by_weights_loc,res_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc,basis_grads, basis_grads_p
@@ -1193,7 +1226,7 @@ TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
 type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
 !$omp parallel private(ik, k, l, m,jr,jc,curved,coords,cell_dofs,cell_dofs_p,basis_vals,basis_vals_p,basis_grads,basis_grads_p,T_weights_loc, &
 !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp,tmp2,tmp3, iloc, jac_loc, &
+!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp,tmp2,tmp3,rfac, iloc, jac_loc, &
 !$omp chi, m_i, eta, nu, gamma, D_diff) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 IF (incomp) ALLOCATE(basis_vals_p(oft_blagrange_p%nce),basis_grads_p(3,oft_blagrange_p%nce))
@@ -1295,9 +1328,11 @@ DO i=1,mesh%nc
     dn = dn * self%den_scale
     div_vel = dvel(1,1) + dvel(3,3)
     btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
+    rfac = 1.d0
     IF(cyl_flag)THEN
       div_vel = dvel(1,1) +vel(1)/(coords(1)+gs_epsilon) + dvel(3,3)
       btmp = cross_product(dpsi/(coords(1)+gs_epsilon), [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0]/(coords(1)+gs_epsilon) + B_0
+      rfac = coords(1) ! Volume element factor in cylindrical geometry
     END IF
     diag_vals = diag_vals + [n, vel(1), vel(2), vel(3), T, psi, by]*int_factor
     !---Compute local matrix contributions
@@ -1375,60 +1410,51 @@ DO i=1,mesh%nc
         END IF
         !--Momentum
         !--vel,n
-        IF(cyl_flag)THEN
+        IF(linear.AND.(.NOT.cyl_flag))THEN
+          ! Linear runs: the 1/n dependence of the force terms is evaluated with the
+          ! (inviscid) steady-state momentum equation for the equilibrium
           DO l=1,3
             jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-            ! grad T terms
-            + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor*coords(1)/(m_i*n) & !
-            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*coords(1)/(m_i*n) &
-            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor*coords(1)/(m_i*n**2.d0) &
-            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*coords(1)/(m_i*n**2.d0) &
-            ! dyadic b terms
-            - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
-            + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**3.d0) &
-            + dt_fac*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(2.d0*mu0*m_i*n**2.d0) &
-            + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(2.d0*mu0*m_i*n**2.d0) &
-            - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(mu0*m_i*n**3.d0) &
-            ! velocity dissipation terms
-            - dt_fac*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(l, :))*int_factor*coords(1)/n &
-            - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor*coords(1)/n &
-            + dt_fac*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor*coords(1)/n**2
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) &
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
+            + basis_vals(jr)*basis_vals(jc)*dt_fac*DOT_PRODUCT(vel,dvel(l,:))*int_factor/n
           END DO
-          jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
-          - dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(mu0*m_i*n**2*(coords(1)+gs_epsilon)) &
-          - dt_fac*basis_vals(jr)*basis_vals(jc)*nu*vel(1)*int_factor/(n*(coords(1)+gs_epsilon))
-          jac_loc(3,1)%m(jr,jc) = jac_loc(3,1)%m(jr,jc) &
-          + dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(1)*btmp(2))*int_factor/(mu0*m_i*n**2*(coords(1)+gs_epsilon)) &
-          - dt_fac*basis_vals(jr)*basis_vals(jc)*nu*vel(2)*int_factor/(n*(coords(1)+gs_epsilon))
         ELSE
-          IF(linear)THEN
-            DO l=1,3
+          DO l=1,3
+            jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
+            ! Maxwell stress (1/n factor)
+            - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor*rfac/(mu0*m_i*n**2) &
+            + dt_fac*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor*rfac/(2.d0*mu0*m_i*n**2) &
+            ! velocity dissipation terms
+            - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor*rfac/n &
+            + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor*rfac/n**2
+            IF(incomp)THEN
+              ! Pressure (1/n factor)
               jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-              + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) & !
-              + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
-              + basis_vals(jr)*basis_vals(jc)*dt_fac*DOT_PRODUCT(vel,dvel(l,:))*int_factor/n
-            END DO
-          ELSE
-            DO l=1,3
+              + dt_fac*basis_vals(jc)*T*basis_grads(l,jr)*int_factor*rfac/(m_i*n**2)
+            ELSE
               jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-              ! grad T terms
-              + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) & !
-              + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
-              - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor/(m_i*n**2.d0) &
-              - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor/(m_i*n**2.d0) &
-              ! dyadic b terms
-              - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2.d0) &
-              - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2.d0) &
-              + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor/(mu0*m_i*n**3.d0) &
-              + dt_fac*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor/(2.d0*mu0*m_i*n**2.d0) &
-              + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor/(2.d0*mu0*m_i*n**2.d0) &
-              - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor/(mu0*m_i*n**3.d0) &
-              ! velocity dissipation terms
-              - dt_fac*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(l, :))*int_factor/n &
-              - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor/n &
-              + dt_fac*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor/n**2
-            END DO
+              ! Maxwell stress (grad(n) terms)
+              - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor*rfac/(mu0*m_i*n**2) &
+              + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor*rfac/(mu0*m_i*n**3) &
+              + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor*rfac/(2.d0*mu0*m_i*n**2) &
+              - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor*rfac/(mu0*m_i*n**3) &
+              ! Pressure gradient: grad(2nkT)/(m_i n)
+              + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*rfac/(m_i*n) &
+              - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*rfac/(m_i*n**2)
+            END IF
+          END DO
+          IF(cyl_flag)THEN
+            ! Curvature (hoop) terms of the Maxwell stress
+            jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
+            - dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(2.d0*mu0*m_i*n**2)
+            jac_loc(3,1)%m(jr,jc) = jac_loc(3,1)%m(jr,jc) &
+            + dt_fac*basis_vals(jr)*basis_vals(jc)*btmp(1)*btmp(2)*int_factor/(mu0*m_i*n**2)
+            IF(incomp)THEN
+              ! Curvature term of the pressure gradient (integrated by parts)
+              jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
+              + dt_fac*basis_vals(jr)*basis_vals(jc)*T*int_factor/(m_i*n**2)
+            END IF
           END IF
         END IF
         !--vel, vel
@@ -1482,62 +1508,35 @@ DO i=1,mesh%nc
             END DO
           END IF
         END IF
-        ! --vel, psi
-        IF(cyl_flag)THEN
-          tmp2 = cross_product(basis_grads(:,jc), [0.d0,1.d0/(coords(1)+gs_epsilon),0.d0]) ! this is 'dB'
+        ! --vel, psi (ik=6) and vel, by (ik=7): tmp2 is the perturbation of B
+        DO ik=6,7
+          IF(ik==6)THEN
+            tmp2 = cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0])
+          ELSE
+            tmp2 = [0.d0,basis_vals(jc),0.d0]
+          END IF
+          IF(cyl_flag)tmp2 = tmp2/(coords(1)+gs_epsilon)
           DO l=1,3
-            jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n**2*mu0)
+            jac_loc(l+1,ik)%m(jr,jc) = jac_loc(l+1,ik)%m(jr,jc) &
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor*rfac/(m_i*n*mu0) &
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*rfac/(m_i*n*mu0) &
+            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*rfac/(m_i*n*mu0)
+            ! grad(n) terms (not included in the incompressible model)
+            IF(.NOT.incomp)THEN
+              jac_loc(l+1,ik)%m(jr,jc) = jac_loc(l+1,ik)%m(jr,jc) &
+              - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*rfac/(m_i*n**2*mu0) &
+              - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*rfac/(m_i*n**2*mu0) &
+              + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*rfac/(m_i*n**2*mu0)
+            END IF
           END DO
-          jac_loc(2,6)%m(jr,jc) = jac_loc(2,6)%m(jr,jc) &
-          + dt_fac*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
-          jac_loc(3,6)%m(jr,jc) = jac_loc(3,6)%m(jr,jc) &
-          - dt_fac*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
-        ELSE
-          tmp2 = cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0])
-          DO l=1,3
-            jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor/(m_i*n*mu0) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor/(m_i*n*mu0) &
-            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor/(m_i*n**2*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor/(m_i*n**2*mu0) &
-            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n**2*mu0)
-          END DO
-        END IF
-        ! --vel, by
-        IF(cyl_flag)THEN
-          tmp2 = [0.d0,basis_vals(jc)/(coords(1)+gs_epsilon),0.d0]! this is 'B_y'
-          DO l=1,3
-            jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr),tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n**2*mu0)
-          END DO
-          jac_loc(2,7)%m(jr,jc) = jac_loc(2,7)%m(jr,jc) &
-          + dt_fac*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
-          jac_loc(3,7)%m(jr,jc) = jac_loc(3,7)%m(jr,jc) &
-          - dt_fac*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
-        ELSE
-          tmp2 = [0.d0,basis_vals(jc),0.d0]
-          DO l=1,3
-            jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr),tmp2)*btmp(l)*int_factor/(m_i*n*mu0) &
-            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor/(m_i*n*mu0) &
-            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor/(m_i*n**2*mu0) &
-            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor/(m_i*n**2*mu0) &
-            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n**2*mu0)
-          END DO
-        END IF
+          IF(cyl_flag)THEN
+            ! Curvature (hoop) terms of the Maxwell stress
+            jac_loc(2,ik)%m(jr,jc) = jac_loc(2,ik)%m(jr,jc) &
+            + dt_fac*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
+            jac_loc(3,ik)%m(jr,jc) = jac_loc(3,ik)%m(jr,jc) &
+            - dt_fac*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
+          END IF
+        END DO
         ! Temperature
         IF (.NOT. incomp) THEN
           ! T, n
@@ -1547,11 +1546,13 @@ DO i=1,mesh%nc
               + dt_fac*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*int_factor*coords(1)/(n**2) ! delta_n 
           ELSE
             IF (linear) THEN
-              jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-              + dt_fac*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel, dT)*int_factor/(n*(gamma-1))&
-              + dt_fac*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor/n &
-              - dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:, jr), dT)*int_factor/n &
-              - dt_fac*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor/(n**2) 
+              ! Linear runs: the 1/n dependence of the conduction term is evaluated with the
+              ! steady-state temperature equation for the equilibrium
+              jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &
+              + dt_fac*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel, dT)*int_factor/(n*(gamma-1)) &
+              + dt_fac*basis_vals(jr)*basis_vals(jc)*T*div_vel*int_factor/n &
+              + dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:, jr), dT)*int_factor/n &
+              - dt_fac*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor/(n**2)
             ELSE
               jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
               - dt_fac*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*int_factor/n & ! grad(delta_n) 
@@ -1601,7 +1602,7 @@ DO i=1,mesh%nc
             tmp2(l) = 1.d0
             tmp3 = cross_product(B_0, tmp2)
             jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-            + basis_vals(jr)*dt_fac*basis_vals(jc)*tmp3(2)*int_factor/(eta(2)*(coords(1)+gs_epsilon))
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*tmp3(2)*int_factor/eta(2)
           END DO
         ELSE
           DO l=1,3
@@ -1635,9 +1636,11 @@ DO i=1,mesh%nc
             + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor/(coords(1)+gs_epsilon)
           END DO
           jac_loc(7,2)%m(jr,jc) = jac_loc(7, 2)%m(jr,jc) &
-          + basis_vals(jr)*dt_fac*by*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2
+          - basis_vals(jr)*dt_fac*by*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2
           jac_loc(7,3)%m(jr,jc) = jac_loc(7, 3)%m(jr,jc) &
-          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
+          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon) &
+          - basis_vals(jr)*dt_fac*basis_vals(jc)*dpsi(3)*int_factor/(coords(1)+gs_epsilon)**2 &
+          - basis_vals(jr)*dt_fac*DOT_PRODUCT(B_0, basis_grads(:,jc))*int_factor
         ELSE
           DO l=1,3
             jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
@@ -1645,7 +1648,11 @@ DO i=1,mesh%nc
             + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor
             IF(l==2)THEN
               jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
-              + basis_vals(jr)*dt_fac*tmp2(l)*int_factor
+              + basis_vals(jr)*dt_fac*tmp2(l)*int_factor &
+              - basis_vals(jr)*dt_fac*DOT_PRODUCT(B_0, basis_grads(:,jc))*int_factor
+            ELSE
+              jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
+              + basis_vals(jr)*dt_fac*B_0(2)*basis_grads(l,jc)*int_factor
             END IF
           END DO
         END IF
@@ -1653,7 +1660,8 @@ DO i=1,mesh%nc
         tmp2 = cross_product(basis_grads(:,jc),dvel(2,:))
         IF(cyl_flag)THEN
           jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
-          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
+          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon) &
+          - basis_vals(jr)*dt_fac*basis_grads(3,jc)*vel(2)*int_factor/(coords(1)+gs_epsilon)**2
         ELSE
           jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
           + basis_vals(jr)*dt_fac*tmp2(2)*int_factor

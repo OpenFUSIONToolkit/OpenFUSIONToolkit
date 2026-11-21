@@ -8,8 +8,8 @@ This page documents the system of equations advanced by the nonlinear time integ
 The complete system is defined by the nonlinear residual function \ref xmhd_2d::nlfun_apply
 "nlfun_apply". The Jacobian built in \ref xmhd_2d::build_approx_jacobian "build_approx_jacobian"
 is used as the preconditioner, and also as the Newton operator unless the matrix-free option
-(`mfnk`) is enabled. It is constructed as the derivative of the residual, so it is not described
-separately. The 2D linearized model
+(`mfnk`) is enabled. It is the exact derivative of the residual (apart from the linear-run substitutions
+described in \ref doc_mug_xmhd_2d_eqns_linear), so it is not described separately. The 2D linearized model
 (\ref xmhd_2d::run_lin_simulation "run_lin_simulation") is defined by this Jacobian and is summarized
 in \ref doc_mug_xmhd_2d_eqns_linear.
 
@@ -66,8 +66,11 @@ Here:
  - \f$ \psi_t = \psi + \psi_v \f$ is the total poloidal flux. \f$ \psi_v \f$ is an optional vacuum flux (`psi_vac`, zero
    by default). It is not evolved, but is set by the driver, eg. from coil currents in the
    MUG-TokaMaker coupling (\ref mugtok_td). See \ref doc_mug_xmhd_2d_eqns_ind.
- - \f$ B_0 \f$ is a uniform background field (`B_0`, zero by default). See the warnings in
-   \ref doc_mug_xmhd_2d_eqns_ind.
+ - \f$ B_0 \f$ is a uniform background field (`B_0`, zero by default). It is equivalent to adding the flux
+   \f$ \psi_0 = B_{0,z} x - B_{0,x} z \f$ and a uniform \f$ B_{0,y} \f$ to the evolved fields (planar), or the flux
+   \f$ \psi_0 = B_{0,Z} R^2 / 2 \f$ (cylindrical). In cylindrical geometry only a \f$ Z \f$ component is allowed,
+   because a uniform field with \f$ R \f$ or \f$ \phi \f$ components is not divergence- and curl-free. \f$ B_0 \f$ is not
+   included in the plotted field.
 
 The following conventions are used throughout:
  - \f$ J_\mu \equiv \nabla \times B \f$, so the physical current density is \f$ J = J_\mu / \mu_0 \f$.
@@ -81,8 +84,10 @@ The following conventions are used throughout:
 \subsection doc_mug_xmhd_2d_eqns_params Parameters
 
 Material properties are arrays with one entry per mesh region, and are taken as uniform within a region.
-All of them except \f$ m_i \f$ default to -1 and must be set before \ref xmhd_2d::setup "setup" is called.
-No check is made that they have been set.
+All of them except \f$ m_i \f$ default to -1 and must be set. \ref xmhd_2d::run_simulation "run_simulation" and
+\ref xmhd_2d::run_lin_simulation "run_lin_simulation" abort if, in any region that is not ignored, \f$ m_i \f$ or
+\f$ \eta_2 \f$ is not positive, \f$ \nu \f$ or \f$ \eta_1 \f$ is negative, or (compressible model only) \f$ D \f$ or
+\f$ \chi \f$ is negative or \f$ \gamma \le 1 \f$.
 
 | Symbol | Component | Description |
 |--------|-----------|-------------|
@@ -151,9 +156,8 @@ With `incomp=T`, the temperature equation is replaced by a divergence constraint
    \f$ \phi \f$ of each velocity component, with \f$ \mathcal{T} \f$ the Maxwell stress (plus \f$ -\phi \, p / (R \, m_i n) \f$ in
    the \f$ R \f$ component in cylindrical geometry). This is exact only for uniform \f$ n \f$, which is the normal use
    (\f$ n \f$ is not evolved). The \f$ \nabla n \f$ part of the viscous term is still included.
- - The constraint is applied as \f$ \int \phi_p \nabla \cdot V^{n+1} = \int \phi_p \nabla \cdot V^n \f$ (see
-   \ref doc_mug_xmhd_2d_eqns_time). The divergence of the initial velocity is therefore preserved, not removed,
-   so the initial velocity must be divergence-free.
+ - The constraint is applied at the new time level only, as \f$ \int \phi_p \nabla \cdot V^{n+1} = 0 \f$ (see
+   \ref doc_mug_xmhd_2d_eqns_time). Any divergence in the initial velocity is removed in the first step.
  - By default the pressure is fixed (to set its gauge) at the first global pressure node. This is only valid for a
    single connected MHD region. For multiple regions the driver must set the pressure boundary conditions.
 
@@ -184,20 +188,24 @@ the out-of-plane current and \f$ \eta_1 \f$ the in-plane current.
 \f[ \frac{\partial \psi_t}{\partial t} + V \cdot \nabla \psi_t + \left( B_0 \times V \right)_y = \eta_2 \nabla^2 \psi \f]
 
 \f[ \frac{\partial B_y}{\partial t} + \nabla \cdot \left( B_y V \right) = B_\text{pol} \cdot \nabla V_y
-+ \nabla \cdot \left( \eta_1 \nabla B_y \right) \f]
++ B_0 \cdot \nabla V_y - B_{0,y} \nabla \cdot V + \nabla \cdot \left( \eta_1 \nabla B_y \right) \f]
 
 where \f$ B_\text{pol} = \nabla \psi_t \times \hat{y} \f$. In the implementation the stretching term appears as
 \f$ -\left( \nabla \psi_t \times \nabla V_y \right)_y \f$, which is equal to it.
 
 **Cylindrical**
 
-\f[ \frac{\partial \psi_t}{\partial t} + V \cdot \nabla \psi_t + \left( B_0 \times V \right)_\phi = \eta_2 \Delta^* \psi \f]
+\f[ \frac{\partial \psi_t}{\partial t} + V \cdot \nabla \psi_t + R \left( B_0 \times V \right)_\phi = \eta_2 \Delta^* \psi \f]
 
-\f[ \frac{\partial F}{\partial t} + R^2 \nabla \cdot \left( \frac{F V}{R^2} \right) = R B_\text{pol} \cdot \nabla V_\phi
+\f[ \frac{\partial F}{\partial t} + R^2 \nabla \cdot \left( \frac{F V}{R^2} \right) =
+R^2 \left( B_\text{pol} + B_0 \right) \cdot \nabla \left( \frac{V_\phi}{R} \right)
 + R^2 \nabla \cdot \left( \frac{\eta_1}{R^2} \nabla F \right) \f]
 
 where \f$ B_\text{pol} = \nabla \psi_t \times \hat{\phi} / R \f$, and
 \f$ R^2 \nabla \cdot \left( F V / R^2 \right) = V \cdot \nabla F + F \left( \partial_R V_R + \partial_Z V_Z \right) - F V_R / R \f$.
+The stretching term is \f$ R^2 B \cdot \nabla ( V_\phi / R ) = R B \cdot \nabla V_\phi - B_R V_\phi \f$, so only differential
+rotation generates toroidal field. In the implementation the \f$ R B_\text{pol} \cdot \nabla V_\phi \f$ part appears as
+\f$ -\left( \nabla \psi_t \times \nabla V_\phi \right)_\phi \f$.
 
 Notes:
  - The resistive term uses only \f$ \psi \f$, not \f$ \psi_t \f$, so \f$ \psi_v \f$ is assumed to be a vacuum field
@@ -210,19 +218,6 @@ Notes:
    but \f$ \eta_2 \f$ must be positive in every region. \f$ \eta_1 \f$ appears inside the divergence, which is also correct
    for piecewise-constant values.
  - Both resistive terms are integrated by parts with the boundary term dropped.
-
-\warning In cylindrical geometry the stretching term should be \f$ R^2 B_\text{pol} \cdot \nabla ( V_\phi / R ) =
-R B_\text{pol} \cdot \nabla V_\phi - B_R V_\phi \f$. The \f$ -B_R V_\phi \f$ part is not included in either the residual or the Jacobian,
-so a rigid toroidal rotation (\f$ V_\phi = \Omega R \f$) generates toroidal field when \f$ B_R \neq 0 \f$. This
-affects runs that evolve \f$ V_\phi \f$.
-
-\warning The background field \f$ B_0 \f$ is not treated consistently. It is included in the Lorentz force
-and in the \f$ \psi \f$ equation (where its in-plane part acts like the flux \f$ \psi_0 = B_{0,z} x - B_{0,x} z \f$),
-but it is absent from the \f$ B_y \f$ (\f$ F \f$) equation, which is missing the terms \f$ B_0 \cdot \nabla V_y - B_{0,y} \nabla \cdot V \f$.
-In cylindrical geometry a uniform \f$ B_0 \f$ with \f$ R \f$ or \f$ \phi \f$ components is not a valid
-(divergence- and curl-free) field, and the \f$ (B_0 \times V)_\phi \f$ term is missing a factor of \f$ R \f$. \f$ B_0 \f$ is
-also not included in the plotted field. A uniform in-plane field is better represented
-through the initial \f$ \psi \f$, and a uniform guide field through the initial \f$ B_y \f$.
 
 \section doc_mug_xmhd_2d_eqns_bc Boundary conditions
 
@@ -251,8 +246,8 @@ implementation, the right-hand side is formed by evaluating the residual with a 
 or \f$ -\Delta t/2 \f$ (Crank-Nicolson), and the nonlinear solve then uses \f$ \Delta t \f$ or \f$ \Delta t/2 \f$.
 
 Additional details:
- - The incompressibility constraint has no time derivative or \f$ \Delta t \f$ factor, so it appears unchanged on
-   both sides, giving \f$ \int \phi_p \nabla \cdot V^{n+1} = \int \phi_p \nabla \cdot V^n \f$.
+ - The incompressibility constraint has no time derivative, so it is omitted from the right-hand-side evaluation
+   (any evaluation with a time step \f$ \le 0 \f$), giving \f$ \int \phi_p \nabla \cdot V^{n+1} = 0 \f$.
  - With `mfnk=F` (the default) the Jacobian is used directly as the Newton operator. It is rebuilt from the
    current solution at the start of each step and every 4 Newton iterations. With `mfnk=T` a matrix-free
    finite-difference operator is used, and the Jacobian is used only as the preconditioner. It is then rebuilt at the
