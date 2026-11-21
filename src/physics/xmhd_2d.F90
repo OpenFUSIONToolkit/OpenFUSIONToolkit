@@ -552,16 +552,16 @@ class(xmhd_2d_mfun), intent(inout) :: self !< mass function object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
-LOGICAL :: cyl_flag, incomp
+LOGICAL :: cyl_flag, incomp, linear
 INTEGER(i4) :: i
 REAL(r8) :: diag_vals(5), B_0(3), gamma, eta(2)
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
                               n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
-REAL(r8), POINTER, DIMENSION(:) :: psi_vac_weights
+REAL(r8), POINTER, DIMENSION(:) :: psi_vac_weights, n0_weights
 quad=>oft_blagrange%quad
 NULLIFY(n_weights, vel_weights, T_weights, psi_weights, by_weights, &
-n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res)
+n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res, n0_weights)
 
 !---Get weights from solution vector
 ALLOCATE(vel_weights(3,oft_blagrange%ne))
@@ -578,6 +578,13 @@ CALL a%get_local(by_weights,7)
 !---Get vacuum poloidal flux offset (added to the psi field reconstruction)
 NULLIFY(psi_vac_weights)
 CALL self%parent_sim%psi_vac%get_local(psi_vac_weights)
+!---Kinetic energy uses the equilibrium density in linear runs (a holds the perturbation)
+linear = self%parent_sim%linear
+IF(linear)THEN
+  CALL self%parent_sim%u0%get_local(n0_weights,1)
+ELSE
+  n0_weights => n_weights
+END IF
 
 B_0 = self%parent_sim%B_0
 cyl_flag = self%parent_sim%cyl_flag
@@ -602,11 +609,11 @@ REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
                      psi_weights_loc, by_weights_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
 REAL(r8) :: jac_det,int_factor, btmp(3), tmp1(3), coords(3)
-REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
+REAL(r8) :: n, n_ke, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
          dvel(3,3),div_vel,jac_mat(3,4)
 !$omp parallel private(m,jr,cell_dofs,curved,basis_vals,T_weights_loc,n_weights_loc, &
 !$omp psi_weights_loc, by_weights_loc,vel_weights_loc,basis_grads,res_loc, &
-!$omp jac_det,int_factor,btmp,tmp1,coords,n,vel,T,psi,by,dT,dn,dpsi,dby,dvel,div_vel,jac_mat, &
+!$omp jac_det,int_factor,btmp,tmp1,coords,n,n_ke,vel,T,psi,by,dT,dn,dpsi,dby,dvel,div_vel,jac_mat, &
 !$omp  eta, gamma) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
@@ -649,12 +656,13 @@ DO i=1,mesh%nc
     !---Reconstruct values of solution fields
     n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
     T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
-    by = 0.d0; dby = 0.d0
+    by = 0.d0; dby = 0.d0; n_ke = 0.d0
     basis_grads(3, :) = basis_grads(2,:)
     basis_grads(2,:) = 0.d0
     int_factor = jac_det*quad%wts(m)
     DO jr=1,oft_blagrange%nce
       n = n + n_weights_loc(jr)*basis_vals(jr)
+      n_ke = n_ke + n0_weights(cell_dofs(jr))*basis_vals(jr)
       vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
       T = T + T_weights_loc(jr)*basis_vals(jr)
       psi = psi + psi_weights_loc(jr)*basis_vals(jr)
@@ -670,12 +678,13 @@ DO i=1,mesh%nc
       dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
     END DO
     n = n * self%parent_sim%den_scale
+    n_ke = n_ke * self%parent_sim%den_scale
     dn = dn * self%parent_sim%den_scale
     div_vel = dvel(1,1) + dvel(3,3)
     btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
 
     diag_vals(1) = diag_vals(1) + DOT_PRODUCT(btmp,btmp)*int_factor
-    diag_vals(2) = diag_vals(2) + 0.5d0*self%parent_sim%m_i(mesh%reg(i))*n*DOT_PRODUCT(vel,vel)*int_factor
+    diag_vals(2) = diag_vals(2) + 0.5d0*self%parent_sim%m_i(mesh%reg(i))*n_ke*DOT_PRODUCT(vel,vel)*int_factor
     diag_vals(3) = diag_vals(3) + n*int_factor
     diag_vals(4) = diag_vals(4) + T*int_factor
     diag_vals(5) = diag_vals(5) + int_factor !total volume
@@ -746,6 +755,7 @@ self%diag_vals=oft_mpi_sum(diag_vals,5)
 DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
         n_weights,vel_weights, T_weights, psi_weights, by_weights)
 DEALLOCATE(psi_vac_weights)
+IF(linear)DEALLOCATE(n0_weights)
 end subroutine mfun_apply
 !---------------------------------------------------------------------------
 !> Compute the NL error function, where we are solving F(x) = 0
