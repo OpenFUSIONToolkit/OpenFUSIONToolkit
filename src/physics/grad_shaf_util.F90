@@ -28,7 +28,7 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol, gs_ffprim_pprime, &
-  gs_trace_tol
+  gs_trace_tol, gs_plasma_cell_quad, gs_cut_cell_maxpts
 USE oft_gs_contour, ONLY: gs_rays_contour
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
@@ -224,7 +224,11 @@ type(oft_lag_brinterp) :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp) :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3),fpsi
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),pani(2),bcross_kappa(1)
-integer(4) :: i,m
+real(8), allocatable, target :: cut_pts(:,:),cut_wts(:)
+real(8), pointer, dimension(:,:) :: qpts
+real(8), pointer, dimension(:) :: qwts
+integer(4) :: i,m,nq,ncut_max
+logical :: cut_cells
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
 !---
@@ -248,18 +252,25 @@ vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
 bp_vol = 0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,fpsi,Btor,Bpol,bcross_kappa,pani) &
+cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+ncut_max=0
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
+!$omp parallel private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,fpsi,Btor,Bpol,bcross_kappa,pani,cut_pts,cut_wts,qpts,qwts,nq) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
+allocate(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
+!$omp do
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
-  do m=1,device%fe_rep%quad%np
-    call smesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  CALL gs_plasma_cell_quad(self,i,cut_cells,psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
+  do m=1,nq
+    call smesh%jacobian(i,qpts(:,m),goptmp,v)
+    call psi_eval%interp(i,qpts(:,m),goptmp,psitmp)
+    IF(cut_cells)psitmp(1)=MAX(psitmp(1),self%plasma_bounds(1))
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
+    pt=smesh%log2phys(i,qpts(:,m))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt))THEN
+    IF(cut_cells.OR.gs_test_bounds(self,pt))THEN
       fpsi=self%I%F(psitmp(1))
       IF(self%mode==0)THEN
         itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*fpsi+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
@@ -268,27 +279,27 @@ do i=1,smesh%nc
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
-        CALL self%P_ani%interp(i,device%fe_rep%quad%pts(:,m),goptmp,pani)
-        CALL bcross_kappa_fun%interp(i,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        CALL self%P_ani%interp(i,qpts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(i,qpts(:,m),goptmp,bcross_kappa)
         itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
         itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
-      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
-      centroid = centroid + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
-      pvol = pvol + (self%p_scale*self%P%F(psitmp(1)))*v*device%fe_rep%quad%wts(m)*pt(1)
-      vol = vol + v*device%fe_rep%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*qwts(m)
+      centroid = centroid + itor_loc*pt(1:2)*v*qwts(m)
+      pvol = pvol + (self%p_scale*self%P%F(psitmp(1)))*v*qwts(m)*pt(1)
+      vol = vol + v*qwts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
         Btor = (self%ffp_scale*fpsi + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
         Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
-      tflux = tflux + Btor*v*device%fe_rep%quad%wts(m)
+      tflux = tflux + Btor*v*qwts(m)
       !---Compute internal inductance
-      call psi_geval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,gpsitmp)
+      call psi_geval%interp(i,qpts(:,m),goptmp,gpsitmp)
       Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+gs_epsilon)
-      bp_vol = bp_vol + SUM(Bpol**2)*v*device%fe_rep%quad%wts(m)*pt(1)
+      bp_vol = bp_vol + SUM(Bpol**2)*v*qwts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
         Btor = self%ffp_scale*fpsi/pt(1)
@@ -296,10 +307,12 @@ do i=1,smesh%nc
         Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
-      dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
+      dflux = dflux + Btor*v*qwts(m)
     END IF
   end do
 end do
+deallocate(cut_pts,cut_wts)
+!$omp end parallel
 centroid = centroid/itor
 bp_vol=2*pi*bp_vol
 !
@@ -332,7 +345,11 @@ real(8) :: goptmp(3,3)
 real(8) :: v ! volume
 real(8) :: pt(3) ! radial coordinate
 real(8) :: psitmp(1) ! magnetic flux coordinate
-integer(4) :: i,m
+real(8), allocatable, target :: cut_pts(:,:),cut_wts(:)
+real(8), pointer, dimension(:,:) :: qpts
+real(8), pointer, dimension(:) :: qwts
+integer(4) :: i,m,nq
+logical :: cut_cells
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
 !---
@@ -348,17 +365,23 @@ eta_jsq = 0.d0
 I_NI = 0.d0
 itor = 0.d0
 vloop = 0.d0
+cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+nq=0
+IF(cut_cells)nq=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
+ALLOCATE(cut_pts(3,nq),cut_wts(nq)) ! Empty without cut cells
 !!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc) &
 !!$omp reduction(+:itor) reduction(+:vol) &
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
-  do m=1,device%fe_rep%quad%np
-    call smesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  CALL gs_plasma_cell_quad(self,i,cut_cells,psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
+  do m=1,nq
+    call smesh%jacobian(i,qpts(:,m),goptmp,v)
+    call psi_eval%interp(i,qpts(:,m),goptmp,psitmp)
+    IF(cut_cells)psitmp(1)=MAX(psitmp(1),self%plasma_bounds(1))
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
+    pt=smesh%log2phys(i,qpts(:,m))
     !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
-    IF(gs_test_bounds(self,pt))THEN
+    IF(cut_cells.OR.gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
@@ -367,11 +390,12 @@ do i=1,smesh%nc
         itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
           + (0.5d0*self%ffp_scale*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
       END IF
-      eta_jsq = eta_jsq + (itor_loc**2)*v*device%fe_rep%quad%wts(m)*pt(1)*self%eta%fp(psitmp(1))
-      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
+      eta_jsq = eta_jsq + (itor_loc**2)*v*qwts(m)*pt(1)*self%eta%fp(psitmp(1))
+      itor = itor + itor_loc*v*qwts(m)
     END IF
   end do
 end do
+DEALLOCATE(cut_pts,cut_wts)
 eta_jsq=eta_jsq*(2*pi/(mu0*mu0))
 itor=itor/mu0
 !---Vloop = integral(eta_jsq) / itor

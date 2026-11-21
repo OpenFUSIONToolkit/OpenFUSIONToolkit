@@ -55,6 +55,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Do not search for X-points when determining LCFS?
   LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Use dipole mode (only toroidal current, no pressure gradient)
   LOGICAL(KIND=c_bool) :: mirror_mode = .FALSE. !< Use mirror mode (symmetry about z=0 plane, only upper half of mesh used)
+  LOGICAL(KIND=c_bool) :: lcfs_cut_cells = .FALSE. !< Integrate plasma terms over the part of each cell inside the LCFS (cut-cell quadrature)?
   INTEGER(KIND=c_int) :: maxits = 40 !< Maximum NL iteration count for G-S solver
   INTEGER(KIND=c_int) :: mode = 1 !< Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
   INTEGER(KIND=c_int) :: trace_type = 3 !< Field-line tracer for flux surfaces not handled by the contour method (1 -> LSODE, 3 -> Runge-Kutta)
@@ -1995,6 +1996,7 @@ tMaker_obj%device%urf=settings%urf
 tMaker_obj%device%maxits=settings%maxits
 tMaker_obj%device%nl_tol=settings%nl_tol
 tMaker_obj%device%trace_type=settings%trace_type
+tMaker_obj%device%lcfs_cut_cells=settings%lcfs_cut_cells
 tMaker_obj%mode=settings%mode
 IF(ASSOCIATED(tMaker_obj%gs_equil))tMaker_obj%gs_equil%mode=tMaker_obj%mode
 IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution and report bugs")
