@@ -315,7 +315,7 @@ CHARACTER(LEN=1) :: nbc = 'd' !< Density BC ('d','n')
 CHARACTER(LEN=1) :: tbc = 'd' !< Temperature BC ('d','n')
 CHARACTER(LEN=3) :: visc_type = 'kin' !< Viscosity type ('kin','iso','ani')
 INTEGER(i4) :: visc_itype = 1 !< Viscosity type flag (1->kin,2->iso,3->ani)
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_cell !< Solid region flag
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: reg_solid !< Solid region flag for each mesh region (valid on all MG levels)
 !---Physical parameters
 REAL(r8) :: jac_dt = 1.E-3_r8 !< Time step
 REAL(r8) :: k_db = 1._r8 !< Divergence cleaning term
@@ -1600,7 +1600,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Handle solid region
     !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       eta_curr=eta_reg(mesh%reg(i))
       c1 = eta_curr*jac_dt*det
       do li=1,3
@@ -2490,7 +2490,7 @@ DO level=levelin,xmhd_minlev,-1
   !
   ALLOCATE(j_lag(oft_lagrange%nce))
   DO i=1,mesh%nc
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       CALL oft_lagrange%ncdofs(i,j_lag)
       node_flag(j_lag)=1.d0
     END IF
@@ -2524,10 +2524,10 @@ DEBUG_STACK_PUSH
 ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
-  ALLOCATE(eta_reg(mesh%nreg),solid_cell(mesh%nc))
+  ALLOCATE(eta_reg(mesh%nreg),reg_solid(mesh%nreg))
 END IF
 eta_reg=-1.d0
-solid_cell=.FALSE.
+reg_solid=.FALSE.
 IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
@@ -2582,10 +2582,11 @@ IF(xmhd_root_node%associated())THEN
 END IF
 !
 xmhd_rw=.FALSE.
+reg_solid=(reg_types==2)
 DO i=1,mesh%nc
-  IF(reg_types(mesh%reg(i))==2)THEN
+  IF(reg_solid(mesh%reg(i)))THEN
     xmhd_rw=.TRUE.
-    solid_cell(i)=.TRUE.
+    EXIT
   END IF
 END DO
 #ifdef HAVE_MPI
@@ -2889,7 +2890,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Compute F (u) for solid region
     !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       IF(xmhd_adv_b)THEN
         !---Eta J
         eta_curr=eta_reg(mesh%reg(i))
@@ -3193,7 +3194,7 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
   !$omp critical(xmhderr_red)
   !---Lagrange rows (B,V,n,T)
-  IF(solid_cell(i))THEN
+  IF(reg_solid(mesh%reg(i)))THEN
     DO jr=1,oft_lagrange%nce
       bout(:,j_lag(jr)) = bout(:,j_lag(jr)) + b_loc(jr,:)
     END DO
@@ -3462,7 +3463,7 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
 ! Compute mass matrix
 !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       do jr=1,oft_lagrange%nce
         b_loc(:,jr) = b_loc(:,jr) + lag_rop(jr)*u0%B*det
       end do
@@ -3785,16 +3786,13 @@ integer(i4), intent(in) :: level !< Desired level
 if(level>xmhd_ML_lagrange%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
-! if(level<mg_mesh%mgdim)then
-!   call multigrid_level(level)
-! else
-!   call multigrid_level(mg_mesh%mgdim)
-! end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
 CALL xmhd_ML_lagrange%set_level(level)
 IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid lagrange FE object","xmhd_set_level",__FILE__)
+!---Operate on the mesh of this level (coarser than the finest mesh on geometric MG levels)
+mesh=>oft_lagrange%mesh
 IF(j2_ind>0)THEN
   CALL xmhd_ML_hcurl%set_level(level)
   IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid HCurl FE object","xmhd_set_level",__FILE__)
@@ -4068,10 +4066,11 @@ CALL full_interp%setup(mesh)
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_lagrange%order
-nfields=26
-IF(xmhd_two_temp)nfields=30
-IF(n2_ind>0)nfields=nfields+1
-IF(j2_ind>0)nfields=nfields+1
+!---Number of packed interpolation fields (last index used by `xmhd_interp_apply`)
+nfields=27
+IF(xmhd_two_temp)nfields=31
+IF(n2_ind>0)nfields=35
+IF(j2_ind>0)nfields=41
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
 !------------------------------------------------------------------------------
@@ -4091,10 +4090,10 @@ do i=levelin,minlev,-1
   else
     !---Create cell centered storage
     if(ASSOCIATED(fullcctmp))DEALLOCATE(fullcctmp)
-    allocate(fullcctmp(26,mesh%nc))
+    allocate(fullcctmp(nfields,mesh%nc))
     !---Transfer from distributed to local grid
     if(xmhd_ML_lagrange%level==xmhd_ML_lagrange%blevel)then
-      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,26)
+      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,nfields)
     !---Average values to over child cells
     else
       !$omp parallel do private(k)
