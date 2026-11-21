@@ -8,6 +8,17 @@
 !! The mesh coordinates (x, y) map to the model coordinates (x, z) (or (R, Z) in cylindrical
 !! mode), with y (or phi) the ignorable direction. An optional uniform gravitational
 !! acceleration (`g_accel`) acts along -z, ie. along the negative second mesh coordinate.
+!!
+!! In the compressible model the pressure force uses the gradient of the pressure interpolant
+!! \f$ p_h = \sum_j 2 k n_j T_j \phi_j \f$ (a "group" finite element form of \f$ p = 2 n k T \f$).
+!! Evaluating \f$ 2 k \nabla(n T) \f$ pointwise from the separate n and T expansions instead
+!! makes equal-order stratified equilibria unstable, with spurious modes that grow at a rate of
+!! order \f$ c_s/L_n \f$ regardless of resolution.
+!!
+!! In stratified equilibria the walls should not hold n and T fixed (Dirichlet): with
+!! \f$ v_z = 0 \f$ on a wall, \f$ \partial n/\partial t = -n \partial v_z/\partial z \f$ is not zero
+!! there, and pinning n and T drives a similar spurious instability. Natural (zero-flux)
+!! conditions on n and T are used instead.
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
@@ -817,13 +828,13 @@ BLOCK
 LOGICAL :: curved
 INTEGER(i4) :: k,m,jr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs, cell_dofs_p
-REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dpsi_0(3),dby(3)
+REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dpsi_0(3),dby(3),dp_h(3)
 REAL(r8) :: dvel(3,3),div_vel,jac_mat(3,4),jac_det,int_factor,btmp(3),tmp1(3),coords(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,basis_vals_p,T_weights_loc,n_weights_loc,psi_weights_loc,by_weights_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc,basis_grads, basis_grads_p, res_loc
 !$omp parallel private(k,m,jr,curved,coords,cell_dofs,cell_dofs_p,basis_vals,basis_grads, basis_vals_p, basis_grads_p, T_weights_loc, &
 !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dpsi_0,dby,dvel,div_vel,btmp, tmp1, &
+!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dpsi_0,dby,dp_h,dvel,div_vel,btmp, tmp1, &
 !$omp chi, m_i, eta, nu, gamma, D_diff) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),&
@@ -911,10 +922,14 @@ DO i=1,mesh%nc
         dT = dT + T_weights_loc(jr)*basis_grads_p(:,jr)
       END DO
     ELSE
+      dp_h = 0.d0
       DO jr=1,oft_blagrange%nce
         T = T + T_weights_loc(jr)*basis_vals(jr)
         dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
+        dp_h = dp_h + n_weights_loc(jr)*T_weights_loc(jr)*basis_grads(:,jr)
       END DO
+      ! Gradient of the pressure interpolant p_h = sum_j 2*k*n_j*T_j*phi_j (group FE form, see momentum)
+      dp_h = dp_h*2.d0*k_boltz*self%parent_sim%den_scale
     END IF
     n = n * self%parent_sim%den_scale
     dn = dn * self%parent_sim%den_scale
@@ -1000,8 +1015,7 @@ DO i=1,mesh%nc
           res_loc(jr, 2:4) = res_loc(jr, 2:4) &
           - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*int_factor*coords(1)/(mu0*m_i*n**2) &
           + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*int_factor*coords(1)/(2*mu0*m_i*n**2) &
-          + self%dt*basis_vals(jr)*2.d0*k_boltz*dT*int_factor*coords(1)/m_i &
-          + self%dt*basis_vals(jr)*2.d0*k_boltz*T*dn*int_factor*coords(1)/(m_i*n)
+          + self%dt*basis_vals(jr)*dp_h*int_factor*coords(1)/(m_i*n)
         END IF
         DO k=1,3
           res_loc(jr,k+1) = res_loc(jr, k+1) &
@@ -1032,8 +1046,7 @@ DO i=1,mesh%nc
           res_loc(jr,2:4) = res_loc(jr,2:4) &
           - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*int_factor/(mu0*m_i*n**2) &
           + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*int_factor/(2*mu0*m_i*n**2) &
-          + self%dt*basis_vals(jr)*2.d0*k_boltz*dT*int_factor/m_i &
-          + self%dt*basis_vals(jr)*2.d0*k_boltz*T*dn*int_factor/(m_i*n)
+          + self%dt*basis_vals(jr)*dp_h*int_factor/(m_i*n)
         END IF
         DO k=1,3
           res_loc(jr,k+1) = res_loc(jr, k+1) &
@@ -1199,7 +1212,7 @@ BLOCK
 LOGICAL :: curved
 INTEGER(i4) :: k, l, m, ik, jr, jc
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs, cell_dofs_p
-REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dby(3),dvel(3,3),div_vel
+REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dby(3),dvel(3,3),div_vel,dp_h(3),rfac
 REAL(r8) :: jac_mat(3,4),jac_det,int_factor,btmp(3),tmp2(3),tmp3(3),coords(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals, basis_vals_p,n_weights_loc,T_weights_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: psi_weights_loc,by_weights_loc,res_loc
@@ -1208,7 +1221,7 @@ TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
 type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
 !$omp parallel private(ik, k, l, m,jr,jc,curved,coords,cell_dofs,cell_dofs_p,basis_vals,basis_vals_p,basis_grads,basis_grads_p,T_weights_loc, &
 !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp,tmp2,tmp3, iloc, jac_loc, &
+!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,dp_h,rfac,btmp,tmp2,tmp3, iloc, jac_loc, &
 !$omp chi, m_i, eta, nu, gamma, D_diff) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 IF (incomp) ALLOCATE(basis_vals_p(oft_blagrange_p%nce),basis_grads_p(3,oft_blagrange_p%nce))
@@ -1289,10 +1302,13 @@ DO i=1,mesh%nc
         dT = dT + T_weights_loc(jr)*basis_grads_p(:,jr)
       END DO
     ELSE
-       DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
+      dp_h = 0.d0
+      DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
         T = T + T_weights_loc(jr)*basis_vals(jr)
         dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
+        dp_h = dp_h + n_weights_loc(jr)*T_weights_loc(jr)*basis_grads(:,jr)
       END DO
+      dp_h = dp_h*2.d0*k_boltz*self%den_scale
     END IF
     DO jr=1,oft_blagrange%nce
       vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
@@ -1393,11 +1409,6 @@ DO i=1,mesh%nc
         IF(cyl_flag)THEN
           DO l=1,3
             jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-            ! grad T terms
-            + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor*coords(1)/(m_i*n) & !
-            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*coords(1)/(m_i*n) &
-            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor*coords(1)/(m_i*n**2.d0) &
-            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*coords(1)/(m_i*n**2.d0) &
             ! dyadic b terms
             - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
             - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
@@ -1416,9 +1427,6 @@ DO i=1,mesh%nc
         ELSE
           DO l=1,3
             jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-            ! grad p terms, d/dn of 2*k*(n*grad(T) + T*grad(n))/(m*n)
-            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
-            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor/(m_i*n**2) &
             ! dyadic b terms
             - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2) &
             - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2) &
@@ -1429,6 +1437,24 @@ DO i=1,mesh%nc
             ! velocity dissipation terms, d/dn of -nu*phi*grad(n).grad(v)/n
             - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor/n &
             + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor/n**2
+          END DO
+        END IF
+        ! --vel, n: pressure force
+        rfac = 1.d0
+        IF(cyl_flag)rfac = coords(1)
+        IF(incomp)THEN
+          ! Field 5 is the pressure and n is fixed (Dirichlet everywhere) when incompressible
+          DO l=1,3
+            jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*rfac/(m_i*n) &
+            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*rfac/(m_i*n**2)
+          END DO
+        ELSE
+          ! d/dn of grad(p_h)/(m*n), with p_h = sum_j 2*k*n_j*T_j*phi_j
+          DO l=1,3
+            jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T_weights_loc(jc)*basis_grads(l,jc)*int_factor*rfac/(m_i*n) &
+            - dt_fac*basis_vals(jr)*basis_vals(jc)*dp_h(l)*int_factor*rfac/(m_i*n**2)
           END DO
         END IF
         !--vel, vel
@@ -1468,19 +1494,11 @@ DO i=1,mesh%nc
         END IF
         ! --vel, T
         IF (.NOT. incomp) THEN
-          IF (cyl_flag) THEN
-            DO l=1,3
-              jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
-              + dt_fac*basis_vals(jr)*2*k_boltz*dn(l)*basis_vals(jc)*int_factor*coords(1)/(m_i*n) &
-              + dt_fac*basis_vals(jr)*2*k_boltz*basis_grads(l,jc)*int_factor*coords(1)/(m_i) 
-            END DO
-          ELSE
-            DO l=1,3
-              jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
-              + dt_fac*basis_vals(jr)*2*k_boltz*dn(l)*basis_vals(jc)*int_factor/(m_i*n) &
-              + dt_fac*basis_vals(jr)*2*k_boltz*basis_grads(l,jc)*int_factor/(m_i) 
-            END DO
-          END IF
+          ! d/dT of grad(p_h)/(m*n), with p_h = sum_j 2*k*n_j*T_j*phi_j
+          DO l=1,3
+            jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*n_weights_loc(jc)*self%den_scale*basis_grads(l,jc)*int_factor*rfac/(m_i*n)
+          END DO
         END IF
         ! --vel, psi
         IF(cyl_flag)THEN
