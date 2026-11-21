@@ -26,6 +26,7 @@ run_test() {
 # Fixed boundary cases
 run_test fixed_boundary fixed_boundary_ex1.ipynb
 run_test fixed_boundary fixed_boundary_ex2.ipynb
+run_test fixed_boundary fixed_boundary_ex4.ipynb
 
 # CUTE cases
 run_test CUTE CUTE_mesh_ex.ipynb
