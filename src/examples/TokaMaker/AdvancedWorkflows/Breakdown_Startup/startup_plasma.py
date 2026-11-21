@@ -406,7 +406,8 @@ class PlasmaModel:
                          like the transport losses; densities and temperatures are unchanged by it)
 
     The geometry is a callable geometry(t, Ip) -> dict with R, a, kappa, Vp [m, m, -, m^3], Bphi [T at R],
-    and either Lf [m] (connection length: tau_par = Lf/Cs, thesis eq. 3.49) or tau_par [s]; the loop
+    and either Lf [m] (connection length: tau_par = Lf/Cs, thesis eq. 3.49) or tau_par [s], and optionally
+    nu_conv [1/s], a further loss rate of particles and energy (the convective loss, O43); the loop
     voltage is a callable vloop(t) [V] at the plasma when there is no circuit.
     """
 
@@ -519,7 +520,7 @@ class PlasmaModel:
         Cs = np.sqrt((Te + Ti) * EV / self.m_fuel)
         tau_par = geo['tau_par'] if 'tau_par' in geo else geo['Lf'] / Cs
         tau_perp = 8 * a ** 2 * abs(Bphi) / Te
-        tau = 1.0 / (1.0 / tau_par + 1.0 / tau_perp)
+        tau = 1.0 / (1.0 / tau_par + 1.0 / tau_perp + geo.get('nu_conv', 0.0))     # nu_conv: O43
         # resistance and inductance
         Zeff = sum(np.dot(np.arange(len(n)) ** 2, n) for n in N) / max(Ne, 1.0)
         eta = ETA_SPITZER * Zeff * self.lnL / max(Te, 0.05) ** 1.5         # [Ohm m]
@@ -890,6 +891,8 @@ class FieldLineMap:
             L_sol           mean length of the open mid-plane lines next to the plasma region, on either
                             side (the scrape-off layer; nan if none), for PlasmaModel(neutrals='sol')
             f_open          their fraction of the mid-plane lines in the plasma
+            Bp_open, E_open R-weighted means of B_p [T] and |E_phi| [V/m] over the open cells of the region
+                            (nan if none), for the convective loss (run_with_field_lines convect=True)
             Lf              effective parallel length for tau_par = Lf / C_s: 'loss_fraction' L_open /
                             f_open (only the open fraction loses particles; closed lines have
                             L = inf, K22 sec. 2.2); 'k22_printed' L_open f_open (eq. 17 as printed;
@@ -1020,6 +1023,9 @@ class FieldLineMap:
         out.update(self.shape(plasma))
         w = np.where(plasma, self.RR, 0.0)
         out['f_closed'] = float(w[closed].sum() / max(w.sum(), 1e-300))
+        wo = np.where(plasma & ~closed, self.RR, 0.0)                # open part of the region (O43)
+        out['Bp_open'] = float((wo * np.hypot(BR, BZ)).sum() / wo.sum()) if wo.sum() > 0 else np.nan
+        out['E_open'] = float((wo * np.abs(Ephi)).sum() / wo.sum()) if wo.sum() > 0 else np.nan
         in_pl = plasma[km, jm] & (tm >= 0)                           # mid-plane lines inside the plasma
         if region == 'midplane':
             in_pl &= mid['held'] | ~mid['open']
@@ -1164,7 +1170,7 @@ def geometry_between(ga, gb, ta, dt):
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
                          n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', tau_pos=5e-3, li=0.5,
-                         drain=False, avalanche=None, log=None):
+                         drain=False, avalanche=None, convect=False, log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -1215,6 +1221,14 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     removes the vacated plasma at that rate. Without it a region that flickers closed/open between maps (a
     small wall-limited plasma, M5 cycle 5) loses the plasma of the vacated volume within one map.
 
+    Convective loss (O43; a departure from K22, Valovic NF 27 (1987) 599, Yoo et al. Nat. Commun. 9 (2018)
+    3523): above n_crit ~ eps0 B^2 tan^2(theta_B) / m_e (~1e13 m^-3 at theta_B ~ 1e-3) the space charge on open
+    lines cancels E_par and its field E_RZ ~ E_phi cot(theta_B) drives E x B_phi across B_RZ at up to
+    E_phi / B_RZ (Yoo eq. 4): the plasma moves with the poloidal flux as the coils change it. convect=True
+    removes the open part of the region at nu_conv = (1 - f_closed) E_open / (r_vol Bp_open) (the region
+    crossed at that speed; means over its open cells, analyze), added to the model's loss rate.
+    Not modelled: the partial cancellation of E_par itself (Yoo's lower ohmic heating on open lines).
+
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
     the last to the last (1/Lf, the loss rate, for Lf; geometry_between), a lag of one interval, so it is
@@ -1239,7 +1253,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     concatenated; None without breakdown), 'status' (0, or the solver's status where it stopped),
     'message', 't_stop' (the last time reached; status -2: the model raised ValueError, eg. L_p below
     the structure coupling M_ps M_ss^-1 M_sp when the region's R_vol is far from Rp, O27), 'maps' (per map time: t, p (the Townsend pressure), Rp, Zp (the filament), R_eq, beta_p (position='force'), Vp, R_vol, Z_vol, r_vol,
-    kappa, Lf, L_open, f_open, f_closed, n_bd (mid-plane lines broken down at that map), n_held (lines
+    kappa, Lf, L_open, f_open, f_closed, Bp_open, E_open, n_bd (mid-plane lines broken down at that map), n_held (lines
     in the plasma), breakdown).
     """
     if Rp is None and position == 'fixed':
@@ -1249,7 +1263,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     circ = model.circuit
     M_saved = circ._M
     nc = circ.nc
-    keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed', 'L_sol')
+    keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed', 'L_sol', 'Bp_open', 'E_open')
     maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp', 'R_eq', 'beta_p', 'nu_av') + keys}
     held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
@@ -1288,7 +1302,9 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
 
     def geo_of(o):
         return {'R': o['R_vol'], 'a': o['r_vol'], 'kappa': o['kappa'], 'Vp': o['Vp'], 'Bphi': abs(fmap.F0) / o['R_vol'],
-                'Lf': min(o['Lf'], 1e7), 'L_sol': o['L_sol']}
+                'Lf': min(o['Lf'], 1e7), 'L_sol': o['L_sol'],
+                'nu_conv': (1 - o['f_closed']) * o['E_open'] / (o['r_vol'] * o['Bp_open'])
+                if convect and np.isfinite(o['Bp_open']) and o['Bp_open'] > 0 else 0.0}
 
     # vacuum until the first Townsend breakdown
     f = lambda t, I: circ.K_ss @ (-circ.M_sc @ circ.coil_rate(t) - circ.R_s * I)
