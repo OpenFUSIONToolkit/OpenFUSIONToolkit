@@ -1,0 +1,50 @@
+&runtime_options
+ ppn=1
+ debug=0
+/
+
+&mesh_options
+ meshname='rt'
+ cad_type=92
+ nlevels=1
+ nbase=1
+ grid_order=2
+ fix_boundary=T
+/
+
+&cube_options
+ mesh_type=1          ! Triangular mesh
+ ni=32,32,0           ! Cells in x (periodic) and z (between walls)
+ rscale=1.,1.,0.      ! Lx = Lz = 1 m
+ shift=-0.5,-0.5,0.   ! Center the domain on the origin
+ ref_per=T,F,F        ! Periodic in x
+/
+
+&rt_2d_options
+ order=2              ! FE order
+ linear=F             ! Nonlinear run
+ plot_run=F           ! Run the simulation (T: make plot files from restart files)
+ pm=F                 ! Do not print solver progress
+ n_0=1.E19            ! Density at z=0 [m^-3]
+ T_0=100.             ! Temperature at z=0 [eV]
+ L_n=0.5              ! Density scale length [m] (> 0: heavy plasma on top)
+ g=1.E8               ! Gravity along -z [m/s^2]
+ B_0=0.               ! In-plane field along x at z=0 [T] (B_c = 2.89E-4 T)
+ by0=0.               ! Uniform out-of-plane field [T]
+ V1=100.              ! Seed amplitude [m/s]
+ nu=10.               ! Viscosity [m^2/s]
+ eta=10.              ! Resistivity [m^2/s]
+ chi=0.               ! Thermal diffusivity [m^2/s]
+ D_diff=0.            ! Particle diffusivity [m^2/s]
+ gamma=1.6666667      ! Adiabatic index
+ den_scale=1.E19      ! Density normalization [m^-3]
+ dt=4.E-6             ! Time step [s]
+ nsteps=300           ! Number of time steps
+ rst_freq=10          ! Restart (and plot) file frequency
+ ittarget=1000        ! Keep dt fixed
+ timestep_cn=T        ! Crank-Nicolson time stepping
+ use_mfnk=T           ! Matrix-free Newton-Krylov (preconditioner from the assembled Jacobian)
+ pre_freq=10          ! Rebuild the preconditioner every 10 steps
+ lin_tol=1.E-9        ! Absolute linear tolerance
+ nl_tol=1.E-7         ! Absolute nonlinear tolerance
+/

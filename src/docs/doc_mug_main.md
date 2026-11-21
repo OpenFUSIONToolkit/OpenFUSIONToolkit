@@ -39,6 +39,8 @@ optional incompressible variant. The 2D system is documented in:
 
  - \subpage doc_mug_xmhd_2d_eqns
 
-The following example illustrates usage of the 2D implementation:
+\subsection doc_mhd_main_2d_ex 2D examples
+The following examples illustrate usage of the 2D implementation:
 
  - \subpage doc_mug2d_harris_ex
+ - \subpage doc_mug2d_rt_ex
