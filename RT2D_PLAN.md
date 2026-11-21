@@ -285,3 +285,29 @@ combinations the tests exclude.
   This is harmless because n is fixed when incompressible, so it was left unchanged.
 - **`psi_vac` in linear runs.** `mfun_apply` still adds `psi_vac` to the perturbation's psi in linear runs (noted in
   section 1, out of scope).
+
+## Merge with claude/peaceful-dijkstra-9cjvbz
+
+That branch (742c922, dd22599) added the 2D equations page `src/docs/doc_mug_xmhd_2d_eqns.md`, a finite-difference
+Jacobian test (`test_jacobian_2d`), input checks (`check_settings`) and several `xmhd_2d.F90` fixes: B_0 and
+cylindrical F terms, the incompressible constraint, and `psi_vac` in linear runs. It was merged as b9a1210, using
+their `xmhd_2d.F90` as the base with Session A's changes re-applied:
+- gravity
+- exact linearization: their approximate `IF(linear)` branches in `(vel,n)`/`(T,n)` are removed, because they assumed
+  `F0 = m n v.grad v`, which is wrong with gravity
+- linear kinetic energy using u0's density
+- the group FE pressure
+
+Terms both branches had fixed keep their version.
+
+- `test_jacobian_2d` now also sets `g_accel`.
+- The 2D tests give 72 passed and 18 PETSc skips.
+- RT rates are unchanged.
+- The equations page documents gravity, the pressure discretization (`doc_mug_xmhd_2d_eqns_pres`, with references),
+  the natural n/T wall note and the exact linear operator.
+
+For Session B:
+- `check_settings` now aborts unless `nu`, `eta(:,1)`, `D_diff` and `chi` are >= 0, `eta(:,2)` and `m_i` are > 0,
+  and `gamma` is > 1. The RT example already satisfies this with `D_diff = chi = 0`.
+- `doc_mug_main.md` now has a "2D MHD" section listing the equations page and the Harris sheet example. Put the new
+  RT example there rather than in a separate list.
