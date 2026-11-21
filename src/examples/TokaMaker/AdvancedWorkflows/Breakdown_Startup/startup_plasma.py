@@ -661,6 +661,19 @@ def townsend_field(p, L):
     return np.where(x > 1.0, TOWNSEND_B * pt / np.log(np.maximum(x, 1.0 + 1e-12)), np.inf)
 
 
+DRIFT_COEF = 43.0           # m^2 Torr / (V s): electron parallel drift v_d = 43 E/p[Torr] in H2, D2 (Hammond et al. 2018)
+
+
+def avalanche_rate(p, L, E):
+    """Electron avalanche growth rate [1/s] on open lines of length L [m] with mean parallel field E [V/m] at
+    pressure p [Pa]: nu = v_d (alpha - 1/L), alpha = A p exp(-B p / E) (K22 eq. 13's coefficients), v_d = 43 E/p
+    (E/p in V/(m Torr)); nu > 0 is the Townsend criterion alpha L > 1. -inf where L is not finite."""
+    pt = np.asarray(p, float) / TORR
+    L, E = np.asarray(L, float), np.abs(np.asarray(E, float))
+    alpha = TOWNSEND_A * pt * np.exp(-TOWNSEND_B * pt / np.maximum(E, 1e-30))
+    return np.where(np.isfinite(L) & (L > 0), DRIFT_COEF * E / pt * (alpha - 1.0 / np.where(L > 0, L, 1.0)), -np.inf)
+
+
 def filament_psi(R, Z, Rf, Zf, rho=0.0):
     """Flux [Wb/rad] at (R, Z) of 1 A in a toroidal filament at (Rf, Zf) (Maxwell; = M / 2 pi). rho [m]
     softens the singularity (rho^2 added to the squared distance in the modulus): for a filament standing
@@ -1151,7 +1164,7 @@ def geometry_between(ga, gb, ta, dt):
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
                          n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', tau_pos=5e-3, li=0.5,
-                         drain=False, log=None):
+                         drain=False, avalanche=None, log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -1189,6 +1202,11 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     region centre at breakdown.
     Z is held at Zp (the machine's vertical position control; vertical balance is not solved). The
     balance is the closed-surface one; before the lines close it is a model of where the current goes.
+
+    Avalanche (O31; a departure from K22, which starts the plasma at the first map meeting the Townsend
+    criterion): avalanche=n_seed [m^-3] starts it only when the electrons, grown from the seed density on
+    the fastest-growing mid-plane line at avalanche_rate (G = int nu dt, floored at 0), reach the K22
+    initial density gamma0 n_fill: G >= ln(gamma0 n_fill / n_seed). 'maps' nu_av holds the rate [1/s].
 
     Drain (O42; a departure from K22, for shrink='lose'): drain=True limits how fast the volume handed to
     the model can fall: plasma on lines that have just opened reaches the wall along them in tau_d = L / C_s
@@ -1232,7 +1250,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     M_saved = circ._M
     nc = circ.nc
     keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed', 'L_sol')
-    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp', 'R_eq', 'beta_p') + keys}
+    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp', 'R_eq', 'beta_p', 'nu_av') + keys}
     held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
     log = log or (lambda *a: None)
@@ -1256,6 +1274,7 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         maps['Rp'].append(pos[0] if pos[0] is not None else np.nan)
         maps['Zp'].append(pos[1])
         maps['R_eq'].append(np.nan), maps['beta_p'].append(np.nan)
+        maps['nu_av'].append(float(np.max(avalanche_rate(p, o['mid']['L'], o['mid']['Epar']), initial=-np.inf)))
         maps['n_bd'].append(int(o['mid']['bd'].sum()))
         maps['n_held'].append(int(o['mid']['held'].sum()))
         maps['breakdown'].append(o['breakdown'])
@@ -1274,12 +1293,16 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     # vacuum until the first Townsend breakdown
     f = lambda t, I: circ.K_ss @ (-circ.M_sc @ circ.coil_rate(t) - circ.R_s * I)
     I_s = circ.vacuum(circ.t_coil[0], t_start)
-    t, o, t_bd = t_start, None, None
+    t, o, t_bd, G = t_start, None, None, 0.0
+    if avalanche is not None:
+        g0 = 2e-3 * Te0 ** 1.5 if gamma0 is None else gamma0
+        G_bd = np.log(g0 * 2 * p_fill / (model.T_n * EV) / avalanche)
     while t <= t_end + 1e-12:
         o = analyze(t, I_s, f(t, I_s), 0.0, 0.0)
-        if o['breakdown'] and o['Vp'] > 0:
+        if o['breakdown'] and o['Vp'] > 0 and (avalanche is None or G >= G_bd):
             t_bd = t
             break
+        G = max(G + maps['nu_av'][-1] * dt_map, 0.0) if np.isfinite(maps['nu_av'][-1]) else 0.0
         I_s = solve_ivp(f, (t, t + dt_map), I_s, method='BDF', rtol=1e-8, atol=1e-6).y[:, -1]
         t += dt_map
     if t_bd is None:
