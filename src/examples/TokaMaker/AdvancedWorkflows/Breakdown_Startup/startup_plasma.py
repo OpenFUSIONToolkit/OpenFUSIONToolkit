@@ -39,6 +39,7 @@ EQUI_COEF = 7.75e-34        # electron-ion equilibration [W m^3 eV^0.5 amu] (the
 
 ADAS_DIR = os.environ.get('OFT_ADAS_DIR', os.path.join(os.path.expanduser('~'), '.cache', 'oft_breakdown_startup', 'adas'))
 ADAS_URL = 'https://open.adas.ac.uk/download/adf11/{cls}/{name}.dat'
+ADAS15_URL = 'https://open.adas.ac.uk/download/adf15/{cls}/{name}.dat'
 
 # adf11 files per element: scd ionization, acd recombination, ccd charge-exchange recombination by
 # neutral hydrogen, plt line power, prb recombination + bremsstrahlung power. 96 (the GCR project)
@@ -64,11 +65,15 @@ MASS_AMU = {'h': 1.007825, 'd': 2.014102, 'be': 9.01218, 'c': 12.0107, 'n': 14.0
 
 
 def adas_file(name):
-    """Local path of OPEN-ADAS adf11 file `name` (eg. 'scd96_c'), downloaded into ADAS_DIR if missing."""
+    """Local path of OPEN-ADAS adf11 file `name` (eg. 'scd96_c') or adf15 file (eg. 'pec96#h_pju#h0',
+    OPEN-ADAS's ']['-separated name), downloaded into ADAS_DIR if missing."""
     path = os.path.join(ADAS_DIR, name + '.dat')
     if not os.path.isfile(path):
         os.makedirs(ADAS_DIR, exist_ok=True)
-        url = ADAS_URL.format(cls=name.split('_')[0], name=name)
+        if name.startswith('pec'):
+            url = ADAS15_URL.format(cls=name.split('_')[0].replace('#', '%5D%5B'), name=name.replace('#', '%5D%5B'))
+        else:
+            url = ADAS_URL.format(cls=name.split('_')[0], name=name)
         with urllib.request.urlopen(url, timeout=60) as r:
             text = r.read().decode('latin-1')
         if 'DOCTYPE' in text[:200] or '/' not in text.split('\n')[0]:     # OPEN-ADAS answers a missing file with a web page
@@ -105,6 +110,28 @@ def read_adf11(path):
             continue
         k += 1
     return {'z_max': z_max, 'logne': logne, 'logT': logT, 'blocks': np.array(blocks), 'z1': np.array(z1)}
+
+
+def read_adf15(path, wavelength, kind):
+    """Photon emissivity coefficient of an adf15 file: the block at `wavelength` [A] (within 0.5 A) of TYPE
+    `kind` ('EXCIT', 'RECOM' or 'CHEXC') as f(Te [eV], ne [m^-3]) -> PEC [photons m^3/s], bilinear in
+    log10 ne, log10 Te, held at the table's edges."""
+    import re
+    from scipy.interpolate import RegularGridInterpolator
+    lines = open(path, encoding='latin-1').read().split('\n')
+    for i, line in enumerate(lines):
+        m = re.match(r'\s*([\d.]+)\s*A\s+(\d+)\s+(\d+)\s*/(.*)', line)
+        if m and abs(float(m.group(1)) - wavelength) < 0.5 and re.search(rf'TYPE\s*=\s*{kind}', m.group(4)):
+            n_ne, n_T = int(m.group(2)), int(m.group(3))
+            vals, k = [], i + 1
+            while len(vals) < n_ne + n_T + n_ne * n_T:
+                vals += [float(x) for x in lines[k].split()]
+                k += 1
+            lne, lT = np.log10(vals[:n_ne]) + 6.0, np.log10(vals[n_ne:n_ne + n_T])
+            lpec = np.log10(np.maximum(np.reshape(vals[n_ne + n_T:], (n_ne, n_T)), 1e-74)) - 6.0   # cm^3/s -> m^3/s
+            f = RegularGridInterpolator((lne, lT), lpec)
+            return lambda Te, ne: 10 ** float(f((np.clip(np.log10(ne), lne[0], lne[-1]), np.clip(np.log10(Te), lT[0], lT[-1]))))
+    raise ValueError(f'no {kind} block at {wavelength} A in {path}')
 
 
 class AtomicSpecies:
@@ -343,6 +370,11 @@ class PlasmaModel:
         T_cx             energy [eV] of the fuel atoms in the plasma (charge exchange, penetration); None: T_n
                          (DYON). With a D2 fill the atoms come from electron-impact dissociation and carry
                          Franck-Condon energies (~2-3 eV per atom); option, a departure (prefill study)
+        lines            synthetic line emission (M5 diagnostics; K20 sec. 3.2): {name: (adf15 file,
+                         wavelength [A], element, z)}, eg. {'Da': ('pec96#h_pju#h0', 6561.9, 'd', 0),
+                         'CIII': ('pec96#c_vsu#c2', 4650.1, 'c', 2)}; terms() then gives 'eps_<name>'
+                         [photons/(m^3 s)] = ne (n_z PEC_exc + n_z+1 PEC_rec) in the plasma (n_0 inside
+                         it for z = 0); charge-exchange emission not included. None: off
         E_dis            electron energy [eV] paid per fuel atom ionized for its dissociation from D2 (binding
                          2.26 eV + the Franck-Condon energy); 0: DYON (fully dissociated fill)
         neutrals         'uniform' (DYON: one well-mixed vessel reservoir, n_0 = N_0 / (gamma V_V), screening by
@@ -381,7 +413,7 @@ class PlasmaModel:
     def __init__(self, fuel='d', impurities=('c', 'o'), wall=None, V_V=35.0, T_n=0.026, lnL=10.0, li=0.5,
                  inductance='circular', screening=True, fixed_T=None, paux=None, fuelling=None, circuit=None,
                  shrink='compress', T_cx=None, E_dis=0.0, dis_per_cx=False,
-                 neutrals='uniform', L_sol=30.0, ec=None):
+                 neutrals='uniform', L_sol=30.0, ec=None, lines=None):
         self.L_sol = L_sol
         self.ec = None if ec is None else dict({'freq': 110e9, 'harmonic': 2, 'R_wall': 0.9, 'c': np.pi}, **ec)
         if neutrals not in ('uniform', 'kinetic', 'sol'):
@@ -396,6 +428,9 @@ class PlasmaModel:
         self.V_V, self.T_n, self.lnL, self.li, self.inductance = V_V, T_n, lnL, li, inductance
         self.screening, self.fixed_T, self.paux, self.fuelling = screening, fixed_T, paux, fuelling
         self.m_fuel = self.species[0].mass_amu * AMU
+        el = {('d' if n in ('h', 'd') else n): i for i, n in enumerate(self.names)}
+        self.lines = {k: (el['d' if e in ('h', 'd') else e], z, read_adf15(adas_file(f), w, 'EXCIT'),
+                          read_adf15(adas_file(f), w, 'RECOM')) for k, (f, w, e, z) in (lines or {}).items()}
         self.slices, k = [], 0                               # slice of y holding species i (charge states 0..Z)
         for s in self.species:
             self.slices.append(slice(k, k + s.Z + 1))
@@ -574,7 +609,9 @@ class PlasmaModel:
         else:
             dIs, dy[self.iIp], V = self.circuit.derivs(t, y[self.iIs:], Ip, Rp, Lp_eff, dLp)
             dy[self.iIs:] = dIs
-        return {'t': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
+        eps = {'eps_' + k: ne * ((n0[i] if z == 0 else nz[i][z]) * f_exc(Te, ne) + nz[i][z + 1] * f_rec(Te, ne))
+               for k, (i, z, f_exc, f_rec) in self.lines.items()}
+        return {**eps, 't': t, 'dy': dy, 'ne': ne, 'Te': Te, 'Ti': Ti, 'Ip': Ip, 'n0': n0, 'nz': nz, 'N': N,
                 'Vn': Vn, 'gamma': gam, 'tau': tau, 'tau_par': tau_par, 'tau_perp': tau_perp, 'Zeff': Zeff,
                 'Rp': Rp, 'Lp': Lp, 'Lp_eff': Lp_eff, 'dLp_dt': dLp, 'Vloop': V, 'P_oh': P_oh, 'P_aux': P_aux, 'P_iz': P_iz, 'P_rad': P_rad,
                 'P_equi': P_equi, 'P_econ': P_econ, 'P_cx': P_cx, 'P_fc': P_fc, 'P_sol': P_sol, 'delta_sol': delta_sol, 'f_ec': f_ec, 'P_icon': P_icon, 'Vp': Vp,
@@ -624,10 +661,12 @@ def townsend_field(p, L):
     return np.where(x > 1.0, TOWNSEND_B * pt / np.log(np.maximum(x, 1.0 + 1e-12)), np.inf)
 
 
-def filament_psi(R, Z, Rf, Zf):
-    """Flux [Wb/rad] at (R, Z) of 1 A in a toroidal filament at (Rf, Zf) (Maxwell; = M / 2 pi)."""
+def filament_psi(R, Z, Rf, Zf, rho=0.0):
+    """Flux [Wb/rad] at (R, Z) of 1 A in a toroidal filament at (Rf, Zf) (Maxwell; = M / 2 pi). rho [m]
+    softens the singularity (rho^2 added to the squared distance in the modulus): for a filament standing
+    for a block of distributed current, its flux at the block itself stays finite."""
     from scipy.special import ellipe, ellipk
-    k2 = np.clip(4 * R * Rf / ((R + Rf) ** 2 + (Z - Zf) ** 2), 1e-14, 1 - 1e-9)
+    k2 = np.clip(4 * R * Rf / ((R + Rf) ** 2 + (Z - Zf) ** 2 + rho ** 2), 1e-14, 1 - 1e-9)
     k = np.sqrt(k2)
     return MU0 * np.sqrt(R * Rf) * ((2 / k - k) * ellipk(k2) - 2 / k * ellipe(k2)) / (2 * np.pi)
 
@@ -682,12 +721,38 @@ class FieldLineMap:
         psi = eval_fields(machine.gs, machine.psi_u, np.column_stack([RR.ravel(), ZZ.ravel()]))['psi']
         return cls(R, Z, wall, machine.F0, psi.reshape(len(psi), len(Z), len(R)))
 
-    def fields(self, I_u, dI_u, Ip=0.0, dIp=0.0, Rp=None, Zp=0.0, dRp=0.0, dZp=0.0):
+    def current_psi(self, W, block=4):
+        """psi [Wb/rad] of 1 A distributed over the grid with fractions W [nZ, nR] (sum 1; a rate dW/dt
+        gives dpsi/dt per ampere). The cells are summed into blocks of block x block cells, each a filament
+        at the block centre softened by the radius of a disk of the block's area (filament_psi rho):
+        exact far from the current, smoothed within ~one block of it. Block flux maps are cached."""
+        cache = self.__dict__.setdefault('_gblk', {})
+        nZ, nR = W.shape
+        Wb = np.add.reduceat(np.add.reduceat(W, np.arange(0, nZ, block), 0), np.arange(0, nR, block), 1)
+        rho = block * np.sqrt(self.dR * self.dZ / np.pi)
+        out = np.zeros(self.RR.shape)
+        for j, i in zip(*np.nonzero(Wb)):
+            if (j, i, block) not in cache:
+                Rc, Zc = self.R[i * block:(i + 1) * block].mean(), self.Z[j * block:(j + 1) * block].mean()
+                cache[j, i, block] = filament_psi(self.RR, self.ZZ, Rc, Zc, rho).astype(np.float32)
+            out += Wb[j, i] * cache[j, i, block]
+        return out
+
+    def mutual_w(self, W):
+        """M_p [nu] of a plasma current distributed with fractions W [nZ, nR] (sum 1): 2 pi sum W psi_u."""
+        return 2 * np.pi * np.tensordot(self.psi_units, W, axes=([1, 2], [0, 1]))
+
+    def fields(self, I_u, dI_u, Ip=0.0, dIp=0.0, Rp=None, Zp=0.0, dRp=0.0, dZp=0.0, W=None, dW=None):
         """(psi, E_phi) grids [Wb/rad, V/m] of unit currents I_u [nu] (per turn) changing at dI_u [A/s],
-        plus a plasma filament Ip [A] at (Rp, Zp) moving at (dRp, dZp) [m/s] (K22 eq. 9-10)."""
+        plus a plasma filament Ip [A] at (Rp, Zp) moving at (dRp, dZp) [m/s] (K22 eq. 9-10), or, with W
+        [nZ, nR] (O33), Ip distributed with fractions W changing at dW [1/s] (current_psi)."""
         psi = np.tensordot(I_u, self.psi_units, 1)
         dpsi = np.tensordot(dI_u, self.psi_units, 1)
-        if Rp is not None and (Ip != 0.0 or dIp != 0.0):
+        if W is not None:
+            g = self.current_psi(W)
+            psi = psi + Ip * g
+            dpsi = dpsi + dIp * g + (Ip * self.current_psi(dW) if dW is not None and Ip != 0.0 else 0.0)
+        elif Rp is not None and (Ip != 0.0 or dIp != 0.0):
             g = filament_psi(self.RR, self.ZZ, Rp, Zp)
             psi = psi + Ip * g
             h = 1e-4
@@ -695,6 +760,37 @@ class FieldLineMap:
                   + (filament_psi(self.RR, self.ZZ, Rp, Zp + h) - filament_psi(self.RR, self.ZZ, Rp, Zp - h)) / (2 * h) * dZp)
             dpsi = dpsi + dIp * g + Ip * dg
         return psi, -dpsi / self.RR
+
+    def force_balance_R(self, I_u, Ip, Z, a, beta_p=0.0, li=0.5, R_near=None):
+        """Radius [m] of a filament Ip [A] at height Z in radial force balance (Shafranov, large aspect
+        ratio, circular): the external field of the unit currents I_u [nu] (coils and structure, no
+        plasma) on the line Z gives the force per filament F_R = 2 pi R Ip f(R),
+        f = B_Z,ext + mu0 Ip [ln(8R/a) + beta_p + li/2 - 3/2] / (4 pi R) (hoop and pressure force out,
+        Ip x B_Z,ext). A plasma of minor radius a limits on the wall: its centre stays on the part of
+        the line at least a from the wall (the point farthest from it if none), whose ends are the
+        limited positions. From R_near (default the middle) the plasma follows the force to the first
+        stable root (Ip f' < 0) that way, or to the limited position at that end."""
+        j = int(np.clip(np.searchsorted(self.Z, Z) - 1, 0, len(self.Z) - 2))
+        v = (Z - self.Z[j]) / self.dZ
+        psi = (1 - v) * np.tensordot(I_u, self.psi_units[:, j], 1) + v * np.tensordot(I_u, self.psi_units[:, j + 1], 1)
+        ok = self.inside[j] & self.inside[j + 1]
+        R = self.R[ok]
+        BZ = np.gradient(psi, self.dR)[ok] / R
+        A, B = self.wall, np.roll(self.wall, -1, 0)                     # distance to the wall segments
+        P = np.column_stack([R, np.full_like(R, Z)])[:, None]
+        s = np.clip(((P - A) * (B - A)).sum(-1) / np.maximum(((B - A) ** 2).sum(-1), 1e-30), 0, 1)
+        d = np.linalg.norm(P - A - s[..., None] * (B - A), axis=-1).min(1)
+        fit = d >= a
+        if fit.sum() < 2:
+            return float(R[np.argmax(d)])
+        R, BZ = R[fit], BZ[fit]
+        F = Ip * (BZ + MU0 * Ip * (np.log(8 * R / a) + beta_p + li / 2 - 1.5) / (4 * np.pi * R))
+        k = np.nonzero((F[:-1] > 0) & (F[1:] <= 0))[0]                   # stable: F from + (out) to - (in)
+        Rr = R[k] + self.dR * F[k] / (F[k] - F[k + 1])
+        R0 = float(np.clip(R_near if R_near is not None else R.mean(), R[0], R[-1]))
+        if np.interp(R0, R, F) > 0:                                      # pushed out: the next root outward
+            return float(Rr[Rr >= R0].min()) if (Rr >= R0).any() else float(R[-1])
+        return float(Rr[Rr <= R0].max()) if (Rr <= R0).any() else float(R[0])
 
     def mutual(self, R, Z):
         """M_p [nu]: mutual inductance of a filament at (R, Z) with 1 A per turn in each unit,
@@ -1054,7 +1150,8 @@ def geometry_between(ga, gb, ta, dt):
 
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
-                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', tau_pos=5e-3, log=None):
+                         n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', tau_pos=5e-3, li=0.5,
+                         log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -1075,6 +1172,23 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     map gave a motion voltage ~1/dt_map (review cycle 4). The returned 'out' holds the terms at the
     moving position; model.terms after the run uses the restored filament.
     No force balance: the mechanical work I_p dM_p/dt . I_u is not in the plasma energy.
+    position='distributed' (O33; a departure from K22's filament): I_p spread over the plasma region with
+    J_phi ~ 1/R (a common loop voltage across a region of uniform T_e, hence uniform resistivity: the
+    current of a cell ~ dA / R), the fractions W relaxing toward each map's region with tau_pos as above
+    (starting on the region at breakdown); the map's flux and E_phi from FieldLineMap.current_psi (with
+    the -Ip dW/dt term of the changing distribution), the circuit's M_p = 2 pi sum W psi_u
+    (FieldLineMap.mutual_w), linear between maps. L_p stays the model's (the region's ellipse). 'maps'
+    Rp, Zp are then the current centroid.
+    position='force' (O41; a departure from K22): as 'region', but the filament relaxes toward the radius of
+    radial force balance at height Zp (FieldLineMap.force_balance_R: the coils' and structure's vertical
+    field against the hoop and pressure forces, a = the region's r_vol, internal inductance li,
+    beta_p = f_closed 2 mu0 n_e (T_e + T_i) / B_pa^2 with B_pa = mu0 I_p / (2 pi a): only the closed
+    fraction's pressure is held by the poloidal field; on open lines the 1/R pressure force drives a
+    vertical charge separation that drains along them, not a radial force on the current; unweighted,
+    beta_p ~ 30-500 at I_p ~ 0.1-2 kA after breakdown threw the filament between the walls), from the
+    region centre at breakdown.
+    Z is held at Zp (the machine's vertical position control; vertical balance is not solved). The
+    balance is the closed-surface one; before the lines close it is a model of where the current goes.
 
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
@@ -1099,28 +1213,32 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     Returns a dict: 't_bd' (None if no breakdown before t_end), 'out' (the plasma model's output arrays,
     concatenated; None without breakdown), 'status' (0, or the solver's status where it stopped),
     'message', 't_stop' (the last time reached; status -2: the model raised ValueError, eg. L_p below
-    the structure coupling M_ps M_ss^-1 M_sp when the region's R_vol is far from Rp, O27), 'maps' (per map time: t, p (the Townsend pressure), Rp, Zp (the filament), Vp, R_vol, Z_vol, r_vol,
+    the structure coupling M_ps M_ss^-1 M_sp when the region's R_vol is far from Rp, O27), 'maps' (per map time: t, p (the Townsend pressure), Rp, Zp (the filament), R_eq, beta_p (position='force'), Vp, R_vol, Z_vol, r_vol,
     kappa, Lf, L_open, f_open, f_closed, n_bd (mid-plane lines broken down at that map), n_held (lines
     in the plasma), breakdown).
     """
     if Rp is None and position == 'fixed':
         raise ValueError('Rp (the plasma current position, the circuit filament radius) must be given')
-    if hold not in ('k22', 'sustained') or pressure not in ('neutral', 'fill') or position not in ('fixed', 'region'):
+    if hold not in ('k22', 'sustained') or pressure not in ('neutral', 'fill') or position not in ('fixed', 'region', 'distributed', 'force'):
         raise ValueError(f'unknown hold {hold!r}, pressure {pressure!r} or position {position!r}')
     circ = model.circuit
     M_saved = circ._M
     nc = circ.nc
     keys = ('Vp', 'R_vol', 'Z_vol', 'r_vol', 'kappa', 'Lf', 'L_open', 'f_open', 'f_closed', 'L_sol')
-    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp') + keys}
+    maps = {k: [] for k in ('t', 'p', 'n_bd', 'n_held', 'breakdown', 'Rp', 'Zp', 'R_eq', 'beta_p') + keys}
     held = np.zeros(n_mid, bool)
     I_coil = lambda t: np.array([np.interp(t, circ.t_coil, circ.I_coil[:, j]) for j in range(nc)])
     log = log or (lambda *a: None)
 
-    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False, p=p_fill, pos=(Rp, Zp), vel=(0.0, 0.0)):
+    def analyze(t, I_s, dI_s, Ip, dIp, plasma_exists=False, p=p_fill, pos=(Rp, Zp), vel=(0.0, 0.0), cur=None):
         nonlocal held
         I_u = np.concatenate([I_coil(t), I_s])
         dI_u = np.concatenate([circ.coil_rate(t), dI_s])
-        psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, pos[0], pos[1], vel[0], vel[1])
+        if cur is not None:                                              # distributed current (O33)
+            psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, W=cur[0], dW=cur[1])
+            pos = (float((cur[0] * fmap.RR).sum()), float((cur[0] * fmap.ZZ).sum()))
+        else:
+            psi, Ephi = fmap.fields(I_u, dI_u, Ip, dIp, pos[0], pos[1], vel[0], vel[1])
         sus = held if plasma_exists and hold == 'sustained' else None
         o = fmap.analyze(psi, Ephi, p, n_mid=n_mid, Z_mid=Z_mid, region=region, tau_form=tau_form,
                          plasma_exists=plasma_exists, sustained=sus)
@@ -1130,12 +1248,17 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         maps['p'].append(p)
         maps['Rp'].append(pos[0] if pos[0] is not None else np.nan)
         maps['Zp'].append(pos[1])
+        maps['R_eq'].append(np.nan), maps['beta_p'].append(np.nan)
         maps['n_bd'].append(int(o['mid']['bd'].sum()))
         maps['n_held'].append(int(o['mid']['held'].sum()))
         maps['breakdown'].append(o['breakdown'])
         for k in keys:
             maps[k].append(o[k] if k in o else np.nan)
         return o
+
+    def weights(o):                                                     # J ~ 1/R over the plasma region
+        w = o['plasma'] * fmap.dA / fmap.RR
+        return w / w.sum()
 
     def geo_of(o):
         return {'R': o['R_vol'], 'a': o['r_vol'], 'kappa': o['kappa'], 'Vp': o['Vp'], 'Bphi': abs(fmap.F0) / o['R_vol'],
@@ -1157,7 +1280,8 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         return {'t_bd': None, 'out': None, 'status': 0, 'message': 'no breakdown', 't_stop': t_end,
                 'maps': {k: np.array(v) for k, v in maps.items()}}
     g_prev = g_last = geo_of(o)
-    P_prev = P_last = (Rp, Zp) if position == 'fixed' else (o['R_vol'], o['Z_vol'])
+    P_prev = P_last = (Rp, Zp) if position == 'fixed' else (o['R_vol'], Zp if position == 'force' else o['Z_vol'])
+    W_prev = W_last = weights(o) if position == 'distributed' else None
     if y0 is None:
         y0 = model.initial_state(p_fill, g_last, Te0=Te0, gamma0=gamma0, impurity_fraction=impurity_fraction)
     y0 = np.array(y0, float)
@@ -1169,8 +1293,10 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
         while t < t_end - 1e-12:
             t1 = min(t + dt_map, t_end)
             geometry = geometry_between(dict(g_prev), dict(g_last), t, dt_map)
-            if position == 'region':
+            if position in ('region', 'force'):
                 circ.move(fmap.mutual(*P_prev), fmap.mutual(*P_last), t, t1 - t)
+            elif position == 'distributed':
+                circ.move(fmap.mutual_w(W_prev), fmap.mutual_w(W_last), t, t1 - t)
             try:
                 o_run = model.run(geometry, None, y, (t, t1), t_eval=[t, 0.5 * (t + t1), t1])
             except ValueError as e:                                      # eg. L_p below the structure coupling (O27)
@@ -1183,15 +1309,24 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
             y, t0, t = o_run['y'][-1], t, t1
             tt = model.terms(t, y)
             p_now = tt['n0'][0] * model.T_n * EV / 2 if pressure == 'neutral' else p_fill
-            vel = ((P_last[0] - P_prev[0]) / (t1 - t0), (P_last[1] - P_prev[1]) / (t1 - t0)) if position == 'region' else (0.0, 0.0)
+            vel = ((P_last[0] - P_prev[0]) / (t1 - t0), (P_last[1] - P_prev[1]) / (t1 - t0)) if position in ('region', 'force') else (0.0, 0.0)
+            cur = (W_last, (W_last - W_prev) / (t1 - t0)) if position == 'distributed' else None
             o = analyze(t, y[model.iIs:], tt['dy'][model.iIs:], y[model.iIp], tt['dy'][model.iIp], plasma_exists=True,
-                        p=p_now, pos=P_last, vel=vel)
-            g_prev, P_prev = g_last, P_last
+                        p=p_now, pos=P_last, vel=vel, cur=cur)
+            g_prev, P_prev, W_prev = g_last, P_last, W_last
             if o['Vp'] > 0:
                 g_last = geo_of(o)
+                if position == 'distributed':
+                    W_last = W_last + min(dt_map / tau_pos, 1.0) * (weights(o) - W_last)
                 if position == 'region':
                     w = min(dt_map / tau_pos, 1.0)
                     P_last = (P_last[0] + w * (o['R_vol'] - P_last[0]), P_last[1] + w * (o['Z_vol'] - P_last[1]))
+                if position == 'force':
+                    Ip, a = y[model.iIp], o['r_vol']
+                    beta_p = o['f_closed'] * 2 * MU0 * tt['ne'] * (tt['Te'] + tt['Ti']) * EV / max(MU0 * abs(Ip) / (2 * np.pi * a), 1e-9) ** 2
+                    R_eq = fmap.force_balance_R(np.concatenate([I_coil(t), y[model.iIs:]]), Ip, Zp, a, beta_p, li, P_last[0])
+                    P_last = (P_last[0] + min(dt_map / tau_pos, 1.0) * (R_eq - P_last[0]), Zp)
+                    maps['R_eq'][-1], maps['beta_p'][-1] = R_eq, beta_p
     finally:
         circ.move(M_saved[0], M_saved[1], M_saved[2], M_saved[3])
     out = {k: np.concatenate([d[k] for d in outs]) for k in outs[0]} if outs else None
