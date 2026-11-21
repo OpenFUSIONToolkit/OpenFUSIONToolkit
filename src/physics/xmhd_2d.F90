@@ -4,6 +4,10 @@
 !> @file xmhd_2d.F90
 !
 !> Solve time-dependent MHD equations in 2D with lagrange basis set
+!!
+!! The mesh coordinates (x, y) map to the model coordinates (x, z) (or (R, Z) in cylindrical
+!! mode), with y (or phi) the ignorable direction. An optional uniform gravitational
+!! acceleration (`g_accel`) acts along -z, ie. along the negative second mesh coordinate.
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
@@ -87,6 +91,7 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8), ALLOCATABLE :: D_diff(:) !< diffusivity, by region
   REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant (use elec_charge for T in eV)
   REAL(r8) :: den_scale = 1.d19 !< scale factor used to normalize density
+  REAL(r8) :: g_accel = 0.d0 !< gravitational acceleration [m/s^2] along -z (the second mesh coordinate)
   REAL(r8), ALLOCATABLE :: m_i(:) !< ion mass, by region
   REAL(r8), ALLOCATABLE :: eta(:, :) !< electrical resistivity, in units of mu0, by region. First column is in plane, second column is out of plane (for anisotropic resistivity)
   LOGICAL, ALLOCATABLE :: ignore_rmask(:) !< Mask for regions to ignore when populating physics (defaults to false)
@@ -756,7 +761,7 @@ LOGICAL :: linear,cyl_flag, incomp
 INTEGER(i4) :: i,l
 REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
-REAL(r8) :: chi, eta(2), nu, D_diff, gamma, diag_vals(5), B_0(3), diag_vec(3)
+REAL(r8) :: chi, eta(2), nu, D_diff, gamma, diag_vals(5), B_0(3), diag_vec(3), g_accel
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
                               n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
@@ -784,6 +789,7 @@ CALL self%parent_sim%psi_vac%get_local(psi_vac_weights)
 B_0 = self%parent_sim%B_0
 cyl_flag = self%parent_sim%cyl_flag
 incomp = self%parent_sim%incomp
+g_accel = self%parent_sim%g_accel
 
 !---Zero result and get storage array
 CALL b%set(0.d0)
@@ -1001,6 +1007,9 @@ DO i=1,mesh%nc
         - self%dt*basis_vals(jr)*btmp(1)*btmp(2)*int_factor/(mu0*m_i*n) & !!nonzero
         + self%dt*basis_vals(jr)*nu*vel(2)*int_factor/(coords(1)+gs_epsilon) &
         + self%dt*basis_vals(jr)*vel(1)*vel(2)*int_factor
+        !---Gravity (per unit mass, along -Z)
+        res_loc(jr,4) = res_loc(jr,4) &
+        + self%dt*basis_vals(jr)*g_accel*int_factor*coords(1)
       ELSE
         res_loc(jr, 2:4) = res_loc(jr, 2:4) &
           + basis_vals(jr)*vel*int_factor&
@@ -1022,6 +1031,9 @@ DO i=1,mesh%nc
             + nu*self%dt*DOT_PRODUCT(basis_grads(:,jr),dvel(k,:))*int_factor &
             - nu*basis_vals(jr)*self%dt*DOT_PRODUCT(dn,dvel(k,:))*int_factor/n
         END DO
+        !---Gravity (per unit mass, along -z)
+        res_loc(jr,4) = res_loc(jr,4) &
+        + self%dt*basis_vals(jr)*g_accel*int_factor
       END IF
       !---Psi
       tmp1 = cross_product(B_0,vel)
