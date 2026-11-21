@@ -15,7 +15,7 @@
 !! coordinate). The thermal pressure force uses the gradient of the nodal pressure interpolant
 !! \f$ p_h = \sum_j 2 k n_j T_j \phi_j \f$, a group finite element form (C. A. J. Fletcher,
 !! Comput. Methods Appl. Mech. Eng. 37, 225 (1983)), which keeps stratified equilibria free of
-!! spurious instabilities.
+!! spurious instabilities (see \ref doc_mug_xmhd_2d_eqns_pres).
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)

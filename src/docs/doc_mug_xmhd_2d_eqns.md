@@ -8,8 +8,7 @@ This page documents the system of equations advanced by the nonlinear time integ
 The complete system is defined by the nonlinear residual function \ref xmhd_2d::nlfun_apply
 "nlfun_apply". The Jacobian built in \ref xmhd_2d::build_approx_jacobian "build_approx_jacobian"
 is used as the preconditioner, and also as the Newton operator unless the matrix-free option
-(`mfnk`) is enabled. It is the exact derivative of the residual (apart from the linear-run substitutions
-described in \ref doc_mug_xmhd_2d_eqns_linear), so it is not described separately. The 2D linearized model
+(`mfnk`) is enabled. It is the exact derivative of the residual, so it is not described separately. The 2D linearized model
 (\ref xmhd_2d::run_lin_simulation "run_lin_simulation") is defined by this Jacobian and is summarized
 in \ref doc_mug_xmhd_2d_eqns_linear.
 
@@ -107,7 +106,8 @@ held fixed with Dirichlet conditions (see \ref doc_mug_xmhd_2d_eqns_bc).
 
 Other settings of \ref xmhd_2d::oft_xmhd_2d_sim "oft_xmhd_2d_sim" referenced below are `cyl_flag`
 (cylindrical geometry), `incomp` (incompressible model), `timestep_cn` (time-centered stepping),
-`mfnk` (matrix-free Newton-Krylov), `den_scale` (density scale, default \f$ 10^{19} \f$), and `B_0`.
+`mfnk` (matrix-free Newton-Krylov), `den_scale` (density scale, default \f$ 10^{19} \f$), `B_0`, and
+`g_accel` (gravitational acceleration \f$ g \f$ [m/s^2], default 0).
 
 \section doc_mug_xmhd_2d_eqns_cont Continuity
 
@@ -123,9 +123,14 @@ Other settings of \ref xmhd_2d::oft_xmhd_2d_sim "oft_xmhd_2d_sim" referenced bel
 \subsection doc_mug_xmhd_2d_eqns_mom_comp Compressible model
 
 \f[ \frac{\partial V}{\partial t} + V \cdot \nabla V = \frac{J_\mu \times B}{\mu_0 m_i n}
-- \frac{\nabla \left( 2 n k T \right)}{m_i n} + \frac{1}{n} \nabla \cdot \left( n \nu \nabla V \right) \f]
+- \frac{\nabla p_h}{m_i n} + \frac{1}{n} \nabla \cdot \left( n \nu \nabla V \right) - g \hat{z} \f]
 
  - The pressure is \f$ p = 2 n k T \f$: electrons and ions are assumed to have the same temperature, \f$ T \f$.
+   The force uses \f$ p_h = \sum_j 2 k n_j T_j \phi_j \f$, the interpolant of the nodal values of \f$ p \f$, rather than
+   the product of the \f$ n \f$ and \f$ T \f$ fields (see \ref doc_mug_xmhd_2d_eqns_pres).
+ - \f$ g \f$ = `g_accel` is a uniform gravitational acceleration along \f$ -\hat{z} \f$ (\f$ -\hat{Z} \f$ in cylindrical
+   geometry), ie. along the negative second mesh coordinate. It is a body force per unit mass, so it does not depend on
+   the solution and adds nothing to the Jacobian.
  - The Lorentz force is written as the divergence of the Maxwell stress,
    \f$ J_\mu \times B = \nabla \cdot \left( B B - \frac{1}{2} |B|^2 I \right) \f$. This is exact because
    \f$ \nabla \cdot B = 0 \f$ by construction. In the weak form it is integrated by parts onto
@@ -146,7 +151,7 @@ Other settings of \ref xmhd_2d::oft_xmhd_2d_sim "oft_xmhd_2d_sim" referenced bel
 With `incomp=T`, the temperature equation is replaced by a divergence constraint, and field 5 is the pressure:
 
 \f[ \frac{\partial V}{\partial t} + V \cdot \nabla V = \frac{J_\mu \times B}{\mu_0 m_i n}
-- \frac{\nabla p}{m_i n} + \frac{1}{n} \nabla \cdot \left( n \nu \nabla V \right), \qquad \nabla \cdot V = 0 \f]
+- \frac{\nabla p}{m_i n} + \frac{1}{n} \nabla \cdot \left( n \nu \nabla V \right) - g \hat{z}, \qquad \nabla \cdot V = 0 \f]
 
  - The pressure uses Lagrange elements one order lower than the other fields (Taylor-Hood elements). It acts
    as a Lagrange multiplier.
@@ -160,6 +165,68 @@ With `incomp=T`, the temperature equation is replaced by a divergence constraint
    \ref doc_mug_xmhd_2d_eqns_time). Any divergence in the initial velocity is removed in the first step.
  - By default the pressure is fixed (to set its gauge) at the first global pressure node. This is only valid for a
    single connected MHD region. For multiple regions the driver must set the pressure boundary conditions.
+
+\subsection doc_mug_xmhd_2d_eqns_pres Pressure discretization (compressible model)
+
+With \f$ n_h = \sum_j n_j \phi_j \f$ and \f$ T_h = \sum_j T_j \phi_j \f$, the pressure force is evaluated from
+
+\f[ p_h = \sum_j 2 k n_j T_j \phi_j, \qquad
+\frac{\nabla p_h}{m_i n_h} = \frac{2 k}{m_i n_h} \sum_j n_j T_j \nabla \phi_j \f]
+
+instead of the pointwise product \f$ 2 k \nabla (n_h T_h) / (m_i n_h) = 2 k \left( \nabla T_h + T_h \nabla n_h / n_h \right) / m_i \f$.
+This is the group finite element formulation of Fletcher (\ref Fletcher1983 "1983", \ref Fletcher1984 "1984"), also called product
+approximation (\ref Christie1981 "Christie et al. 1981") or interpolated coefficients (\ref Douglas1975 "Douglas and Dupont 1975"): a nonlinear group (here the product
+\f$ n T \f$) is expanded in the same basis as the unknowns, using its nodal values. It is widely used for compressible
+flow, for example in algebraic flux correction schemes (\ref Kuzmin2012 "Kuzmin et al. 2012"). The Jacobian uses the exact derivatives of
+\f$ \nabla p_h / (m_i n_h) \f$ with respect to \f$ n_j \f$ and \f$ T_j \f$.
+
+**Why it is used.** With all fields of the same order, the pointwise form is unstable for any stratified state (non-uniform
+\f$ n \f$ and \f$ T \f$), even without gravity and at uniform pressure. Linear analysis of the discretization (and the 2D
+code) shows a non-oscillatory spurious mode with a growth rate of order \f$ c_s / L_n \f$, where \f$ L_n \f$ is the density
+scale length. It does not decrease with mesh refinement or a higher element order, and implicit time stepping does not damp
+it. For typical laboratory parameters it is one to two orders of magnitude faster than buoyancy-driven instabilities, such
+as the Rayleigh-Taylor instability. With \f$ p_h \f$, which lies in the finite element space, the mode is absent, and the
+Rayleigh-Taylor growth rate of an exponential stratification agrees with the incompressible analytic rate to the
+expected compressibility and dissipation corrections (\f$ < 0.2\% \f$; see `test_rt_2d`).
+
+**What is unchanged.** For a uniform background (\f$ n_0 \f$, \f$ T_0 \f$ constant) the linearized pressure
+\f$ 2 k (n_0 \delta T + T_0 \delta n) \f$ already lies in the finite element space, so linear waves about uniform states are
+identical in both forms. The continuity and temperature equations, the magnetic force (the Maxwell stress is still formed
+pointwise from \f$ B \f$), and the incompressible model (where \f$ p \f$ is itself a field) are not affected.
+
+**Limitations.**
+ - The scheme is not exactly well-balanced: when \f$ n \f$ and \f$ T \f$ are projected from a continuous hydrostatic
+   equilibrium, \f$ \nabla p_h / (m_i n_h) + g \hat{z} \f$ is zero only to the accuracy of the interpolation. The
+   remaining static imbalance drives small motions. Because hydrostatic balance is a small difference of large terms when
+   \f$ m_i g L_n \ll k T \f$, the relative pressure error is amplified by about \f$ p / (m_i n g L_n) \f$. Schemes that preserve
+   discrete hydrostatic states exactly need a dedicated (eg. hydrostatic) reconstruction
+   (\ref Botta2004 "Botta et al. 2004", \ref Kaeppeli2014 "Käppeli and Mishra 2014"), which is not implemented.
+ - For the same reason, particle diffusion (\f$ D \f$) and thermal conduction (\f$ \chi \f$) slowly move a stratified
+   equilibrium away from hydrostatic balance, which drives flows. Small values (or zero) should be used when the
+   equilibrium must stay at rest.
+ - Only the thermal pressure uses the group form.
+ - Dirichlet conditions on \f$ n \f$ and \f$ T \f$ at walls drive a similar spurious instability in stratified states
+   (see \ref doc_mug_xmhd_2d_eqns_bc).
+
+**References**
+ - \anchor Fletcher1983 C. A. J. Fletcher, "The group finite element formulation", Comput. Methods Appl. Mech. Eng. 37,
+   225-244 (1983), [doi:10.1016/0045-7825(83)90122-6](https://doi.org/10.1016/0045-7825(83)90122-6)
+ - \anchor Fletcher1984 C. A. J. Fletcher, *Computational Galerkin Methods* (Springer, New York, 1984),
+   [doi:10.1007/978-3-642-85949-6](https://doi.org/10.1007/978-3-642-85949-6)
+ - \anchor Douglas1975 J. Douglas Jr. and T. Dupont, "The effect of interpolating the coefficients in nonlinear parabolic
+   Galerkin procedures", Math. Comp. 29, 360-389 (1975),
+   [doi:10.1090/S0025-5718-1975-0502033-7](https://doi.org/10.1090/S0025-5718-1975-0502033-7)
+ - \anchor Christie1981 I. Christie, D. F. Griffiths, A. R. Mitchell, and J. M. Sanz-Serna, "Product approximation for
+   non-linear problems in the finite element method", IMA J. Numer. Anal. 1, 253-266 (1981),
+   [doi:10.1093/imanum/1.3.253](https://doi.org/10.1093/imanum/1.3.253)
+ - \anchor Kuzmin2012 D. Kuzmin, M. Möller, and M. Gurris, "Algebraic flux correction II", in *Flux-Corrected Transport:
+   Principles, Algorithms, and Applications*, 2nd ed. (Springer, Dordrecht, 2012), pp. 193-238,
+   [doi:10.1007/978-94-007-4038-9_7](https://doi.org/10.1007/978-94-007-4038-9_7)
+ - \anchor Botta2004 N. Botta, R. Klein, S. Langenberg, and S. Lützenkirchen, "Well balanced finite volume methods for
+   nearly hydrostatic flows", J. Comput. Phys. 196, 539-565 (2004),
+   [doi:10.1016/j.jcp.2003.11.008](https://doi.org/10.1016/j.jcp.2003.11.008)
+ - \anchor Kaeppeli2014 R. Käppeli and S. Mishra, "Well-balanced schemes for the Euler equations with gravitation",
+   J. Comput. Phys. 259, 199-219 (2014), [doi:10.1016/j.jcp.2013.11.026](https://doi.org/10.1016/j.jcp.2013.11.026)
 
 \section doc_mug_xmhd_2d_eqns_temp Temperature
 
@@ -232,6 +299,12 @@ These are applied after the weak forms are assembled. If a flag array is not set
 Where a field is not fixed, the boundary terms dropped in the weak forms above act as natural boundary
 conditions: no diffusive particle, heat, or magnetic flux, and no viscous or Maxwell stress.
 
+\note In stratified equilibria (non-uniform \f$ n \f$ and \f$ T \f$) do not fix \f$ n \f$ and \f$ T \f$ at walls. Where the
+normal velocity is zero, \f$ \partial n / \partial t = -\nabla \cdot (n V) \f$ is still not zero in general, so holding
+\f$ n \f$ and \f$ T \f$ fixed over-constrains the continuity and temperature equations. This drives a spurious instability with a
+growth rate of order \f$ c_s / L_n \f$. Set `n_bc` and `T_bc` to `.FALSE.` on such walls (natural, zero-flux
+conditions). For a free-slip wall, fix only the normal and out-of-plane velocity components.
+
 \section doc_mug_xmhd_2d_eqns_time Time discretization
 
 Write the semi-discrete system as \f$ M \partial u / \partial t + R(u) = 0 \f$, where \f$ M \f$ includes the row weights
@@ -267,13 +340,12 @@ equilibrium \f$ u_0 \f$ (`u0`). It is available only in planar geometry. The ope
 backward Euler step:
 \f$ \left( M + \frac{2}{3} \Delta t L \right) \delta u^{n+1} = \frac{1}{3} M \left( 4 \delta u^n - \delta u^{n-1} \right) \f$.
 
-The Jacobian is constructed as the linearization of the equations above, except for the response to a density perturbation
-\f$ \delta n \f$. There, the \f$ 1/n \f$ dependence of the force and heat-flux terms is evaluated with the steady-state equations
-for \f$ u_0 \f$ in place of the force and conduction terms themselves. For momentum,
-\f[ \delta \left[ \frac{1}{m_i n} \left( \frac{J_\mu \times B}{\mu_0} - \nabla p \right) \right]_{\delta n}
-\approx -\frac{\delta n}{n_0} \left( V_0 \cdot \nabla V_0 \right) - \frac{2 k \nabla \left( T_0 \delta n \right)}{m_i n_0} \f]
-and the viscous terms in \f$ \delta n \f$ are dropped. A similar substitution is used for the conduction term in the temperature equation.
-The equilibrium must therefore be a steady state of the ideal and thermal parts of the equations.
+\f$ L \f$ is the exact linearization of the equations above, including the response to a density perturbation through
+the \f$ 1/n \f$ factors of the force terms. For an equilibrium in force balance with gravity this response contains the buoyancy
+force, \f$ -g \, \delta n / n_0 \, \hat{z} \f$ (from \f$ +\delta n \, \nabla p_0 / (m_i n_0^2) \f$ with
+\f$ \nabla p_0 = -m_i n_0 g \hat{z} \f$). Gravity itself is constant and does not appear in \f$ L \f$. \f$ u_0 \f$ need not be an
+exact steady state: \f$ R(u_0) \f$ is not included, so a non-equilibrium \f$ u_0 \f$ only changes the operator about which the
+perturbation evolves.
 
-\note These substitutions are exact for a static (\f$ V_0 = 0 \f$), uniform-temperature equilibrium in force
-balance (\f$ J_\mu \times B = \mu_0 \nabla p \f$ at \f$ u_0 \f$).
+In the history file (`xmhd_2d.hist`) of a linear run, the kinetic energy `ven` is \f$ \int \frac{1}{2} m_i n_0 |\delta V|^2 \f$,
+using the equilibrium density, so its growth rate is twice the growth rate of the perturbation.
