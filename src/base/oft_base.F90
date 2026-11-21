@@ -21,7 +21,7 @@
 !! @ingroup doxy_oft_base
 !--------------------------------------------------------------------------------
 MODULE oft_base
-USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
+USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit, output_unit
 USE omp_lib
 USE oft_local
 USE oft_xml, ONLY: xml_doc,xml_node,xml_nodelist,xml_parsefile,xml_get_element,xml_hasAttribute, &
@@ -147,6 +147,11 @@ INTEGER(i4), PARAMETER :: oft_test_seed(34) = [430470439, -303393496, -476850581
   325397911, 701379007, 392919068, 379166631, 484739024, -292318758, -1669143581, &
   430570439, 430420439, -303093496]
 !$omp threadprivate(oft_tid)
+!---Abort handling
+INTEGER(i4), PRIVATE :: oft_abort_count = 0 !< Number of calls to @ref oft_abort (first caller ends the run)
+LOGICAL, PRIVATE :: oft_abort_active = .FALSE. !< This thread is running @ref oft_abort (detects re-entry)
+LOGICAL, PRIVATE :: oft_main_thread = .FALSE. !< This thread called @ref oft_init (the MPI main thread)
+!$omp threadprivate(oft_abort_active,oft_main_thread)
 !---Debugging stack information
 LOGICAL :: oft_stack_disabled = .FALSE. !< Disable debug/profiling stack
 LOGICAL, PRIVATE :: oft_prof_enabled = .FALSE. !< Enable profiling?
@@ -169,6 +174,11 @@ INTERFACE
 !------------------------------------------------------------------------------
   SUBROUTINE oft_set_signal_handlers()  BIND(C)
   END SUBROUTINE oft_set_signal_handlers
+!------------------------------------------------------------------------------
+!> Interface for restoring default UNIX signal handlers in "oft_local.c"
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_reset_signal_handlers()  BIND(C)
+  END SUBROUTINE oft_reset_signal_handlers
 !------------------------------------------------------------------------------
 !> Interface for printing git information in "oft_local.c"
 !------------------------------------------------------------------------------
@@ -203,6 +213,7 @@ LOGICAL :: called_from_lib
 LOGICAL :: rst,print_header
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
+oft_main_thread=.TRUE.
 #ifdef HAVE_MPI
 CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
 #endif
@@ -409,45 +420,79 @@ END SUBROUTINE oft_finalize
 !> "Graceful" abort for Open FUSION Toolkit
 !!
 !! Also calls MPI_ABORT/STOP
+!!
+!! Safe to call from several OpenMP threads at once: only the first caller
+!! prints its error and ends the run. Later callers wait for the process to
+!! exit, except the thread that called @ref oft_init (the MPI main thread),
+!! which ends the run itself if the process is still alive after 10 seconds.
+!! A call made while this thread is already aborting (eg. from
+!! @ref oft_abort_cb) skips printing and ends the run immediately.
 !------------------------------------------------------------------------------
 SUBROUTINE oft_abort(error_str,sname,fname)
 CHARACTER(LEN=*), INTENT(in) :: error_str !< Error string
 CHARACTER(LEN=*), INTENT(in) :: sname !< Source subroutine name
 CHARACTER(LEN=*), INTENT(in) :: fname !< Source file name
-INTEGER(i4) :: ierr,errcode,outunit
+INTEGER(i4) :: i,ierr,errcode,outunit,ncalls
 #ifdef OFT_ABORT_FILES
 CHARACTER(LEN=5) :: proc
 #endif
-outunit=error_unit
-#ifdef OFT_ABORT_FILES
-WRITE(proc,'(I5.5)')oft_env%rank
-OPEN(outunit,FILE='abort_'//proc//'.err')
+errcode=99
+!---Re-entry on this thread (eg. from oft_abort_cb) skips straight to ending the run
+IF(.NOT.oft_abort_active)THEN
+  oft_abort_active=.TRUE.
+  !$omp atomic capture
+  oft_abort_count=oft_abort_count+1
+  ncalls=oft_abort_count
+  !$omp end atomic
+  IF(ncalls>1)THEN
+    !---Another thread is already ending the run, wait for it
+    DO i=1,10
+      ierr=oft_sleep(1)
+    END DO
+    !---Only the MPI main thread may take over if the process is still alive
+    IF(.NOT.oft_main_thread)THEN
+      DO
+        ierr=oft_sleep(1)
+      END DO
+    END IF
+  ELSE
+#ifdef OFT_STACK
+    !---Ensure SIGINT/SIGTERM from the launcher cannot end the run with a zero exit code
+    CALL oft_reset_signal_handlers
 #endif
-!---Print error information
+    outunit=error_unit
+#ifdef OFT_ABORT_FILES
+    WRITE(proc,'(I5.5)')oft_env%rank
+    OPEN(outunit,FILE='abort_'//proc//'.err')
+#endif
+    !---Print error information
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
-WRITE(outunit,'(1X)')
-WRITE(outunit,'(A)')'#----------------------------------------------'
-IF(oft_env%nprocs>1)THEN
-  WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
-  WRITE(outunit,100)  '[',oft_env%rank,'] SUBROUTINE: ',TRIM(sname)
-  WRITE(outunit,100)  '[',oft_env%rank,'] FILE: ',TRIM(fname)
-ELSE
-  WRITE(outunit,101)  'ERROR: ',TRIM(error_str)
-  WRITE(outunit,101)  'SUBROUTINE: ',TRIM(sname)
-  WRITE(outunit,101)  'FILE: ',TRIM(fname)
-END IF
-WRITE(outunit,'(A)')'#----------------------------------------------'
-WRITE(outunit,'(1X)')
+    FLUSH(output_unit)
+    WRITE(outunit,'(1X)')
+    WRITE(outunit,'(A)')'#----------------------------------------------'
+    IF(oft_env%nprocs>1)THEN
+      WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
+      WRITE(outunit,100)  '[',oft_env%rank,'] SUBROUTINE: ',TRIM(sname)
+      WRITE(outunit,100)  '[',oft_env%rank,'] FILE: ',TRIM(fname)
+    ELSE
+      WRITE(outunit,101)  'ERROR: ',TRIM(error_str)
+      WRITE(outunit,101)  'SUBROUTINE: ',TRIM(sname)
+      WRITE(outunit,101)  'FILE: ',TRIM(fname)
+    END IF
+    WRITE(outunit,'(A)')'#----------------------------------------------'
+    WRITE(outunit,'(1X)')
+    FLUSH(outunit)
 #ifdef OFT_ABORT_FILES
-CLOSE(outunit)
+    CLOSE(outunit)
 #endif
-!---
-CALL oft_stack_print
-!---
-IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
+    !---
+    CALL oft_stack_print
+    !---
+    IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
+  END IF
+END IF
 !---Abort run
-errcode=99
 #ifdef HAVE_MPI
 CALL MPI_ABORT(oft_env%comm,errcode,ierr)
 ierr=oft_sleep(1)
@@ -474,11 +519,13 @@ CHARACTER(LEN=*) :: error_str
 !---Print warning information
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
+!$omp critical (oft_warn_crit)
 IF(oft_env%nprocs>1)THEN
   WRITE(error_unit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
 ELSE
   WRITE(error_unit,101)'WARNING: ',TRIM(error_str)
 END IF
+!$omp end critical (oft_warn_crit)
 END SUBROUTINE oft_warn
 !------------------------------------------------------------------------------
 !> Output control for performance messages

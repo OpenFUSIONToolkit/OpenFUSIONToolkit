@@ -215,7 +215,7 @@ cubit.cmd('export Genesis "tMaker_cubit.g" overwrite block all')
 
 class gs_Domain:
     '''! Grad-Sharvanov domain definitions for TokaMaker with Triangle library meshing'''
-    def __init__(self,rextent=None,zextents=[None,None],rpad=1.2,zpad=[1.2,1.2],json_filename=None):
+    def __init__(self,rextent=None,zextents=(None,None),rpad=1.2,zpad=(1.2,1.2),json_filename=None):
         '''! Create a new Grad-Shafranov domain
 
         @param region_list List of @ref oftpy.Region objects that define mesh
@@ -239,10 +239,11 @@ class gs_Domain:
             self.region_info = input_dict['region_info']
             self.regions = []
             for region in input_dict['regions']:
-                region.append(Region(load_dict=region))
+                self.regions.append(Region(None,load_dict=region))
+            self._extra_reg_defs = input_dict.get('extra_reg_defs', [])
         else:
             self.rextent = rextent
-            self.zextents = zextents
+            self.zextents = list(zextents)
             self.rpad = None
             if self.rextent is None:
                 self.rpad = rpad
@@ -560,6 +561,7 @@ class gs_Domain:
                             raise ValueError('User specified "zextents[0]" does not enclose all regions')
                     if self.zextents[1] is None:
                         self.zextents[1] = self.zpad[1]*self.zmax
+                    else:
                         if self.zmax > self.zextents[1]:
                             raise ValueError('User specified "zextents[1]" does not enclose all regions')
                     # Create boundary region
@@ -635,11 +637,13 @@ class gs_Domain:
             'boundary_reg': self.boundary_reg,
             'reg_type_counts': self.reg_type_counts,
             'regions': [],
-            'region_info': self.region_info
-
+            'region_info': self.region_info,
+            'extra_reg_defs': [[float(val) for val in point_def[:2]] + [int(point_def[2]), float(point_def[3])] for point_def in self._extra_reg_defs]
         }
         for region in self.regions:
-            output_dict['regions'].append(region.get_dict())
+            region_dict = region.get_json()
+            region_dict['points'] = numpy.asarray(region_dict['points']).tolist()
+            output_dict['regions'].append(region_dict)
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
 
@@ -836,7 +840,7 @@ def load_gs_mesh(filename,use_hdf5=True):
 
 class Mesh:
     '''! Mesh builder class for triangle library'''
-    def __init__(self,region_list,merge_thresh=1.E-4,debug=False,extra_reg_defs=[]):
+    def __init__(self,region_list,merge_thresh=1.E-4,debug=False,extra_reg_defs=None):
         '''! Initialize Mesh builder object
 
         @param region_list List of @ref oftpy.Region objects that define mesh
@@ -1025,7 +1029,7 @@ class Mesh:
         print('  # of unique points    = {0}'.format(self._resampled_points.shape[0]))
         print('  # of unique segments  = {0}'.format(len(self._segments)))
         # Build list of region definitions
-        self._reg_defs = extra_reg_defs
+        self._reg_defs = [] if extra_reg_defs is None else list(extra_reg_defs)
         for ireg, region in enumerate(region_list):
             imin = -1
             dmin = 1.E99
@@ -1083,13 +1087,16 @@ class Region:
         @param sliver_tol Tolerance used for "sliver" region warnings
         @param small_thresh Tolerance used for "small" curve warnings (default: dx/2)
         @param id Region id number (default: 0)
+        @param load_dict Dictionary from `get_json()` to restore region from (optional, `points` is ignored when set)
         '''
         if load_dict is not None:
-            self._points = load_dict['points']
+            self._points = numpy.asarray(load_dict['points'])
             self._segments = load_dict['segments']
             self._id = load_dict['id']
             self._dx_curve = load_dict['dx_curve']
             self._dx_vol = load_dict['dx_vol']
+            if small_thresh is None:
+                small_thresh = load_dict.get('small_thresh')
         else:
             if numpy.any(points[:,0] < 0):
                 raise ValueError("Point with negative radial position detected!")
@@ -1249,5 +1256,6 @@ class Region:
             'segments': self._segments,
             'id': self._id,
             'dx_curve': self._dx_curve,
-            'dx_vol': self._dx_vol
+            'dx_vol': self._dx_vol,
+            'small_thresh': self._small_thresh
         }
