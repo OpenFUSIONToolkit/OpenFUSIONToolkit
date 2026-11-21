@@ -1,0 +1,10 @@
+# Python packages required by the Breakdown_Startup notebooks, in addition to
+# OpenFUSIONToolkit itself. clarabel is the conic solver used by
+# startup_optimizer.py; it is needed only by optimization/ARC_breakdown_startup_ex.ipynb
+# (validation/DIIID_breakdown_validation_ex.ipynb does not use it).
+numpy
+scipy
+matplotlib
+h5py
+clarabel
+jupyterlab
