@@ -2018,6 +2018,11 @@ class PETSC(package):
                 sys.exit(1)
             return self.config_dict
         self.setup_root_struct()
+        # PETSc < 3.25 always builds its Fortran interface on the "mpi" module (integer handles)
+        if self.mpi_f08 and ver_lt(self.version, "3.25"):
+            print("  Note: PETSc {0} does not support the MPI Fortran 2008 interface, header-based interface will be used".format(self.version))
+            self.mpi_f08 = False
+            self.config_dict["MPI_USE_HEADERS"] = True
         # Setup library build type
         if self.shared_libs is None:
             if self.config_dict['OS_TYPE'] == 'Darwin':
