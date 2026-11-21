@@ -85,7 +85,8 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         eq_info['nl_its'] = nl_its
         fsa = EQ_obj.get_fsa(psi=np.r_[0.25, 0.5, 0.9])
         for key in ('q', 'F', 'dV/dPsi', '<|grad psi|>', '<|grad psi|^2>', '<Bp^2>',
-                    '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax'):
+                    '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax',
+                    '<|grad psi|^2/B^2>', 'surface', 'area', 'B_min', 'B_max'):
             eq_info['fsa_' + key] = fsa[key].tolist()
     # Deleting the previous object exercises TokaMaker cleanup while another instance is live
     if mygs_last is not None:

@@ -13,8 +13,9 @@ flux per radian. The sign of \f$ \psi \f$ is chosen so that the Grad-Shafranov e
 
 \f[ j_\phi = R p' + \frac{FF'}{\mu_0 R} \qquad \text{(A1)} \f]
 
-which is TokaMaker's convention (`util.get_jphi_from_GS`). COCOS 11 (IMAS) uses \f$ \psi \f$ per full turn
-and a different sign: that changes only the factors \f$ 2\pi \f$ and \f$ \pm 1 \f$ in what follows, never the geometry.
+which is TokaMaker's convention (`util.get_jphi_from_GS`, COCOS 7). IMAS (COCOS 11 in Data Dictionary 3, COCOS 17 in
+Data Dictionary 4; see \ref doc_tokamaker_imas) uses \f$ \psi \f$ per full turn,
+with the opposite sign in COCOS 11: that changes only the factors \f$ 2\pi \f$ and \f$ \pm 1 \f$ in what follows, never the geometry.
 Flux-surface average: \f$ \langle A \rangle = \oint A\, dl/B_p \big/ \oint dl/B_p \f$, so
 \f$ V' = dV/d\psi = 2\pi \oint dl/B_p \f$. \f$ F \f$, \f$ F' \f$ and \f$ p' \f$ are flux functions.
 
