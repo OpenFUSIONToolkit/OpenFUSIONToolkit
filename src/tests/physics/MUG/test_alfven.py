@@ -168,6 +168,45 @@ def test_lin_r1_p4_mpi(petsc_flag):
     assert validate_alfven(berr_exp,verr_exp,linear=True)
 
 #============================================================================
+# Runs with geometric multigrid, refined tetrahedral mesh, quadratic elements
+def test_nl_r2_p2_gmg():
+    '''Nonlinear Alfven wave, quadratic elements on a once-refined tetrahedral mesh, serial, with a multigrid
+    preconditioner that includes a linear-element level on the coarse mesh (geometric and p-multigrid). Reference
+    errors match a single-level (direct solve) run on the same mesh.'''
+    berr_exp = 1.011290E-02
+    verr_exp = 4.422328E-03
+    assert alfven_setup(2,2,2,1,'2,2,2')
+    assert validate_alfven(berr_exp,verr_exp)
+@pytest.mark.slow
+@pytest.mark.mpi
+def test_nl_r2_p2_gmg_mpi():
+    '''Nonlinear Alfven wave, quadratic elements on a once-refined tetrahedral mesh, on two MPI processes, with
+    geometric multigrid down to the distributed base mesh.'''
+    berr_exp = 1.011290E-02
+    verr_exp = 4.422328E-03
+    assert alfven_setup(1,3,2,2,'0,0,2,2')
+    assert validate_alfven(berr_exp,verr_exp)
+@pytest.mark.linear
+@pytest.mark.slow
+def test_lin_r2_p2_gmg():
+    '''Linearized Alfven wave, quadratic elements on a once-refined tetrahedral mesh, serial, with geometric and
+    p-multigrid.'''
+    berr_exp = 1.013647E-02
+    verr_exp = 4.472189E-03
+    assert alfven_setup(2,2,2,1,'2,2,2',linear=True)
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.slow
+@pytest.mark.mpi
+def test_lin_r2_p2_gmg_mpi():
+    '''Linearized Alfven wave, quadratic elements on a once-refined tetrahedral mesh, on two MPI processes, with
+    geometric multigrid down to the distributed base mesh.'''
+    berr_exp = 1.013647E-02
+    verr_exp = 4.472189E-03
+    assert alfven_setup(1,3,2,2,'0,0,2,2',linear=True)
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+
+#============================================================================
 # Nonlinear runs, hexahedral mesh, quadratic elements
 def test_hex_nl_r1_p2(petsc_flag=False):
     '''Nonlinear Alfven wave, quadratic elements on a hexahedral mesh, serial.'''
