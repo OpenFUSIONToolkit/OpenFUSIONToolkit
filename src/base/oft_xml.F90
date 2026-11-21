@@ -744,6 +744,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr
 REAL(r8), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 CALL xml_extractDataContent_double1D(node,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
   CALL xml_set_exception('Error in child of xml_extractDataContent_double')
@@ -766,6 +767,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: shape_tmp(2),ierr
 REAL(r8), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 NULLIFY(output)
 CALL xml_extractDataContent_double1D(node,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
@@ -817,6 +819,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 CALL xml_extractDataContent_int1D(node,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
   CALL xml_set_exception('Error in child of xml_extractDataContent_int')
@@ -839,6 +842,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: i,j,ierr,shape_tmp(2)
 INTEGER(i4), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 NULLIFY(output)
 CALL xml_extractDataContent_int1D(node,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
@@ -890,6 +894,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 LOGICAL, POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 CALL xml_extractDataContent_logical1D(node,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
   CALL xml_set_exception('Error in child of xml_extractDataContent_logical')
@@ -912,6 +917,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
 LOGICAL, POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 NULLIFY(output)
 CALL xml_extractDataContent_logical1D(node,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
@@ -982,6 +988,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 REAL(r8), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 CALL xml_extractDataAttribute_double1D(node,attr_name,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
   CALL xml_set_exception('Error in child of xml_extractDataAttribute_double')
@@ -1005,6 +1012,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
 REAL(r8), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 NULLIFY(output)
 CALL xml_extractDataAttribute_double1D(node,attr_name,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
@@ -1058,6 +1066,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 CALL xml_extractDataAttribute_int1D(node,attr_name,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
   CALL xml_set_exception('Error in child of xml_extractDataAttribute_int')
@@ -1081,6 +1090,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
 INTEGER(i4), POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 NULLIFY(output)
 CALL xml_extractDataAttribute_int1D(node,attr_name,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
@@ -1134,6 +1144,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 LOGICAL, POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 CALL xml_extractDataAttribute_logical1D(node,attr_name,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
   CALL xml_set_exception('Error in child of xml_extractDataAttribute_logical2')
@@ -1157,6 +1168,7 @@ INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
 LOGICAL, POINTER :: output_tmp(:)
+NULLIFY(output_tmp)
 NULLIFY(output)
 CALL xml_extractDataAttribute_logical1D(node,attr_name,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN

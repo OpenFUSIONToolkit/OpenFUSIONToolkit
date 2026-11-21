@@ -108,6 +108,15 @@ SUBROUTINE oftpy_set_debug(debug_level) BIND(C,NAME="oftpy_set_debug")
 INTEGER(c_int), VALUE, INTENT(in) :: debug_level !< New value for debug level (must be in range [0,3])
 oft_env%debug=debug_level
 END SUBROUTINE oftpy_set_debug
+!------------------------------------------------------------------------------
+!> Get MPI rank and number of tasks
+!------------------------------------------------------------------------------
+SUBROUTINE oftpy_get_mpi_info(rank,nprocs) BIND(C,NAME="oftpy_get_mpi_info")
+INTEGER(c_int), INTENT(out) :: rank !< MPI rank of this process
+INTEGER(c_int), INTENT(out) :: nprocs !< Total number of MPI tasks
+rank=oft_env%rank
+nprocs=oft_env%nprocs
+END SUBROUTINE oftpy_get_mpi_info
 !---------------------------------------------------------------------------------
 !> Set the number of OpenMP threads to use
 !---------------------------------------------------------------------------------

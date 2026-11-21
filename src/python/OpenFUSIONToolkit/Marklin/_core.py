@@ -88,8 +88,8 @@ class Marklin():
         self._io_basepath = "."
 
     def __del__(self):
-        if not self._marklin_ptr:
-            return # Nothing to do
+        if (not self._marklin_ptr) or getattr(self._oft_env, 'mpi_finalized', False):
+            return # Nothing to do (or OFT environment already finalized at exit)
         error_string = self._oft_env.get_c_errorbuff()
         marklin_destroy(self._marklin_ptr,error_string)
         if error_string.value != b'':

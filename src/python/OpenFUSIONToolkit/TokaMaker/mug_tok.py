@@ -87,6 +87,8 @@ class MUGToksim():
 
     def __del__(self):
         '''! Free the Fortran-side object (the borrowed equilibrium/mesh are left intact)'''
+        if getattr(getattr(self, '_oft_env', None), 'mpi_finalized', False):
+            return # OFT environment already finalized at exit
         if getattr(self, '_ptr', None) is not None and self._ptr:
             error_string = self._oft_env.get_c_errorbuff()
             mugtok_destroy(self._ptr, error_string)
