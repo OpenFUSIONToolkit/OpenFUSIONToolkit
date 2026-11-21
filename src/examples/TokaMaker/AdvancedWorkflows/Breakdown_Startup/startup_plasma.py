@@ -1151,7 +1151,7 @@ def geometry_between(ga, gb, ta, dt):
 def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e-3, Rp=None, Zp=0.0, Te0=1.0,
                          gamma0=None, impurity_fraction=None, region='midplane', tau_form='loss_fraction',
                          n_mid=50, Z_mid=0.0, hold='k22', pressure='neutral', position='fixed', tau_pos=5e-3, li=0.5,
-                         log=None):
+                         drain=False, log=None):
     """DYON's electromagnetic plasma initiation (K22): a PlasmaModel with a PlasmaCircuit, its geometry
     from the field-line analysis of FieldLineMap every dt_map (K22 table 1: 1 ms).
 
@@ -1189,6 +1189,13 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
     region centre at breakdown.
     Z is held at Zp (the machine's vertical position control; vertical balance is not solved). The
     balance is the closed-surface one; before the lines close it is a model of where the current goes.
+
+    Drain (O42; a departure from K22, for shrink='lose'): drain=True limits how fast the volume handed to
+    the model can fall: plasma on lines that have just opened reaches the wall along them in tau_d = L / C_s
+    (the parallel loss time, thesis eq. 3.49), with L the open mid-plane lines next to the region (L_sol;
+    else L_open, else model.L_sol), so V_p >= V_p,last exp(-dt_map / tau_d) at each map, and the 'lose' term
+    removes the vacated plasma at that rate. Without it a region that flickers closed/open between maps (a
+    small wall-limited plasma, M5 cycle 5) loses the plasma of the vacated volume within one map.
 
     Geometry handed to the plasma model: R = R_vol, a = r_vol, kappa, Vp, Bphi = F0/R_vol, Lf (field-line
     parallel length, capped at 1e7 m). Between maps it is interpolated linearly from the map before
@@ -1315,7 +1322,12 @@ def run_with_field_lines(model, fmap, p_fill, t_start, t_end, y0=None, dt_map=1e
                         p=p_now, pos=P_last, vel=vel, cur=cur)
             g_prev, P_prev, W_prev = g_last, P_last, W_last
             if o['Vp'] > 0:
-                g_last = geo_of(o)
+                g_new = geo_of(o)
+                if drain and g_new['Vp'] < g_last['Vp']:                # O42: the vacated lines drain at C_s / L
+                    L = next((x for x in (o['L_sol'], o['L_open'], model.L_sol) if np.isfinite(x) and x > 0))
+                    Cs = np.sqrt((tt['Te'] + tt['Ti']) * EV / model.m_fuel)
+                    g_new['Vp'] = max(g_new['Vp'], g_last['Vp'] * np.exp(-dt_map * Cs / L))
+                g_last = g_new
                 if position == 'distributed':
                     W_last = W_last + min(dt_map / tau_pos, 1.0) * (weights(o) - W_last)
                 if position == 'region':
