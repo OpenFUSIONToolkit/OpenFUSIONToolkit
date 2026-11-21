@@ -135,16 +135,32 @@ integer-handle `mpi` module, so OFT uses the header-based MPI interface.
   `xmhd_bench` projects it with CG to `atol=1e-10`, and the native and PETSc CG solutions differ at that level.
   With the projections converged to 1e-15 the NL residual and Jacobian matvec norms of the initial state agree
   between the backends to 6e-15 (profile mode, tet p2).
-- **Not #457** (seen during this validation; fixed by separate upstream PRs, applied only locally):
+- **Not #457** (seen during this validation):
   - Run-mode PETSc with an XML block-Jacobi preconditioner (`nlocal>0`) crashes in `PCSetUp_ASM`/`ISSort` with
-    PETSc 3.23; fixed by #459. The PETSc runs above used #459 applied locally (native tet p2: this branch
-    alone); the p3 p-MG comparison used #459 and #456 for both backends.
-  - Native p-MG with an exact (SuperLU) LU smoother gives NaN from round-off in the native global reductions,
-    with both implementations and with the position map off. This is also the cause of the native
+    PETSc 3.23; fixed by #459 (separate PR). The PETSc runs above used #459 applied locally (native tet p2: this
+    branch alone); the p3 p-MG comparison used #459 and #456 for both backends.
+  - Native p-MG with an exact (SuperLU) LU smoother gave NaN from round-off in the native global reductions,
+    with both implementations and with the position map off. This was also the cause of the native
     `test_alfven.py::test_nl_r1_p3`, `test_lin_r1_p3` and `test_lin_r1_p3_mpi[False]` failures in SuperLU
-    builds (their PETSc variants pass). All three pass with #456 applied.
+    builds. Fixed in `main` by #456, which this branch now includes: all three pass natively.
   - Intermittent `free()` segfaults right after setup with an XML MG preconditioner (8 of 8 runs in one
-    environment, 0 of 8 with the fix): undefined pointer outputs of the XML extractors, fixed by #456.
+    environment, 0 of 8 with the fix): undefined pointer outputs of the XML extractors, fixed in `main` by #456.
+
+### Geometric multigrid and solid regions (after merging #453/#456)
+
+`main` now sets the module `mesh` to the active level's mesh (`xmhd_set_level`) and stores solid flags per
+region (`reg_solid`). The cache, the position map and the cell-shared flags follow the active level (cache
+validity is checked against the mesh, the position map against the level's matrix and mesh); coarse polynomial
+levels reuse the finest-level geometry only on the finest mesh, and geometric MG levels (coarser meshes) use
+the direct path with cell-centered fields. Solid cells are `reg_solid(mesh%reg(i))` on every level
+(`xmhd_cell_solid`); the equivalence check's solid test pattern applies only on the mesh it was set for.
+
+- The geometric MG tests of #456 (`test_alfven.py`/`test_alfven_lag.py` `test_{nl,lin}_r2_p2_gmg[_mpi]`) pass
+  with the defaults (cache on); `test_nl_r2_p2_gmg` also with runtime checks (`-fcheck=all`).
+- Equivalence with a real solid region (curved cylinder mesh from the Marklin tests with the upper part of
+  the cylinder as a second region, `type=2`; p2, Hall, shaping): residual blocks agree to 2.0e-15, Jacobian
+  entries to 6.6e-13 of the row maximum (curved cells, as above), products to 1.6e-15; the same with PETSc
+  and with runtime checks (`-fcheck=all`, no errors).
 
 ## Performance
 

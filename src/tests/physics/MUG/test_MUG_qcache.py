@@ -114,6 +114,31 @@ def curved_mesh():
     return {'mesh': mesh, 'mesh_groups': groups, 'lam': '2.,2.,2.'}
 
 
+def solid_region_mesh():
+    '''Curved tet cylinder mesh (as curved_mesh) with the cells above z=0.24 in a second region
+
+    The second region is made a solid region in the XML input (solid_region_xml)'''
+    import h5py
+    import numpy as np
+    mesh_file = 'qcache_cyl_2reg.h5'
+    with h5py.File('../Marklin/cyl_Marklin.h5', 'r') as fin:
+        with h5py.File(mesh_file, 'w') as fout:
+            fin.copy('mesh', fout)
+    with h5py.File(mesh_file, 'r+') as fid:
+        lc = fid['mesh/LC'][()]
+        zc = fid['mesh/R'][()][lc-1, 2].mean(axis=1)
+        reg = fid['mesh/REG']
+        reg[...] = np.where(zc > 0.24, 2, 1).astype(reg.dtype).reshape(reg.shape)
+    mesh = " meshname='cyl'\n cad_type=0\n nlevels=1\n nbase=1\n grid_order=2\n fix_boundary=T\n"
+    groups = "&native_mesh_options\n filename='{0}'\n/\n".format(mesh_file)
+    return {'mesh': mesh, 'mesh_groups': groups, 'lam': '2.,2.,2.'}
+
+
+# Region 2 of solid_region_mesh as a solid (resistive wall) region
+solid_region_xml = oft_in_xml.replace("  <xmhd>\n", "  <xmhd>\n    <region>\n      <id>2</id>\n      <eta>5.0</eta>\n"
+                                      "      <type>2</type>\n    </region>\n")
+
+
 def revolved_mesh(cell_type):
     '''Wedge about the x-axis, reflected and made periodic (revolved periodicity), from test_vlag_periodic'''
     sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..', 'fem')))
@@ -163,13 +188,13 @@ def parse_qcheck(output):
     return blocks, diags, flags, max_rel
 
 
-def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False):
+def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False, xml=oft_in_xml):
     '''Write the input, run the equivalence check, and validate the reported differences
 
     nlevels is the expected number of Jacobian levels (polynomial levels on the finest mesh); jac=False
     skips the Jacobian comparison (memory-heavy configurations); petsc=True uses the PETSc linear algebra
     backend (skipped if OFT is not compiled with PETSc), where the Jacobians are compared through products
-    with random vectors only'''
+    with random vectors only; xml is the XML input (preconditioner and regions)'''
     if not jac:
         bench += " jac_check=F\n"
     os.chdir(test_dir)
@@ -177,7 +202,7 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
         fid.write(oft_in_template.format(order=order, minlev=minlev, xmhd=xmhd, bench=bench,
                                          petsc='T' if petsc else 'F', **mesh))
     with open('oft_in_qcache.xml', 'w+') as fid:
-        fid.write(oft_in_xml)
+        fid.write(xml)
     status, output = run_OFT("./xmhd_bench oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
     assert status
     blocks, diags, flags, max_rel = parse_qcheck(output)
@@ -291,6 +316,14 @@ def test_qcache_curved_p2():
     '''Residual and Jacobian implementations agree on a curved (quadratic) tet mesh with shaping, floors and solid cells'''
     bench = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
     assert qcheck_case(curved_mesh(), 2, xmhd=" xmhd_hall=T\n", bench=bench)
+
+
+@pytest.mark.parametrize("petsc_flag", [False, True])
+def test_qcache_solid_region(petsc_flag):
+    '''Residual and Jacobian implementations agree on a curved tet mesh with a solid (resistive wall) region,
+    where the solid flags come from the region type on every level (reg_solid)'''
+    assert qcheck_case(solid_region_mesh(), 2, xmhd=" xmhd_hall=T\n", bench=" shaping=T\n", petsc=petsc_flag,
+                       xml=solid_region_xml)
 
 
 @pytest.mark.parametrize("vbc", ['norm', 'tang'])
