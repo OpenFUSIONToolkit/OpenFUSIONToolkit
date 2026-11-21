@@ -121,10 +121,11 @@ def solid_region_mesh():
     import h5py
     import numpy as np
     mesh_file = 'qcache_cyl_2reg.h5'
-    with h5py.File('../Marklin/cyl_Marklin.h5', 'r') as fin:
-        with h5py.File(mesh_file, 'w') as fout:
+    mesh_path = os.path.join(test_dir, mesh_file)
+    with h5py.File(os.path.join(test_dir, '..', 'Marklin', 'cyl_Marklin.h5'), 'r') as fin:
+        with h5py.File(mesh_path, 'w') as fout:
             fin.copy('mesh', fout)
-    with h5py.File(mesh_file, 'r+') as fid:
+    with h5py.File(mesh_path, 'r+') as fid:
         lc = fid['mesh/LC'][()]
         zc = fid['mesh/R'][()][lc-1, 2].mean(axis=1)
         reg = fid['mesh/REG']
