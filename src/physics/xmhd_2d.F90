@@ -344,7 +344,8 @@ DO i=1,self%nsteps
   self%dt=self%ittarget*SUM(dthist)/SUM(itcount)
   IF(self%dt>dtin)self%dt=dtin
   IF(self%dt<1.d-3*dtin)CALL oft_abort('Time step dropped too low!','run_simulation',__FILE__)
-  IF(ABS(1.d0-(self%dt-dthist(MOD(i,XMHD_ITCACHE)+1))/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
+  ! Update the preconditioner on the next step if the time step changed by more than 10%
+  IF(ABS(self%dt-dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0*dthist(MOD(i,XMHD_ITCACHE)+1))npre=-1
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
