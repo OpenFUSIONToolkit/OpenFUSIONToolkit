@@ -790,7 +790,7 @@ SELECT CASE(itype)
     norm=oft_global_reduction(self%stitch_info,vtmp,self%n)
     DEALLOCATE(vtmp)
   CASE(2)
-    norm=SQRT(MAX(self%dot(self),0.d0)) ! Clamp round-off from shared/periodic duplicates
+    norm=SQRT(clamp_nonneg(self%dot(self))) ! Clamp negative round-off (safety net, NaN preserved)
   CASE(3)
     nloc=0.d0
     DO i=1,self%n
@@ -1642,7 +1642,7 @@ SELECT CASE(itype)
     norm=oft_global_reduction(self%stitch_info,vtmp,self%n)
     DEALLOCATE(vtmp)
   CASE(2)
-    norm=SQRT(MAX(REAL(self%dot(self),r8),0.d0)) ! Clamp round-off from shared/periodic duplicates
+    norm=SQRT(clamp_nonneg(REAL(self%dot(self),r8))) ! Clamp negative round-off (safety net, NaN preserved)
   CASE(3)
     nloc=0.d0
     DO i=1,self%n

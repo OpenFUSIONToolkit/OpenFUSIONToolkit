@@ -21,7 +21,7 @@ oft_in_template = """
  nlevels={1}
  nbase={0}
  grid_order={3}
-/
+{8}/
 
 &cubit_test_options
  test_surf={6}
@@ -37,8 +37,12 @@ oft_in_template = """
 
 # Common setup function and process handling
 def cubit_setup(nbase, nlevels, prefix, grid_order=1,
-                reflect='F', per_ns=-1, zstretch=1., test_2d='F'):
+                reflect='F', per_ns=-1, zstretch=1., test_2d='F', ho_curve_all=None):
     #
+    # Only written when set, since the surface mesh path does not read this option
+    curve_line = ''
+    if ho_curve_all is not None:
+        curve_line = ' ho_curve_all={0}\n'.format(ho_curve_all)
     convert_cmd = ["OFT_convert_cubit.py", "--in_file={0}.g".format(prefix)]
     nproc = 1
     if nbase != nlevels:
@@ -50,7 +54,7 @@ def cubit_setup(nbase, nlevels, prefix, grid_order=1,
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, prefix, grid_order, reflect, zstretch, test_2d, ref_periodic))
+        fid.write(oft_in_template.format(nbase, nlevels, prefix, grid_order, reflect, zstretch, test_2d, ref_periodic, curve_line))
     # Run mesh conversion script
     # Run under the interpreter running the tests; the stub's "#!/usr/bin/env python" shebang
     # would otherwise pick up whichever interpreter comes first on PATH
@@ -126,11 +130,12 @@ def test_tet10_quad(top_lev):
 @pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("grid_order", (1, 2))
-def test_tet10_1ref(top_lev,grid_order):
+@pytest.mark.parametrize("ho_curve_all", ('F', 'T'))
+def test_tet10_1ref(top_lev,grid_order,ho_curve_all):
     volume_cubit = approx_list([4.12061, 4.18669], abs=1.E-4)
     area_cubit = approx_list([12.4552, 12.5622], abs=1.E-4)
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'sphere_tet10_test',grid_order=grid_order)
+    assert cubit_setup(minlev,top_lev,'sphere_tet10_test',grid_order=grid_order,ho_curve_all=ho_curve_all)
     assert check_result(volume_cubit[grid_order-1], area_cubit[grid_order-1])
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_hex27_quad(top_lev):
@@ -141,11 +146,12 @@ def test_hex27_quad(top_lev):
 @pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("grid_order", (1, 2))
-def test_hex27_1ref(top_lev,grid_order):
+@pytest.mark.parametrize("ho_curve_all", ('F', 'T'))
+def test_hex27_1ref(top_lev,grid_order,ho_curve_all):
     volume_cubit = approx_list([4.11911, 4.18831], abs=1.E-4)
     area_cubit = approx_list([12.4621, 12.5654], abs=1.E-4)
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'sphere_hex27_test',grid_order=grid_order)
+    assert cubit_setup(minlev,top_lev,'sphere_hex27_test',grid_order=grid_order,ho_curve_all=ho_curve_all)
     assert check_result(volume_cubit[grid_order-1], area_cubit[grid_order-1])
 
 #============================================================================
@@ -290,6 +296,16 @@ def test_surf_circle_quad(mesh_type,levels):
     volume_cubit = pytest.approx(0.0, abs=1.E-4)
     area_cubit = pytest.approx(3.14160, abs=1.E-3)
     assert cubit_setup(levels[0],levels[1],'circle_{0}_test'.format(mesh_type),test_2d='T',grid_order=2)
+    assert check_result(volume_cubit, area_cubit)
+# Linear input meshes with a quadratic top level: coarse levels carry no high-order nodes
+@pytest.mark.coverage
+@pytest.mark.parametrize("mesh_type", ("tri3", "quad4"))
+@pytest.mark.parametrize("levels", ((1, 2), (2, 3), (1, 3)))
+@pytest.mark.parametrize("geom,area", (("circle", 3.1403), ("sphere", 12.5595)))
+def test_surf_linear_quad(geom,area,mesh_type,levels):
+    volume_cubit = pytest.approx(0.0, abs=1.E-4)
+    area_cubit = pytest.approx(area, abs=1.E-3)
+    assert cubit_setup(levels[0],levels[1],'{0}_{1}_test'.format(geom,mesh_type),test_2d='T',grid_order=2)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("mesh_type", ("tri3", "quad4"))
 @pytest.mark.parametrize("top_lev", (1, 2))
