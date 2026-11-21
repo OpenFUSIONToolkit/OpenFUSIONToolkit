@@ -31,3 +31,14 @@ temperature evolution with anisotropic thermal conduction. The complete system a
  - \subpage doc_mug_xmhd_eqns
 
 Most features are also supported by the \ref xmhd_lag "Lagrange only" variant.
+
+\section doc_mhd_main_2d 2D MHD
+MUG also includes a 2D implementation (\ref xmhd_2d) for planar (slab) and axisymmetric geometries, using
+scalar Lagrange elements for all fields. It solves a reduced single-temperature resistive MHD model, with an
+optional incompressible variant. The 2D system is documented in:
+
+ - \subpage doc_mug_xmhd_2d_eqns
+
+The following example illustrates usage of the 2D implementation:
+
+ - \subpage doc_mug2d_harris_ex

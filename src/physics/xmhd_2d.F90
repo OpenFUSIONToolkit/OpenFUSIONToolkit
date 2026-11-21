@@ -4,6 +4,12 @@
 !> @file xmhd_2d.F90
 !
 !> Solve time-dependent MHD equations in 2D with lagrange basis set
+!!
+!! Solves the single-temperature resistive MHD equations (continuity, momentum, temperature, and
+!! induction for the poloidal flux and out-of-plane field), or an incompressible variant, in planar
+!! or axisymmetric geometry using Lagrange elements for all fields. The full system of equations is
+!! defined by the nonlinear residual (@ref xmhd_2d::nlfun_apply "nlfun_apply") and is documented in
+!! \ref doc_mug_xmhd_2d_eqns.
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
