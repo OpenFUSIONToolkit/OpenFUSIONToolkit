@@ -328,8 +328,9 @@ mhd_sim%n_bc=>mhd_sim%velx_bc
 mhd_sim%T_bc=>mhd_sim%velx_bc
 !!\subsubsection doc_mug2d_rt_ex_code_run_opts Simulation options
 !!
-!! A large `ittarget` keeps the time step fixed in linear runs and lets it grow only slowly in
-!! nonlinear runs. Time centering (`timestep_cn=T`, BDF2 in linear runs and Crank-Nicolson in nonlinear
+!! In nonlinear runs the time step is reduced (never increased beyond `dt`) to keep the number of linear
+!! iterations per step near `ittarget`; a large value keeps it fixed. Linear runs always use a fixed time step.
+!! Time centering (`timestep_cn=T`, BDF2 in linear runs and Crank-Nicolson in nonlinear
 !! runs) avoids the \f$ \gamma \Delta t / 2 \f$ bias of backward Euler in the measured growth rate.
 mhd_sim%g_accel=g
 mhd_sim%chi=chi
@@ -433,10 +434,10 @@ END SUBROUTINE project_field
 END PROGRAM MUG_rt_2d
 !!\section doc_mug2d_rt_ex_input Input files
 !!
-!! The default input file runs the nonlinear case without a field on a \f$ 32 \times 32 \f$ mesh at
-!! second order, up to the time the bubble and spikes reach the walls (\ref doc_mug2d_rt_ex_nl). This takes
-!! about 6 minutes on two cores. Linear runs and the field scan are set up by `run_scan.py`
-!! (\ref doc_mug2d_rt_ex_scan) from the same file.
+!! The default input file runs the nonlinear transition-layer case without a field on a \f$ 48 \times 96 \f$ mesh at
+!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, up to the time the bubble and spikes start to roll up
+!! (about @@RUNTIME@@ on two cores). `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
+!! `run_scan.py` sets up the exponential profile for the linear scan (\ref doc_mug2d_rt_ex_scan).
 !!
 ! OFT_DOC_INCLUDE: oft.in
 !!
@@ -450,12 +451,12 @@ END PROGRAM MUG_rt_2d
 !! XDMF/HDF5 files (in `all/`) for VisIt or ParaView, which `plot_rt_2d.py` also reads to draw density snapshots
 !! with matplotlib, eg.
 !! \verbatim
-!! python plot_rt_2d.py --runs . --times 2.8E-4 3.6E-4 4.0E-4 4.4E-4
+!! python plot_rt_2d.py --runs . --times 6.E-4 7.E-4 7.4E-4 7.6E-4
 !! \endverbatim
 !!
 !!\section doc_mug2d_rt_ex_results Results
 !!
-!!\subsection doc_mug2d_rt_ex_scan Linear growth rate scan
+!!\subsection doc_mug2d_rt_ex_scan Linear growth rate scan (exponential profile)
 !!
 !! `run_scan.py` runs the linearized model for \f$ B_0 / B_c \in \{0, 0.25, 0.5, 0.75, 0.9, 1.1\} \f$, plus one case
 !! with \f$ B_0 = 0 \f$ and a strong out-of-plane field \f$ b_{y0} = 10^{-2} \f$ T (\f$ 35 B_c \f$, \f$ \beta \approx 8 \f$).
@@ -487,52 +488,52 @@ END PROGRAM MUG_rt_2d
 !! the measured \f$ \gamma \f$ at \f$ 0.9 B_c \f$ is 1.6% above the ideal value (0.1% at \f$ \eta = 0.1 \f$), which is why the scan uses
 !! the smaller resistivity.
 !!
-!!\subsection doc_mug2d_rt_ex_nl Nonlinear evolution
+!!\subsection doc_mug2d_rt_ex_nl Transition layer: linear and nonlinear growth
 !!
-!! The nonlinear runs use the default input file: a \f$ 32 \times 32 \f$ mesh at second order, \f$ \Delta t = 4 \times 10^{-6} \f$ s,
-!! a larger seed (\f$ V_1 = 100 \f$ m/s), and \f$ \nu = \eta = 10 \f$ m\f$^2\f$/s. The larger viscosity keeps the cell Reynolds
-!! number \f$ v \Delta x / \nu \f$ of order 10 at the late-time speeds (\f$ \sim 10^4 \f$ m/s); the corresponding resistivity
-!! changes \f$ \gamma \f$ at \f$ 0.5 B_c \f$ by about 1%. Particle diffusion and thermal conduction are off (\f$ D = \chi = 0 \f$).
+!! `run_nonlinear.py` runs the transition-layer case from the default input file, linearized and nonlinear, for
+!! \f$ B_0 = 0 \f$ and \f$ B_0 = 2 \times 10^{-4} \f$ T (\f$ 0.49 B_c \f$ for a sharp interface), with \f$ V_1 = 1 \f$ m/s,
+!! \f$ \nu = 10 \f$ m\f$^2\f$/s, \f$ \eta = 1 \f$ m\f$^2\f$/s, and \f$ D = \chi = 0 \f$. The viscosity damps the short-wavelength
+!! modes of the layer, which grow faster than the seeded mode (up to \f$ \sim \sqrt{A g / \delta} \f$) and are poorly resolved.
+!! Since the nonlinear runs start from the projected equilibrium, which is not in exact discrete balance, the layer
+!! adjusts slightly at the start of the run. This x-independent motion adds a floor of about \f$ 4 \times 10^{-10} \f$ J/m to
+!! the kinetic energy, not far below the energy of the seed (\f$ 1.7 \times 10^{-9} \f$ J/m), so the comparison uses the
+!! amplitude of the \f$ \cos(kx) \f$ component of \f$ v_z \f$ instead, which the adjustment does not contribute to.
+!! Both runs are fit over the same time window, in which the nonlinear amplitude is between 3 and 30 m/s:
 !!
-!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 0.5 B_c (bottom) as the light plasma rises in a bubble at x = 0 and the heavy plasma falls in spikes at the periodic boundaries x = +-L_x/2."
+!! | \f$ B_0 \f$ [T] | Window [\f$ \mu \f$s] | \f$ \gamma \f$ linear [s\f$^{-1}\f$] | \f$ \gamma \f$ nonlinear [s\f$^{-1}\f$] | Ratio | \f$ \gamma \f$ sharp interface [s\f$^{-1}\f$] |
+!! |--------|---------|----------|----------|--------|----------|
+!! | 0      | 240-400 | 1.4010e4 | 1.4004e4 | 0.9996 | 1.7724e4 |
+!! | 2e-4   | 310-520 | 1.0633e4 | 1.0632e4 | 0.9999 | 1.5461e4 |
 !!
-!! While the perturbation is small the nonlinear model reproduces the linear growth rate. Run with `run_scan.py --nonlinear`
-!! (same mesh and settings as the linear scan, \f$ V_1 = 1 \f$ m/s, so that \f$ k \xi \lesssim 0.1 \f$ at \f$ \gamma t = 6 \f$), the slope for
-!! \f$ \gamma t > 3 \f$ is 0.9972 (\f$ B_0 = 0 \f$) and 0.9982 (\f$ 0.5 B_c \f$) of the ideal value, against 0.9984 for the linear runs.
-!! On the default mesh, with \f$ \nu = \eta = 10 \f$ m\f$^2\f$/s, the early growth rates are \f$ 1.21 \times 10^4 \f$ and
-!! \f$ 1.06 \times 10^4 \f$ s\f$^{-1}\f$ (viscosity accounts for most of the 3% reduction). The light plasma then rises as a single
-!! bubble at \f$ x = 0 \f$ while the heavy plasma falls along the periodic boundaries, and the mode saturates
-!! (kinetic energy \f$ \approx 0.2 \f$ J/m) when the bubble reaches the upper wall and the spikes the lower wall, at
-!! \f$ t \approx 440 \, \mu \f$s for \f$ B_0 = 0 \f$ and \f$ t \approx 560 \, \mu \f$s for \f$ B_0 = 0.5 B_c \f$. The field slows the growth,
-!! and the stretched field lines keep the bubble flanks smoother. Up to this point the density and temperature stay
-!! positive and smooth (minimum \f$ n = 3.2 \times 10^{18} \f$ m\f$^{-3}\f$, minimum \f$ T = 35 \f$ eV, against 3.7e18 and 37 eV
-!! initially), with no dissipation in \f$ n \f$ or \f$ T \f$.
+!! \image html MUG_rt2d_ex-modes.png "Amplitude of the cos(kx) component of v_z in the linearized (dashed) and nonlinear (solid) runs. The fit window is shaded."
 !!
-!! \warning The runs cannot currently be carried much past wall contact. As the heavy plasma piles up on the lower
-!! wall, grid-scale oscillations grow in \f$ n \f$ and \f$ T \f$ (undamped Galerkin advection, since \f$ D = \chi = 0 \f$), the
-!! GMRES iteration count grows rapidly and the Newton solve fails (about \f$ 470 \, \mu \f$s for \f$ B_0 = 0 \f$, \f$ 570 \, \mu \f$s at
-!! \f$ 0.5 B_c \f$). Neither an adaptive time step (\f$ \Delta t \f$ collapses to \f$ 10^{-7} \f$ s at \f$ 517 \, \mu \f$s) nor more
-!! viscosity (\f$ \nu = \eta = 50 \f$ m\f$^2\f$/s, failure at \f$ 550 \, \mu \f$s) avoids this. Turning on particle diffusion or
-!! thermal conduction (even \f$ D \f$ or \f$ \chi = 1 \f$ m\f$^2\f$/s) instead makes the first Newton solve fail at this time step:
-!! the natural (zero-flux) walls are inconsistent with the equilibrium gradient \f$ dn/dz = n/L \f$, so the first step must
-!! form a thin boundary layer, and Newton converges only for much smaller steps (\f$ \Delta t \lesssim 4 \times 10^{-7} \f$ s).
+!! The two models agree to better than 0.05% until the amplitude reaches a few hundred m/s, where the nonlinear growth
+!! starts to slow down. The linear growth rate changes by 0.09% between \f$ 32 \times 64 \f$ and \f$ 48 \times 96 \f$ meshes.
+!! As expected, the layer grows more slowly than a sharp interface (\f$ k \delta = 0.63 \f$), and the field reduces the
+!! growth rate more than for a sharp interface, since the finite layer weakens the buoyancy drive but not the
+!! field-line bending.
 !!
-!!\subsection doc_mug2d_rt_ex_noise Noise floor
+!!\subsection doc_mug2d_rt_ex_nl_evol Nonlinear evolution
 !!
-!! Without a seed (\f$ V_1 = 0 \f$) the projected equilibrium is out of discrete balance only by its projection error. The
-!! nonlinear kinetic energy after 10 steps is \f$ 1.6 \times 10^{-11} \f$ J/m on the \f$ 8 \times 8 \f$, third-order scan mesh (against
-!! \f$ 2.7 \times 10^{-9} \f$ J/m for the \f$ V_1 = 1 \f$ m/s seed), and \f$ 6 \times 10^{-15} \f$ J/m on the default mesh (against
-!! \f$ 2.7 \times 10^{-5} \f$ J/m for \f$ V_1 = 100 \f$ m/s). The imbalance seeds all modes, which then grow at up to the RT rate,
-!! so the seed must stay well above this floor; the linear model has no such floor.
+@@NLEVOL@@
+!!
+!!\subsection doc_mug2d_rt_ex_exp_nl Why the exponential profile is not used nonlinearly
+!!
+!! The exponential profile has its largest density and pressure gradients at the walls. In nonlinear runs:
+!!  - The bubble and spikes reach the walls while still growing, at \f$ t \approx 440 \, \mu \f$s on a \f$ 32 \times 32 \f$ mesh
+!!    (\f$ V_1 = 100 \f$ m/s). As the heavy plasma then piles up on the lower wall, grid-scale oscillations grow in
+!!    \f$ n \f$ and \f$ T \f$ and the Newton solve fails, with fixed or adaptive time steps, and with \f$ \nu = \eta = 50 \f$ m\f$^2\f$/s.
+!!  - Particle diffusion or thermal conduction, even \f$ D \f$ or \f$ \chi = 1 \f$ m\f$^2\f$/s, makes the first Newton solve fail at
+!!    practical time steps (\f$ \Delta t \gtrsim 4 \times 10^{-7} \f$ s). The natural (zero-flux) walls are inconsistent with
+!!    the equilibrium gradient \f$ dn/dz = n/L \f$, so the first step must form a thin boundary layer at each wall. The Jacobian
+!!    itself is correct (it matches a finite-difference Jacobian), and the solve converges with a uniform density or with
+!!    \f$ D \f$ acting on \f$ n - n_0 \f$ only.
+!!  - Fixing \f$ n \f$ and \f$ T \f$ on the walls instead drives a spurious, wall-localized mode (\f$ 3.4 \times 10^4 \f$ s\f$^{-1}\f$ on an
+!!    \f$ 8 \times 8 \f$, third-order mesh, against \f$ 1.25 \times 10^4 \f$ s\f$^{-1}\f$ for RT; see \ref doc_mug2d_rt_ex_bcs).
+!!
+!! In the transition-layer case the plasma near the walls is uniform, so none of these problems arise: the
+!! wall conditions are consistent with the equilibrium, and particle diffusion and thermal conduction can be used.
 !!
 !!\subsection doc_mug2d_rt_ex_cost Cost
 !!
-!! The nonlinear runs use the matrix-free Newton-Krylov method (`use_mfnk=T`), with the LU preconditioner rebuilt every
-!! `pre_freq` steps. Rebuilding (and refactoring) it every step costs about 7.5 s per step on the default mesh with
-!! two OpenMP threads and UMFPACK (about 24 s with SuperLU), while `pre_freq=10` brings this down to about 1.6 s per
-!! step while the perturbation is small. Once the flow is nonlinear the GMRES iteration count grows quickly with the age of
-!! the preconditioner (by about 1.5x per step), so the default is `pre_freq=4`, which gives about 3 s per step over the
-!! whole run (2 runs sharing 4 cores). The linear scan costs about 0.01-0.04 s per step.
-!!
-!! \note `pre_freq` only takes effect with `use_mfnk=T`. With the assembled Jacobian as the Newton operator
-!! (`use_mfnk=F`) the Jacobian and its factorization are rebuilt every step.
+@@COST@@

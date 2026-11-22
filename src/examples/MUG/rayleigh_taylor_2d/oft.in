@@ -45,7 +45,7 @@
  dt=2.E-6             ! Time step [s]
  nsteps=600           ! Number of time steps
  rst_freq=5           ! Restart (and plot) file frequency
- ittarget=1000        ! Keep dt fixed
+ ittarget=60          ! Target linear iterations per step: dt shrinks once the flow is nonlinear
  timestep_cn=T        ! Crank-Nicolson (nonlinear) or BDF2 (linear) time stepping
  use_mfnk=T           ! Matrix-free Newton-Krylov (preconditioner from the assembled Jacobian)
  pre_freq=4           ! Rebuild the preconditioner every 4 steps
