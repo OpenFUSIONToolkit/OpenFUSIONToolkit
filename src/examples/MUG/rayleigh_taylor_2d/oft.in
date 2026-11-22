@@ -38,8 +38,8 @@
  V1=1.                ! Seed amplitude [m/s]
  nu=10.               ! Viscosity [m^2/s]
  eta=1.               ! Resistivity [m^2/s]
- chi=0.               ! Thermal diffusivity [m^2/s]
- D_diff=0.            ! Particle diffusivity [m^2/s]
+ chi=1.               ! Thermal diffusivity [m^2/s]
+ D_diff=1.            ! Particle diffusivity [m^2/s]
  gamma=1.6666667      ! Adiabatic index
  den_scale=1.E19      ! Density normalization [m^-3]
  dt=2.E-6             ! Time step [s]
