@@ -395,7 +395,7 @@ Cost (32x32 p2, 2 threads):
 | After the fix, `pre_freq=4` | ~3 s average over the run |
 
 - `pre_freq=10` lets the GMRES iterations grow ~1.5x per step in the nonlinear phase (to >1000 iterations), hence the default of 4.
-- Tolerances: with `lin_tol=1e-9`/`nl_tol=1e-7` the matrix-free solve struggled at large amplitude, which is why the defaults were loosened.
+- Tolerances: the defaults were loosened to `lin_tol=1e-6`/`nl_tol=1e-5` (about 1e-10 relative to the state norm ~1e4), because the tolerances are absolute and the residual scales with the flow amplitude. The tighter values (1e-9/1e-7) were not shown to fail: a run I thought had stalled was only buffering its log.
 
 ### Tests (after merging Session A's branch and with the pre_freq fix)
 
