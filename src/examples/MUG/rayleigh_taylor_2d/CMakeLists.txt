@@ -4,6 +4,8 @@ install(FILES oft_in.xml DESTINATION examples/MUG/rayleigh_taylor_2d COMPONENT e
 configure_file( oft_in.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 install(FILES run_scan.py DESTINATION examples/MUG/rayleigh_taylor_2d COMPONENT examples)
 configure_file( run_scan.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES run_nonlinear.py DESTINATION examples/MUG/rayleigh_taylor_2d COMPONENT examples)
+configure_file( run_nonlinear.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 install(FILES plot_rt_2d.py DESTINATION examples/MUG/rayleigh_taylor_2d COMPONENT examples)
 configure_file( plot_rt_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 oft_add_exe( MUG_rt_2d.F90 )

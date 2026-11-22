@@ -3,16 +3,17 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# Run the 2D Rayleigh-Taylor example (MUG_rt_2d) over a range of in-plane field strengths, B_0/B_c, plus a case
-# with an out-of-plane field, and compare the measured growth rates with the incompressible, ideal result of
-# S. Chandrasekhar, Hydrodynamic and Hydromagnetic Stability (1961), sections 92 and 97.
+# Run the linearized 2D Rayleigh-Taylor example (MUG_rt_2d) with the exponential profile over a range of in-plane
+# field strengths, B_0/B_c, plus a case with an out-of-plane field, and compare the measured growth rates with the
+# incompressible, ideal result of S. Chandrasekhar, Hydrodynamic and Hydromagnetic Stability (1961), sections 92
+# and 97. The profile, box (1 m x 1 m), mesh and dissipation are set here; the other options come from oft.in.
 #
 # Each case starts from the velocity-only m=1 eigenmode, so the velocity grows as cosh(gamma*t). The growth rate
 # is obtained by fitting E_k = A*cosh^2(gamma*t) to the whole kinetic energy history, and, as a check, from the
 # slope of ln(E_k)/2 over the part of the run with gamma*t > 3 (where tanh(gamma*t) > 0.995).
 #
 # Usage (from the directory containing MUG_rt_2d, oft.in, and oft_in.xml):
-#   python run_scan.py [--b_frac 0 0.25 ...] [--by0 1.E-3] [--nonlinear] [--np 1] [--plot]
+#   python run_scan.py [--b_frac 0 0.25 ...] [--by0 1.E-2] [--np 1] [--plot]
 import argparse
 import os
 import re
@@ -87,19 +88,18 @@ def fit_growth(hist_file):
     return gamma_cosh, gamma_late
 
 
-def run_case(exe, template, case, b_frac, by0, nonlinear, nprocs):
+def run_case(exe, template, case, b_frac, by0, nprocs):
     '''Run one case in its own directory and return the measured growth rates [1/s]'''
     case_dir = 'b_{0:.3f}'.format(b_frac)
     if by0 != 0.0:
         case_dir += '_by_{0:.2E}'.format(by0)
-    case_dir += '_nl' if nonlinear else '_lin'
     os.makedirs(case_dir, exist_ok=True)
     # Run until gamma*t = 6 (theory), or for 0.6 ms if stable, keeping gamma*dt <= 0.025
     dt = read_option(template, 'dt')[0]
     gamma_ref = case.gamma(b_frac)
     t_end = 6.0/gamma_ref if gamma_ref > 0.0 else 6.E-4
     nsteps = int(np.ceil(t_end/dt))
-    text = set_option(template, 'linear', 'F' if nonlinear else 'T')
+    text = set_option(template, 'linear', 'T')
     text = set_option(text, 'B_0', '{0:.6E}'.format(b_frac*case.B_c))
     text = set_option(text, 'by0', '{0:.6E}'.format(by0))
     text = set_option(text, 'nsteps', str(nsteps))
@@ -134,8 +134,6 @@ def main():
     parser.add_argument('--nu', type=float, default=1.0, help='Viscosity [m^2/s]')
     parser.add_argument('--eta', type=float, default=0.1,
                         help='Resistivity [m^2/s] (resistive slippage raises gamma near B_c, see the example docs)')
-    parser.add_argument('--nonlinear', action='store_true',
-                        help='Run the nonlinear model (from u0 + seed) instead of the linearized model')
     parser.add_argument('--np', type=int, default=1, help='Number of MPI processes per run')
     parser.add_argument('--exe', default='./MUG_rt_2d', help='Path to the MUG_rt_2d executable')
     parser.add_argument('--plot', action='store_true', help='Plot growth rate vs B_0/B_c (rt_2d_scan.png)')
@@ -143,6 +141,9 @@ def main():
     with open('oft.in', 'r') as fid:
         template = fid.read()
     # Scan settings: small, well resolved runs with fixed time step and weak dissipation (see the example docs)
+    template = set_option(template, 'profile', "'exp'")
+    template = set_option(template, 'rscale', '1.,1.,0.')
+    template = set_option(template, 'shift', '-0.5,-0.5,0.')
     template = set_option(template, 'ni', '{0},{0},0'.format(options.ni))
     template = set_option(template, 'order', str(options.order))
     template = set_option(template, 'dt', '{0:.6E}'.format(options.dt))
@@ -163,7 +164,7 @@ def main():
         cases.append((0.0, options.by0))
     results = []
     for b_frac, by0 in cases:
-        gamma_cosh, gamma_late = run_case(exe, template, case, b_frac, by0, options.nonlinear, options.np)
+        gamma_cosh, gamma_late = run_case(exe, template, case, b_frac, by0, options.np)
         theory = case.gamma(b_frac)
         if gamma_cosh is None:
             print('  {0:7.3f}  {1:9.2E}  {2:14.4E}  {3:>18s}'.format(b_frac, by0, theory, 'stable'))
