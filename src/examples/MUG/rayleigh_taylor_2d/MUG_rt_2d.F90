@@ -439,8 +439,8 @@ END PROGRAM MUG_rt_2d
 !!\section doc_mug2d_rt_ex_input Input files
 !!
 !! The default input file runs the nonlinear transition-layer case without a field on a \f$ 48 \times 96 \f$ mesh at
-!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, up to the time the bubble has rolled up into a mushroom shape
-!! (about an hour on two cores). `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
+!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, streamline upwinding and \f$ D = \chi = 0.3 \f$ m\f$^2\f$/s
+!! (\ref doc_mug2d_rt_ex_upwind), up to the time the bubble and spikes reach the walls (about an hour on two cores). `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
 !! `run_scan.py` sets up the exponential profile for the linear scan (\ref doc_mug2d_rt_ex_scan).
 !!
 ! OFT_DOC_INCLUDE: oft.in
@@ -496,7 +496,8 @@ END PROGRAM MUG_rt_2d
 !!
 !! `run_nonlinear.py` runs the transition-layer case from the default input file, linearized and nonlinear, for
 !! \f$ B_0 = 0 \f$ and \f$ B_0 = 2 \times 10^{-4} \f$ T (\f$ 0.49 B_c \f$ for a sharp interface), with \f$ V_1 = 1 \f$ m/s,
-!! \f$ \nu = 10 \f$ m\f$^2\f$/s, \f$ \eta = 1 \f$ m\f$^2\f$/s, and \f$ D = \chi = 0 \f$. The viscosity damps the short-wavelength
+!! \f$ \nu = 10 \f$ m\f$^2\f$/s, \f$ \eta = 1 \f$ m\f$^2\f$/s, and \f$ D = \chi = 0 \f$ (upwinding, which is on in the input file, is
+!! used in the nonlinear runs only; it changes the nonlinear growth rate by less than 0.03%). The viscosity damps the short-wavelength
 !! modes of the layer, which grow faster than the seeded mode (up to \f$ \sim \sqrt{A g / \delta} \f$) and are poorly resolved.
 !! Since the nonlinear runs start from the projected equilibrium, which is not in exact discrete balance, the layer
 !! adjusts slightly at the start of the run. This x-independent motion adds a floor of about \f$ 4 \times 10^{-10} \f$ J/m to
@@ -506,8 +507,8 @@ END PROGRAM MUG_rt_2d
 !!
 !! | \f$ B_0 \f$ [T] | Window [\f$ \mu \f$s] | \f$ \gamma \f$ linear [s\f$^{-1}\f$] | \f$ \gamma \f$ nonlinear [s\f$^{-1}\f$] | Ratio | \f$ \gamma \f$ sharp interface [s\f$^{-1}\f$] |
 !! |--------|---------|----------|----------|--------|----------|
-!! | 0      | 240-400 | 1.4010e4 | 1.4004e4 | 0.9996 | 1.7724e4 |
-!! | 2e-4   | 310-520 | 1.0633e4 | 1.0632e4 | 0.9999 | 1.5461e4 |
+!! | 0      | 240-400 | 1.4010e4 | 1.4005e4 | 0.9996 | 1.7724e4 |
+!! | 2e-4   | 310-520 | 1.0633e4 | 1.0629e4 | 0.9996 | 1.5461e4 |
 !!
 !! \image html MUG_rt2d_ex-modes.png "Amplitude of the cos(kx) component of v_z in the linearized (dashed) and nonlinear (solid) runs. The fit window is shaded."
 !!
@@ -519,27 +520,73 @@ END PROGRAM MUG_rt_2d
 !!
 !!\subsection doc_mug2d_rt_ex_nl_evol Nonlinear evolution
 !!
-!! The nonlinear runs shown here use the default input file (\f$ \nu = 10 \f$, \f$ \eta = D = \chi = 1 \f$ m\f$^2\f$/s, adaptive
-!! time step), run for longer. A single bubble of light plasma rises at \f$ x = 0 \f$ and the heavy plasma falls in spikes at
-!! the periodic boundaries \f$ x = \pm L_x / 2 \f$. The shear along the bubble flanks rolls up into Kelvin-Helmholtz vortices,
-!! giving the familiar mushroom shape, before the bubble and spikes reach the walls (\f$ t \approx 880 \, \mu \f$s for
-!! \f$ B_0 = 0 \f$) and spread along them. With \f$ B_0 = 2 \times 10^{-4} \f$ T the bubble grows more slowly and the field, stretched
-!! along its flanks, suppresses the Kelvin-Helmholtz roll-up: the bubble keeps smooth flanks and a rounded head as it
-!! approaches the upper wall (\f$ t \approx 1.3 \f$ ms).
+!! The nonlinear runs shown here use the default input file (\f$ \nu = 10 \f$, \f$ \eta = 1 \f$ m\f$^2\f$/s, \f$ D = \chi = 0.3 \f$
+!! m\f$^2\f$/s, streamline upwinding, adaptive time step), run for longer. A single bubble of light plasma rises at \f$ x = 0 \f$ and the
+!! heavy plasma falls in spikes at the periodic boundaries \f$ x = \pm L_x / 2 \f$. The shear along the bubble flanks rolls up into
+!! Kelvin-Helmholtz vortices, giving the familiar mushroom shape, before the bubble and spikes reach the walls (\f$ t \approx 870 \, \mu \f$s
+!! for \f$ B_0 = 0 \f$) and spread along them; the heavy plasma spreading along the lower wall from both sides then collides
+!! below the bubble, at \f$ x = 0 \f$, and is pushed up into a thin jet. With \f$ B_0 = 2 \times 10^{-4} \f$ T the bubble grows more slowly
+!! and the field, stretched along its flanks, suppresses the Kelvin-Helmholtz roll-up: the bubble keeps smooth flanks and a rounded head as
+!! it approaches the upper wall (\f$ t \approx 1.3 \f$ ms), and its stem later pinches off.
 !!
-!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 2e-4 T (bottom), with the default input file (D = chi = 1 m^2/s, adaptive time step)."
+!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 2e-4 T (bottom), with the default input file (upwinding, D = chi = 0.3 m^2/s, adaptive time step)."
 !!
-!! Particle diffusion and thermal conduction are needed for the late phase. Without them (\f$ D = \chi = 0 \f$) the
-!! density and temperature stay smooth and within their initial range until the roll-ups thin the layer to the grid
-!! scale (\f$ t \approx 730 \, \mu \f$s for \f$ B_0 = 0 \f$). Grid-scale oscillations then grow (undamped Galerkin advection): by
-!! \f$ 840 \, \mu \f$s they fill the domain, with the minimum of \f$ n \f$ down to half its initial value and the maximum up to 2.3 times. With \f$ D = \chi = 1 \f$ m\f$^2\f$/s,
-!! which lowers the linear growth rate by 0.65%, \f$ n \f$ stays within about 5% of its initial range to \f$ t = 1 \f$ ms, and
-!! \f$ T \f$ above 63 eV.
+!! With these settings \f$ n \f$ stays within 5% of its initial range up to \f$ t = 930 \, \mu \f$s for \f$ B_0 = 0 \f$, and within
+!! 6% below and 8% above it during the collision at the lower wall (to \f$ t = 1 \f$ ms), with \f$ T \f$ within 65-222 eV. With the field
+!! \f$ n \f$ stays within 1% of its initial range to 1.3 ms. Without upwinding, particle diffusion and thermal conduction of about
+!! 1 m\f$^2\f$/s are needed for the same result (\ref doc_mug2d_rt_ex_upwind).
 !!
-!! The time step must also adapt once the flow is nonlinear: with a fixed \f$ \Delta t = 2 \times 10^{-6} \f$ s, the GMRES
-!! iteration count grows quickly after \f$ 650 \, \mu \f$s and the Newton solve fails at \f$ 710 \, \mu \f$s, whether the
-!! preconditioner is rebuilt every 4 steps or every step. With `ittarget=60` the time step falls to
-!! \f$ 2-7 \times 10^{-7} \f$ s around the roll-up and wall contact (and recovers later in the field case).
+!! The time step must also adapt once the flow is nonlinear: without upwinding and with a fixed \f$ \Delta t = 2 \times 10^{-6} \f$ s,
+!! the GMRES iteration count grows quickly after \f$ 650 \, \mu \f$s and the Newton solve fails at \f$ 710 \, \mu \f$s, whether the
+!! preconditioner is rebuilt every 4 steps or every step. With `ittarget=60` the time step falls to \f$ 1-2 \times 10^{-6} \f$ s
+!! around the wall contact with upwinding (\f$ 2-7 \times 10^{-7} \f$ s without it, from the roll-up on), and stays at
+!! \f$ 2 \times 10^{-6} \f$ s in the field case.
+!!
+!!\subsection doc_mug2d_rt_ex_upwind Streamline upwinding
+!!
+!! The Galerkin discretization of advection has no damping at the grid scale, so without particle diffusion and thermal conduction
+!! (\f$ D = \chi = 0 \f$) the density and temperature stay smooth and within their initial range only until the Kelvin-Helmholtz roll-ups
+!! thin the layer to the grid scale (\f$ t \approx 730 \, \mu \f$s for \f$ B_0 = 0 \f$). Grid-scale oscillations then grow and fill the
+!! domain: at \f$ 790 \, \mu \f$s \f$ n \f$ is already 9% below its initial minimum and 29% above its initial maximum, and by
+!! \f$ 840 \, \mu \f$s the minimum is half its initial value. `upwind=T` adds streamline upwinding (an inconsistent SUPG method,
+!! \ref doc_mug_xmhd_2d_eqns_upwind) to the advection of \f$ n \f$, \f$ V \f$ and \f$ T \f$. The table compares \f$ B_0 = 0 \f$ runs
+!! of the default case (adaptive time step) up to \f$ t = 1 \f$ ms. The ranges are those of \f$ n \f$ and \f$ T \f$ over the whole run,
+!! relative to the initial range for \f$ n \f$ (\f$ 5-15 \times 10^{18} \f$ m\f$^{-3}\f$; \f$ T \f$ is initially 66-201 eV). Part of the
+!! departure is physical: the plasma is compressed where the bubble and spikes reach the walls, which raises \f$ n \f$ by a few percent.
+!!
+!! | \f$ D = \chi \f$ [m\f$^2\f$/s] | Upwinding | \f$ n \f$ leaves its initial range by 5% at | \f$ n \f$ range | \f$ T \f$ range [eV] | Run to |
+!! |-----|-----|-----------------|-----------|--------|-----------------------|
+!! | 0   | no  | 747 \f$ \mu \f$s (noise from 730 \f$ \mu \f$s) | 0.91-1.29 | 52-220 | 791 \f$ \mu \f$s (stopped, noise everywhere) |
+!! | 0   | yes | 878 \f$ \mu \f$s (noise from 910 \f$ \mu \f$s) | 0.38-1.94 | 33-524 | 988 \f$ \mu \f$s (stopped) |
+!! | 0.1 | yes | 912 \f$ \mu \f$s | 0.61-1.75 | 40-338 | 974 \f$ \mu \f$s (stopped) |
+!! | 0.3 | yes | 931 \f$ \mu \f$s | 0.95-1.08 | 65-222 | 1 ms |
+!! | 1   | yes | never           | 1.00-1.04 | 66-209 | 1 ms |
+!! | 1   | no  | 892 \f$ \mu \f$s | 0.85-1.08 | 63-241 | 1 ms |
+!!
+!! \image html MUG_rt2d_ex-upwind.png "Density for B_0 = 0 with D = chi = 0 (first row), and with upwinding and D = chi = 0 (second row) or 0.3 m^2/s (third row), compared with D = chi = 1 m^2/s without upwinding (last row). The first run was stopped once grid-scale noise had filled the spikes."
+!!
+!! - Upwinding alone (\f$ D = \chi = 0 \f$) removes the grid-scale noise of the roll-up and of the spikes reaching the lower wall, about
+!!   \f$ 190 \, \mu \f$s more than without it. It fails where the heavy plasma spreading along the lower wall collides with itself at
+!!   \f$ x = 0 \f$, and in the lower corners: streamline diffusion acts only along the flow, so it does not damp the oscillations at
+!!   the stagnation point, or the ripples across the layers that run along the walls. A small \f$ D \f$ and \f$ \chi \f$ are still
+!!   needed there: \f$ 0.3 \f$ m\f$^2\f$/s with upwinding is cleaner than 1 m\f$^2\f$/s without it, and 1 m\f$^2\f$/s with upwinding
+!!   keeps \f$ n \f$ within 4% of its initial range with no transients. The default input file uses 0.3 m\f$^2\f$/s, which changes the
+!!   growth rate less (below).
+!! - Upwinding does not change the growth of the instability: the growth rate of the seeded mode in the nonlinear run changes by
+!!   +0.001% (\f$ B_0 = 0 \f$) and -0.03% (\f$ B_0 = 2 \times 10^{-4} \f$ T), against -0.20% for \f$ D = \chi = 0.3 \f$ m\f$^2\f$/s and -0.64% for
+!!   \f$ D = \chi = 1 \f$ m\f$^2\f$/s. It is not used in linear runs, so `run_scan.py` and the linear rates are unaffected.
+!! - With the field the flow stays smooth: with \f$ B_0 = 2 \times 10^{-4} \f$ T, upwinding and \f$ D = \chi = 0 \f$ the run is clean to
+!!   2 ms (\f$ n \f$ within 2.6% of its initial range, no undershoot), through the bubble reaching the upper wall and the pinch-off of its stem,
+!!   with the time step fixed at \f$ 2 \times 10^{-6} \f$ s throughout. It closely follows a run with \f$ D = \chi = 1 \f$ m\f$^2\f$/s
+!!   without upwinding, apart from the sharper layer.
+!!
+!! \image html MUG_rt2d_ex-upwind-field.png "Density for B_0 = 2e-4 T with upwinding and D = chi = 0 (top), compared with D = chi = 1 m^2/s without upwinding (bottom)."
+!!
+!! Upwinding also helps the nonlinear solver: the extra streamline diffusion keeps the GMRES iteration count low for longer, so the
+!! adaptive time step stays at \f$ 2 \times 10^{-6} \f$ s until \f$ t \approx 790 \, \mu \f$s, against \f$ 690-700 \, \mu \f$s without it.
+!! It costs about 5% more per time step (\ref doc_mug2d_rt_ex_cost), but the runs reach a given time in fewer, cheaper steps: on one
+!! core each, with four runs sharing the machine, \f$ t = 1 \f$ ms took 547 steps and 5800 s with upwinding (\f$ D = \chi = 0.3 \f$),
+!! against 788 steps and 11200 s without it (\f$ D = \chi = 1 \f$).
 !!
 !!\subsection doc_mug2d_rt_ex_exp_nl Why the exponential profile is not used nonlinearly
 !!
@@ -552,6 +599,10 @@ END PROGRAM MUG_rt_2d
 !!    the equilibrium gradient \f$ dn/dz = n/L \f$, so the first step must form a thin boundary layer at each wall. The Jacobian
 !!    itself is correct (it matches a finite-difference Jacobian), and the solve converges with a uniform density or with
 !!    \f$ D \f$ acting on \f$ n - n_0 \f$ only.
+!!  - Streamline upwinding (with \f$ D = \chi = 0 \f$, \f$ \nu = 10 \f$, \f$ \eta = 1 \f$ m\f$^2\f$/s, adaptive time step) removes the
+!!    grid-scale noise that fills the domain without it by \f$ 500 \, \mu \f$s, but not the oscillations where the heavy plasma spreading
+!!    along the lower wall collides at \f$ x = 0 \f$: by \f$ 530 \, \mu \f$s \f$ n \f$ ranges over 0.64-1.73 times its initial range,
+!!    against 0.29-2.17 without upwinding at \f$ 516 \, \mu \f$s.
 !!  - Fixing \f$ n \f$ and \f$ T \f$ on the walls instead drives a spurious, wall-localized mode (\f$ 3.4 \times 10^4 \f$ s\f$^{-1}\f$ on an
 !!    \f$ 8 \times 8 \f$, third-order mesh, against \f$ 1.25 \times 10^4 \f$ s\f$^{-1}\f$ for RT; see \ref doc_mug2d_rt_ex_bcs).
 !!
@@ -564,7 +615,9 @@ END PROGRAM MUG_rt_2d
 !! every `pre_freq` steps. Rebuilding it every step roughly doubles the cost of the linear phase, while letting it age for more
 !! than a few steps makes the GMRES iteration count grow quickly once the flow is nonlinear, so the default is `pre_freq=4`.
 !! On the default \f$ 48 \times 96 \f$ mesh with two OpenMP threads this costs about 4-5 s per step while the time step is
-!! fixed, and 15-20 s per step later; the default run (450 steps, to \f$ 790 \, \mu \f$s) takes about an hour. The linear runs
+!! fixed, and 15-20 s per step later; the default run (450 steps, to \f$ 880 \, \mu \f$s) takes about an hour. Upwinding adds about
+!! 5% to the cost of a step (3.8 against 3.6 s on two threads in the linear phase, with about 15% more GMRES iterations), but
+!! keeps the time step larger in the nonlinear phase (\ref doc_mug2d_rt_ex_upwind). The linear runs
 !! cost about 0.5 s per step on this mesh, and the exponential-profile scan 0.01-0.04 s per step.
 !!
 !! \note `pre_freq` only takes effect with `use_mfnk=T`. With the assembled Jacobian as the Newton operator

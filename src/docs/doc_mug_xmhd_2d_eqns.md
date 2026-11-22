@@ -331,8 +331,10 @@ Notes:
  - In the incompressible model only \f$ n \f$ (normally not evolved) and \f$ V \f$ are upwinded.
  - With `timestep_cn=T` the terms are time-centered like the rest of the residual (both time levels use \f$ V_{ad} = V^n \f$).
  - The scheme adds first-order (in \f$ h_e \f$) diffusion along the streamlines where the cell Peclet number is large, which
-   smooths the grid-scale oscillations of the Galerkin method near steep gradients, but it is not monotone: undershoots and
-   overshoots are reduced, not removed.
+   suppresses the grid-scale oscillations of the Galerkin method where steep gradients are advected. It adds no diffusion across
+   the streamlines and it is not monotone, so it does not control oscillations where the flow stagnates or two streams collide
+   (eg. where plasma spreading along a wall meets itself), or ripples across a steep layer parallel to the flow. There, a small
+   explicit \f$ D \f$ and \f$ \chi \f$ is still needed. See \ref doc_mug2d_rt_ex_upwind for an example.
  - Upwinding is always disabled in linear runs (\ref xmhd_2d::run_lin_simulation "run_lin_simulation", or `linear=T`), so linear
    growth rates do not depend on it.
  - `upwind` defaults to `F` (unlike `xmhd_upwind` in 3D) so that existing 2D results, including the MUG-TokaMaker coupling, are

@@ -38,15 +38,16 @@
  V1=1.                ! Seed amplitude [m/s]
  nu=10.               ! Viscosity [m^2/s]
  eta=1.               ! Resistivity [m^2/s]
- chi=1.               ! Thermal diffusivity [m^2/s]
- D_diff=1.            ! Particle diffusivity [m^2/s]
+ chi=0.3              ! Thermal diffusivity [m^2/s]
+ D_diff=0.3           ! Particle diffusivity [m^2/s]
  gamma=1.6666667      ! Adiabatic index
  den_scale=1.E19      ! Density normalization [m^-3]
  dt=2.E-6             ! Time step [s]
- nsteps=450           ! Number of time steps (t = 790 us)
+ nsteps=450           ! Number of time steps (t = 880 us)
  rst_freq=5           ! Restart (and plot) file frequency
  ittarget=60          ! Target linear iterations per step: dt shrinks once the flow is nonlinear
  timestep_cn=T        ! Crank-Nicolson (nonlinear) or BDF2 (linear) time stepping
+ upwind=T             ! Streamline upwinding of n, V and T (nonlinear runs only)
  use_mfnk=T           ! Matrix-free Newton-Krylov (preconditioner from the assembled Jacobian)
  pre_freq=4           ! Rebuild the preconditioner every 4 steps
  lin_tol=1.E-10       ! Absolute linear tolerance

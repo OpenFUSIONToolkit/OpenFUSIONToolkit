@@ -439,3 +439,125 @@ rate by 0.65%).
   equilibrium, or diffusion acting on n - n0, would avoid it; not pursued since the exponential profile is now linear only.
 - UMFPACK fails to factorize the 64x128 p2 Jacobian; finer meshes need another LU package or MPI.
 - Doxygen was not available in the sandbox; the doc page was checked through `generate_doc.py` only.
+
+## SUPG upwinding session report
+
+Branch `claude/mug2d-supg-upwind` (from `claude/practical-fermi-j3e4is`). Built against Ubuntu 24.04 system packages
+(GCC 13, OpenMPI, OpenBLAS, SuperLU, UMFPACK; `OFT_BUILD_EXAMPLES=ON`) on 4 cores. Run directories (not committed) were
+under `builds/rt_runs/`.
+
+### What changed
+
+| Commit | Change |
+|---|---|
+| MUG: Add streamline upwinding to the 2D xMHD solver | `oft_xmhd_2d_sim%upwind` (default `.FALSE.`). Inconsistent SUPG streamline diffusion `w (V_ad.grad phi)(V.grad f)` on the advection of n, each component of V, and T (compressible only), added to `nlfun_apply` with exact Jacobian terms in `build_approx_jacobian`. Helpers `upwind_active`, `upwind_weight`, `get_vel_weights`. Off in linear runs (`linear=T`, or inside `run_lin_simulation`, via the private flag `lin_run`). `test_jacobian_2d` extended; driver option `upwind` in the RT example; upwinding section `doc_mug_xmhd_2d_eqns_upwind` in the 2D equations page. |
+| MUG: Cache the 2D upwinding element sizes | `he_cell(:)` computed once on first use (`upwind_elem_sizes`), instead of in every residual/Jacobian call. Cuts the per-step overhead from ~16% to ~5%. |
+| MUG: Use upwinding in the 2D Rayleigh-Taylor example | `oft.in`: `upwind=T`, `D_diff = chi = 0.3`. New doc subsection `doc_mug2d_rt_ex_upwind`, updated evolution/cost/exp-profile text, new images, regenerated `MUG_rt2d_ex-density.png`. |
+
+### Design choices
+
+- **Same scheme as 3D.** Weight `w = beta h_e/(2|V_ad|)`, `beta = coth(Pe) - 1/Pe`, `Pe = |V_ad| h_e/(2 nu_f)`. The test function
+  modification is applied to the advection term only (inconsistent SUPG). Diffusivities: `D` for n, `nu` for V (the 2D
+  viscosity is already kinematic, so no `n0/n` factor as in 3D), `(gamma-1) chi` for T. In the T row the term is divided by
+  `gamma-1` like the rest of the row.
+- **Advecting velocity frozen at the start of the step** (`V_ad` from `self%u`, which holds `u^n` during a step in
+  `run_simulation`). This mirrors the 3D `vad` from the previous step. It makes `w` and `V_ad` constants during a step, so the
+  terms are linear in V and f and the Jacobian is exact. The CN right-hand side (dt = -dt/2, evaluated at `u^n`) uses the same
+  `V_ad`, so the term is time-centred like everything else in 2D.
+- **In-plane velocity only** for `V_ad` and `|V_ad|`: `V_y` advects nothing (d/dy = 0), and including it in `|V_ad|` would
+  shrink the weight.
+- **Element size** for 2D: node spacing of an equilateral triangle (`sqrt(4A/sqrt(3))/p`) or square (`sqrt(A)/p`) with the
+  cell's planar area (from the quadrature, so curved cells are handled), also in cylindrical geometry.
+- **Fields.** n, V and T only. psi and B_y are not upwinded (as in 3D): streamline diffusion of the flux would be an
+  artificial resistivity along the flow, breaking flux freezing. In cylindrical geometry each component is upwinded with
+  `V.grad V_k`; the centrifugal and Coriolis terms are not part of it. Incompressible: n and V only (field 5 is pressure).
+- **Zero diffusivities allowed.** The 3D checks abort if `nu_visc`, `d_dens` or `kappa_perp` are not positive with
+  upwinding. That would forbid the main goal here (D = chi = 0), and the weight is continuous as nu -> 0 (beta -> 1, full
+  upwinding), so the 2D solver keeps its existing checks (D, chi, nu >= 0) and uses full upwinding where the diffusivity
+  is zero. Documented as a deliberate difference.
+- **Default `.FALSE.`** (3D defaults to `.TRUE.`). Turning it on changes every existing nonlinear 2D result, including the
+  MUG-TokaMaker coupling (`mugtok_td`) and the Harris sheet example, which were validated without it, and the frozen
+  `V_ad` relies on `self%u` holding the start-of-step state, which callers that drive `nlfun` themselves (eg. tests) must
+  provide. For the small-amplitude wave tests upwinding is also not needed. The RT example turns it on.
+
+### FD Jacobian check (`test_jacobian_2d`)
+
+- New parameters `upwind` and `no_diff`. With `upwind=T`, `mhd_sim%u` (the advecting state) is set to a second
+  pseudo-random velocity, different from the state the Jacobian is taken at, and dt = 1e-3 (instead of 1e-5) so the
+  advective terms are not swamped by the mass matrix.
+- 19 cases: planar/cylindrical x compressible/incompressible x order 2/3 x upwind off/on, plus upwind with D = chi = 0
+  (planar and cylindrical), plus the B_0 abort test. All pass; largest block error 4.2e-7 (tolerance 1e-6).
+- Sensitivity check (temporary, not committed): scaling the (n,V), (V,V) and (T,T) upwinding Jacobian terms by 1.01 gives
+  block errors of 1e-5 to 3e-3, so each term is tested (with dt = 1e-5 the (V,V) and (T,T) errors stayed near 1e-6, hence
+  the larger dt).
+
+### Tests
+
+- 2D MUG tests (`test_jacobian_2d`, `test_sound_2d`, `test_alfven_2d`, `test_taylor_green_2d`, `test_rt_2d`, including linear
+  and MPI variants): 82 passed, 18 skipped (12 `Not compiled with PETSc`, 6 matrix-free+PETSc). 72 of these are the previous
+  tests, unchanged (upwinding is off by default, so no reference values moved); 10 are the new Jacobian cases.
+- Linear runs ignore `upwind`: an 8x8 p3 exponential-profile linear run gives bit-identical `ven` with `upwind=T` and `F`,
+  so `run_scan.py` results are unchanged.
+
+### RT nonlinear results (tanh, 48x96 p2, nu = 10, eta = 1, V1 = 1, adaptive dt, `pre_freq=4`)
+
+Growth of the cos(kx) component of v_z in the nonlinear run (fit window 3-30 m/s, as `run_nonlinear.py`):
+
+| Case | gamma [1/s] | vs no upwinding, D = chi = 0 |
+|---|---|---|
+| B_0 = 0, D = chi = 0 | 1.40044e4 | |
+| B_0 = 0, D = chi = 0, upwind | 1.40046e4 | +0.001% |
+| B_0 = 0, D = chi = 0.1, upwind | 1.39951e4 | -0.07% |
+| B_0 = 0, D = chi = 0.3, upwind | 1.39771e4 | -0.20% |
+| B_0 = 0, D = chi = 1, upwind | 1.39145e4 | -0.64% |
+| B_0 = 0, D = chi = 1 | 1.39144e4 | -0.64% |
+| B_0 = 2e-4 T, D = chi = 0 | 1.06317e4 | |
+| B_0 = 2e-4 T, D = chi = 0, upwind | 1.06287e4 | -0.03% |
+
+How far the B_0 = 0 runs stay clean (n relative to its initial range 5e18-1.5e19, over the run up to 1 ms):
+
+| D = chi | Upwind | n leaves +-5% at | n range | T range [eV] | Run to | Wall time to 1 ms (1 core, 4 runs sharing) |
+|---|---|---|---|---|---|---|
+| 0 | no | 747 us (noise from ~730 us) | 0.91-1.29 | 52-220 | 791 us, stopped (noise everywhere, dt 0.35 us) | |
+| 0 | yes | 878 us (noise from ~910 us) | 0.38-1.94 | 33-524 | 988 us, stopped (dt 0.23 us, 136 its) | |
+| 0.1 | yes | 912 us | 0.61-1.75 | 40-338 | 974 us, stopped | |
+| 0.3 | yes | 931 us | 0.95-1.08 | 65-222 | 1 ms | 5800 s, 547 steps |
+| 1 | yes | never | 1.00-1.04 | 66-209 | 1 ms | 5100 s, 523 steps |
+| 1 | no | 892 us | 0.85-1.08 | 63-241 | 1 ms | 11200 s, 788 steps |
+
+- Upwinding alone (D = chi = 0) moves the onset of grid-scale noise from ~730 us to ~910 us: it keeps the roll-up and the
+  spikes' arrival at the lower wall (~870 us) clean. It then fails where the heavy plasma spreading along the lower wall from
+  both sides collides at x = 0 (a stagnation point with a thin upward jet) and in the lower corners, with ripples across the
+  wall-parallel layers. This is the expected limitation of streamline-only diffusion (no crosswind/discontinuity-capturing
+  term). The D = chi = 1 reference shows the same jet and a 15% transient there, but much smaller.
+- Some explicit diffusion is still needed past the wall collision; 0.3 m^2/s with upwinding is cleaner than 1 m^2/s without,
+  costs 0.20% of the growth rate (vs 0.64%), and runs ~2x faster to 1 ms. The example's `oft.in` now uses `upwind=T`,
+  `D_diff = chi = 0.3`.
+- Upwinding also keeps the adaptive dt at 2 us until ~790 us (vs ~690-700 us without), i.e. fewer GMRES iterations in the
+  roll-up phase.
+- B_0 = 2e-4 T, D = chi = 0, upwind: clean to 2.0 ms (n within 1.019-1.026 of its range at 2 ms, no undershoot; T 66-203.5 eV),
+  through the bubble reaching the top wall and the pinch-off of its stem; dt fixed at 2 us throughout (stopped at 2 ms). The
+  D = chi = 1 reference without upwinding (also run to 2 ms, dt fixed at 2 us) looks the same apart from a slightly broader
+  layer (n within 1.011-1.018 at 2 ms). With the new defaults (upwind, D = chi = 0.3) n stays within 1% to 1.3 ms.
+- Exponential profile past wall contact (32x32 p2, V1 = 100, D = chi = 0, nonlinear; driver check temporarily bypassed, not
+  committed): without upwinding grid-scale noise fills the domain by 500 us (n 0.29-2.17 of its range at 516 us); with
+  upwinding the bulk stays smooth, but the collision line at x = 0 still oscillates (n 0.64-1.73 at 530 us). Both stopped.
+- Snapshots: `src/docs/images/MUG_rt2d_ex-upwind.png` (B_0 = 0: no upwind D = chi = 0 / upwind D = chi = 0 / upwind
+  D = chi = 0.3 / D = chi = 1), `MUG_rt2d_ex-upwind-field.png` (B_0 = 2e-4 T), and the regenerated
+  `MUG_rt2d_ex-density.png` (new defaults).
+
+### Cost
+
+- 48x96 p2, 2 OpenMP threads, first 40 steps (fixed dt): 3.78 s/step with upwinding vs 3.61 s/step without (+5%); GMRES
+  iterations 5.25 vs 4.58 per step. Before caching the element sizes it was 4.10 s/step (+16%).
+- Over a whole run upwinding is cheaper, because dt stays larger (table above).
+
+### Unresolved
+
+- Streamline upwinding does not control stagnation-point/collision oscillations or crosswind ripples (B_0 = 0 after the
+  wall collision, ~920 us; exponential profile after wall contact). A crosswind or discontinuity-capturing term (eg. a
+  residual-based shock-capturing diffusivity) would be the next step if D = chi = 0 is needed in such phases.
+- Default kept `.FALSE.`; the other 2D users (Harris sheet example, MUG-TokaMaker) were not re-run with upwinding.
+- With `mfnk=T`, the GMRES iteration count in the linear phase rises ~15% with upwinding (the preconditioner is rebuilt only
+  every `pre_freq` steps while `V_ad` changes every step); not investigated further.
+- Doxygen was not available; the example page was checked with `generate_doc.py` only.
