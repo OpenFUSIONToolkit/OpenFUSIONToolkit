@@ -233,6 +233,7 @@ LOGICAL :: plot_run = .FALSE. !< Generate plot files from existing restart files
 LOGICAL :: pm = .FALSE. !< Print solver progress?
 LOGICAL :: use_mfnk = .FALSE. !< Use the matrix-free Newton-Krylov method?
 LOGICAL :: timestep_cn = .TRUE. !< Use second-order time stepping (CN nonlinear, BDF2 linear)
+LOGICAL :: upwind = .FALSE. !< Use streamline upwinding for n, V and T (nonlinear runs only)
 REAL(r8) :: by0 = 0.d0 !< Uniform out-of-plane field [T]
 REAL(r8) :: nu = 1.d0 !< Kinematic viscosity [m^2/s]
 REAL(r8) :: eta = 1.d0 !< Resistivity [m^2/s] (eta/mu0)
@@ -243,7 +244,7 @@ REAL(r8) :: dt = 2.d-6 !< Time step [s]
 REAL(r8) :: lin_tol = 1.d-10 !< Absolute linear solver tolerance
 REAL(r8) :: nl_tol = 1.d-8 !< Absolute nonlinear solver tolerance
 NAMELIST/rt_2d_options/order,linear,plot_run,pm,profile,n_0,T_0,L_n,atwood,delta,sigma,g,B_0,by0,V1,nu,eta,chi, &
-  D_diff,gamma,dt,nsteps,rst_freq,use_mfnk,pre_freq,timestep_cn,ittarget,lin_tol,nl_tol,den_scale
+  D_diff,gamma,dt,nsteps,rst_freq,use_mfnk,pre_freq,timestep_cn,upwind,ittarget,lin_tol,nl_tol,den_scale
 !!\subsubsection doc_mug2d_rt_ex_code_setup Mesh and FE setup
 !!
 !! The mesh must be periodic in \f$ x \f$ and centered on \f$ z = 0 \f$, since the profiles are defined
@@ -332,6 +333,8 @@ mhd_sim%T_bc=>mhd_sim%velx_bc
 !! iterations per step near `ittarget`; a large value keeps it fixed. Linear runs always use a fixed time step.
 !! Time centering (`timestep_cn=T`, BDF2 in linear runs and Crank-Nicolson in nonlinear
 !! runs) avoids the \f$ \gamma \Delta t / 2 \f$ bias of backward Euler in the measured growth rate.
+!! `upwind=T` adds streamline upwinding (\ref doc_mug_xmhd_2d_eqns_upwind) to the advection of \f$ n \f$, \f$ V \f$
+!! and \f$ T \f$ in nonlinear runs; it is ignored in linear runs.
 mhd_sim%g_accel=g
 mhd_sim%chi=chi
 mhd_sim%eta=eta
@@ -349,6 +352,7 @@ mhd_sim%lin_tol=lin_tol
 mhd_sim%nl_tol=nl_tol
 mhd_sim%ittarget=ittarget
 mhd_sim%timestep_cn=timestep_cn
+mhd_sim%upwind=upwind
 oft_env%pm=pm
 !!\subsubsection doc_mug2d_rt_ex_code_plot Plotting
 !!

@@ -10,6 +10,11 @@
 !! nonlinear residual about a pseudo-random state, one field (column block) at a time.
 !! The relative error of every row block is printed and the largest is reported.
 !!
+!! With `upwind=T` the streamline upwinding terms are included. Their advecting velocity is taken from
+!! `mhd_sim%u` (the start-of-step solution), which is set to a second pseudo-random state, different
+!! from the state the Jacobian is evaluated at. With `no_diff=T` the particle and thermal diffusivities
+!! are zero, so the upwinding weights use full upwinding.
+!!
 !! If `check_abort=T` a nonlinear run is started instead, so that the input checks made by
 !! run_simulation can be tested.
 !!
@@ -35,10 +40,12 @@ INTEGER(i4) :: order = 2
 LOGICAL :: cyl = .FALSE.
 LOGICAL :: incomp = .FALSE.
 LOGICAL :: check_abort = .FALSE.
+LOGICAL :: upwind = .FALSE.
+LOGICAL :: no_diff = .FALSE.
 REAL(r8) :: b0(3) = 0.d0
 REAL(r8) :: dt = 1.d-5
 REAL(r8) :: fd_eps = 1.d-6
-NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,b0,dt,fd_eps
+NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,upwind,no_diff,b0,dt,fd_eps
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -61,6 +68,11 @@ mhd_sim%den_scale=1.d19
 mhd_sim%B_0=b0
 mhd_sim%g_accel=1.d8 ! Constant source: must not change the Jacobian
 mhd_sim%dt=dt
+mhd_sim%upwind=upwind
+IF(no_diff)THEN
+  mhd_sim%D_diff=0.d0
+  mhd_sim%chi=0.d0
+END IF
 !---------------------------------------------------------------------------
 ! Pseudo-random state (n, V, T or p, psi, B_y) and vacuum flux
 !---------------------------------------------------------------------------
@@ -94,6 +106,17 @@ DO i=1,SIZE(vals)
 END DO
 CALL mhd_sim%psi_vac%restore_local(vals)
 DEALLOCATE(vals)
+!---Start-of-step state (advecting velocity for upwinding)
+CALL mhd_sim%u%add(0.d0,1.d0,u)
+DO ic=2,4
+  NULLIFY(vals)
+  CALL mhd_sim%u%get_local(vals,ic)
+  DO i=1,SIZE(vals)
+    vals(i)=scale(ic)*(pseudo_rand(i,20+ic)-0.5d0)
+  END DO
+  CALL mhd_sim%u%restore_local(vals,ic)
+  DEALLOCATE(vals)
+END DO
 !---------------------------------------------------------------------------
 ! Optionally test input checks
 !---------------------------------------------------------------------------
