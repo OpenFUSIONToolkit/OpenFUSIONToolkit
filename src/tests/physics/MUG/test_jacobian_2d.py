@@ -45,7 +45,7 @@ oft_in_template = """
  b0={3}
  check_abort={4}
  upwind={5}
- no_diff={6}
+ diff_set={6:.4E}
  dt={7:.4E}
 /
 """
@@ -54,7 +54,7 @@ oft_in_template = """
 JAC_TOL = 1.E-6
 
 
-def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=None, upwind=False, no_diff=False):
+def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=None, upwind=False, diff_set=-1.0):
     # With upwinding a larger time step is used, so that the advection and upwinding terms are not
     # dominated by the mass matrix and errors in their derivatives are detected
     dt = 1.E-3 if upwind else 1.E-5
@@ -63,7 +63,7 @@ def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=No
         fid.write(oft_in_template.format(order, 'T' if cyl else 'F', 'T' if incomp else 'F',
                                          ','.join('{0:.4E}'.format(val) for val in b0),
                                          'T' if check_abort else 'F', 'T' if upwind else 'F',
-                                         'T' if no_diff else 'F', dt))
+                                         diff_set, dt))
     return run_OFT("./test_jacobian_2d", 1, 600, return_stdout=True, expect_abort=expect_abort)
 
 
@@ -100,10 +100,17 @@ def test_jacobian_cyl(order, incomp, upwind):
 
 
 @pytest.mark.parametrize("cyl", (False, True))
-def test_jacobian_upwind_nodiff(cyl):
-    '''Jacobian consistency with upwinding and zero particle and thermal diffusivities (full upwinding).'''
+def test_jacobian_upwind_lowdiff(cyl):
+    '''Jacobian consistency with upwinding and very small particle and thermal diffusivities (full upwinding).'''
     b0 = (0.0, 0.0, 1.E-2) if cyl else (1.E-2, 2.E-2, 1.5E-2)
-    assert validate_result(jacobian_2d_setup(2, cyl, False, b0, upwind=True, no_diff=True))
+    assert validate_result(jacobian_2d_setup(2, cyl, False, b0, upwind=True, diff_set=1.E-6))
+
+
+def test_upwind_zero_diff_abort():
+    '''Upwinding is rejected when the particle diffusivity (or thermal diffusivity) is zero.'''
+    status, _ = jacobian_2d_setup(2, False, False, (0.0, 0.0, 0.0), check_abort=True, upwind=True, diff_set=0.0,
+                                  expect_abort='Upwinding requires "D_diff>0"')
+    assert status
 
 
 def test_cyl_b0_abort():

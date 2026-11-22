@@ -86,7 +86,8 @@ Material properties are arrays with one entry per mesh region, and are taken as 
 All of them except \f$ m_i \f$ default to -1 and must be set. \ref xmhd_2d::run_simulation "run_simulation" and
 \ref xmhd_2d::run_lin_simulation "run_lin_simulation" abort if, in any region that is not ignored, \f$ m_i \f$ or
 \f$ \eta_2 \f$ is not positive, \f$ \nu \f$ or \f$ \eta_1 \f$ is negative, or (compressible model only) \f$ D \f$ or
-\f$ \chi \f$ is negative or \f$ \gamma \le 1 \f$.
+\f$ \chi \f$ is negative or \f$ \gamma \le 1 \f$. With upwinding (nonlinear runs only), \f$ \nu \f$ and (compressible model)
+\f$ D \f$ and \f$ \chi \f$ must also be positive.
 
 | Symbol | Component | Description |
 |--------|-----------|-------------|
@@ -321,9 +322,12 @@ the time derivative or the other terms, so the scheme adds diffusion along the s
 Notes:
  - Because \f$ V_{ad} \f$ and \f$ w_f \f$ are frozen, the terms are linear in \f$ V \f$ and \f$ f \f$ during a step, and the
    Jacobian includes their exact derivatives.
- - Where \f$ \nu_f = 0 \f$, full upwinding (\f$ \beta = 1 \f$, the limit \f$ \nu_f \to 0 \f$) is used, giving a streamline
-   diffusivity \f$ h_e |V_{ad}| / 2 \f$. Unlike the 3D implementation, zero diffusivities are allowed with upwinding, so that
-   advection can be run without any explicit particle diffusion or thermal conduction.
+ - As in the 3D implementation, the diffusivities of the upwinded fields (\f$ \nu \f$, and \f$ D \f$ and \f$ \chi \f$ in the
+   compressible model) must be positive, and the run aborts otherwise. Very small values may be used: as \f$ \nu_f \to 0 \f$,
+   \f$ \beta \to 1 \f$ (full upwinding), giving a streamline diffusivity \f$ h_e |V_{ad}| / 2 \f$.
+ - The weight is applied whenever upwinding is on, and adapts to the local cell Peclet number: where \f$ Pe \ll 1 \f$
+   (slow flow or large diffusivity) \f$ \beta \approx Pe / 3 \f$ and the added streamline diffusivity, \f$ \approx |V_{ad}|^2 h_e^2 / (12 \nu_f) \f$,
+   is small compared with \f$ \nu_f \f$; where \f$ Pe \gg 1 \f$ it approaches \f$ h_e |V_{ad}| / 2 \f$.
  - The magnetic fields (\f$ \psi \f$, \f$ B_y \f$) are not upwinded, as in 3D: streamline diffusion of the flux would act as
    an artificial resistivity along the flow and break flux freezing. Their advection is stabilized only by \f$ \eta \f$.
  - In cylindrical geometry the momentum term upwinds each component, \f$ V \cdot \nabla V_k \f$ (\f$ k = R, \phi, Z \f$). The

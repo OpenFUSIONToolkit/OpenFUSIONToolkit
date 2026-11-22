@@ -10,8 +10,9 @@
 # kinetic energy also contains a small, x-independent adjustment of the layer. The comparison therefore uses the
 # amplitude of the cos(kx) component of v_z (k = 2 pi/L_x), computed from the plot files of each run. Particle
 # diffusion and thermal conduction are turned off (D_diff = chi = 0), since they also spread the layer in the
-# nonlinear runs, which the linearized model does not include; the other options come from oft.in. Streamline upwinding
-# (`upwind`) is kept as set in oft.in: it is used in the nonlinear runs only and changes their growth rate by less than 0.03%.
+# nonlinear runs, which the linearized model does not include. Streamline upwinding is turned off too (it requires
+# D_diff, chi > 0, is not part of the linearized model, and changes the nonlinear growth rate by less than 0.03%); the
+# other options come from oft.in.
 #
 # Usage (from the directory containing MUG_rt_2d, oft.in, and oft_in.xml):
 #   python run_nonlinear.py [--B_0 0. 2.E-4] [--nsteps_lin 400] [--np 1] [--plot] [--skip_run]
@@ -83,6 +84,7 @@ def main():
     # which spread the layer in the nonlinear run only
     template = set_option(template, 'D_diff', '0.')
     template = set_option(template, 'chi', '0.')
+    template = set_option(template, 'upwind', 'F')
     k = 2.0*np.pi/read_option(template, 'rscale')[0]
     exe = os.path.abspath(options.exe)
     results = []

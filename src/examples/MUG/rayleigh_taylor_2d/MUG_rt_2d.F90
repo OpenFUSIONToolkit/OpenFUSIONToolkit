@@ -496,8 +496,8 @@ END PROGRAM MUG_rt_2d
 !!
 !! `run_nonlinear.py` runs the transition-layer case from the default input file, linearized and nonlinear, for
 !! \f$ B_0 = 0 \f$ and \f$ B_0 = 2 \times 10^{-4} \f$ T (\f$ 0.49 B_c \f$ for a sharp interface), with \f$ V_1 = 1 \f$ m/s,
-!! \f$ \nu = 10 \f$ m\f$^2\f$/s, \f$ \eta = 1 \f$ m\f$^2\f$/s, and \f$ D = \chi = 0 \f$ (upwinding, which is on in the input file, is
-!! used in the nonlinear runs only; it changes the nonlinear growth rate by less than 0.03%). The viscosity damps the short-wavelength
+!! \f$ \nu = 10 \f$ m\f$^2\f$/s, \f$ \eta = 1 \f$ m\f$^2\f$/s, \f$ D = \chi = 0 \f$, and no upwinding (which requires \f$ D, \chi > 0 \f$ and
+!! changes the nonlinear growth rate by less than 0.03%, \ref doc_mug2d_rt_ex_upwind). The viscosity damps the short-wavelength
 !! modes of the layer, which grow faster than the seeded mode (up to \f$ \sim \sqrt{A g / \delta} \f$) and are poorly resolved.
 !! Since the nonlinear runs start from the projected equilibrium, which is not in exact discrete balance, the layer
 !! adjusts slightly at the start of the run. This x-independent motion adds a floor of about \f$ 4 \times 10^{-10} \f$ J/m to
@@ -507,8 +507,8 @@ END PROGRAM MUG_rt_2d
 !!
 !! | \f$ B_0 \f$ [T] | Window [\f$ \mu \f$s] | \f$ \gamma \f$ linear [s\f$^{-1}\f$] | \f$ \gamma \f$ nonlinear [s\f$^{-1}\f$] | Ratio | \f$ \gamma \f$ sharp interface [s\f$^{-1}\f$] |
 !! |--------|---------|----------|----------|--------|----------|
-!! | 0      | 240-400 | 1.4010e4 | 1.4005e4 | 0.9996 | 1.7724e4 |
-!! | 2e-4   | 310-520 | 1.0633e4 | 1.0629e4 | 0.9996 | 1.5461e4 |
+!! | 0      | 240-400 | 1.4010e4 | 1.4004e4 | 0.9996 | 1.7724e4 |
+!! | 2e-4   | 310-520 | 1.0633e4 | 1.0632e4 | 0.9999 | 1.5461e4 |
 !!
 !! \image html MUG_rt2d_ex-modes.png "Amplitude of the cos(kx) component of v_z in the linearized (dashed) and nonlinear (solid) runs. The fit window is shaded."
 !!
@@ -562,6 +562,10 @@ END PROGRAM MUG_rt_2d
 !! | 0.3 | yes | 931 \f$ \mu \f$s | 0.95-1.08 | 65-222 | 1 ms |
 !! | 1   | yes | never           | 1.00-1.04 | 66-209 | 1 ms |
 !! | 1   | no  | 892 \f$ \mu \f$s | 0.85-1.08 | 63-241 | 1 ms |
+!!
+!! The upwinded runs with \f$ D = \chi = 0 \f$ here (and below) were made before the solver began to require positive diffusivities
+!! with upwinding (\ref doc_mug_xmhd_2d_eqns_upwind); to repeat them, use a very small value such as \f$ 10^{-6} \f$ m\f$^2\f$/s, which gives
+!! the same (full) upwinding and negligible diffusion.
 !!
 !! \image html MUG_rt2d_ex-upwind.png "Density for B_0 = 0 with D = chi = 0 (first row), and with upwinding and D = chi = 0 (second row) or 0.3 m^2/s (third row), compared with D = chi = 1 m^2/s without upwinding (last row). The first run was stopped once grid-scale noise had filled the spikes."
 !!

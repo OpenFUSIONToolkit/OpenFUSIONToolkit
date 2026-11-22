@@ -570,7 +570,9 @@ END SUBROUTINE run_lin_simulation
 !!
 !! Material properties default to -1 and must be set for every region that is not
 !! ignored (`ignore_rmask`). In cylindrical geometry only a uniform background field
-!! along \f$ \hat{Z} \f$ is a valid (divergence- and curl-free) field.
+!! along \f$ \hat{Z} \f$ is a valid (divergence- and curl-free) field. When upwinding is active, the
+!! diffusivities of the upwinded fields (`nu`, and `D_diff` and `chi` in the compressible model) must be
+!! positive, as in the 3D implementation (see \ref doc_mug_xmhd_2d_eqns_upwind).
 !---------------------------------------------------------------------------
 SUBROUTINE check_settings(self)
 CLASS(oft_xmhd_2d_sim), INTENT(in) :: self !< Simulation object
@@ -585,6 +587,13 @@ DO i=1,SIZE(self%ignore_rmask)
     IF(self%D_diff(i)<0.d0)CALL oft_abort("Particle diffusivity not set or negative","check_settings",__FILE__)
     IF(self%chi(i)<0.d0)CALL oft_abort("Thermal diffusivity not set or negative","check_settings",__FILE__)
     IF(self%gamma(i)<=1.d0)CALL oft_abort("Adiabatic index must be greater than 1","check_settings",__FILE__)
+  END IF
+  IF(upwind_active(self))THEN
+    IF(self%nu(i)<=0.d0)CALL oft_abort('Upwinding requires "nu>0"','check_settings',__FILE__)
+    IF(.NOT.self%incomp)THEN
+      IF(self%D_diff(i)<=0.d0)CALL oft_abort('Upwinding requires "D_diff>0"','check_settings',__FILE__)
+      IF(self%chi(i)<=0.d0)CALL oft_abort('Upwinding requires "chi>0"','check_settings',__FILE__)
+    END IF
   END IF
 END DO
 IF(self%cyl_flag.AND.((self%B_0(1)/=0.d0).OR.(self%B_0(2)/=0.d0)))CALL oft_abort( &
@@ -612,8 +621,9 @@ END FUNCTION upwind_active
 !! "xmhd_upwind_weight"), the weight is the optimal value for 1D advection-diffusion,
 !! \f$ w = \beta h_e / (2 |v|) \f$ with \f$ \beta = \coth(Pe) - 1/Pe \f$ and \f$ Pe = |v| h_e / (2 \nu) \f$,
 !! from A. N. Brooks and T. J. R. Hughes, Comput. Methods Appl. Mech. Eng. 32, 199 (1982).
-!! Where the diffusivity is not positive, full upwinding (\f$ \beta = 1 \f$, the limit \f$ \nu \to 0 \f$)
-!! is used.
+!! Zero diffusivities are rejected when upwinding is enabled (see \ref xmhd_2d::check_settings
+!! "check_settings"); a non-positive value (eg. the unused density diffusivity of the incompressible model)
+!! gives full upwinding (\f$ \beta = 1 \f$, the limit \f$ \nu \to 0 \f$).
 !!
 !! @result Upwinding weight [s]
 !---------------------------------------------------------------------------

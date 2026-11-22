@@ -12,8 +12,8 @@
 !!
 !! With `upwind=T` the streamline upwinding terms are included. Their advecting velocity is taken from
 !! `mhd_sim%u` (the start-of-step solution), which is set to a second pseudo-random state, different
-!! from the state the Jacobian is evaluated at. With `no_diff=T` the particle and thermal diffusivities
-!! are zero, so the upwinding weights use full upwinding.
+!! from the state the Jacobian is evaluated at. If `diff_set>=0`, the particle and thermal diffusivities
+!! are set to it: a very small value gives (nearly) full upwinding, and zero tests the input check.
 !!
 !! If `check_abort=T` a nonlinear run is started instead, so that the input checks made by
 !! run_simulation can be tested.
@@ -41,11 +41,11 @@ LOGICAL :: cyl = .FALSE.
 LOGICAL :: incomp = .FALSE.
 LOGICAL :: check_abort = .FALSE.
 LOGICAL :: upwind = .FALSE.
-LOGICAL :: no_diff = .FALSE.
+REAL(r8) :: diff_set = -1.d0
 REAL(r8) :: b0(3) = 0.d0
 REAL(r8) :: dt = 1.d-5
 REAL(r8) :: fd_eps = 1.d-6
-NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,upwind,no_diff,b0,dt,fd_eps
+NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,upwind,diff_set,b0,dt,fd_eps
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -69,9 +69,9 @@ mhd_sim%B_0=b0
 mhd_sim%g_accel=1.d8 ! Constant source: must not change the Jacobian
 mhd_sim%dt=dt
 mhd_sim%upwind=upwind
-IF(no_diff)THEN
-  mhd_sim%D_diff=0.d0
-  mhd_sim%chi=0.d0
+IF(diff_set>=0.d0)THEN
+  mhd_sim%D_diff=diff_set
+  mhd_sim%chi=diff_set
 END IF
 !---------------------------------------------------------------------------
 ! Pseudo-random state (n, V, T or p, psi, B_y) and vacuum flux
