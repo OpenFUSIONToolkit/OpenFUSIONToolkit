@@ -11,7 +11,7 @@
 # amplitude of the cos(kx) component of v_z (k = 2 pi/L_x), computed from the plot files of each run.
 #
 # Usage (from the directory containing MUG_rt_2d, oft.in, and oft_in.xml):
-#   python run_nonlinear.py [--B_0 0. 2.E-4] [--nsteps_lin 400] [--np 1] [--plot]
+#   python run_nonlinear.py [--B_0 0. 2.E-4] [--nsteps_lin 400] [--np 1] [--plot] [--skip_run]
 import argparse
 import os
 import shutil
@@ -69,6 +69,8 @@ def main():
     parser.add_argument('--np', type=int, default=1, help='Number of MPI processes per run')
     parser.add_argument('--exe', default='./MUG_rt_2d', help='Path to the MUG_rt_2d executable')
     parser.add_argument('--plot', action='store_true', help='Plot the mode amplitudes (rt_2d_nonlinear.png)')
+    parser.add_argument('--skip_run', action='store_true',
+                        help='Analyze existing runs (and plot files) instead of running the cases')
     options = parser.parse_args()
     with open('oft.in', 'r') as fid:
         template = fid.read()
@@ -85,7 +87,8 @@ def main():
             case = set_option(text, 'linear', 'T' if linear else 'F')
             if linear:
                 case = set_option(case, 'nsteps', str(options.nsteps_lin))
-            run(exe, case, run_dir, options.np)
+            if not options.skip_run:
+                run(exe, case, run_dir, options.np)
             curves[linear] = mode_amplitude(run_dir, k)
         # Fit both runs over the same time window, set by the nonlinear run's amplitude
         gamma_nl, t0, t1 = fit_rate(*curves[False], options.a_max)

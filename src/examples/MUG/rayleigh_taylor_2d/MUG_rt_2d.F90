@@ -209,10 +209,11 @@ USE rt_2d_helpers
 IMPLICIT NONE
 !!\subsubsection doc_mug2d_rt_ex_code_vars Local variables and input options
 !!
-!! The physical parameters (`n_0`, `T_0`, `L_n`, `g`, `B_0`, `V1`, `den_scale`) live in the helper module and
-!! are read from the `rt_2d_options` group together with the run options below. `B_0` is the in-plane field
-!! at \f$ z = 0 \f$ [T], `by0` the uniform out-of-plane field [T], and `V1` the seed amplitude [m/s]. The domain
-!! size is taken from the mesh.
+!! The physical parameters (`profile`, `n_0`, `T_0`, `L_n`, `atwood`, `delta`, `sigma`, `g`, `B_0`, `V1`,
+!! `den_scale`) live in the helper module and are read from the `rt_2d_options` group together with the run
+!! options below. `L_n` is used only by the exponential profile, and `atwood`, `delta` and `sigma` only by the
+!! transition layer. `B_0` is the in-plane field (at \f$ z = 0 \f$ for the exponential profile) [T], `by0` the
+!! uniform out-of-plane field [T], and `V1` the seed amplitude [m/s]. The domain size is taken from the mesh.
 INTEGER(i4) :: io_unit,ierr,i
 REAL(r8), POINTER :: vec_vals(:)
 TYPE(oft_xmhd_2d_sim) :: mhd_sim
@@ -261,8 +262,10 @@ IF(ABS(zmax+zmin)>1.d-6*L_z)CALL oft_abort('Mesh must be centered in z','MUG_rt_
 CALL mhd_sim%setup(mg_mesh,order)
 !!\subsubsection doc_mug2d_rt_ex_code_theory Theoretical growth rate
 !!
-!! The incompressible growth rate of the \f$ m = 1 \f$ mode, the critical field, and the compressibility
-!! parameters are printed for reference.
+!! For reference the driver prints the incompressible growth rate (exact for the exponential profile, the
+!! sharp-interface estimate for the transition layer), the corresponding critical field, the compressibility
+!! parameters, and the density and temperature on the walls. Nonlinear runs with the exponential profile are
+!! stopped here (\ref doc_mug2d_rt_ex_exp_nl).
 IF(profile/='exp'.AND.profile/='tanh')CALL oft_abort('Unknown profile','MUG_rt_2d',__FILE__)
 IF(profile=='exp'.AND.(.NOT.linear).AND.(.NOT.plot_run))CALL oft_abort( &
   'Nonlinear runs require profile="tanh" (see the example docs)','MUG_rt_2d',__FILE__)
