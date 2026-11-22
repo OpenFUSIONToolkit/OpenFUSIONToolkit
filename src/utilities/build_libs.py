@@ -500,6 +500,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
     elif "MKL_FLAGS" in mydict:
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
+    elif mydict.get("BLAS_ACCELERATE",False):
+        cmake_lines.append("-DOFT_LAPACK_LIBRARIES:STRING={0}".format(mydict["LAPACK_LIB_PATH"]))
     if "ARPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
@@ -1350,6 +1352,161 @@ class MKL(package):
         return self.config_dict
 
 
+class ACCELERATE(package):
+    """! BLAS/LAPACK from the macOS Accelerate framework
+
+    Accelerate exports two interfaces: a legacy one (eg. "dgemm_"), which is LAPACK 3.2.1 and uses
+    the f2c return convention for single precision and complex functions, and a modern one
+    (LAPACK 3.11, macOS >= 13.3) with symbols suffixed by "$NEWLAPACK". Fortran codes cannot reference
+    the modern symbols directly, so a small shim library is generated that maps each standard Fortran
+    symbol to its "$NEWLAPACK" counterpart. Most symbols are pure tail-call trampolines; complex-valued
+    functions, which return through a hidden argument in Accelerate, are wrapped in C. Utility routines
+    that Accelerate only provides through the legacy interface ("lsame", "dcabs1") are implemented
+    directly in the shim.
+    """
+    ## Complex valued functions (returned through hidden first argument in Accelerate)
+    complex_funcs = {
+        'cdotc': ('float complex', 'dot'),
+        'cdotu': ('float complex', 'dot'),
+        'zdotc': ('double complex', 'dot'),
+        'zdotu': ('double complex', 'dot'),
+        'cladiv': ('float complex', 'div'),
+        'zladiv': ('double complex', 'div')
+    }
+    ## Reference implementations of routines without a "$NEWLAPACK" version
+    legacy_funcs = {
+        'lsame': [
+            '#include <ctype.h>',
+            '#include <stddef.h>',
+            'int lsame_(const char *ca, const char *cb, size_t ca_len, size_t cb_len)',
+            '{ return toupper((unsigned char)*ca) == toupper((unsigned char)*cb); }'
+        ],
+        'dcabs1': [
+            '#include <math.h>',
+            'double dcabs1_(const double complex *z) { return fabs(creal(*z)) + fabs(cimag(*z)); }'
+        ]
+    }
+
+    def __init__(self):
+        self.name = "ACCELERATE"
+        self.display_name = "Accelerate (BLAS/LAPACK shim)"
+        self.build_dir = "accelerate_shim"
+        self.install_dir = "accelerate_shim"
+
+    def install(self, config_dict, keep_build_dirs=False, force=False):
+        # Nothing to download, so set paths that would normally be set from the URL
+        self.root_path = config_dict['base_dir']
+        self.root_build_path = config_dict['build_dir']
+        return super().install(config_dict, keep_build_dirs, force)
+
+    def fetch(self, force=False, nretry=2):
+        return
+
+    def extract(self):
+        if not os.path.isdir(self.build_dir):
+            os.mkdir(self.build_dir)
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        if self.config_dict['OS_TYPE'] != 'Darwin':
+            error_exit('Accelerate BLAS/LAPACK is only available on macOS')
+        if ver_lt(self.config_dict['OS_VER'], '13.3'):
+            error_exit('Accelerate BLAS/LAPACK requires macOS >= 13.3 (found {0})'.format(self.config_dict['OS_VER']))
+        if ver_lt(self.config_dict.get('MACOSX_DEPLOYMENT_TARGET', '13.3'), '13.3'):
+            error_exit('Accelerate BLAS/LAPACK requires MACOSX_DEPLOYMENT_TARGET >= 13.3')
+        if self.config_dict['TARGET_ARCH'] not in ('arm64', 'x86_64'):
+            error_exit('Unsupported architecture for Accelerate BLAS/LAPACK: {0}'.format(self.config_dict['TARGET_ARCH']))
+        self.setup_root_struct()
+        self.config_dict['BLAS_VENDOR'] = "Apple"
+        self.config_dict['BLAS_ACCELERATE'] = True
+        self.config_dict['LAPACK_LIB'] = self.config_dict['ACCELERATE_LIB']
+        self.config_dict['LAPACK_LIBS'] = "-loftaccelerate"
+        self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'liboftaccelerate.dylib')
+        self.config_dict['LAPACK_LIB_PATH'] = self.config_dict['BLAS_LIB_PATH']
+        # Installation check files
+        self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
+        return self.config_dict
+
+    def get_symbols(self):
+        # Read modern (non-ILP64) Fortran symbols from Accelerate's text-based stubs in the SDK
+        sdk_path = self.config_dict.get('MACOS_SDK_PATH', None)
+        if sdk_path is None:
+            sdk_path, errcode = run_command('xcrun --show-sdk-path')
+            sdk_path = sdk_path.strip()
+            if errcode != 0:
+                error_exit('Could not determine macOS SDK path for Accelerate', ('Specify with "--macos_sdk_path"',))
+        veclib_path = os.path.join(sdk_path, 'System', 'Library', 'Frameworks', 'Accelerate.framework',
+                                   'Versions', 'A', 'Frameworks', 'vecLib.framework', 'Versions', 'A')
+        symbols = set()
+        for lib_name in ('libBLAS.tbd', 'libLAPACK.tbd'):
+            tbd_path = os.path.join(veclib_path, lib_name)
+            if not os.path.isfile(tbd_path):
+                error_exit('Could not find Accelerate stub file "{0}"'.format(tbd_path))
+            with open(tbd_path, 'r') as fid:
+                symbols.update(re.findall(r"_([a-z][a-z0-9_]*)\$NEWLAPACK(?!\$)", fid.read()))
+        # Remove C-only interfaces
+        symbols = sorted([sym for sym in symbols if not sym.startswith(('cblas_', 'catlas_', 'appleblas_'))])
+        if ('dgemm' not in symbols) or ('dgetrf' not in symbols):
+            error_exit('Accelerate "$NEWLAPACK" interface not found in SDK "{0}"'.format(sdk_path),
+                       ('macOS SDK >= 13.3 required',))
+        return symbols
+
+    def setup_build(self):
+        symbols = self.get_symbols()
+        # Trampolines for all symbols except complex-valued functions
+        if self.config_dict['TARGET_ARCH'] == 'arm64':
+            branch_inst = 'b'
+        else:
+            branch_inst = 'jmp'
+        asm_lines = ['.text']
+        for sym in symbols:
+            if sym in self.complex_funcs:
+                continue
+            asm_lines += [
+                '.globl _{0}_'.format(sym),
+                '.p2align 4',
+                '_{0}_:'.format(sym),
+                '  {0} "_{1}$NEWLAPACK"'.format(branch_inst, sym)
+            ]
+        with open('oft_accelerate_tramp.S', 'w+') as fid:
+            fid.write('\n'.join(asm_lines) + '\n')
+        # C wrappers for complex-valued functions
+        c_lines = ['#include <complex.h>']
+        for sym, (ctype, func_type) in self.complex_funcs.items():
+            if sym not in symbols:
+                continue
+            if func_type == 'dot':
+                c_lines += [
+                    'extern void {0}_new({1} *, const int *, const {1} *, const int *, const {1} *, const int *) __asm__("_{0}$NEWLAPACK");'.format(sym, ctype),
+                    '{1} {0}_(const int *n, const {1} *x, const int *incx, const {1} *y, const int *incy)'.format(sym, ctype),
+                    '{{ {1} r; {0}_new(&r, n, x, incx, y, incy); return r; }}'.format(sym, ctype)
+                ]
+            else:
+                c_lines += [
+                    'extern void {0}_new({1} *, const {1} *, const {1} *) __asm__("_{0}$NEWLAPACK");'.format(sym, ctype),
+                    '{1} {0}_(const {1} *x, const {1} *y)'.format(sym, ctype),
+                    '{{ {1} r; {0}_new(&r, x, y); return r; }}'.format(sym, ctype)
+                ]
+        for sym, func_lines in self.legacy_funcs.items():
+            if sym not in symbols:
+                c_lines += func_lines
+        with open('oft_accelerate_cplx.c', 'w+') as fid:
+            fid.write('\n'.join(c_lines) + '\n')
+        # Hash of generated sources (forces rebuild if symbol list changes)
+        hasher = hashlib.sha256()
+        for src_file in ('oft_accelerate_tramp.S', 'oft_accelerate_cplx.c'):
+            with open(src_file, 'rb') as fid:
+                hasher.update(fid.read())
+        build_lines = [
+            'export OFT_ACCELERATE_SRC_HASH={0}'.format(hasher.hexdigest()),
+            'mkdir -p {ACCELERATE_LIB}',
+            '{CC} -c oft_accelerate_tramp.S -o oft_accelerate_tramp.o',
+            '{CC} -O2 -fPIC -c oft_accelerate_cplx.c -o oft_accelerate_cplx.o',
+            '{CC} -dynamiclib oft_accelerate_tramp.o oft_accelerate_cplx.o -o {BLAS_LIB_PATH} -install_name {BLAS_LIB_PATH} -framework Accelerate'
+        ]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
@@ -1706,6 +1863,11 @@ class UMFPACK(package):
             config_CMAKE_options = AMD_CMAKE_options.copy() + [
                 "-DBLAS_ROOT:PATH={BLAS_ROOT}",
                 "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
+            ]
+        elif self.config_dict.get('BLAS_ACCELERATE',False):
+            config_CMAKE_options = AMD_CMAKE_options.copy() + [
+                "-DBLAS_LIBRARIES:FILEPATH={BLAS_LIB_PATH}",
+                "-DLAPACK_LIBRARIES:FILEPATH={LAPACK_LIB_PATH}"
             ]
         else:
             config_CMAKE_options = AMD_CMAKE_options.copy()
@@ -2194,6 +2356,7 @@ group.add_argument("--ref_blas", action="store_true", default=False, help="Use r
 group.add_argument("--blas_lapack_wrapper", action="store_true", default=False, help="BLAS/LAPACK included in compilers")
 group.add_argument("--use_mkl", action="store_true", default=False, help="Use MKL BLAS/LAPACK instead of OpenBLAS")
 group.add_argument("--mkl_root", default=None, type=str, help="MKL root directory path (required for MKL)")
+group.add_argument("--use_accelerate", action="store_true", default=False, help="Use macOS Accelerate BLAS/LAPACK instead of OpenBLAS (macOS >= 13.3)")
 group.add_argument("--blas_lib_path", default=None, type=str, help="Path to pre-built BLAS library")
 group.add_argument("--lapack_lib_path", default=None, type=str, help="Path to pre-built LAPACK library")
 #
@@ -2299,8 +2462,15 @@ packages = []
 if options.build_cmake == 1:
     packages.append(CMAKE())
 # BLAS/LAPACK
+if options.use_accelerate:
+    if options.use_mkl or options.ref_blas or options.blas_lapack_wrapper:
+        parser.exit(-1, '"--use_accelerate" cannot be combined with "--use_mkl", "--ref_blas", or "--blas_lapack_wrapper"\n')
+    if (options.blas_lib_path is not None) or (options.lapack_lib_path is not None):
+        parser.exit(-1, '"--use_accelerate" cannot be combined with "--blas_lib_path" or "--lapack_lib_path"\n')
 if options.use_mkl:
     packages.append(MKL(options.mkl_root))
+elif options.use_accelerate:
+    packages.append(ACCELERATE())
 else:
     if (options.blas_lib_path is not None) or (options.lapack_lib_path is not None):
         if (options.blas_lib_path is None) or (options.lapack_lib_path is None):

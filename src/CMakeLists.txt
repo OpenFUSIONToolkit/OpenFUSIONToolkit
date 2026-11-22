@@ -35,6 +35,7 @@ set(OFT_MPI_PLEN "4" CACHE STRING "Size of strings for MPI processor index")
 set(OFT_PATH_SLEN "200" CACHE STRING "Size of path strings")
 set(OFT_ERROR_SLEN "200" CACHE STRING "Size of error strings")
 set(OFT_SLEN "80" CACHE STRING "General string length")
+set(OFT_LAPACK_LIBRARIES "" CACHE STRING "BLAS/LAPACK libraries to link (skips search with FindLAPACK if set)")
 set(OFT_HDF5_WAIT "30" CACHE STRING "Wait time (s) for HDF5 file creation")
 
 # Internal variables
@@ -297,7 +298,13 @@ if( OFT_USE_MPI )
   add_definitions( -DHAVE_MPI )
 endif()
 # BLAS/LAPACK
-find_package( LAPACK REQUIRED )
+if( OFT_LAPACK_LIBRARIES )
+  # Explicitly specified libraries (eg. macOS Accelerate shim from build_libs.py)
+  set( LAPACK_LIBRARIES ${OFT_LAPACK_LIBRARIES} )
+  message( STATUS "Using specified BLAS/LAPACK libraries: ${LAPACK_LIBRARIES}" )
+else()
+  find_package( LAPACK REQUIRED )
+endif()
 list(REMOVE_DUPLICATES LAPACK_LIBRARIES) # Sometimes BLAS and LAPACK are in the same library
 set( EXT_LIBS ${LAPACK_LIBRARIES} ${EXT_LIBS} )
 if( BLA_VENDOR MATCHES "^Intel" )
