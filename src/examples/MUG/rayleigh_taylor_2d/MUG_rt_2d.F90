@@ -359,8 +359,9 @@ END PROGRAM MUG_rt_2d
 !!\section doc_mug2d_rt_ex_input Input files
 !!
 !! The default input file runs the nonlinear case without a field on a \f$ 32 \times 32 \f$ mesh at
-!! second order (see \ref doc_mug2d_rt_ex_nl). Linear runs and the field scan are set up by `run_scan.py`
-!! (\ref doc_mug2d_rt_ex_scan) from this file.
+!! second order, up to the time the bubble and spikes reach the walls (\ref doc_mug2d_rt_ex_nl). This takes
+!! about 5 minutes on two cores. Linear runs and the field scan are set up by `run_scan.py`
+!! (\ref doc_mug2d_rt_ex_scan) from the same file.
 !!
 ! OFT_DOC_INCLUDE: oft.in
 !!
@@ -370,8 +371,93 @@ END PROGRAM MUG_rt_2d
 !!
 ! OFT_DOC_INCLUDE: oft_in.xml
 !!
-!! To plot a run, set `plot_run=T` in `oft.in` and run the executable again in the same directory.
+!! To plot a run, set `plot_run=T` in `oft.in` and run the executable again in the same directory. This writes
+!! XDMF/HDF5 files (in `all/`) for VisIt or ParaView, which `plot_rt_2d.py` also reads to draw density snapshots
+!! with matplotlib, eg.
+!! \verbatim
+!! python plot_rt_2d.py --runs . --times 2.8E-4 3.6E-4 4.0E-4 4.4E-4
+!! \endverbatim
 !!
 !!\section doc_mug2d_rt_ex_results Results
 !!
-!! RESULTS_PLACEHOLDER
+!!\subsection doc_mug2d_rt_ex_scan Linear growth rate scan
+!!
+!! `run_scan.py` runs the linearized model for \f$ B_0 / B_c \in \{0, 0.25, 0.5, 0.75, 0.9, 1.1\} \f$, plus one case
+!! with \f$ B_0 = 0 \f$ and a strong out-of-plane field \f$ b_{y0} = 10^{-2} \f$ T (\f$ 35 B_c \f$, \f$ \beta \approx 8 \f$).
+!! It uses an \f$ 8 \times 8 \f$ mesh at third order, \f$ \Delta t = 2 \times 10^{-6} \f$ s (\f$ \gamma \Delta t \le 0.025 \f$),
+!! \f$ \nu = 1 \f$ m\f$^2\f$/s, \f$ \eta = 0.1 \f$ m\f$^2\f$/s, \f$ D = \chi = 0 \f$, and \f$ V_1 = 1 \f$ m/s, and runs each case
+!! to \f$ \gamma t = 6 \f$ (about 30 s each on one core). The growth rate is fit to the whole kinetic energy history
+!! with \f$ E_k = A \cosh^2(\gamma t) \f$, and checked with the slope of \f$ \frac{1}{2} \ln E_k \f$ for \f$ \gamma t > 3 \f$:
+!!
+!! | \f$ B_0 / B_c \f$ | \f$ b_{y0} \f$ [T] | \f$ \gamma \f$ theory [s\f$^{-1}\f$] | \f$ \gamma \f$ MUG, \f$ \cosh^2 \f$ fit | Ratio | \f$ \gamma \f$ MUG, \f$ \gamma t > 3 \f$ | Ratio |
+!! |------|------|------------|------------|--------|------------|--------|
+!! | 0    | 0    | 1.2523e4   | 1.2508e4   | 0.9988 | 1.2502e4   | 0.9984 |
+!! | 0.25 | 0    | 1.2125e4   | 1.2111e4   | 0.9988 | 1.2105e4   | 0.9984 |
+!! | 0.5  | 0    | 1.0845e4   | 1.0832e4   | 0.9988 | 1.0827e4   | 0.9984 |
+!! | 0.75 | 0    | 8.2831e3   | 8.2751e3   | 0.9990 | 8.2722e3   | 0.9987 |
+!! | 0.9  | 0    | 5.4586e3   | 5.4649e3   | 1.0012 | 5.4645e3   | 1.0011 |
+!! | 1.1  | 0    | stable     | stable     |        |            |        |
+!! | 0    | 1e-2 | 1.2523e4   | 1.2507e4   | 0.9987 | 1.2501e4   | 0.9983 |
+!!
+!! \image html MUG_rt2d_ex-scan.png "Linear growth rate against in-plane field strength, compared with the incompressible, ideal result."
+!!
+!! The remaining ~0.1% comes mostly from viscosity and compressibility. The results do not change with a
+!! \f$ 16 \times 16 \f$ mesh or a four times smaller time step. Above \f$ B_c \f$ the kinetic energy oscillates
+!! (gravity-Alfven waves) without growing, and the out-of-plane field leaves \f$ \gamma \f$ unchanged, as expected
+!! for \f$ \mathbf{k} \cdot \mathbf{B} = 0 \f$.
+!!
+!! \note Resistivity matters near marginal stability: the field slips through the plasma at a rate
+!! \f$ \sim \eta k^2 \f$, which weakens field-line bending, and because \f$ \gamma^2 \f$ is a small difference near
+!! \f$ B_c \f$ the relative effect on \f$ \gamma \f$ is amplified by \f$ 1 / (1 - B_0^2/B_c^2) \f$. With \f$ \eta = 1 \f$ m\f$^2\f$/s
+!! the measured \f$ \gamma \f$ at \f$ 0.9 B_c \f$ is 1.6% above the ideal value (0.1% at \f$ \eta = 0.1 \f$), which is why the scan uses
+!! the smaller resistivity.
+!!
+!!\subsection doc_mug2d_rt_ex_nl Nonlinear evolution
+!!
+!! The nonlinear runs use the default input file: a \f$ 32 \times 32 \f$ mesh at second order, \f$ \Delta t = 4 \times 10^{-6} \f$ s,
+!! a larger seed (\f$ V_1 = 100 \f$ m/s), and \f$ \nu = \eta = 10 \f$ m\f$^2\f$/s. The larger viscosity keeps the cell Reynolds
+!! number \f$ v \Delta x / \nu \f$ of order 10 at the late-time speeds (\f$ \sim 10^4 \f$ m/s); the corresponding resistivity
+!! changes \f$ \gamma \f$ at \f$ 0.5 B_c \f$ by about 1%. Particle diffusion and thermal conduction are off (\f$ D = \chi = 0 \f$).
+!!
+!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 0.5 B_c (bottom) as the light plasma rises in a bubble at x = 0 and the heavy plasma falls in spikes at the periodic boundaries x = +-L_x/2."
+!!
+!! While the perturbation is small the nonlinear model reproduces the linear growth rate. Run with `run_scan.py --nonlinear`
+!! (same mesh and settings as the linear scan, \f$ V_1 = 1 \f$ m/s, so that \f$ k \xi \lesssim 0.1 \f$ at \f$ \gamma t = 6 \f$), the slope for
+!! \f$ \gamma t > 3 \f$ is 0.9972 (\f$ B_0 = 0 \f$) and 0.9982 (\f$ 0.5 B_c \f$) of the ideal value, against 0.9984 for the linear runs.
+!! On the default mesh, with \f$ \nu = \eta = 10 \f$ m\f$^2\f$/s, the early growth rates are \f$ 1.21 \times 10^4 \f$ and
+!! \f$ 1.06 \times 10^4 \f$ s\f$^{-1}\f$ (viscosity accounts for most of the 3% reduction). The light plasma then rises as a single
+!! bubble at \f$ x = 0 \f$ while the heavy plasma falls along the periodic boundaries, and the mode saturates
+!! (kinetic energy \f$ \approx 0.2 \f$ J/m) when the bubble reaches the upper wall and the spikes the lower wall, at
+!! \f$ t \approx 440 \, \mu \f$s for \f$ B_0 = 0 \f$ and \f$ t \approx 560 \, \mu \f$s for \f$ B_0 = 0.5 B_c \f$. The field slows the growth,
+!! and the stretched field lines keep the bubble flanks smoother. Up to this point the density and temperature stay
+!! positive and smooth (minimum \f$ n = 3.2 \times 10^{18} \f$ m\f$^{-3}\f$, minimum \f$ T = 35 \f$ eV, against 3.7e18 and 37 eV
+!! initially), with no dissipation in \f$ n \f$ or \f$ T \f$.
+!!
+!! \warning The runs cannot currently be carried much past wall contact. As the heavy plasma piles up on the lower
+!! wall, grid-scale oscillations grow in \f$ n \f$ and \f$ T \f$ (undamped Galerkin advection, since \f$ D = \chi = 0 \f$), the
+!! GMRES iteration count grows rapidly and the Newton solve fails (about \f$ 470 \, \mu \f$s for \f$ B_0 = 0 \f$, \f$ 570 \, \mu \f$s at
+!! \f$ 0.5 B_c \f$). Neither an adaptive time step (\f$ \Delta t \f$ collapses to \f$ 10^{-7} \f$ s at \f$ 517 \, \mu \f$s) nor more
+!! viscosity (\f$ \nu = \eta = 50 \f$ m\f$^2\f$/s, failure at \f$ 550 \, \mu \f$s) avoids this. Turning on particle diffusion or
+!! thermal conduction (even \f$ D \f$ or \f$ \chi = 1 \f$ m\f$^2\f$/s) instead makes the first Newton solve fail at this time step:
+!! the natural (zero-flux) walls are inconsistent with the equilibrium gradient \f$ dn/dz = n/L \f$, so the first step must
+!! form a thin boundary layer, and Newton converges only for much smaller steps (\f$ \Delta t \lesssim 4 \times 10^{-7} \f$ s).
+!!
+!!\subsection doc_mug2d_rt_ex_noise Noise floor
+!!
+!! Without a seed (\f$ V_1 = 0 \f$) the projected equilibrium is out of discrete balance only by its projection error. The
+!! nonlinear kinetic energy after 10 steps is \f$ 1.6 \times 10^{-11} \f$ J/m on the \f$ 8 \times 8 \f$, third-order scan mesh (against
+!! \f$ 2.7 \times 10^{-9} \f$ J/m for the \f$ V_1 = 1 \f$ m/s seed), and \f$ 6 \times 10^{-15} \f$ J/m on the default mesh (against
+!! \f$ 2.7 \times 10^{-5} \f$ J/m for \f$ V_1 = 100 \f$ m/s). The imbalance seeds all modes, which then grow at up to the RT rate,
+!! so the seed must stay well above this floor; the linear model has no such floor.
+!!
+!!\subsection doc_mug2d_rt_ex_cost Cost
+!!
+!! The nonlinear runs use the matrix-free Newton-Krylov method (`use_mfnk=T`), with the LU preconditioner rebuilt every
+!! `pre_freq` steps. Rebuilding (and refactoring) it every step costs about 7.5 s per step on the default mesh with
+!! two OpenMP threads and UMFPACK (about 24 s with SuperLU), while `pre_freq=10` brings this down to about 1.6 s per
+!! step while the perturbation is small. Once the flow is nonlinear the GMRES iteration count grows quickly with the age of
+!! the preconditioner (by about 1.5x per step), so the default is `pre_freq=4`, which gives about 3 s per step over the
+!! whole run (2 runs sharing 4 cores). The linear scan costs about 0.01-0.04 s per step.
+!!
+!! \note `pre_freq` only takes effect with `use_mfnk=T`. With the assembled Jacobian as the Newton operator
+!! (`use_mfnk=F`) the Jacobian and its factorization are rebuilt every step.

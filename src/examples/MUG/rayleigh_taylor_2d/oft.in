@@ -39,7 +39,7 @@
  gamma=1.6666667      ! Adiabatic index
  den_scale=1.E19      ! Density normalization [m^-3]
  dt=4.E-6             ! Time step [s]
- nsteps=300           ! Number of time steps
+ nsteps=110           ! Number of time steps (to t = 440 us, wall contact)
  rst_freq=10          ! Restart (and plot) file frequency
  ittarget=1000        ! Keep dt fixed
  timestep_cn=T        ! Crank-Nicolson time stepping
