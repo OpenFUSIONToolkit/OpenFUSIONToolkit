@@ -93,6 +93,7 @@ TYPE, public :: oft_xmhd_2d_sim
   !! runs (see \ref doc_mug_xmhd_2d_eqns_upwind). Off by default; ignored (always off) in linear runs
   LOGICAL :: upwind = .FALSE.
   LOGICAL :: lin_run = .FALSE. !< Set internally while a linear run is active (disables upwinding)
+  REAL(r8), ALLOCATABLE :: he_cell(:) !< Element size of each cell for upwinding [m] (set on first use)
   INTEGER(i4) :: nsteps = -1 !< # of timesteps
   INTEGER(i4) :: rst_base = 0 !< starting index of restart files
   INTEGER(i4) :: rst_freq = 10 !< frequency to generate restart files
@@ -630,32 +631,33 @@ END IF
 w_up = beta*he/(2.d0*MAX(1.d-10,v_mag))
 END FUNCTION upwind_weight
 !---------------------------------------------------------------------------
-!> Get the element size used for upwinding
+!> Get the element sizes used for upwinding
 !!
-!! Node spacing of a regular cell (equilateral triangle or square) with the area of cell `i`:
-!! edge length divided by the Lagrange element order. The area is the planar (mesh) area, also in
-!! cylindrical geometry.
-!!
-!! @result Element size [m]
+!! For each cell, the node spacing of a regular cell (equilateral triangle or square) with the same
+!! area: edge length divided by the Lagrange element order. The area is the planar (mesh) area, also
+!! in cylindrical geometry.
 !---------------------------------------------------------------------------
-FUNCTION upwind_elem_size(i) RESULT(he)
-INTEGER(i4), INTENT(in) :: i !< Cell index
-INTEGER(i4) :: m
-REAL(r8) :: he,area,jac_mat(3,4),jac_det
+SUBROUTINE upwind_elem_sizes(he)
+REAL(r8), ALLOCATABLE, INTENT(inout) :: he(:) !< Element size of each cell [m]
+INTEGER(i4) :: i,m
+REAL(r8) :: area,jac_mat(3,4),jac_det
 TYPE(oft_quad_type), POINTER :: quad
 quad=>oft_blagrange%quad
-area = 0.d0
-DO m=1,quad%np
-  CALL mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det)
-  area = area + ABS(jac_det)*quad%wts(m)
+ALLOCATE(he(mesh%nc))
+DO i=1,mesh%nc
+  area = 0.d0
+  DO m=1,quad%np
+    CALL mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det)
+    area = area + ABS(jac_det)*quad%wts(m)
+  END DO
+  IF(mesh%cell_np==4)THEN ! Quadrilateral (square)
+    he(i) = SQRT(area)
+  ELSE ! Triangle (equilateral)
+    he(i) = SQRT(4.d0*area/SQRT(3.d0))
+  END IF
 END DO
-IF(mesh%cell_np==4)THEN ! Quadrilateral (square)
-  he = SQRT(area)
-ELSE ! Triangle (equilateral)
-  he = SQRT(4.d0*area/SQRT(3.d0))
-END IF
 he = he/REAL(oft_blagrange%order,8)
-END FUNCTION upwind_elem_size
+END SUBROUTINE upwind_elem_sizes
 !---------------------------------------------------------------------------
 !> Get the local velocity weights (fields 2-4) of a solution vector
 !---------------------------------------------------------------------------
@@ -926,7 +928,10 @@ g_accel = self%parent_sim%g_accel
 !---Advecting velocity for upwinding: the solution at the start of the time step (parent_sim%u)
 upwind = upwind_active(self%parent_sim)
 NULLIFY(vad_weights)
-IF(upwind)CALL get_vel_weights(self%parent_sim%u,vad_weights)
+IF(upwind)THEN
+  CALL get_vel_weights(self%parent_sim%u,vad_weights)
+  IF(.NOT.ALLOCATED(self%parent_sim%he_cell))CALL upwind_elem_sizes(self%parent_sim%he_cell)
+END IF
 
 !---Zero result and get storage array
 CALL b%set(0.d0)
@@ -983,7 +988,7 @@ DO i=1,mesh%nc
   by_weights_loc = by_weights(cell_dofs)
   IF(upwind)THEN
     vad_weights_loc = vad_weights(:, cell_dofs)
-    he = upwind_elem_size(i)
+    he = self%parent_sim%he_cell(i)
   END IF
 
   !Set material properties
@@ -1366,7 +1371,10 @@ dt_fac = self%jac_dt
 !---Advecting velocity for upwinding: the solution at the start of the time step (self%u)
 upwind = upwind_active(self)
 NULLIFY(vad_weights)
-IF(upwind)CALL get_vel_weights(self%u,vad_weights)
+IF(upwind)THEN
+  CALL get_vel_weights(self%u,vad_weights)
+  IF(.NOT.ALLOCATED(self%he_cell))CALL upwind_elem_sizes(self%he_cell)
+END IF
 !--Setup thread locks
 ALLOCATE(tlocks(self%fe_rep%nfields))
 DO i=1,self%fe_rep%nfields
@@ -1428,7 +1436,7 @@ DO i=1,mesh%nc
   by_weights_loc = by_weights(cell_dofs)
   IF(upwind)THEN
     vad_weights_loc = vad_weights(:, cell_dofs)
-    he = upwind_elem_size(i)
+    he = self%he_cell(i)
   END IF
 
   !Set material properties
