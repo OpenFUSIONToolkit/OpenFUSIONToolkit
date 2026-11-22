@@ -566,5 +566,44 @@ END PROGRAM MUG_rt_2d
 !! \note `pre_freq` only takes effect with `use_mfnk=T`. With the assembled Jacobian as the Newton operator
 !! (`use_mfnk=F`) the Jacobian and its factorization are rebuilt every step.
 !!
-!! \note UMFPACK fails to factorize the Jacobian on a \f$ 64 \times 128 \f$ second-order mesh in this configuration, so finer
-!! meshes need another LU package or MPI (one block per process).
+!! \note The linearized model (`linear=T`) is limited to about \f$ 48 \times 96 \f$ on one process: its matrix needs
+!! off-diagonal pivoting, and the extra fill exceeds the limits of the (32-bit) UMFPACK interface on finer meshes.
+!!
+!!\subsection doc_mug2d_rt_ex_parallel Running in parallel
+!!
+!! The default preconditioner (`oft_in.xml`) is one LU factorization of the whole Jacobian, which on a single process
+!! keeps the number of GMRES iterations at about 5 per time step. This is the fastest option for the meshes tested here.
+!! Measured on one core in the linear phase (fixed time step, second order):
+!!
+!! | Mesh | Memory | Time per step |
+!! |------|--------|---------------|
+!! | \f$ 48 \times 96 \f$  | 1.9 GB | 3.5 s |
+!! | \f$ 64 \times 128 \f$ | 3.4 GB | 7 s   |
+!! | \f$ 96 \times 192 \f$ | 6.9 GB | 17 s  |
+!!
+!! Extrapolating, a \f$ 128 \times 256 \f$ mesh would need about 13 GB (not run). The cost per step grows by 3-5 times once the
+!! flow is nonlinear, and OpenMP threads change it little (8% with four threads), since most of the time is spent in the
+!! factorization and the triangular solves.
+!!
+!! With several MPI processes (`nlevels=2`, so that the base mesh is distributed) the mesh is partitioned and the
+!! block-Jacobi preconditioner factorizes one block per process. The results are the same as on one process, and the
+!! memory per process falls roughly in proportion, but the blocks miss the strong coupling across partition boundaries
+!! (sound crosses about 15 cells per time step), so the iteration count rises to hundreds per step with `oft_in.xml`.
+!! `oft_in_mpi.xml` overlaps the blocks (`boverlap`) and wraps them in 5 GMRES iterations, which brings this down to about
+!! 45 per step, independent of the mesh. Measured on four processes:
+!!
+!! | Mesh | Memory per process | Time per step | Time per step, one process |
+!! |------|--------------------|---------------|----------------------------|
+!! | \f$ 48 \times 96 \f$  | 0.47 GB | 11 s | 3.5 s |
+!! | \f$ 64 \times 128 \f$ | 0.76 GB | 22 s | 7 s   |
+!! | \f$ 96 \times 192 \f$ | 1.7 GB  | 55 s | 17 s  |
+!!
+!! So MPI is useful when the mesh no longer fits in memory on one process, at about 3 times the cost per step. Run with
+!! `oft_in_mpi.xml`, `nlevels=2`, and `ittarget` increased to about 200: with the shipped value of 60 the larger iteration
+!! count makes the time step shrink from the start, and the outer GMRES limit (`4*ittarget` iterations) can stop the
+!! Newton solve. For example,
+!! \verbatim
+!! mpirun -np 4 ./MUG_rt_2d oft.in oft_in_mpi.xml
+!! \endverbatim
+!!
+! OFT_DOC_INCLUDE: oft_in_mpi.xml

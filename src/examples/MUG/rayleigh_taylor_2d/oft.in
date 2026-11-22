@@ -6,7 +6,7 @@
 &mesh_options
  meshname='rt'
  cad_type=92
- nlevels=1
+ nlevels=1            ! Use 2 for MPI runs (base mesh distributed over the processes)
  nbase=1
  grid_order=2
  fix_boundary=T
@@ -45,7 +45,7 @@
  dt=2.E-6             ! Time step [s]
  nsteps=450           ! Number of time steps (t = 790 us)
  rst_freq=5           ! Restart (and plot) file frequency
- ittarget=60          ! Target linear iterations per step: dt shrinks once the flow is nonlinear
+ ittarget=60          ! Target linear iterations per step: dt shrinks once the flow is nonlinear (~200 for MPI runs)
  timestep_cn=T        ! Crank-Nicolson (nonlinear) or BDF2 (linear) time stepping
  use_mfnk=T           ! Matrix-free Newton-Krylov (preconditioner from the assembled Jacobian)
  pre_freq=4           ! Rebuild the preconditioner every 4 steps
