@@ -519,9 +519,11 @@ END PROGRAM MUG_rt_2d
 !! time step), run for longer. A single bubble of light plasma rises at \f$ x = 0 \f$ and the heavy plasma falls in spikes at
 !! the periodic boundaries \f$ x = \pm L_x / 2 \f$. The shear along the bubble flanks rolls up into Kelvin-Helmholtz vortices,
 !! giving the familiar mushroom shape, before the bubble and spikes reach the walls (\f$ t \approx 880 \, \mu \f$s for
-!! \f$ B_0 = 0 \f$) and spread along them. @@B2@@
+!! \f$ B_0 = 0 \f$) and spread along them. With \f$ B_0 = 2 \times 10^{-4} \f$ T the bubble grows more slowly and the field, stretched
+!! along its flanks, suppresses the Kelvin-Helmholtz roll-up: the bubble keeps smooth flanks and a rounded head as it
+!! approaches the upper wall (\f$ t \approx 1.3 \f$ ms).
 !!
-!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 2e-4 T (bottom)."
+!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 2e-4 T (bottom), with the default input file (D = chi = 1 m^2/s, adaptive time step)."
 !!
 !! Particle diffusion and thermal conduction are needed for the late phase. Without them (\f$ D = \chi = 0 \f$) the
 !! density and temperature stay smooth and within their initial range until the roll-ups thin the layer to the grid
