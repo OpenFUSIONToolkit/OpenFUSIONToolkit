@@ -324,7 +324,8 @@ UMFPACK; `OFT_BUILD_EXAMPLES=ON`) on 4 cores.
 | MUG: Honor pre_freq in matrix-free 2D xMHD runs | One-line fix in `xmhd_2d.F90` `run_simulation`. The check that forces a preconditioner update after a time-step change, `ABS(1-(dt-dt_old)/dt_old) > 0.1`, is always true for a constant dt, so the LU preconditioner was refactored every step and `pre_freq` did nothing with `mfnk=T`. It now tests `ABS(dt-dt_old) > 0.1*dt_old`. Runs with `mfnk=F` or `pre_freq=1` are unchanged. |
 | MUG: Add 2D Rayleigh-Taylor example | `src/examples/MUG/rayleigh_taylor_2d/`: `MUG_rt_2d.F90` (doc page `doc_mug2d_rt_ex`), `oft.in`, `oft_in.xml`, `run_scan.py`, `plot_rt_2d.py`, `CMakeLists.txt`; registered in `src/examples/MUG/CMakeLists.txt`. `doc_mug_main.md`: a "2D examples" subsection (Harris sheet + RT) under the existing "2D MHD" section. |
 | MUG: Tune solver settings in the 2D Rayleigh-Taylor input file | `pre_freq=4`, `lin_tol=1e-6`, `nl_tol=1e-5` in `oft.in`. |
-| MUG: Document results of the 2D Rayleigh-Taylor example | Results, Noise floor and Cost sections, plus two images in `src/docs/images` (`MUG_rt2d_ex-scan.png` 32 kB, `MUG_rt2d_ex-density.png` 163 kB). The default run stops at wall contact. |
+| MUG: Document results of the 2D Rayleigh-Taylor example | First results (exponential profile only), superseded by the tanh redesign below. |
+| MUG: Add a tanh transition-layer profile to the 2D RT example (and follow-ups) | `profile='exp'` (linear benchmark, `run_scan.py`) or `'tanh'` (required for nonlinear runs). New `run_nonlinear.py` (linear vs nonlinear growth of the cos(kx) component of vz, `--skip_run` to re-analyse). Default `oft.in`: nonlinear tanh, 48x96 p2, adaptive dt, D = chi = 1. Doc results rewritten; images `MUG_rt2d_ex-scan.png`, `MUG_rt2d_ex-modes.png`, `MUG_rt2d_ex-density.png`. |
 
 The driver:
 - Follows `test_rt_2d.F90`: profiles, seed, free-slip `vx`, natural n/T walls, vz zeroed on the walls.
@@ -336,7 +337,7 @@ The driver:
 `run_scan.py`:
 - Runs `B_0/B_c in {0, 0.25, 0.5, 0.75, 0.9, 1.1}` plus `by0 = 1e-2 T` (35 B_c, beta ~ 8), each to gamma t = 6.
 - Fits `E_k = A cosh^2(gamma t)` to the whole history, and checks it with the slope over gamma t > 3.
-- Options: `--nonlinear`, `--plot`, `--np`, `--ni`, `--order`, `--dt`, `--nu`, `--eta`, `--V1`.
+- Forces `profile='exp'` in a 1 m x 1 m box. Options: `--plot`, `--np`, `--ni`, `--order`, `--dt`, `--nu`, `--eta`, `--V1` (`--nonlinear` was removed with the tanh redesign).
 
 `plot_rt_2d.py`:
 - Reads the XDMF/HDF5 plot files with `OpenFUSIONToolkit.io.XDMF_plot_file` and merges the MPI pieces.
@@ -366,51 +367,75 @@ The driver:
   - 8x8 p3: 1.6e-11 J/m after 10 steps, growing at about the RT rate (1e-9 by step 100). The V1 = 1 seed starts at 2.7e-9.
   - Default 32x32 p2: 6e-15 J/m after 50 steps. The V1 = 100 seed starts at 2.7e-5.
 
-### Nonlinear runs
+### Redesign: exponential profile for the linear benchmark, tanh layer for nonlinear runs
 
-Settings: the default `oft.in`.
-- 32x32 cells, p2, dt = 4e-6, CN, V1 = 100 m/s, nu = eta = 10, D_diff = chi = 0.
-- `use_mfnk=T`, `pre_freq=4`, lin_tol 1e-6, nl_tol 1e-5.
-- Cases B_0 = 0 and 0.5 B_c, each on 2 OpenMP threads (two runs sharing 4 cores).
-- nu = 10 keeps the cell Reynolds number ~10 at the late speeds (~1e4 m/s). It and eta = 10 lower the early growth rate to 1.21e4 and 1.06e4 /s (about 3%, mostly viscosity).
+At the user's direction the exponential profile is kept only for the linear benchmark (scan above), and nonlinear runs
+require `profile='tanh'`: `n = n_0 (1 + A tanh(z/delta))`, uniform `B_x = B_0`, `p` from force balance, seed
+`cos(pi z/L_z) exp(-(z/sigma)^2)`. Defaults: 1 m x 2 m box, A = 0.5, delta = 0.1 m, sigma = 0.2 m, T from 200 eV
+(bottom) to 66 eV (top). The driver prints the sharp-interface estimate `gamma^2 = A g k tanh(k L_z/2) - k^2 v_A^2`
+(1.772e4 /s, B_c = 4.09e-4 T).
 
-Observed:
-- **Structure.** A single bubble rises at x = 0 and the heavy plasma falls in spikes along the periodic boundaries. The field case is slower and has smoother flanks. A thin density filament forms on the axis below the bubble.
-- **Wall contact.** The mode saturates (E_k ≈ 0.2 J/m, |V| ≈ 1.3e4 m/s) when the bubble reaches the top wall and the spikes the bottom: t ≈ 440 us (B = 0) and 560 us (0.5 B_c).
-- **Positivity.** Up to then n and T stay positive and smooth: min n 3.2e18 (initially 3.7e18), min T 35 eV (initially 36.6), with no n/T dissipation.
-- **Default run.** The shipped `oft.in` (B = 0, 110 steps to t = 440 us) runs cleanly in 345 s on 2 threads.
-- **After wall contact the runs fail.** Grid-scale (checkerboard) oscillations grow in n and T as the heavy plasma piles up on the bottom wall (undamped Galerkin advection). GMRES iterations explode and Newton fails at ~470 us (B = 0) and ~570 us (0.5 B_c). Tried:
-  - adaptive dt (`ittarget=30`): dt collapses to 1.2e-7 s at 517 us, with n down to 7e17 and T between 16 and 1200 eV;
-  - nu = eta = 50: fails at 550 us (B = 0) and 680 us (0.5 B_c).
-  As agreed with the parent session, the documented runs stop at wall contact and the doc page states this failure mode.
-- **0.8 B_c** case: not run (optional, dropped).
+Why the exponential profile was dropped for nonlinear runs (all documented on the doc page):
+- The bubble/spikes reach the walls while growing, and the runs fail after wall contact (32x32: ~470 us).
+- D_diff or chi > 0 fails on the first Newton step. Investigation (temporary FD program, not committed): the Jacobian
+  matches FD and passes a Taylor test; the solve converges with a uniform density, a flat n with D, a flat T with chi,
+  Dirichlet n/T walls, smaller dt, or with D acting on n - n0 only. So it is the zero-flux walls being inconsistent with
+  the equilibrium gradient (a sub-grid boundary layer must form), not a Jacobian bug.
+- Dirichlet n/T walls (8x8 p3, nonlinear, V1 = 1): spurious mode at 3.4e4 /s (vs RT 1.25e4), and with D = 1 the run
+  fails at step 124.
 
-Cost (32x32 p2, 2 threads):
+Choice of tanh parameters (linear and nonlinear test runs):
+- delta = 0.04-0.05 m: grid-scale spurious growth on coarse meshes (1.9e5 /s at 16x32, 5e4 /s at 32x64), and a
+  kinetic-energy floor (2e-8 J/m) above a 1 m/s seed. delta = 0.1 m on 48x96 p2: floor 4e-10 J/m (an x-independent
+  adjustment of the projected layer, which saturates), against a seed energy of 1.7e-9 J/m. Growth is therefore measured
+  from the cos(kx) component of vz, which the adjustment does not contribute to.
+- nu = 10 m^2/s damps the short-wavelength layer modes; eta = 1.
+- Linear growth rate, B_0 = 0: 1.3922e4 (32x64) vs 1.3909e4 (48x96), 0.09%. 64x128 could not be run: UMFPACK fails
+  to factorize (not a machine-memory limit; 11 GB free).
 
-| Setup | Time per step |
-|---|---|
-| Assembled-Jacobian Newton or `mfnk=T` before the fix, SuperLU | ~24 s |
-| Same, UMFPACK | ~7.5 s |
-| After the fix, `pre_freq=10` | ~1.6 s in the linear phase |
-| After the fix, `pre_freq=4` | ~3 s average over the run |
+### Linear vs nonlinear (tanh, 48x96 p2, dt = 2e-6, V1 = 1, nu = 10, eta = 1, D = chi = 0)
 
-- `pre_freq=10` lets the GMRES iterations grow ~1.5x per step in the nonlinear phase (to >1000 iterations), hence the default of 4.
-- Tolerances: the defaults were loosened to `lin_tol=1e-6`/`nl_tol=1e-5` (about 1e-10 relative to the state norm ~1e4), because the tolerances are absolute and the residual scales with the flow amplitude. The tighter values (1e-9/1e-7) were not shown to fail: a run I thought had stalled was only buffering its log.
+`run_nonlinear.py`, cos(kx) amplitude of vz, both runs fit over the window where the nonlinear amplitude is 3-30 m/s:
 
-### Tests (after merging Session A's branch and with the pre_freq fix)
+| B_0 [T] | Window [us] | gamma linear | gamma nonlinear | Ratio | Sharp interface |
+|---|---|---|---|---|---|
+| 0 | 240-400 | 1.4010e4 | 1.4004e4 | 0.9996 | 1.7724e4 |
+| 2e-4 (0.49 B_c,sharp) | 310-520 | 1.0633e4 | 1.0632e4 | 0.9999 | 1.5461e4 |
 
-`test_jacobian_2d`, `test_sound_2d`, `test_alfven_2d`, `test_taylor_green_2d` and `test_rt_2d`, including the linear and MPI variants:
-- 72 passed and 18 skipped in 4.5 min, on 4 cores with OMP_NUM_THREADS=2.
-- The skips are 12 `Not compiled with PETSc` and 6 matrix-free+PETSc combinations, the same counts as Session A's merge report.
-- No test tolerances or reference values were changed.
+The amplitudes agree to < 0.05% up to a few hundred m/s. `run_nonlinear.py` forces D = chi = 0, since diffusion also
+spreads the layer in the nonlinear run, which the linearized model does not include (D = chi = 1 lowers the nonlinear
+rate by 0.65%).
+
+### Nonlinear evolution (tanh)
+
+- **Fixed dt fails** at ~710 us (B_0 = 0) and ~990 us (2e-4 T): GMRES iterations climb once the flow is nonlinear
+  (velocity ~ 1 cell per step). Rebuilding the preconditioner every step (`pre_freq=1`) fails at the same time
+  (712 us). With `ittarget=60` (adaptive dt) the runs continue: dt falls to 2-7e-7 s around roll-up/wall contact.
+  The default `oft.in` now uses `ittarget=60`.
+- **D = chi = 0 with adaptive dt** (B_0 = 0): n and T stay within their initial range until ~730 us, when the
+  Kelvin-Helmholtz roll-ups thin the layer to the grid scale; grid-scale oscillations then fill the domain by 840 us
+  (n from 0.5x min to 2.3x max). B_0 = 2e-4 T reached 1.44 ms without a solver failure (not inspected for noise).
+- **D = chi = 1 with adaptive dt** (the new default): B_0 = 0 runs to 1.0 ms (bubble at the top wall at ~880 us,
+  secondary structure afterwards), n within ~5% of its initial range (one 15% transient at 923 us), T >= 63 eV.
+  B_0 = 2e-4 T runs to 1.3 ms (stopped by hand) with n within 1% of its initial range; the field suppresses the KH roll-up.
+- Cost on 2 OpenMP threads: ~4-5 s/step with fixed dt, 15-20 s/step after roll-up (runs shared 4 cores). The default
+  run (450 steps, to 790 us) takes about an hour. `pre_freq=1` doubles the cost of the linear phase (8.5 vs 4.2 s/step).
+
+### Tests
+
+- `test_rt_2d`: 5/5 passed after the final rebuild (OMP_NUM_THREADS=1). The MPI variant needs
+  `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` when run as root in this sandbox (it fails otherwise).
+- Earlier, after merging Session A's branch and with the pre_freq fix: the 2D MUG tests (`test_jacobian_2d`,
+  `test_sound_2d`, `test_alfven_2d`, `test_taylor_green_2d`, `test_rt_2d`, including linear and MPI variants) gave
+  72 passed and 18 skipped (12 `Not compiled with PETSc`, 6 matrix-free+PETSc). No tolerances or reference values were
+  changed. `xmhd_2d.F90` has not changed since then.
+- `ruff check` passes on the example scripts.
 
 ### Unresolved
 
-- **D_diff or chi > 0 breaks the first Newton solve of the RT case** at the default dt, even at 1 m^2/s.
-  - It happens with the assembled Jacobian too, and with BE as well as CN. The linear solve converges, but |du| is ~10x larger than with D = chi = 0 and the residual drops only ~10% per Newton iteration.
-  - `test_jacobian_2d` passes (9/9) with D_diff and chi nonzero.
-  - With BE, the per-iteration reduction improves from ~0.9 (dt = 4e-6) to 0.21 (4e-7) and 0.003 (4e-8), roughly quadratically in dt. That fits the parent's hypothesis (i): the natural (zero-flux) walls are inconsistent with the equilibrium gradient dn/dz = n/L, so the first step must form a sub-grid boundary layer, a strongly nonlinear adjustment, rather than a Jacobian/residual mismatch. It was not settled by an FD check restricted to wall rows.
-  - Consequence: n/T diffusion cannot currently regularize the late phase at a practical dt. A possible remedy (not tried): a diffusion-consistent equilibrium (zero wall gradient), or ramping D/chi on.
-  - Reproduce: `MUG_rt_2d` with the shipped `oft.in`, `D_diff=1.`, `nsteps=1`, `pm=T`.
-- **Late-phase failure after wall contact** (above). It is likely to need some form of stabilization for advection of n and T. Out of scope here.
-- **Doxygen not run.** Doxygen was not available in the sandbox, so the doc page was checked only through `generate_doc.py`, which converts it without error.
+- Without particle diffusion/thermal conduction, Galerkin advection of n and T is undamped, so late nonlinear phases
+  need D, chi > 0 (or a stabilized advection scheme, not attempted).
+- With the exponential profile, D or chi > 0 is incompatible with zero-flux walls (above). A diffusion-consistent
+  equilibrium, or diffusion acting on n - n0, would avoid it; not pursued since the exponential profile is now linear only.
+- UMFPACK fails to factorize the 64x128 p2 Jacobian; finer meshes need another LU package or MPI.
+- Doxygen was not available in the sandbox; the doc page was checked through `generate_doc.py` only.
