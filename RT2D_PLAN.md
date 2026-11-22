@@ -439,3 +439,18 @@ rate by 0.65%).
   equilibrium, or diffusion acting on n - n0, would avoid it; not pursued since the exponential profile is now linear only.
 - UMFPACK fails to factorize the 64x128 p2 Jacobian; finer meshes need another LU package or MPI.
 - Doxygen was not available in the sandbox; the doc page was checked through `generate_doc.py` only.
+
+### Follow-up: mesh-size limit and parallel runs
+
+Investigation requested by the parent session (full report sent to it; scratch data not committed).
+- The 1-rank 64x128 failure affects only the linearized model: its matrix needs off-diagonal pivoting (9087 pivots and
+  4x the fill at 48x96, none for the nonlinear Jacobian), which exceeds the 32-bit `umfpack_di` limits at 64x128
+  ("Out of Memory" at 4 GB with 15 GB free). The nonlinear case runs on 1 rank at 64x128 (3.4 GB) and 96x192 (6.9 GB).
+  SuperLU is worse (OOM at 13.6 GB). To be addressed separately (preconditioner/factorization work).
+- MPI: results identical to 1 rank (periodic partitioning OK). Block-Jacobi with one LU per rank raises GMRES
+  iterations from ~5 to 170-470 per step; `boverlap=T` plus 5 inner GMRES iterations gives ~45, independent of mesh,
+  at ~3.2x the 1-rank cost per step and ~1/N memory per rank. Multi-rank runs need `ittarget` ~200 (the shipped 60
+  shrinks dt and the 4*ittarget GMRES cap stops Newton on 4 ranks).
+- Added: `oft_in_mpi.xml` (installed like `oft_in.xml`), a "Running in parallel" doc subsection, `oft.in` comments
+  for `nlevels=2`/`ittarget` in MPI runs, and a note on the linearized-model limit. Example builds, `generate_doc.py`
+  converts the page, and a 2-rank run with `oft_in_mpi.xml` matches the 1-rank kinetic energy exactly over 12 steps.
