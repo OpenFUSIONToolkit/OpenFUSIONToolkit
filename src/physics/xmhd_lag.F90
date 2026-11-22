@@ -2850,7 +2850,7 @@ end subroutine xmhd_setup_regions
 !! - `3`: Fixed tangential components (`bbc='ic'`, `vbc='tang'`)
 !! - `-1`: Fixed components normal to the axis (y,z) on the axis of revolved meshes
 !!
-!! Velocity is fixed (type `1`) at all nodes in solid regions, for any `vbc`.
+!! Velocity, density and temperature are fixed at all nodes in solid regions, for any `vbc`, `nbc` and `tbc`.
 !------------------------------------------------------------------------------
 subroutine xmhd_set_bc
 INTEGER(i4) :: i,j,k
@@ -2960,7 +2960,7 @@ IF(xmhd_adv_den)THEN
   IF(nbc=='n')THEN
     !---Do nothing
   ELSE IF(nbc=='d')THEN
-    oft_xmhd_ops%n_bc=(oft_lagrange%global%gbe.OR.oft_xmhd_ops%solid_node)
+    oft_xmhd_ops%n_bc=oft_lagrange%global%gbe
   ELSE IF(nbc=='x')THEN
     IF(.NOT.xmhd_root_node%associated())CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
     CALL xml_get_element(xmhd_root_node,"den_bc",bc_node,ierr)
@@ -2987,6 +2987,8 @@ IF(xmhd_adv_den)THEN
   ELSE
     CALL oft_abort('Invalid N Boundary Condition.','xmhd_bc',__FILE__)
   END IF
+  !---Fix density at all nodes in solid regions
+  oft_xmhd_ops%n_bc=(oft_xmhd_ops%n_bc.OR.oft_xmhd_ops%solid_node)
 ELSE
   oft_xmhd_ops%n_bc=.TRUE.
 END IF
@@ -2999,7 +3001,7 @@ IF(xmhd_adv_temp)THEN
   IF(tbc=='n')THEN
     !---Do nothing
   ELSE IF(tbc=='d')THEN
-    oft_xmhd_ops%t_bc=(oft_lagrange%global%gbe.OR.oft_xmhd_ops%solid_node)
+    oft_xmhd_ops%t_bc=oft_lagrange%global%gbe
   ELSE IF(tbc=='x')THEN
     IF(.NOT.xmhd_root_node%associated())CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
     CALL xml_get_element(xmhd_root_node,"temp_bc",bc_node,ierr)
@@ -3026,6 +3028,8 @@ IF(xmhd_adv_temp)THEN
   ELSE
     CALL oft_abort('Invalid T Boundary Condition.','xmhd_bc',__FILE__)
   END IF
+  !---Fix temperature at all nodes in solid regions
+  oft_xmhd_ops%t_bc=(oft_xmhd_ops%t_bc.OR.oft_xmhd_ops%solid_node)
 ELSE
   oft_xmhd_ops%t_bc=.TRUE.
 END IF

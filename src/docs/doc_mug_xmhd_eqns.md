@@ -194,9 +194,10 @@ In these cells only resistive diffusion of \f$ B \f$ is solved:
 \quad \eta_w = \eta_{reg} \, f_\eta(\textbf{r}) \f]
 
 Here \f$ \eta_{reg} \f$ is the absolute wall resistivity, not a scale factor on `eta`. The velocity, density,
-and temperature equations are not assembled in solid cells. Nodes in solid regions are treated as
-boundary nodes for the velocity when `vbc` is `'all'`, `'norm'`, or `'tang'`, and for density and temperature
-when `nbc='d'` and `tbc='d'`, respectively.
+and temperature equations are not assembled in solid cells. The velocity is held fixed at all nodes in solid
+regions for any `vbc`. Nodes in solid regions are treated as boundary nodes for density and temperature when
+`nbc='d'` and `tbc='d'`, respectively (\ref xmhd_lag holds them fixed for any `nbc` and `tbc`, see
+\ref doc_mug_xmhd_eqns_lag).
 
 \section doc_mug_xmhd_eqns_temp Temperature
 
@@ -375,5 +376,7 @@ elements (the same basis as \f$ V \f$). The differences are:
    component of \f$ B \f$ fixed, and `bbc='ic'` holds the tangential components fixed, on the boundary. On the
    axis of rotationally periodic (revolved) meshes the components normal to the axis are held fixed, as for
    \f$ V \f$.
+ - Density and temperature are held fixed at all nodes in solid regions for any `nbc` and `tbc`, as for the
+   velocity.
  - The hyper-resistivity terms (`eta_hyper>0`), which use an auxiliary H(Curl) field \f$ J_2 \f$ with the
    Lagrange magnetic field, have not been verified against \ref xmhd.
