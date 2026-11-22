@@ -43,7 +43,7 @@
  gamma=1.6666667      ! Adiabatic index
  den_scale=1.E19      ! Density normalization [m^-3]
  dt=2.E-6             ! Time step [s]
- nsteps=600           ! Number of time steps
+ nsteps=450           ! Number of time steps (t = 790 us)
  rst_freq=5           ! Restart (and plot) file frequency
  ittarget=60          ! Target linear iterations per step: dt shrinks once the flow is nonlinear
  timestep_cn=T        ! Crank-Nicolson (nonlinear) or BDF2 (linear) time stepping

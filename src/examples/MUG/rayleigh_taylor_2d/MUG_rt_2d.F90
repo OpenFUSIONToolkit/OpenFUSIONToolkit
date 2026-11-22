@@ -435,8 +435,8 @@ END PROGRAM MUG_rt_2d
 !!\section doc_mug2d_rt_ex_input Input files
 !!
 !! The default input file runs the nonlinear transition-layer case without a field on a \f$ 48 \times 96 \f$ mesh at
-!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, up to the time the bubble and spikes start to roll up
-!! (about @@RUNTIME@@ on two cores). `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
+!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, up to the time the bubble has rolled up into a mushroom shape
+!! (about an hour on two cores). `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
 !! `run_scan.py` sets up the exponential profile for the linear scan (\ref doc_mug2d_rt_ex_scan).
 !!
 ! OFT_DOC_INCLUDE: oft.in
@@ -515,7 +515,25 @@ END PROGRAM MUG_rt_2d
 !!
 !!\subsection doc_mug2d_rt_ex_nl_evol Nonlinear evolution
 !!
-@@NLEVOL@@
+!! The nonlinear runs shown here use the default input file (\f$ \nu = 10 \f$, \f$ \eta = D = \chi = 1 \f$ m\f$^2\f$/s, adaptive
+!! time step), run for longer. A single bubble of light plasma rises at \f$ x = 0 \f$ and the heavy plasma falls in spikes at
+!! the periodic boundaries \f$ x = \pm L_x / 2 \f$. The shear along the bubble flanks rolls up into Kelvin-Helmholtz vortices,
+!! giving the familiar mushroom shape, before the bubble and spikes reach the walls (\f$ t \approx 880 \, \mu \f$s for
+!! \f$ B_0 = 0 \f$) and spread along them. @@B2@@
+!!
+!! \image html MUG_rt2d_ex-density.png "Density for B_0 = 0 (top) and B_0 = 2e-4 T (bottom)."
+!!
+!! Particle diffusion and thermal conduction are needed for the late phase. Without them (\f$ D = \chi = 0 \f$) the
+!! density and temperature stay smooth and within their initial range until the roll-ups thin the layer to the grid
+!! scale (\f$ t \approx 730 \, \mu \f$s for \f$ B_0 = 0 \f$). Grid-scale oscillations then grow (undamped Galerkin advection): by
+!! \f$ 840 \, \mu \f$s they fill the domain, with the minimum of \f$ n \f$ down to half its initial value and the maximum up to 2.3 times. With \f$ D = \chi = 1 \f$ m\f$^2\f$/s,
+!! which lowers the linear growth rate by 0.65%, \f$ n \f$ stays within about 5% of its initial range to \f$ t = 1 \f$ ms, and
+!! \f$ T \f$ above 63 eV.
+!!
+!! The time step must also adapt once the flow is nonlinear: with a fixed \f$ \Delta t = 2 \times 10^{-6} \f$ s, the GMRES
+!! iteration count grows quickly after \f$ 650 \, \mu \f$s and the Newton solve fails at \f$ 710 \, \mu \f$s, whether the
+!! preconditioner is rebuilt every 4 steps or every step. With `ittarget=60` the time step falls to
+!! \f$ 2-7 \times 10^{-7} \f$ s around the roll-up and wall contact (and recovers later in the field case).
 !!
 !!\subsection doc_mug2d_rt_ex_exp_nl Why the exponential profile is not used nonlinearly
 !!
@@ -536,4 +554,15 @@ END PROGRAM MUG_rt_2d
 !!
 !!\subsection doc_mug2d_rt_ex_cost Cost
 !!
-@@COST@@
+!! The nonlinear runs use the matrix-free Newton-Krylov method (`use_mfnk=T`), with the LU preconditioner (UMFPACK) rebuilt
+!! every `pre_freq` steps. Rebuilding it every step roughly doubles the cost of the linear phase, while letting it age for more
+!! than a few steps makes the GMRES iteration count grow quickly once the flow is nonlinear, so the default is `pre_freq=4`.
+!! On the default \f$ 48 \times 96 \f$ mesh with two OpenMP threads this costs about 4-5 s per step while the time step is
+!! fixed, and 15-20 s per step later; the default run (450 steps, to \f$ 790 \, \mu \f$s) takes about an hour. The linear runs
+!! cost about 0.5 s per step on this mesh, and the exponential-profile scan 0.01-0.04 s per step.
+!!
+!! \note `pre_freq` only takes effect with `use_mfnk=T`. With the assembled Jacobian as the Newton operator
+!! (`use_mfnk=F`) the Jacobian and its factorization are rebuilt every step.
+!!
+!! \note UMFPACK fails to factorize the Jacobian on a \f$ 64 \times 128 \f$ second-order mesh in this configuration, so finer
+!! meshes need another LU package or MPI (one block per process).
