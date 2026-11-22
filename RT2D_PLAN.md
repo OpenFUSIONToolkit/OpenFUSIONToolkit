@@ -311,3 +311,106 @@ For Session B:
   and `gamma` is > 1. The RT example already satisfies this with `D_diff = chi = 0`.
 - `doc_mug_main.md` now has a "2D MHD" section listing the equations page and the Harris sheet example. Put the new
   RT example there rather than in a separate list.
+
+## Session B report
+
+Branch `claude/practical-fermi-j3e4is`. Built against Ubuntu 24.04 system packages (GCC 13, OpenMPI, OpenBLAS, SuperLU,
+UMFPACK; `OFT_BUILD_EXAMPLES=ON`) on 4 cores.
+
+### What was added
+
+| Commit | Change |
+|---|---|
+| MUG: Honor pre_freq in matrix-free 2D xMHD runs | One-line fix in `xmhd_2d.F90` `run_simulation`. The check that forces a preconditioner update after a time-step change, `ABS(1-(dt-dt_old)/dt_old) > 0.1`, is always true for a constant dt, so the LU preconditioner was refactored every step and `pre_freq` did nothing with `mfnk=T`. It now tests `ABS(dt-dt_old) > 0.1*dt_old`. Runs with `mfnk=F` or `pre_freq=1` are unchanged. |
+| MUG: Add 2D Rayleigh-Taylor example | `src/examples/MUG/rayleigh_taylor_2d/`: `MUG_rt_2d.F90` (doc page `doc_mug2d_rt_ex`), `oft.in`, `oft_in.xml`, `run_scan.py`, `plot_rt_2d.py`, `CMakeLists.txt`; registered in `src/examples/MUG/CMakeLists.txt`. `doc_mug_main.md`: a "2D examples" subsection (Harris sheet + RT) under the existing "2D MHD" section. |
+| MUG: Tune solver settings in the 2D Rayleigh-Taylor input file | `pre_freq=4`, `lin_tol=1e-6`, `nl_tol=1e-5` in `oft.in`. |
+| MUG: Document results of the 2D Rayleigh-Taylor example | Results, Noise floor and Cost sections, plus two images in `src/docs/images` (`MUG_rt2d_ex-scan.png` 32 kB, `MUG_rt2d_ex-density.png` 163 kB). The default run stops at wall contact. |
+
+The driver:
+- Follows `test_rt_2d.F90`: profiles, seed, free-slip `vx`, natural n/T walls, vz zeroed on the walls.
+- Takes the domain size from the mesh and aborts unless the mesh is centred in z, or if p <= 0 at a wall.
+- Prints gamma, B_c, g L/c_s^2, v_A^2/c_s^2 and the wall temperatures.
+- Supports linear and nonlinear runs and `plot_run` (`xmhd_2d_plot`). `B_0` is the in-plane field in T, and `by0` a uniform out-of-plane field.
+- Namelist `rt_2d_options` as planned, plus `pre_freq`.
+
+`run_scan.py`:
+- Runs `B_0/B_c in {0, 0.25, 0.5, 0.75, 0.9, 1.1}` plus `by0 = 1e-2 T` (35 B_c, beta ~ 8), each to gamma t = 6.
+- Fits `E_k = A cosh^2(gamma t)` to the whole history, and checks it with the slope over gamma t > 3.
+- Options: `--nonlinear`, `--plot`, `--np`, `--ni`, `--order`, `--dt`, `--nu`, `--eta`, `--V1`.
+
+`plot_rt_2d.py`:
+- Reads the XDMF/HDF5 plot files with `OpenFUSIONToolkit.io.XDMF_plot_file` and merges the MPI pieces.
+- Draws density snapshots (tripcolor), with optional per-run times.
+- Prints min(n) and min(T) over each run.
+
+### Linear growth-rate scan (8x8, p3, dt = 2e-6, nu = 1, eta = 0.1, D_diff = chi = 0, V1 = 1; ~45 s total on 1 core)
+
+| B_0/B_c | by0 [T] | Theory [1/s] | cosh^2 fit | Ratio | gamma t > 3 | Ratio |
+|---|---|---|---|---|---|---|
+| 0 | 0 | 1.2523e4 | 1.2508e4 | 0.9988 | 1.2502e4 | 0.9984 |
+| 0.25 | 0 | 1.2125e4 | 1.2111e4 | 0.9988 | 1.2105e4 | 0.9984 |
+| 0.5 | 0 | 1.0845e4 | 1.0832e4 | 0.9988 | 1.0827e4 | 0.9984 |
+| 0.75 | 0 | 8.2831e3 | 8.2751e3 | 0.9990 | 8.2722e3 | 0.9987 |
+| 0.9 | 0 | 5.4586e3 | 5.4649e3 | 1.0012 | 5.4645e3 | 1.0011 |
+| 1.1 | 0 | stable | stable (no growth, oscillates) | | | |
+| 0 | 1e-2 | 1.2523e4 | 1.2507e4 | 0.9987 | 1.2501e4 | 0.9983 |
+
+- **eta = 1 at 0.9 B_c.** With eta = 1 (the test's value), the 0.9 B_c case is 1.0157.
+  - Not resolution: unchanged on 16x16.
+  - Not the time step: unchanged at dt = 5e-7.
+  - It is resistive slippage, amplified near marginal stability by 1/(1 - b^2): eta = 0.1 gives 1.0012, and nu = 0.1 with eta = 1 gives 1.020. So the scan defaults to eta = 0.1. The doc page explains this.
+- **Linear vs nonlinear** (`run_scan.py --nonlinear`, same settings, V1 = 1): the slope over gamma t > 3 is
+  - 0.9972 (B_0 = 0) and 0.9982 (0.5 B_c),
+  - against 0.9984 linear.
+- **Noise floor** (nonlinear, V1 = 0): the seeds start well above it.
+  - 8x8 p3: 1.6e-11 J/m after 10 steps, growing at about the RT rate (1e-9 by step 100). The V1 = 1 seed starts at 2.7e-9.
+  - Default 32x32 p2: 6e-15 J/m after 50 steps. The V1 = 100 seed starts at 2.7e-5.
+
+### Nonlinear runs
+
+Settings: the default `oft.in`.
+- 32x32 cells, p2, dt = 4e-6, CN, V1 = 100 m/s, nu = eta = 10, D_diff = chi = 0.
+- `use_mfnk=T`, `pre_freq=4`, lin_tol 1e-6, nl_tol 1e-5.
+- Cases B_0 = 0 and 0.5 B_c, each on 2 OpenMP threads (two runs sharing 4 cores).
+- nu = 10 keeps the cell Reynolds number ~10 at the late speeds (~1e4 m/s). It and eta = 10 lower the early growth rate to 1.21e4 and 1.06e4 /s (about 3%, mostly viscosity).
+
+Observed:
+- **Structure.** A single bubble rises at x = 0 and the heavy plasma falls in spikes along the periodic boundaries. The field case is slower and has smoother flanks. A thin density filament forms on the axis below the bubble.
+- **Wall contact.** The mode saturates (E_k ≈ 0.2 J/m, |V| ≈ 1.3e4 m/s) when the bubble reaches the top wall and the spikes the bottom: t ≈ 440 us (B = 0) and 560 us (0.5 B_c).
+- **Positivity.** Up to then n and T stay positive and smooth: min n 3.2e18 (initially 3.7e18), min T 35 eV (initially 36.6), with no n/T dissipation.
+- **Default run.** The shipped `oft.in` (B = 0, 110 steps to t = 440 us) runs cleanly in 345 s on 2 threads.
+- **After wall contact the runs fail.** Grid-scale (checkerboard) oscillations grow in n and T as the heavy plasma piles up on the bottom wall (undamped Galerkin advection). GMRES iterations explode and Newton fails at ~470 us (B = 0) and ~570 us (0.5 B_c). Tried:
+  - adaptive dt (`ittarget=30`): dt collapses to 1.2e-7 s at 517 us, with n down to 7e17 and T between 16 and 1200 eV;
+  - nu = eta = 50: fails at 550 us (B = 0) and 680 us (0.5 B_c).
+  As agreed with the parent session, the documented runs stop at wall contact and the doc page states this failure mode.
+- **0.8 B_c** case: not run (optional, dropped).
+
+Cost (32x32 p2, 2 threads):
+
+| Setup | Time per step |
+|---|---|
+| Assembled-Jacobian Newton or `mfnk=T` before the fix, SuperLU | ~24 s |
+| Same, UMFPACK | ~7.5 s |
+| After the fix, `pre_freq=10` | ~1.6 s in the linear phase |
+| After the fix, `pre_freq=4` | ~3 s average over the run |
+
+- `pre_freq=10` lets the GMRES iterations grow ~1.5x per step in the nonlinear phase (to >1000 iterations), hence the default of 4.
+- Tolerances: with `lin_tol=1e-9`/`nl_tol=1e-7` the matrix-free solve struggled at large amplitude, which is why the defaults were loosened.
+
+### Tests (after merging Session A's branch and with the pre_freq fix)
+
+`test_jacobian_2d`, `test_sound_2d`, `test_alfven_2d`, `test_taylor_green_2d` and `test_rt_2d`, including the linear and MPI variants:
+- 72 passed and 18 skipped in 4.5 min, on 4 cores with OMP_NUM_THREADS=2.
+- The skips are 12 `Not compiled with PETSc` and 6 matrix-free+PETSc combinations, the same counts as Session A's merge report.
+- No test tolerances or reference values were changed.
+
+### Unresolved
+
+- **D_diff or chi > 0 breaks the first Newton solve of the RT case** at the default dt, even at 1 m^2/s.
+  - It happens with the assembled Jacobian too, and with BE as well as CN. The linear solve converges, but |du| is ~10x larger than with D = chi = 0 and the residual drops only ~10% per Newton iteration.
+  - `test_jacobian_2d` passes (9/9) with D_diff and chi nonzero.
+  - With BE, the per-iteration reduction improves from ~0.9 (dt = 4e-6) to 0.21 (4e-7) and 0.003 (4e-8), roughly quadratically in dt. That fits the parent's hypothesis (i): the natural (zero-flux) walls are inconsistent with the equilibrium gradient dn/dz = n/L, so the first step must form a sub-grid boundary layer, a strongly nonlinear adjustment, rather than a Jacobian/residual mismatch. It was not settled by an FD check restricted to wall rows.
+  - Consequence: n/T diffusion cannot currently regularize the late phase at a practical dt. A possible remedy (not tried): a diffusion-consistent equilibrium (zero wall gradient), or ramping D/chi on.
+  - Reproduce: `MUG_rt_2d` with the shipped `oft.in`, `D_diff=1.`, `nsteps=1`, `pm=T`.
+- **Late-phase failure after wall contact** (above). It is likely to need some form of stabilization for advection of n and T. Out of scope here.
+- **Doxygen not run.** Doxygen was not available in the sandbox, so the doc page was checked only through `generate_doc.py`, which converts it without error.

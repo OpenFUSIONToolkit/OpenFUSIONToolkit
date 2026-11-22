@@ -360,7 +360,7 @@ END PROGRAM MUG_rt_2d
 !!
 !! The default input file runs the nonlinear case without a field on a \f$ 32 \times 32 \f$ mesh at
 !! second order, up to the time the bubble and spikes reach the walls (\ref doc_mug2d_rt_ex_nl). This takes
-!! about 5 minutes on two cores. Linear runs and the field scan are set up by `run_scan.py`
+!! about 6 minutes on two cores. Linear runs and the field scan are set up by `run_scan.py`
 !! (\ref doc_mug2d_rt_ex_scan) from the same file.
 !!
 ! OFT_DOC_INCLUDE: oft.in
