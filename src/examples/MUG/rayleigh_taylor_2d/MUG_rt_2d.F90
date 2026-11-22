@@ -439,8 +439,9 @@ END PROGRAM MUG_rt_2d
 !!\section doc_mug2d_rt_ex_input Input files
 !!
 !! The default input file runs the nonlinear transition-layer case without a field on a \f$ 48 \times 96 \f$ mesh at
-!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, streamline upwinding and \f$ D = \chi = 0.3 \f$ m\f$^2\f$/s
-!! (\ref doc_mug2d_rt_ex_upwind), up to the time the bubble and spikes reach the walls (about an hour on two cores). `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
+!! second order (\ref doc_mug2d_rt_ex_nl), with an adaptive time step, streamline upwinding and \f$ D = \chi = 0.3 \f$ m\f$^2\f$/s,
+!! up to the time the bubble and spikes reach the walls (about an hour on two cores). Why these values of \f$ D \f$ and \f$ \chi \f$
+!! are used is explained in \ref doc_mug2d_rt_ex_upwind_choice. `run_nonlinear.py` uses the same file for the linear/nonlinear comparison, and
 !! `run_scan.py` sets up the exponential profile for the linear scan (\ref doc_mug2d_rt_ex_scan).
 !!
 ! OFT_DOC_INCLUDE: oft.in
@@ -573,9 +574,7 @@ END PROGRAM MUG_rt_2d
 !!   \f$ 190 \, \mu \f$s more than without it. It fails where the heavy plasma spreading along the lower wall collides with itself at
 !!   \f$ x = 0 \f$, and in the lower corners: streamline diffusion acts only along the flow, so it does not damp the oscillations at
 !!   the stagnation point, or the ripples across the layers that run along the walls. A small \f$ D \f$ and \f$ \chi \f$ are still
-!!   needed there: \f$ 0.3 \f$ m\f$^2\f$/s with upwinding is cleaner than 1 m\f$^2\f$/s without it, and 1 m\f$^2\f$/s with upwinding
-!!   keeps \f$ n \f$ within 4% of its initial range with no transients. The default input file uses 0.3 m\f$^2\f$/s, which changes the
-!!   growth rate less (below).
+!!   needed there (\ref doc_mug2d_rt_ex_upwind_choice).
 !! - Upwinding does not change the growth of the instability: the growth rate of the seeded mode in the nonlinear run changes by
 !!   +0.001% (\f$ B_0 = 0 \f$) and -0.03% (\f$ B_0 = 2 \times 10^{-4} \f$ T), against -0.20% for \f$ D = \chi = 0.3 \f$ m\f$^2\f$/s and -0.64% for
 !!   \f$ D = \chi = 1 \f$ m\f$^2\f$/s. It is not used in linear runs, so `run_scan.py` and the linear rates are unaffected.
@@ -591,6 +590,23 @@ END PROGRAM MUG_rt_2d
 !! It costs about 5% more per time step (\ref doc_mug2d_rt_ex_cost), but the runs reach a given time in fewer, cheaper steps: on one
 !! core each, with four runs sharing the machine, \f$ t = 1 \f$ ms took 547 steps and 5800 s with upwinding (\f$ D = \chi = 0.3 \f$),
 !! against 788 steps and 11200 s without it (\f$ D = \chi = 1 \f$).
+!!
+!!\subsubsection doc_mug2d_rt_ex_upwind_choice Choice of D and chi in the default input file
+!!
+!! The default input file uses upwinding with \f$ D = \chi = 0.3 \f$ m\f$^2\f$/s, the smallest of the values tried that keeps the
+!! \f$ B_0 = 0 \f$ run clean to \f$ t = 1 \f$ ms, past the collision of the heavy plasma at the lower wall:
+!!  - **Smaller values** (\f$ 0.1 \f$ m\f$^2\f$/s, or a negligible \f$ 10^{-6} \f$ m\f$^2\f$/s, which behaves like \f$ D = \chi = 0 \f$)
+!!    are clean through the roll-up and until the spikes reach the lower wall, but oscillations then grow at the collision from
+!!    about \f$ 910 \, \mu \f$s (table above). The 450 steps of the default run end at about \f$ 880 \, \mu \f$s, before this, so a
+!!    negligible \f$ D \f$ and \f$ \chi \f$ is enough up to there, and for the field case (clean to 2 ms). They are not enough for
+!!    longer runs without a field.
+!!  - **0.3 m\f$^2\f$/s** keeps \f$ n \f$ within 6% below and 8% above its initial range to 1 ms, with fewer and smaller transients than
+!!    the previous default (1 m\f$^2\f$/s without upwinding), and lowers the growth rate by only 0.20%.
+!!  - **1 m\f$^2\f$/s** with upwinding is the cleanest (\f$ n \f$ within 4%, no transients), but lowers the growth rate by 0.64%, and
+!!    spreads the layer more.
+!!
+!! Upwinding requires positive \f$ D \f$, \f$ \chi \f$ and \f$ \nu \f$ (\ref doc_mug_xmhd_2d_eqns_upwind), so to study the case without
+!! particle diffusion or thermal conduction use a negligible value, as `run_nonlinear.py` does (\f$ 10^{-6} \f$ m\f$^2\f$/s).
 !!
 !!\subsection doc_mug2d_rt_ex_exp_nl Why the exponential profile is not used nonlinearly
 !!
