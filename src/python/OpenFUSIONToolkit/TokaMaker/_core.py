@@ -2549,6 +2549,10 @@ class TokaMaker():
         @param coil_currents Coil currents at the end of the timestep (if `None`, current coil currents are used)
         @param coil_voltages Coil voltages to apply over the timestep (if `None`, zero voltages are assumed)
         @result new time, new dt, # of NL iterations, # of linear iterations, # of retries
+
+        @note If every attempt fails, # of retries is negative (-4), but the returned time is still advanced (by the
+        last reduced timestep, `dt/16`) even though the solution is not advanced. Check that # of retries is
+        non-negative after each step.
         '''
         dt = c_double(dt)
         time = c_double(time)
