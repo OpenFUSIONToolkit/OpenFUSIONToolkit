@@ -12,6 +12,7 @@ import time
 import subprocess
 import tarfile
 import re
+import shlex
 import argparse
 import math
 import hashlib
@@ -1355,37 +1356,10 @@ class MKL(package):
 class ACCELERATE(package):
     """! BLAS/LAPACK from the macOS Accelerate framework
 
-    Accelerate exports two interfaces: a legacy one (eg. "dgemm_"), which is LAPACK 3.2.1 and uses
-    the f2c return convention for single precision and complex functions, and a modern one
-    (LAPACK 3.11, macOS >= 13.3) with symbols suffixed by "$NEWLAPACK". Fortran codes cannot reference
-    the modern symbols directly, so a small shim library is generated that maps each standard Fortran
-    symbol to its "$NEWLAPACK" counterpart. Most symbols are pure tail-call trampolines; complex-valued
-    functions, which return through a hidden argument in Accelerate, are wrapped in C. Utility routines
-    that Accelerate only provides through the legacy interface ("lsame", "dcabs1") are implemented
-    directly in the shim.
+    Accelerate's legacy Fortran interface (eg. "dgemm_") is not compatible with gfortran, so a small
+    shim library mapping the standard Fortran symbols to Accelerate's modern "$NEWLAPACK" interface is
+    generated and built by "accelerate_shim.py" (see that script for details).
     """
-    ## Complex valued functions (returned through hidden first argument in Accelerate)
-    complex_funcs = {
-        'cdotc': ('float complex', 'dot'),
-        'cdotu': ('float complex', 'dot'),
-        'zdotc': ('double complex', 'dot'),
-        'zdotu': ('double complex', 'dot'),
-        'cladiv': ('float complex', 'div'),
-        'zladiv': ('double complex', 'div')
-    }
-    ## Reference implementations of routines without a "$NEWLAPACK" version
-    legacy_funcs = {
-        'lsame': [
-            '#include <ctype.h>',
-            '#include <stddef.h>',
-            'int lsame_(const char *ca, const char *cb, size_t ca_len, size_t cb_len)',
-            '{ return toupper((unsigned char)*ca) == toupper((unsigned char)*cb); }'
-        ],
-        'dcabs1': [
-            '#include <math.h>',
-            'double dcabs1_(const double complex *z) { return fabs(creal(*z)) + fabs(cimag(*z)); }'
-        ]
-    }
 
     def __init__(self):
         self.name = "ACCELERATE"
@@ -1427,82 +1401,19 @@ class ACCELERATE(package):
         self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
         return self.config_dict
 
-    def get_symbols(self):
-        # Read modern (non-ILP64) Fortran symbols from Accelerate's text-based stubs in the SDK
-        sdk_path = self.config_dict.get('MACOS_SDK_PATH', None)
-        if sdk_path is None:
-            sdk_path, errcode = run_command('xcrun --show-sdk-path')
-            sdk_path = sdk_path.strip()
-            if errcode != 0:
-                error_exit('Could not determine macOS SDK path for Accelerate', ('Specify with "--macos_sdk_path"',))
-        veclib_path = os.path.join(sdk_path, 'System', 'Library', 'Frameworks', 'Accelerate.framework',
-                                   'Versions', 'A', 'Frameworks', 'vecLib.framework', 'Versions', 'A')
-        symbols = set()
-        for lib_name in ('libBLAS.tbd', 'libLAPACK.tbd'):
-            tbd_path = os.path.join(veclib_path, lib_name)
-            if not os.path.isfile(tbd_path):
-                error_exit('Could not find Accelerate stub file "{0}"'.format(tbd_path))
-            with open(tbd_path, 'r') as fid:
-                symbols.update(re.findall(r"_([a-z][a-z0-9_]*)\$NEWLAPACK(?!\$)", fid.read()))
-        # Remove C-only interfaces
-        symbols = sorted([sym for sym in symbols if not sym.startswith(('cblas_', 'catlas_', 'appleblas_'))])
-        if ('dgemm' not in symbols) or ('dgetrf' not in symbols):
-            error_exit('Accelerate "$NEWLAPACK" interface not found in SDK "{0}"'.format(sdk_path),
-                       ('macOS SDK >= 13.3 required',))
-        return symbols
-
     def setup_build(self):
-        symbols = self.get_symbols()
-        # Trampolines for all symbols except complex-valued functions
-        if self.config_dict['TARGET_ARCH'] == 'arm64':
-            branch_inst = 'b'
-        else:
-            branch_inst = 'jmp'
-        asm_lines = ['.text']
-        for sym in symbols:
-            if sym in self.complex_funcs:
-                continue
-            asm_lines += [
-                '.globl _{0}_'.format(sym),
-                '.p2align 4',
-                '_{0}_:'.format(sym),
-                '  {0} "_{1}$NEWLAPACK"'.format(branch_inst, sym)
-            ]
-        with open('oft_accelerate_tramp.S', 'w+') as fid:
-            fid.write('\n'.join(asm_lines) + '\n')
-        # C wrappers for complex-valued functions
-        c_lines = ['#include <complex.h>']
-        for sym, (ctype, func_type) in self.complex_funcs.items():
-            if sym not in symbols:
-                continue
-            if func_type == 'dot':
-                c_lines += [
-                    'extern void {0}_new({1} *, const int *, const {1} *, const int *, const {1} *, const int *) __asm__("_{0}$NEWLAPACK");'.format(sym, ctype),
-                    '{1} {0}_(const int *n, const {1} *x, const int *incx, const {1} *y, const int *incy)'.format(sym, ctype),
-                    '{{ {1} r; {0}_new(&r, n, x, incx, y, incy); return r; }}'.format(sym, ctype)
-                ]
-            else:
-                c_lines += [
-                    'extern void {0}_new({1} *, const {1} *, const {1} *) __asm__("_{0}$NEWLAPACK");'.format(sym, ctype),
-                    '{1} {0}_(const {1} *x, const {1} *y)'.format(sym, ctype),
-                    '{{ {1} r; {0}_new(&r, x, y); return r; }}'.format(sym, ctype)
-                ]
-        for sym, func_lines in self.legacy_funcs.items():
-            if sym not in symbols:
-                c_lines += func_lines
-        with open('oft_accelerate_cplx.c', 'w+') as fid:
-            fid.write('\n'.join(c_lines) + '\n')
-        # Hash of generated sources (forces rebuild if symbol list changes)
-        hasher = hashlib.sha256()
-        for src_file in ('oft_accelerate_tramp.S', 'oft_accelerate_cplx.c'):
-            with open(src_file, 'rb') as fid:
-                hasher.update(fid.read())
+        # Shim is generated by a helper script; hash of the script forces a rebuild if it changes
+        shim_script = os.path.join(script_dir, 'accelerate_shim.py')
+        with open(shim_script, 'rb') as fid:
+            script_hash = hashlib.sha256(fid.read()).hexdigest()
+        shim_cmd = [sys.executable, shim_script, '--output', self.config_dict['BLAS_LIB_PATH'],
+                    '--cc', self.config_dict['CC'], '--arch', self.config_dict['TARGET_ARCH']]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            shim_cmd += ['--sdk_path', self.config_dict['MACOS_SDK_PATH']]
         build_lines = [
-            'export OFT_ACCELERATE_SRC_HASH={0}'.format(hasher.hexdigest()),
-            'mkdir -p {ACCELERATE_LIB}',
-            '{CC} -c oft_accelerate_tramp.S -o oft_accelerate_tramp.o',
-            '{CC} -O2 -fPIC -c oft_accelerate_cplx.c -o oft_accelerate_cplx.o',
-            '{CC} -dynamiclib oft_accelerate_tramp.o oft_accelerate_cplx.o -o {BLAS_LIB_PATH} -install_name {BLAS_LIB_PATH} -framework Accelerate'
+            'export OFT_ACCELERATE_SHIM_HASH={0}'.format(script_hash),
+            # Command is quoted and escaped here, as it is not a format string
+            ' '.join(shlex.quote(arg) for arg in shim_cmd).replace('{', '{{').replace('}', '}}')
         ]
         self.setup_build_script(build_lines, self.config_dict)
 
