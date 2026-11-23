@@ -41,9 +41,15 @@
   lam_n = 0.5E0
   L_x = 25.6E0
   L_z = 12.8E0
-  nsteps=4000
+  nsteps=2500            ! t = 2.5E-4 s, through the fast reconnection phase
   rst_freq=10
   use_mfnk=T
   pm=F
   linear=F
+  upwind=T               ! Streamline upwinding of n, V and T (stabilizes the X-point density)
+/
+
+&xmhd_plot_options
+  rst_start=0
+  rst_end=2500           ! Plot all restart files (>= nsteps)
 /
