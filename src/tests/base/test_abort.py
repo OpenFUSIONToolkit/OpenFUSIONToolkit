@@ -77,7 +77,8 @@ def test_abort_reentrant():
     assert output.find('Abort called from abort callback') < 0
 
 
-# Parallel loop abort on 2 MPI ranks: at most one error block per rank, non-zero exit
+# Parallel loop abort on 2 MPI ranks: at most one error block per rank, non-zero exit, and the
+# error reaches the output (oft_abort pauses before MPI_ABORT so the launcher can forward it)
 @pytest.mark.mpi
 @pytest.mark.coverage
 def test_abort_parallel_loop_mpi():

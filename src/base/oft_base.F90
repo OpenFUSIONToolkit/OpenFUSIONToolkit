@@ -427,6 +427,11 @@ END SUBROUTINE oft_finalize
 !! which ends the run itself if the process is still alive after 10 seconds.
 !! A call made while this thread is already aborting (eg. from
 !! @ref oft_abort_cb) skips printing and ends the run immediately.
+!!
+!! With more than one MPI task, the first caller waits 1 second after printing
+!! before calling MPI_ABORT, so the launcher can forward the error message
+!! (eg. MPICH's `mpiexec` discards output that is still in transit when the
+!! job is torn down).
 !------------------------------------------------------------------------------
 SUBROUTINE oft_abort(error_str,sname,fname)
 CHARACTER(LEN=*), INTENT(in) :: error_str !< Error string
@@ -490,6 +495,10 @@ IF(.NOT.oft_abort_active)THEN
     CALL oft_stack_print
     !---
     IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
+#ifdef HAVE_MPI
+    !---Let the launcher forward the error message before MPI_ABORT tears down the job
+    IF(oft_env%nprocs>1)ierr=oft_sleep(1)
+#endif
   END IF
 END IF
 !---Abort run
