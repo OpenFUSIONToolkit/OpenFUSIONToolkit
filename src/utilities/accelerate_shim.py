@@ -15,11 +15,15 @@ complex-valued functions, which return through a hidden argument in Accelerate, 
 Utility routines that Accelerate only provides through the legacy interface ("lsame", "dcabs1") are
 implemented directly in the shim.
 
-The symbol list is read from the text-based stub files (.tbd) of the macOS SDK, so the shim matches
-the SDK used for the build. The resulting library is linked against the Accelerate framework and is
-used in place of a BLAS/LAPACK library (eg. "-L<dir> -loftaccelerate").
+The wrapped routines are taken from a fixed list ("accelerate_symbols.txt", next to this script),
+generated from the macOS 14.5 SDK (the same set as the 13.3 SDK), instead of from the SDK used for the build. Newer SDKs export
+additional routines (eg. 54 more in macOS 15) that are missing on older macOS versions. Referencing
+them would cause the shim, and everything linked to it, to fail to load there. The build SDK is checked
+to provide every listed routine. The resulting library is linked against the Accelerate framework and
+is used in place of a BLAS/LAPACK library (eg. "-L<dir> -loftaccelerate").
 
 Usage: python accelerate_shim.py --output <dir>/liboftaccelerate.dylib [--cc CC] [--arch ARCH] [--sdk_path PATH]
+       python accelerate_shim.py --write_symbols <file> [--sdk_path PATH]   (regenerate symbol list)
 
 This script is called by build_libs.py ("--use_accelerate"), but can also be run directly.
 """
@@ -31,6 +35,8 @@ import shlex
 import subprocess
 import sys
 
+## Default list of wrapped routines (available in macOS >= 14.0)
+default_symbols_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'accelerate_symbols.txt')
 ## Complex valued functions (returned through hidden first argument in Accelerate)
 complex_funcs = {
     'cdotc': ('float complex', 'dot'),
@@ -91,7 +97,7 @@ def get_sdk_path(sdk_path=None):
     return sdk_path
 
 
-def get_symbols(sdk_path):
+def get_sdk_symbols(sdk_path):
     '''! Read modern (non-ILP64) Fortran BLAS/LAPACK symbols from Accelerate's stub files
 
     @param sdk_path Path to macOS SDK
@@ -113,10 +119,44 @@ def get_symbols(sdk_path):
     return symbols
 
 
+def read_symbols_file(symbols_file):
+    '''! Read list of routines to wrap (one per line, "#" starts a comment)
+
+    @param symbols_file Path to symbol list
+    @result Sorted list of symbol names
+    '''
+    symbols = set()
+    with open(symbols_file, 'r') as fid:
+        for line in fid:
+            line = line.split('#')[0].strip()
+            if line != '':
+                symbols.add(line)
+    if len(symbols) == 0:
+        shim_error('No symbols found in "{0}"'.format(symbols_file))
+    return sorted(symbols)
+
+
+def write_symbols_file(symbols_file, sdk_path):
+    '''! Write list of routines available in an SDK (for updating the default list)
+
+    @param symbols_file Path to output symbol list
+    @param sdk_path Path to macOS SDK
+    '''
+    sdk_path = get_sdk_path(sdk_path)
+    symbols = get_sdk_symbols(sdk_path)
+    sdk_name = os.path.basename(os.path.normpath(sdk_path))
+    with open(symbols_file, 'w+') as fid:
+        fid.write('# Accelerate BLAS/LAPACK routines wrapped by accelerate_shim.py ("$NEWLAPACK" interface, LP64)\n')
+        fid.write('# Generated with "accelerate_shim.py --write_symbols" from {0}\n'.format(sdk_name))
+        fid.write('# Only routines available on the oldest supported macOS version may be listed\n')
+        fid.write('\n'.join(symbols) + '\n')
+    print('Wrote {0} symbols from "{1}" to "{2}"'.format(len(symbols), sdk_path, symbols_file))
+
+
 def write_sources(symbols, arch, build_dir):
     '''! Write shim sources (assembly trampolines and C wrappers)
 
-    @param symbols List of symbols to wrap (from @ref get_symbols)
+    @param symbols List of symbols to wrap (from @ref read_symbols_file)
     @param arch Target architecture ("arm64" or "x86_64")
     @param build_dir Directory for generated sources
     @result Paths to assembly and C sources
@@ -167,7 +207,7 @@ def write_sources(symbols, arch, build_dir):
     return asm_file, c_file
 
 
-def build_shim(output, cc='cc', arch=None, sdk_path=None, build_dir=None):
+def build_shim(output, cc='cc', arch=None, sdk_path=None, build_dir=None, symbols_file=None):
     '''! Generate and compile the shim library
 
     @param output Path of shim library to create (also used as its install name)
@@ -175,6 +215,7 @@ def build_shim(output, cc='cc', arch=None, sdk_path=None, build_dir=None):
     @param arch Target architecture (default: host architecture)
     @param sdk_path Path to macOS SDK (see @ref get_sdk_path)
     @param build_dir Directory for generated sources and objects (default: current directory)
+    @param symbols_file List of routines to wrap (default: @ref default_symbols_file)
     '''
     if platform.system() != 'Darwin':
         shim_error('Accelerate is only available on macOS')
@@ -183,8 +224,15 @@ def build_shim(output, cc='cc', arch=None, sdk_path=None, build_dir=None):
     if build_dir is None:
         build_dir = os.getcwd()
     output = os.path.abspath(output)
-    symbols = get_symbols(get_sdk_path(sdk_path))
-    print('Found {0} Accelerate BLAS/LAPACK symbols'.format(len(symbols)))
+    if symbols_file is None:
+        symbols_file = default_symbols_file
+    symbols = read_symbols_file(symbols_file)
+    # Check that the build SDK provides all listed routines
+    sdk_path = get_sdk_path(sdk_path)
+    missing = sorted(set(symbols) - set(get_sdk_symbols(sdk_path)))
+    if len(missing) > 0:
+        shim_error('{0} listed routines are missing from SDK "{1}" (eg. {2})'.format(len(missing), sdk_path, ', '.join(missing[:5])))
+    print('Wrapping {0} Accelerate BLAS/LAPACK routines listed in "{1}"'.format(len(symbols), symbols_file))
     asm_file, c_file = write_sources(symbols, arch, build_dir)
     asm_obj = os.path.splitext(asm_file)[0] + '.o'
     c_obj = os.path.splitext(c_file)[0] + '.o'
@@ -197,10 +245,18 @@ def build_shim(output, cc='cc', arch=None, sdk_path=None, build_dir=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Build a Fortran BLAS/LAPACK shim library for the macOS Accelerate framework')
-    parser.add_argument('--output', required=True, type=str, help='Path of shim library to create (eg. lib/liboftaccelerate.dylib)')
+    parser.add_argument('--output', default=None, type=str, help='Path of shim library to create (eg. lib/liboftaccelerate.dylib)')
     parser.add_argument('--cc', default=os.environ.get('CC', 'cc'), type=str, help='C compiler (default: $CC or "cc")')
     parser.add_argument('--arch', default=None, type=str, help='Target architecture, "arm64" or "x86_64" (default: host)')
     parser.add_argument('--sdk_path', default=None, type=str, help='macOS SDK path (default: $SDKROOT or "xcrun --show-sdk-path")')
     parser.add_argument('--build_dir', default=None, type=str, help='Directory for generated sources and objects (default: current directory)')
+    parser.add_argument('--symbols', default=None, type=str, help='List of routines to wrap (default: accelerate_symbols.txt next to this script)')
+    parser.add_argument('--write_symbols', default=None, type=str, help='Write the routines available in the SDK to this file and exit (to update the symbol list)')
     options = parser.parse_args()
-    build_shim(options.output, cc=options.cc, arch=options.arch, sdk_path=options.sdk_path, build_dir=options.build_dir)
+    if options.write_symbols is not None:
+        write_symbols_file(options.write_symbols, options.sdk_path)
+    elif options.output is None:
+        parser.error('"--output" is required')
+    else:
+        build_shim(options.output, cc=options.cc, arch=options.arch, sdk_path=options.sdk_path,
+                   build_dir=options.build_dir, symbols_file=options.symbols)
