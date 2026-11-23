@@ -99,7 +99,13 @@ TYPE, public :: oft_xmhd_2d_sim
   LOGICAL, ALLOCATABLE :: ignore_rmask(:) !< Mask for regions to ignore when populating physics (defaults to false)
   REAL(r8) :: lin_tol = 1.d-8 !< absolute tolerance for linear solver
   REAL(r8) :: nl_tol = 1.d-5 !< absolute tolerance for nonlinear solver
-  REAL (r8) :: B_0(3) = 0.d0 !< background, static magnetic field
+  !> Uniform, static background magnetic field (only a Z component is allowed in cylindrical geometry)
+  !!
+  !! @note This field is redundant and may be removed in the future. Its in-plane part is
+  !! equivalent to adding the flux \f$ B_{0,z} x - B_{0,x} z \f$ (planar) or \f$ B_{0,Z} R^2/2 \f$
+  !! (cylindrical) to `psi_vac`, and its out-of-plane part to adding a uniform \f$ B_{0,y} \f$ to the
+  !! initial out-of-plane field. Prefer those for new uses.
+  REAL (r8) :: B_0(3) = 0.d0
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
