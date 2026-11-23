@@ -517,6 +517,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DOFT_SUPERLU_DIST_ROOT:PATH={0}".format(mydict["SUPERLU_DIST_ROOT"]))
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
+            if mydict.get("UMFPACK_LONG",False):
+                cmake_lines.append("-DOFT_UMFPACK_LONG:BOOL=TRUE")
     if "STRUMPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_STRUMPACK_ROOT:PATH={0}".format(mydict["STRUMPACK_ROOT"]))
         if "SCALAPACK_ROOT" in mydict:
@@ -1655,8 +1657,9 @@ class SUPERLU_DIST(package):
 
 
 class UMFPACK(package):
-    def __init__(self, comp_wrapper=False, shared_libs=False):
+    def __init__(self, use_long=False, comp_wrapper=False, shared_libs=False):
         self.name = "UMFPACK"
+        self.use_long = use_long
         self.url = "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v7.10.1.tar.gz"
         self.build_dir = "SuiteSparse-7.10.1"
         self.install_dir = "UMFPACK-6_3_5"
@@ -1671,6 +1674,8 @@ class UMFPACK(package):
             return self.config_dict
         self.setup_root_struct()
         self.config_dict['UMFPACK_LIBS'] = "-lumfpack -lamd -lsuitesparseconfig"
+        if self.use_long:
+            self.config_dict['UMFPACK_LONG'] = True
         # Installation check files
         if self.shared_libs:
             self.install_chk_files = [os.path.join(self.config_dict['UMFPACK_LIB'], 'libumfpack'+self.config_dict['DYN_EXT'])]
@@ -2219,6 +2224,7 @@ group.add_argument("--superlu_dist_threads", action="store_true", default=False,
 #
 group = parser.add_argument_group("UMFPACK", "UMFPACK package options")
 group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library? (default: 0)")
+group.add_argument("--umfpack_long", action="store_true", default=False, help="Use 64-bit integer UMFPACK interface (umfpack_dl), needed for factors larger than ~16 GB")
 # Disabled: no install root is passed to CMake, so the library is never enabled
 # group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
 #
@@ -2356,7 +2362,7 @@ else:
             parser.exit(-1, 'SuperLU-DIST requires MPI\n')
         packages.append(SUPERLU_DIST(options.superlu_dist_threads))
     if options.build_umfpack == 1:
-        packages.append(UMFPACK())
+        packages.append(UMFPACK(options.umfpack_long))
     if options.build_strumpack == 1:
         if options.strumpack_mpi == 1:
             if not use_mpi:
