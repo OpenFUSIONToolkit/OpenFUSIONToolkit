@@ -452,7 +452,9 @@ END PROGRAM harris_sheet
 !! \f$ (u_x, u_z, u_y) \f$, and in a visualization program the vertical axis of the plot is \f$ z \f$.
 !!
 !! \note The plotted `B` and `psi` are the total fields: they include the background field `B_0` and the vacuum flux
-!! `psi_vac` as well as the evolved fields \f$ \tilde{\psi} \f$ and \f$ B_y \f$. Both are zero in this example.
+!! `psi_vac` as well as the evolved fields \f$ \tilde{\psi} \f$ and \f$ B_y \f$. Both are zero in this example. They are
+!! read from the step-0 restart file `xmhd2d_00000.rst`. If they are not found there, a warning is printed and they
+!! are not included.
 !!
 !! The history file can be read in Python with `OpenFUSIONToolkit.io.histfile`.
 !!

@@ -134,10 +134,10 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: nl_tol = 1.d-5 !< absolute tolerance for nonlinear solver
   !> Uniform, static background magnetic field (only a Z component is allowed in cylindrical geometry)
   !!
-  !! @note This field is redundant and may be removed in the future. Its in-plane part is
-  !! equivalent to adding the flux \f$ B_{0,z} x - B_{0,x} z \f$ (planar) or \f$ B_{0,Z} R^2/2 \f$
-  !! (cylindrical) to `psi_vac`, and its out-of-plane part to adding a uniform \f$ B_{0,y} \f$ to the
-  !! initial out-of-plane field. Prefer those for new uses.
+  !! @note On a non-periodic domain this is equivalent to adding the flux \f$ B_{0,z} x - B_{0,x} z \f$
+  !! (planar) or \f$ B_{0,Z} R^2/2 \f$ (cylindrical) to `psi_vac`, and a uniform \f$ B_{0,y} \f$ to the
+  !! initial out-of-plane field. On a periodic domain a uniform in-plane field cannot be represented
+  !! by `psi_vac`, because its flux is not periodic, so `B_0` is required there.
   REAL (r8) :: B_0(3) = 0.d0
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
@@ -245,6 +245,7 @@ CALL u%add(0.d0,1.d0,self%u)
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
+CALL save_background(self, 'xmhd2d_'//rst_char//'.rst')
 
 !---Fill timestep control cache
 itcount=self%ittarget
@@ -466,6 +467,7 @@ CALL u%add(0.d0,1.d0,self%u)
 WRITE(rst_char,104)0
 CALL self%rst_save(self%u0, self%t, self%dt, 'xmhd2d_eq.rst', 'U')
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
+CALL save_background(self, 'xmhd2d_'//rst_char//'.rst')
 
 ALLOCATE(self%mfun)
 self%mfun%parent_sim=>self
@@ -1938,6 +1940,21 @@ IF(oft_env%head_proc)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine rst_save
+!---------------------------------------------------------------------------
+!> Save the fixed background fields (vacuum flux `psi_vac` and background field `B_0`)
+!! to an existing restart file
+!!
+!! The run drivers add these to the step-0 restart file, so that @ref xmhd_2d_plot can
+!! include them in the plotted totals.
+!---------------------------------------------------------------------------
+subroutine save_background(self,filename)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+character(LEN=*), intent(in) :: filename !< Name of restart file (must already exist)
+DEBUG_STACK_PUSH
+CALL oft_blagrange%vec_save(self%psi_vac,filename,'psi_vac',append=.TRUE.)
+IF(oft_env%head_proc)CALL hdf5_write(self%B_0,filename,'B_0')
+DEBUG_STACK_POP
+end subroutine save_background
 
 !---------------------------------------------------------------------------
 !> Plot the current solution state using XDMF/HDF5 output
@@ -1950,6 +1967,8 @@ end subroutine rst_save
 !!
 !! The plotted poloidal flux `psi` and magnetic field (`B`, or `B*R` in cylindrical geometry)
 !! are the total values, including the vacuum flux (`psi_vac`) and the background field (`B_0`).
+!! Both are read from the step-0 restart file (`xmhd2d_00000.rst`), where the run drivers save
+!! them. If they are not found there, a warning is printed and they are not included.
 !------------------------------------------------------------------------------
 subroutine xmhd_2d_plot(self)
 class(oft_xmhd_2d_sim), intent(inout) :: self
@@ -1957,6 +1976,10 @@ class(oft_vector), pointer :: ux,uy,uz,v_lag
 type(oft_lag_bginterp) :: grad_psi
 class(oft_matrix), pointer :: lmop => NULL()
 real(r8), pointer :: plot_vals(:),plot_vec(:,:),plot_u0(:),psi_bg(:)
+real(r8) :: b0_plot(3)
+integer(i4) :: bg_err
+logical :: bg_found
+class(oft_vector), pointer :: psi_vac_plot
 !---Solver objects
 CLASS(oft_solver), POINTER :: lminv => NULL()
 class(oft_vector), pointer :: u,v,up, u0
@@ -1999,10 +2022,34 @@ ALLOCATE(plot_vec(3,v_lag%n))
 NULLIFY(plot_vals,plot_u0,psi_bg)
 CALL grad_psi%setup(oft_blagrange)
 !---------------------------------------------------------------------------
+! Background fields (psi_vac and B_0) saved in the step-0 restart file
+!---------------------------------------------------------------------------
+100 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
+WRITE(rst_char,100)0
+file_tmp='xmhd2d_'//rst_char//'.rst'
+CALL oft_blagrange%vec_create(psi_vac_plot)
+CALL psi_vac_plot%set(0.d0)
+b0_plot=0.d0
+bg_found=oft_file_exist(TRIM(file_tmp))
+CALL oft_mpi_barrier(ierr)
+IF(bg_found)THEN
+  CALL oft_blagrange%vec_load(psi_vac_plot,TRIM(file_tmp),'psi_vac',err_flag=bg_err)
+  bg_found=(bg_err==0)
+END IF
+IF(bg_found)CALL hdf5_read(b0_plot,TRIM(file_tmp),'B_0',success=bg_found)
+IF(.NOT.bg_found)THEN
+  CALL psi_vac_plot%set(0.d0)
+  b0_plot=0.d0
+  IF(oft_env%head_proc)CALL oft_warn('Background fields (psi_vac, B_0) not found in "'//TRIM(file_tmp)// &
+    '"; if used, they are not included in the plotted psi and B')
+END IF
+!---------------------------------------------------------------------------
 ! Background flux added to the plotted psi: the vacuum flux plus the flux of the
 ! in-plane background field (B_0z*x - B_0x*z planar, B_0Z*R^2/2 cylindrical)
 !---------------------------------------------------------------------------
-CALL self%psi_vac%get_local(psi_bg)
+CALL psi_vac_plot%get_local(psi_bg)
+CALL psi_vac_plot%delete
+DEALLOCATE(psi_vac_plot)
 BLOCK
 INTEGER(i4) :: i,j
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
@@ -2014,9 +2061,9 @@ DO i=1,mesh%nc
     CALL oft_blag_npos(oft_blagrange,i,j,f)
     pt=mesh%log2phys(i,f)
     IF(self%cyl_flag)THEN
-      plot_vec(1,cell_dofs(j))=self%B_0(3)*pt(1)**2/2.d0
+      plot_vec(1,cell_dofs(j))=b0_plot(3)*pt(1)**2/2.d0
     ELSE
-      plot_vec(1,cell_dofs(j))=self%B_0(3)*pt(1)-self%B_0(1)*pt(2)
+      plot_vec(1,cell_dofs(j))=b0_plot(3)*pt(1)-b0_plot(1)*pt(2)
     END IF
   END DO
 END DO
@@ -2048,7 +2095,6 @@ END IF
 !---------------------------------------------------------------------------
 ! Loop through rst files
 !---------------------------------------------------------------------------
-100 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
 rst_cur = rst_start
 DO
   IF(rst_cur > rst_end) EXIT
@@ -2112,7 +2158,7 @@ DO
   CALL u%get_local(plot_vals,7)
   plot_vec(3,:)=plot_vals
   ! Out-of-plane background field (only valid in planar geometry)
-  IF(.NOT.self%cyl_flag)plot_vec(3,:)=plot_vec(3,:)+self%B_0(2)
+  IF(.NOT.self%cyl_flag)plot_vec(3,:)=plot_vec(3,:)+b0_plot(2)
   IF(self%cyl_flag)THEN
     CALL mesh%save_vertex_vector(plot_vec,xdmf_plot,'B*R')
   ELSE

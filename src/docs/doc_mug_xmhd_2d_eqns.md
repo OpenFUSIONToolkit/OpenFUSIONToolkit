@@ -38,7 +38,8 @@ Both \f$ (x, y, z) \f$ and \f$ (R, \phi, Z) \f$ are right-handed.
 Vectors are stored in the order \f$ (x, y, z) \f$, or \f$ (R, \phi, Z) \f$, so the second component is out of
 plane. In plot files vectors are written in mesh order, \f$ (x, z, y) \f$, and in cylindrical geometry
 the plotted magnetic field is \f$ R B \f$ (`B*R`). The plotted flux `psi` and field are the totals, including
-\f$ \psi_{vac} \f$ and \f$ B_0 \f$ (defined below). In cylindrical geometry the weak forms are integrated with the volume element \f$ R \, dR \, dZ \f$,
+\f$ \psi_{vac} \f$ and \f$ B_0 \f$ (defined below). These are read from the step-0 restart file (`xmhd2d_00000.rst`),
+where the run drivers save them. If they are not found there, a warning is printed and they are not included. In cylindrical geometry the weak forms are integrated with the volume element \f$ R \, dR \, dZ \f$,
 which per radian of \f$ \phi \f$ is the true volume element, so all operators below are the true cylindrical operators.
 In particular, for an axisymmetric scalar \f$ f \f$ and vector \f$ V \f$,
 
@@ -70,9 +71,11 @@ Here:
  - \f$ \psi = \tilde{\psi} + \psi_{vac} \f$ is the total poloidal flux, where \f$ \tilde{\psi} \f$ is the evolved flux. \f$ \psi_{vac} \f$ is an optional vacuum flux (`psi_vac`, zero
    by default). It is not evolved, but is set by the driver, eg. from coil currents in the
    MUG-TokaMaker coupling (\ref mugtok_td). See \ref doc_mug_xmhd_2d_eqns_ind.
- - \f$ B_0 \f$ is a uniform background field (`B_0`, zero by default). Its in-plane part is equivalent to adding
-   the vacuum flux \f$ \psi_0 = B_{0,z} x - B_{0,x} z \f$ (planar) or \f$ \psi_0 = B_{0,Z} R^2 / 2 \f$ (cylindrical) to
-   \f$ \psi_{vac} \f$, and its out-of-plane part to adding a uniform \f$ B_{0,y} \f$ to the initial \f$ B_y \f$. In
+ - \f$ B_0 \f$ is a uniform background field (`B_0`, zero by default). Its in-plane part acts like the vacuum flux
+   \f$ \psi_0 = B_{0,z} x - B_{0,x} z \f$ (planar) or \f$ \psi_0 = B_{0,Z} R^2 / 2 \f$ (cylindrical) added to
+   \f$ \psi_{vac} \f$, and its out-of-plane part like a uniform \f$ B_{0,y} \f$ added to the initial \f$ B_y \f$. On a
+   non-periodic domain these are equivalent. On a periodic domain \f$ \psi_0 \f$ is not periodic, so a uniform
+   in-plane field can only be set with `B_0` (as in the Alfven wave regression test). In
    cylindrical geometry only a \f$ Z \f$ component is allowed, because a uniform field with \f$ R \f$ or \f$ \phi \f$
    components is not divergence- and curl-free, and a nonzero `B_0(1)` or `B_0(2)` aborts the run.
 

@@ -54,7 +54,7 @@ not greater than 1.
 | `pre_freq` | 1 | Preconditioner update frequency with `mfnk=T` (steps) |
 | `ittarget` | 40 | Target linear iterations per step for adaptive \f$ \Delta t \f$ |
 | `lin_tol`, `nl_tol` | \f$ 10^{-8} \f$, \f$ 10^{-5} \f$ | Absolute linear and nonlinear tolerances |
-| `B_0(3)` | 0 | Background field [T] (only `B_0(3)` if `cyl_flag=T`). Redundant with `psi_vac` and the initial \f$ B_y \f$, see \ref doc_mug_xmhd_2d_eqns_conv |
+| `B_0(3)` | 0 | Background field [T] (only `B_0(3)` if `cyl_flag=T`). Equivalent to `psi_vac` and the initial \f$ B_y \f$ on a non-periodic domain, see \ref doc_mug_xmhd_2d_eqns_conv |
 | `den_scale` | \f$ 10^{19} \f$ | Density normalization |
 | `nu(nreg)` | -1 | Kinematic viscosity \f$ \nu \f$ [m\f$^2\f$/s] |
 | `chi(nreg)` | -1 | Thermal diffusivity \f$ \chi \f$ [m\f$^2\f$/s] |
