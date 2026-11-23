@@ -44,6 +44,7 @@ CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,xmhd_jac_options,IOSTAT=ierr)
 CLOSE(io_unit)
+IF(ierr/=0)CALL oft_abort('Error reading "xmhd_jac_options" from input file','test_jacobian_2d',__FILE__)
 !---------------------------------------------------------------------------
 ! Setup grid and simulation
 !---------------------------------------------------------------------------

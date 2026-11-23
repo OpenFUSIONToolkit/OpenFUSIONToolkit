@@ -35,7 +35,8 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_native_pre
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec, bfem_map_flag
-USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
+USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast, &
+  oft_blag_npos
 USE oft_blag_operators, ONLY: oft_blag_vproject,oft_blag_project, oft_blag_getmop, oft_lag_bginterp
 USE oft_scalar_inits, ONLY: poss_scalar_bfield
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
@@ -337,7 +338,7 @@ DO i=1,self%nsteps
   self%dt=self%ittarget*SUM(dthist)/SUM(itcount)
   IF(self%dt>dtin)self%dt=dtin
   IF(self%dt<1.d-3*dtin)CALL oft_abort('Time step dropped too low!','run_simulation',__FILE__)
-  IF(ABS(1.d0-(self%dt-dthist(MOD(i,XMHD_ITCACHE)+1))/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
+  IF(ABS(1.d0-self%dt/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
@@ -753,7 +754,12 @@ CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%parent_sim%n_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),velx_res,self%parent_sim%velx_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vely_res,self%parent_sim%vely_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(3, :),velz_res,self%parent_sim%velz_bc)
-CALL fem_dirichlet_vec(oft_blagrange,T_weights,T_res,self%parent_sim%T_bc)
+IF(incomp)THEN
+  !---Field 5 is the pressure, which uses the lower-order pressure space
+  CALL fem_dirichlet_vec(oft_blagrange_p,T_weights,T_res,self%parent_sim%T_bc)
+ELSE
+  CALL fem_dirichlet_vec(oft_blagrange,T_weights,T_res,self%parent_sim%T_bc)
+END IF
 CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%parent_sim%psi_bc)
 CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%parent_sim%by_bc)
 
@@ -955,16 +961,16 @@ DO i=1,mesh%nc
       ! (dt>0). Omitting it from explicit (RHS) evaluations (dt<=0) enforces div(V^{n+1})=0
       ! instead of div(V^{n+1})=div(V^n).
       IF(self%dt>0.d0)THEN
-      DO jr=1,oft_blagrange_p%nce
-        !---Continuity
-        IF (cyl_flag) THEN
-          res_loc(jr,5) = res_loc(jr, 5) &
-            + basis_vals_p(jr)*div_vel*int_factor*coords(1)
-        ELSE
-          res_loc(jr,5) = res_loc(jr, 5) &
-            + basis_vals_p(jr)*div_vel*int_factor
-        END IF
-      END DO
+        DO jr=1,oft_blagrange_p%nce
+          !---Continuity
+          IF (cyl_flag) THEN
+            res_loc(jr,5) = res_loc(jr, 5) &
+              + basis_vals_p(jr)*div_vel*int_factor*coords(1)
+          ELSE
+            res_loc(jr,5) = res_loc(jr, 5) &
+              + basis_vals_p(jr)*div_vel*int_factor
+          END IF
+        END DO
       END IF
     ELSE
       DO jr=1,oft_blagrange%nce
@@ -1939,14 +1945,16 @@ end subroutine rst_save
 !! |------------|---------------|------------|
 !! | `rst_start=0`      | First restart file to read | int |
 !! | `rst_end=2000`     | Last restart file to read | int |
+!!
+!! The plotted poloidal flux `psi` and magnetic field (`B`, or `B*R` in cylindrical geometry)
+!! are the total values, including the vacuum flux (`psi_vac`) and the background field (`B_0`).
 !------------------------------------------------------------------------------
-!---------------------------------------------------------------------------
 subroutine xmhd_2d_plot(self)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 class(oft_vector), pointer :: ux,uy,uz,v_lag
 type(oft_lag_bginterp) :: grad_psi
 class(oft_matrix), pointer :: lmop => NULL()
-real(r8), pointer :: plot_vals(:),plot_vec(:,:),plot_u0(:)
+real(r8), pointer :: plot_vals(:),plot_vec(:,:),plot_u0(:),psi_bg(:)
 !---Solver objects
 CLASS(oft_solver), POINTER :: lminv => NULL()
 class(oft_vector), pointer :: u,v,up, u0
@@ -1986,8 +1994,33 @@ lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre)
 ALLOCATE(plot_vec(3,v_lag%n))
-NULLIFY(plot_vals,plot_u0)
+NULLIFY(plot_vals,plot_u0,psi_bg)
 CALL grad_psi%setup(oft_blagrange)
+!---------------------------------------------------------------------------
+! Background flux added to the plotted psi: the vacuum flux plus the flux of the
+! in-plane background field (B_0z*x - B_0x*z planar, B_0Z*R^2/2 cylindrical)
+!---------------------------------------------------------------------------
+CALL self%psi_vac%get_local(psi_bg)
+BLOCK
+INTEGER(i4) :: i,j
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: f(3),pt(3)
+ALLOCATE(cell_dofs(oft_blagrange%nce))
+DO i=1,mesh%nc
+  CALL oft_blagrange%ncdofs(i,cell_dofs)
+  DO j=1,oft_blagrange%nce
+    CALL oft_blag_npos(oft_blagrange,i,j,f)
+    pt=mesh%log2phys(i,f)
+    IF(self%cyl_flag)THEN
+      plot_vec(1,cell_dofs(j))=self%B_0(3)*pt(1)**2/2.d0
+    ELSE
+      plot_vec(1,cell_dofs(j))=self%B_0(3)*pt(1)-self%B_0(1)*pt(2)
+    END IF
+  END DO
+END DO
+DEALLOCATE(cell_dofs)
+END BLOCK
+psi_bg=psi_bg+plot_vec(1,:)
 
 !---------------------------------------------------------------------------
 ! Pass 1: main fields (n, V, psi, B, and T if compressible) on the full-order mesh
@@ -2055,9 +2088,10 @@ DO
     CALL u%get_local(plot_vals,5)
     CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'T')
   END IF
-  !Plot psi
+  !Plot total psi (including vacuum flux and background field)
   NULLIFY(plot_vals)
   CALL u%get_local(plot_vals,6)
+  plot_vals=plot_vals+psi_bg
   CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'psi')
   !Plot B
   CALL grad_psi%u%restore_local(plot_vals)
@@ -2075,6 +2109,8 @@ DO
   plot_vec(2,:)=plot_vals
   CALL u%get_local(plot_vals,7)
   plot_vec(3,:)=plot_vals
+  ! Out-of-plane background field (only valid in planar geometry)
+  IF(.NOT.self%cyl_flag)plot_vec(3,:)=plot_vec(3,:)+self%B_0(2)
   IF(self%cyl_flag)THEN
     CALL mesh%save_vertex_vector(plot_vec,xdmf_plot,'B*R')
   ELSE
@@ -2119,6 +2155,7 @@ DEALLOCATE(u,up,v,u0,ux,uy,uz)
 IF(ASSOCIATED(plot_vals))DEALLOCATE(plot_vals)
 IF(ASSOCIATED(plot_vec))DEALLOCATE(plot_vec)
 IF(ASSOCIATED(plot_u0))DEALLOCATE(plot_u0)
+IF(ASSOCIATED(psi_bg))DEALLOCATE(psi_bg)
 end subroutine xmhd_2d_plot
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file

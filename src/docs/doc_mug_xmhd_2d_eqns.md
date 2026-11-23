@@ -34,7 +34,8 @@ are supported:
 
 Vectors are stored in the order \f$ (x, y, z) \f$, or \f$ (R, \phi, Z) \f$, so the second component is out of
 plane. In plot files vectors are written in mesh order, \f$ (x, z, y) \f$, and in cylindrical geometry
-the plotted magnetic field is \f$ R B \f$ (`B*R`). In cylindrical geometry the weak forms are integrated with the volume element \f$ R \, dR \, dZ \f$,
+the plotted magnetic field is \f$ R B \f$ (`B*R`). The plotted flux `psi` and field are the totals, including
+\f$ \psi_v \f$ and \f$ B_0 \f$ (defined below). In cylindrical geometry the weak forms are integrated with the volume element \f$ R \, dR \, dZ \f$,
 which per radian of \f$ \phi \f$ is the true volume element, so all operators below are the true cylindrical operators.
 In particular, for an axisymmetric scalar \f$ f \f$ and vector \f$ V \f$,
 
@@ -66,11 +67,11 @@ Here:
  - \f$ \psi_t = \psi + \psi_v \f$ is the total poloidal flux. \f$ \psi_v \f$ is an optional vacuum flux (`psi_vac`, zero
    by default). It is not evolved, but is set by the driver, eg. from coil currents in the
    MUG-TokaMaker coupling (\ref mugtok_td). See \ref doc_mug_xmhd_2d_eqns_ind.
- - \f$ B_0 \f$ is a uniform background field (`B_0`, zero by default). It is equivalent to adding the flux
-   \f$ \psi_0 = B_{0,z} x - B_{0,x} z \f$ and a uniform \f$ B_{0,y} \f$ to the evolved fields (planar), or the flux
-   \f$ \psi_0 = B_{0,Z} R^2 / 2 \f$ (cylindrical). In cylindrical geometry only a \f$ Z \f$ component is allowed,
-   because a uniform field with \f$ R \f$ or \f$ \phi \f$ components is not divergence- and curl-free. \f$ B_0 \f$ is not
-   included in the plotted field.
+ - \f$ B_0 \f$ is a uniform background field (`B_0`, zero by default). Its in-plane part is equivalent to adding
+   the vacuum flux \f$ \psi_0 = B_{0,z} x - B_{0,x} z \f$ (planar) or \f$ \psi_0 = B_{0,Z} R^2 / 2 \f$ (cylindrical) to
+   \f$ \psi_v \f$, and its out-of-plane part to adding a uniform \f$ B_{0,y} \f$ to the initial \f$ B_y \f$. In
+   cylindrical geometry only a \f$ Z \f$ component is allowed, because a uniform field with \f$ R \f$ or \f$ \phi \f$
+   components is not divergence- and curl-free.
 
 The following conventions are used throughout:
  - \f$ J_\mu \equiv \nabla \times B \f$, so the physical current density is \f$ J = J_\mu / \mu_0 \f$.
