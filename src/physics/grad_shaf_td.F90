@@ -737,7 +737,7 @@ do i=1,mesh%nc
         call mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
         det=vol*lag_rep%quad%wts(m)
         pt=mesh%log2phys(i,lag_rep%quad%pts(:,m))
-        IF(.NOT.gs_test_bounds(self%gs_equil,pt))CYCLE
+        IF(.NOT.gs_test_bounds(self%gs_equil,pt,i))CYCLE
         psi_tmp=0.d0!; dpsi_tmp=0.d0
         do jr=1,lag_rep%nce ! Loop over degrees of freedom
             call oft_blag_eval(lag_rep,i,jr,lag_rep%quad%pts(:,m),rop(jr))
@@ -1062,7 +1062,7 @@ do i=1,mesh%nc
         end do
         eta_source=0.d0; gs_source=0.d0
         IF(mesh%reg(i)==1)THEN
-            in_bounds=gs_test_bounds(self%gs_equil,pt).AND.(psi_tmp>self%gs_equil%plasma_bounds(1))
+            in_bounds=gs_test_bounds(self%gs_equil,pt,i).AND.(psi_tmp>self%gs_equil%plasma_bounds(1))
             IF(in_bounds)THEN
                 gs_source=self%dt*(self%p_scale*pt(1)*pt(1)*self%P%Fpp(psi_tmp) &
                 + self%f_scale*0.5d0*self%F%fpp(psi_tmp))
@@ -1304,7 +1304,7 @@ do i=1,lag_rep%mesh%nc
         end do
         eta_source=0.d0; gs_source=0.d0; lim_source=0.d0; ax_source=0.d0
         IF(smesh%reg(i)==1)THEN
-            in_bounds=gs_test_bounds(self%gs_equil,pt).AND.(psi_tmp>self%gs_equil%plasma_bounds(1))
+            in_bounds=gs_test_bounds(self%gs_equil,pt,i).AND.(psi_tmp>self%gs_equil%plasma_bounds(1))
             IF(in_bounds)THEN
                 gs_source=(self%p_scale*pt(1)*pt(1)*self%P%Fpp(psi_tmp) &
                     + self%f_scale*0.5d0*self%F%fpp(psi_tmp))

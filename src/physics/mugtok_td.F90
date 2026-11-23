@@ -886,7 +886,7 @@ DO i=1,mesh%nc
     DO jr=1,lag_rep%nce
       psi = psi + psi_weights_loc(jr)*basis_vals_2(jr)
     END DO
-    IF(gs_test_bounds(eq,coords(1:2)) .AND. psi > eq%plasma_bounds(1))THEN
+    IF(gs_test_bounds(eq,coords(1:2),i) .AND. psi > eq%plasma_bounds(1))THEN
       ! inside the plasma: F = sqrt(f_scale*F*F'(psi) + F0^2)
       F0_res = F0_res + SQRT(f_scale_use*ffp%f(psi) + by_weights(F0)**2) &
                *jac_det*quad%wts(m)/(coords(1)+gs_epsilon)
