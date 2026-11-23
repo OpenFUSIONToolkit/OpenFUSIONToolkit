@@ -93,5 +93,5 @@ def test_jacobian_cyl(order, incomp):
 def test_cyl_b0_abort():
     '''A background field with R or phi components is rejected in cylindrical geometry.'''
     status, _ = jacobian_2d_setup(2, True, False, (1.E-2, 0.0, 0.0), check_abort=True,
-                                  expect_abort='Only a Z-directed background field')
+                                  expect_abort='Only vertical B_0')
     assert status

@@ -6,7 +6,7 @@
 !> @file test_jacobian_2d.F90
 !
 !> Regression test for the 2D xMHD module. The approximate Jacobian assembled by
-!! build_approx_jacobian is compared with a central finite-difference derivative of the
+!! build_approx_jacobian_comp (or _incomp) is compared with a central finite-difference derivative of the
 !! nonlinear residual about a pseudo-random state, one field (column block) at a time.
 !! The relative error of every row block is printed and the largest is reported.
 !!
@@ -108,7 +108,11 @@ END IF
 !---------------------------------------------------------------------------
 mhd_sim%jac_dt=dt
 mhd_sim%nlfun%dt=dt
-CALL build_approx_jacobian(mhd_sim,u)
+IF(incomp)THEN
+  CALL build_approx_jacobian_incomp(mhd_sim,u)
+ELSE
+  CALL build_approx_jacobian_comp(mhd_sim,u)
+END IF
 CALL mhd_sim%nlfun%apply(u,f0)
 max_err=0.d0
 DO ic=1,7
