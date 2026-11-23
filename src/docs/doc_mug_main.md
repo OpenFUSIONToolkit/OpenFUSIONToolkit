@@ -21,6 +21,8 @@ The following examples illustrate usage of MUG to run time-dependent resistive a
  - \subpage doc_mug_sph_ex1
  - \subpage doc_mug_sph_ex2
  - \subpage doc_mug_recon_ex
+ - \subpage doc_mug_railgun
+ - \subpage doc_mug_cyl_kink
  - \subpage doc_mug_gyro_grav_ex
  - \subpage doc_mug_gyro_grav_lag_ex
 

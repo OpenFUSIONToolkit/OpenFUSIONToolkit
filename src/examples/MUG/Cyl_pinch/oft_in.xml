@@ -1,0 +1,19 @@
+<oft>
+  <xmhd>
+    <region><id>2</id><eta>1.E4</eta><type>2</type></region>
+    <pre type="mg">
+      <smoother direction="up">
+        <solver type="gmres">
+          <its>2</its>
+          <nrits>2</nrits>
+          <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <boverlap>0</boverlap>
+            <loverlap>1</loverlap>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </smoother>
+    </pre>
+  </xmhd>
+</oft>

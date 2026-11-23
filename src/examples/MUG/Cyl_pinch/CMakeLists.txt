@@ -1,0 +1,10 @@
+#
+install(FILES oft.in DESTINATION examples/MUG/Cyl_pinch COMPONENT examples)
+configure_file( oft.in ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES oft_in.xml DESTINATION examples/MUG/Cyl_pinch COMPONENT examples)
+configure_file( oft_in.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES MUG-cyl_pinch.h5 DESTINATION examples/MUG/Cyl_pinch COMPONENT examples)
+configure_file( MUG-cyl_pinch.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES rwm_eq.dat DESTINATION examples/MUG/Cyl_pinch COMPONENT examples)
+configure_file( rwm_eq.dat ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+oft_add_exe( MUG_cyl_pinch.F90 )

@@ -1,0 +1,20 @@
+# Parallel plate files
+install(FILES oft_slab.in DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( oft_slab.in ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES oft_slab.xml DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( oft_slab.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES MUG-railgun-tet.h5 DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( MUG-railgun-tet.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES MUG-railgun-hex.h5 DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( MUG-railgun-hex.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+# Coaxial files
+install(FILES oft_coax.in DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( oft_coax.in ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES oft_coax.xml DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( oft_coax.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES MUG-coax_railgun-tet.h5 DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( MUG-coax_railgun-tet.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES MUG-coax_railgun-hex.h5 DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( MUG-coax_railgun-hex.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+# Binary
+oft_add_exe( MUG-railgun.F90 )
