@@ -132,6 +132,7 @@ REAL(8) :: lam0,elapsed_time
 REAL(8), ALLOCATABLE, DIMENSION(:) :: W_tmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mmat
 LOGICAL :: pm_save
+CHARACTER(LEN=OFT_SLEN) :: conv_msg
 CLASS(oft_vector), POINTER :: uloc
 TYPE(oft_native_dense_matrix), TARGET :: fmat,bmat
 CLASS(oft_solver), POINTER :: linv
@@ -187,7 +188,19 @@ CALL arsolver%apply(uloc,lam0)
 oft_env%pm=pm_save
 elapsed_time=loctimer%tock()
 WRITE(*,'(2A,ES12.4)')oft_indent,'Time = ',elapsed_time
-IF(arsolver%info>=0)THEN
+IF(arsolver%info<0)THEN
+  !---Solve failed (eg. no eigenvalues converged)
+  CALL oft_warn("Eigenvalue solve failed, eigenvalues and eigenvectors set to zero")
+  eig_rval=0.d0
+  IF(PRESENT(eig_ival))eig_ival=0.d0
+  eig_vec=0.d0
+ELSE
+  !---Warn on partial convergence (non-converged eigenvalues are zero and sorted last)
+  IF((arsolver%info>0).AND.(arsolver%info<neigs))THEN
+    WRITE(conv_msg,'(A,I4,A,I4,A)')'Only ',arsolver%info,' of ',neigs, &
+      ' eigenvalues converged, remaining eigenvalues and eigenvectors set to zero'
+    CALL oft_warn(TRIM(conv_msg))
+  END IF
   !---Sort eigenvalues
   ALLOCATE(sort_tmp(arsolver%nev),W_tmp(arsolver%nev))
   W_tmp=ABS(arsolver%eig_val(1,1:arsolver%nev))

@@ -3,6 +3,7 @@ if( OFT_BUILD_TESTS )
   # Tests for each physics tool
   add_subdirectory( TokaMaker )
   add_subdirectory( ThinCurr )
+  add_subdirectory( ThickCurr )
   add_subdirectory( Marklin )
   add_subdirectory( MUG )
 

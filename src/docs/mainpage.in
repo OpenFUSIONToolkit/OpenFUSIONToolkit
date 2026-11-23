@@ -16,6 +16,7 @@ Currently the framework is used to implement the following physics modules:
 
  - \ref doc_gs_main "TokaMaker": Free-boundary Grad-Shafranov equilibrium solver (static and time-dependent)
  - \ref doc_tw_main "ThinCurr": 3D thin-wall electromagnetic simulation package
+ - \ref doc_thickcurr_main "ThickCurr": 3D thick-wall electromagnetic simulation package
  - \ref doc_mhd_main "MUG": 3D linear/nonlinear extended MHD simulation package
  - \ref doc_taylor_main "Marklin": 3D force-free, uniform \f$ \lambda \f$ equilibrium solver
 
@@ -50,6 +51,7 @@ The following is a list of documented examples for using the OFT API
 
  - \ref doc_gs_main_ex "TokaMaker examples"
  - \ref doc_tw_main_ex "ThinCurr examples"
+ - \ref doc_thickcurr_main_ex "ThickCurr examples"
  - \ref doc_mhd_main_ex "MUG examples"
  - \ref doc_taylor_main "Marklin examples"
  - **Core API examples**

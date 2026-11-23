@@ -372,12 +372,21 @@ END SUBROUTINE oft_init
 !> Finalize Open FUSION Toolkit environment
 !!
 !! Also calls PetscFinalize/MPI_FINALIZE
+!!
+!! By default the run summary is printed and the program is terminated (`STOP`). If
+!! `no_stop` is true, which is used when OFT is driven from another program (eg. Python),
+!! the summary is not printed and control is returned to the caller after finalization.
 !------------------------------------------------------------------------------
-SUBROUTINE oft_finalize() BIND(C)
+SUBROUTINE oft_finalize(no_stop) BIND(C)
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool
+LOGICAL(c_bool), OPTIONAL, INTENT(in) :: no_stop !< Return to caller without printing summary? (optional)
+LOGICAL :: stop_run
 INTEGER(i4) :: ierr
 INTEGER(i8) :: comm_min(4),comm_max(4),comm_avg(4)
 INTEGER(i8) :: countnew,crate,cmax
 REAL(i8) :: tmp(3)
+stop_run=.TRUE.
+IF(PRESENT(no_stop))stop_run=.NOT.LOGICAL(no_stop)
 #ifdef HAVE_MPI
 CALL MPI_BARRIER(MPI_COMM_WORLD,ierr)
 CALL MPI_ALLREDUCE(comm_times,comm_min,4,OFT_MPI_I8,MPI_MIN,oft_env%COMM,ierr)
@@ -385,7 +394,7 @@ CALL MPI_ALLREDUCE(comm_times,comm_max,4,OFT_MPI_I8,MPI_MAX,oft_env%COMM,ierr)
 CALL MPI_ALLREDUCE(comm_times,comm_avg,4,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
 #endif
 !---Print timing information
-IF(oft_env%rank==0)THEN
+IF(stop_run.AND.(oft_env%rank==0))THEN
   CALL system_clock(countnew,crate,cmax)
   WRITE(*,*)
   WRITE(*,'(A)')         '#----------------------------------------------'
@@ -414,7 +423,7 @@ IF(use_petsc)CALL PetscFinalize(ierr)
 #ifdef HAVE_MPI
 CALL MPI_FINALIZE(ierr)
 #endif
-STOP
+IF(stop_run)STOP
 END SUBROUTINE oft_finalize
 !------------------------------------------------------------------------------
 !> "Graceful" abort for Open FUSION Toolkit

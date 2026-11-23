@@ -9,10 +9,11 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "git_info.h"
 
 void oft_stack_print();
-void oft_finalize();
+void oft_finalize(bool *no_stop);
 #ifdef OFT_COVERAGE
 void __gcov_dump();
 #endif
@@ -42,7 +43,7 @@ void oft_signal_handler(int signum)
 	if (signum == SIGINT || signum == SIGTERM) {
 		fprintf(stdout,"Interrupt requested: halting!\n");
 		// End program
-		oft_finalize();
+		oft_finalize(NULL);
 	} else {
 		// Print signal type
 		switch (signum) {

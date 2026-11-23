@@ -53,7 +53,7 @@ integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nle
 TYPE(xml_node), optional, intent(in) :: xml_root !< Preconditioner definition node (optional)
 !---
 NULLIFY(pre)
-IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
+IF(PRESENT(xml_root))THEN
   IF(xml_root%associated())THEN
     !---Create preconditioner
     CALL create_ml_xml(pre,Mats,levels,nlevels=nlevels, &

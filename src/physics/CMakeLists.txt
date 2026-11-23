@@ -5,6 +5,7 @@ set( OBJS
   diagnostic.F90
   taylor.F90
   xmhd.F90
+  thick_wall.F90
   xmhd_lag.F90
   xmhd_2d.F90
   tracing.F90
