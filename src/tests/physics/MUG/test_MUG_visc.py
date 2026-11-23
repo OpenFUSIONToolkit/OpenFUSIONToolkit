@@ -103,16 +103,17 @@ def sound_linear(nu_long):
     u_hat = (expm(mat*t_final) @ x0)[1]/0.6
     return np.array([-u_hat.imag, u_hat.real])
 
-def visc_case(visc_type,nu_visc,nu_par,b_dir):
+def visc_case(visc_type,nu_visc,nu_par,b_dir,exe='./test_MUG_visc'):
     '''Write the input for a damped sound wave and run test_MUG_visc
 
-    `b_dir` is the (unnormalized) field direction as a namelist string.
+    `b_dir` is the (unnormalized) field direction as a namelist string. `exe` selects the driver program
+    (`./test_MUG_visc_lag` for the Lagrange-only module).
     '''
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(b_dir,visc_type,nu_visc,nu_par,d_dens,kappa))
     # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command)
-    return run_OFT("./test_MUG_visc oft.in oft_in_xmhd.xml", 1, 600)
+    return run_OFT("{0} oft.in oft_in_xmhd.xml".format(exe), 1, 600)
 
 def validate_result(nu_long,err_exp):
     '''Compare the final velocity with linear theory
