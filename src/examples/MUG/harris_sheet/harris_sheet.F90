@@ -451,9 +451,10 @@ END PROGRAM harris_sheet
 !! and whose third is the out-of-plane direction. So `B` is ordered \f$ (B_x, B_z, B_y) \f$ and `V` is ordered
 !! \f$ (u_x, u_z, u_y) \f$, and in a visualization program the vertical axis of the plot is \f$ z \f$.
 !!
-!! \note The plotted `B` and `psi` include only the evolved fields \f$ \tilde{\psi} \f$ and \f$ B_y \f$. The background field
-!! `B_0` and the vacuum flux `psi_vac` are not added. Both are zero in this example, but for runs that use them they must be
-!! added in post-processing to get the total field.
+!! \note The plotted `B` and `psi` are the total fields: they include the background field `B_0` and the vacuum flux
+!! `psi_vac` as well as the evolved fields \f$ \tilde{\psi} \f$ and \f$ B_y \f$. Both are zero in this example. They are
+!! read from the step-0 restart file `xmhd2d_00000.rst`. If they are not found there, a warning is printed and they
+!! are not included.
 !!
 !! The history file can be read in Python with `OpenFUSIONToolkit.io.histfile`.
 !!

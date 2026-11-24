@@ -33,3 +33,5 @@ temperature evolution with anisotropic thermal conduction. The complete system a
  - \subpage doc_mug_xmhd_eqns
 
 The same system is also advanced by the \ref xmhd_lag "Lagrange only" variant, see \ref doc_mug_xmhd_eqns_lag.
+
+For 2D slab and axisymmetric simulations see \ref doc_mug2d_main "MUG 2D".

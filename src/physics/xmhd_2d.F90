@@ -4,6 +4,12 @@
 !> @file xmhd_2d.F90
 !
 !> Solve time-dependent MHD equations in 2D with lagrange basis set
+!!
+!! Solves the single-temperature resistive MHD equations (continuity, momentum, temperature, and
+!! induction for the poloidal flux and out-of-plane field), or an incompressible variant, in planar
+!! or axisymmetric geometry using Lagrange elements for all fields. The full system of equations is
+!! defined by the nonlinear residual (@ref xmhd_2d::nlfun_apply "nlfun_apply") and is documented in
+!! \ref doc_mug_xmhd_2d_eqns.
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
@@ -29,7 +35,8 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_native_pre
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec, bfem_map_flag
-USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
+USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast, &
+  oft_blag_npos
 USE oft_blag_operators, ONLY: oft_blag_vproject,oft_blag_project, oft_blag_getmop, oft_lag_bginterp
 USE oft_scalar_inits, ONLY: poss_scalar_bfield
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
@@ -125,7 +132,13 @@ TYPE, public :: oft_xmhd_2d_sim
   LOGICAL, ALLOCATABLE :: ignore_rmask(:) !< Mask for regions to ignore when populating physics (defaults to false)
   REAL(r8) :: lin_tol = 1.d-8 !< absolute tolerance for linear solver
   REAL(r8) :: nl_tol = 1.d-5 !< absolute tolerance for nonlinear solver
-  REAL (r8) :: B_0(3) = 0.d0 !< background, static magnetic field
+  !> Uniform, static background magnetic field (only a Z component is allowed in cylindrical geometry)
+  !!
+  !! @note On a non-periodic domain this is equivalent to adding the flux \f$ B_{0,z} x - B_{0,x} z \f$
+  !! (planar) or \f$ B_{0,Z} R^2/2 \f$ (cylindrical) to `psi_vac`, and a uniform \f$ B_{0,y} \f$ to the
+  !! initial out-of-plane field. On a periodic domain a uniform in-plane field cannot be represented
+  !! by `psi_vac`, because its flux is not periodic, so `B_0` is required there.
+  REAL (r8) :: B_0(3) = 0.d0
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
@@ -210,6 +223,7 @@ integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
 real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
+CALL check_settings(self)
 !---------------------------------------------------------------------------
 ! Create solver fields
 !---------------------------------------------------------------------------
@@ -231,6 +245,7 @@ CALL u%add(0.d0,1.d0,self%u)
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
+CALL save_background(self, 'xmhd2d_'//rst_char//'.rst')
 
 !---Fill timestep control cache
 itcount=self%ittarget
@@ -380,7 +395,7 @@ DO i=1,self%nsteps
   self%dt=self%ittarget*SUM(dthist)/SUM(itcount)
   IF(self%dt>dtin)self%dt=dtin
   IF(self%dt<1.d-3*dtin)CALL oft_abort('Time step dropped too low!','run_simulation',__FILE__)
-  IF(ABS(1.d0-(self%dt-dthist(MOD(i,XMHD_ITCACHE)+1))/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
+  IF(ABS(1.d0-self%dt/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
@@ -431,7 +446,7 @@ CALL self%setup_bc()
 !---------------------------------------------------------------------------
 IF(self%cyl_flag)CALL oft_abort( &
         "Cylindrical mode not currently supported for linear solve","run_lin_simulation",__FILE__)
-
+CALL check_settings(self)
 
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
@@ -452,6 +467,7 @@ CALL u%add(0.d0,1.d0,self%u)
 WRITE(rst_char,104)0
 CALL self%rst_save(self%u0, self%t, self%dt, 'xmhd2d_eq.rst', 'U')
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
+CALL save_background(self, 'xmhd2d_'//rst_char//'.rst')
 
 ALLOCATE(self%mfun)
 self%mfun%parent_sim=>self
@@ -595,6 +611,29 @@ IF(maxextrap>0)THEN
 END IF
 END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------
+!> Check that required material properties are set and valid
+!!
+!! Material properties default to -1 and must be set for every region that is not
+!! ignored (`ignore_rmask`). Properties that are not used by the chosen model
+!! (eg. \f$ \chi \f$ and \f$ \gamma \f$ when incompressible) are not checked.
+!---------------------------------------------------------------------------
+SUBROUTINE check_settings(self)
+CLASS(oft_xmhd_2d_sim), INTENT(in) :: self !< Simulation object
+INTEGER(i4) :: i
+DO i=1,SIZE(self%ignore_rmask)
+  IF(self%ignore_rmask(i))CYCLE
+  IF(self%m_i(i)<=0.d0)CALL oft_abort("Ion mass must be positive","check_settings",__FILE__)
+  IF(self%nu(i)<0.d0)CALL oft_abort("Viscosity not set or negative","check_settings",__FILE__)
+  IF(self%eta(i,1)<0.d0)CALL oft_abort("In-plane resistivity not set or negative","check_settings",__FILE__)
+  IF(self%eta(i,2)<=0.d0)CALL oft_abort("Out-of-plane resistivity must be positive","check_settings",__FILE__)
+  IF(.NOT.self%incomp)THEN
+    IF(self%D_diff(i)<0.d0)CALL oft_abort("Particle diffusivity not set or negative","check_settings",__FILE__)
+    IF(self%chi(i)<0.d0)CALL oft_abort("Thermal diffusivity not set or negative","check_settings",__FILE__)
+    IF(self%gamma(i)<=1.d0)CALL oft_abort("Adiabatic index must be greater than 1","check_settings",__FILE__)
+  END IF
+END DO
+END SUBROUTINE check_settings
+!---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
 !---------------------------------------------------------------------------
 SUBROUTINE mfun_apply(self,a,b)
@@ -655,7 +694,8 @@ DO i=1,mesh%nc
   ELSE
     T_loc = T_weights(cell_dofs)
   END IF
-  psi_loc = psi_weights(cell_dofs) + psi_vac_weights(cell_dofs)
+  !---The vacuum flux (psi_vac) is part of the equilibrium only, so it is not added to the perturbation
+  psi_loc = psi_weights(cell_dofs)
   by_loc = by_weights(cell_dofs)
   !---Set material properties
   pt%m_i = self%parent_sim%m_i(mesh%reg(i))
@@ -727,7 +767,12 @@ CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%parent_sim%n_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),velx_res,self%parent_sim%velx_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vely_res,self%parent_sim%vely_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(3, :),velz_res,self%parent_sim%velz_bc)
-CALL fem_dirichlet_vec(oft_blagrange,T_weights,T_res,self%parent_sim%T_bc)
+IF(incomp)THEN
+  !---Field 5 is the pressure, which uses the lower-order pressure space
+  CALL fem_dirichlet_vec(oft_blagrange_p,T_weights,T_res,self%parent_sim%T_bc)
+ELSE
+  CALL fem_dirichlet_vec(oft_blagrange,T_weights,T_res,self%parent_sim%T_bc)
+END IF
 CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%parent_sim%psi_bc)
 CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%parent_sim%by_bc)
 
@@ -871,16 +916,16 @@ DO i=1,mesh%nc
     diag_vals(5) = diag_vals(5) + int_factor*rmul !total volume
     !---Compute local function contributions
     IF (incomp) THEN
-      DO jr=1,T_fe%nce
-        !---Continuity
-        IF (cyl_flag) THEN
+      ! The divergence constraint is algebraic, so it is only applied at the new time level
+      ! (dt>0). Omitting it from explicit (RHS) evaluations (dt<=0) enforces div(V^{n+1})=0
+      ! instead of div(V^{n+1})=div(V^n).
+      IF(self%dt>0.d0)THEN
+        DO jr=1,T_fe%nce
+          !---Continuity
           res_loc(jr,5) = res_loc(jr, 5) &
             + basis_vals_T(jr)*div_vel*int_factor*rmul
-        ELSE
-          res_loc(jr,5) = res_loc(jr, 5) &
-            + basis_vals_T(jr)*div_vel*int_factor
-        END IF
-      END DO
+        END DO
+      END IF
     ELSE
       DO jr=1,oft_blagrange%nce
         !---Temperature
@@ -1325,17 +1370,23 @@ TYPE(xmhd_2d_qpt), INTENT(IN) :: pt !< Quadrature point state
 REAL(r8), INTENT(IN) :: basis_vals(:) !< Basis values [nce]
 REAL(r8), INTENT(IN) :: basis_grads(:,:) !< Basis gradients [3,nce]
 REAL(r8), INTENT(IN) :: dt_fac !< Time step factor
-LOGICAL :: cyl_flag,linear
+LOGICAL :: cyl_flag,linear,incomp
 INTEGER(i4) :: jr,jc,k,l,nce
-REAL(r8) :: n,dn(3),vel(3),dvel(3,3),div_vel,T,dT(3),dpsi(3),by,dby(3),btmp(3),B_0(3)
+REAL(r8) :: n,dn(3),vel(3),dvel(3,3),div_vel,T,dT(3),dpsi(3),by,dby(3),btmp(3),B_0(3),dn_c(3)
 REAL(r8) :: rmul,rden,int_factor,m_i,nu,eta(2),D_diff
 REAL(r8) :: db_psi(3),db_by(3),tmp2(3),b0_cross(3,3),psi_cross(3),dvel_cross(3)
 !---Local copies (avoids reloads through possible aliasing with jac_loc pointers)
-cyl_flag=self%cyl_flag; linear=self%linear; B_0=self%B_0
+cyl_flag=self%cyl_flag; linear=self%linear; incomp=self%incomp; B_0=self%B_0
 n=pt%n; dn=pt%dn; vel=pt%vel; dvel=pt%dvel; div_vel=pt%div_vel; T=pt%T; dT=pt%dT
 dpsi=pt%dpsi; by=pt%by; dby=pt%dby; btmp=pt%btmp; rmul=pt%rmul; rden=pt%rden
 int_factor=pt%int_factor; m_i=pt%m_i; nu=pt%nu; eta=pt%eta; D_diff=pt%D_diff
 nce=SIZE(basis_vals)
+!---The grad(n) terms of the Maxwell stress are only included in the compressible model
+IF(incomp)THEN
+  dn_c=0.d0
+ELSE
+  dn_c=dn
+END IF
 !---B_0 x e_l, which does not depend on the basis functions
 DO l=1,3
   tmp2 = 0.d0
@@ -1382,9 +1433,9 @@ DO jc=1,nce
         + dt_fac*DOT_PRODUCT(basis_grads(:,jr),db_psi)*btmp(l)*int_factor*rmul/(m_i*n*mu0) &
         + dt_fac*DOT_PRODUCT(basis_grads(:,jr),btmp)*db_psi(l)*int_factor*rmul/(m_i*n*mu0) &
         - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,db_psi)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*db_psi(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n**2*mu0)
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn_c,db_psi)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn_c,btmp)*db_psi(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        + dt_fac*basis_vals(jr)*dn_c(l)*DOT_PRODUCT(db_psi,btmp)*int_factor*rmul/(m_i*n**2*mu0)
     END DO
     ! vel, by
     DO l=1,3
@@ -1392,9 +1443,9 @@ DO jc=1,nce
         + dt_fac*DOT_PRODUCT(basis_grads(:,jr),db_by)*btmp(l)*int_factor*rmul/(m_i*n*mu0) &
         + dt_fac*DOT_PRODUCT(basis_grads(:,jr),btmp)*db_by(l)*int_factor*rmul/(m_i*n*mu0) &
         - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,db_by)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*db_by(l)*int_factor*rmul/(m_i*n**2*mu0) &
-        + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n**2*mu0)
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn_c,db_by)*btmp(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn_c,btmp)*db_by(l)*int_factor*rmul/(m_i*n**2*mu0) &
+        + dt_fac*basis_vals(jr)*dn_c(l)*DOT_PRODUCT(db_by,btmp)*int_factor*rmul/(m_i*n**2*mu0)
     END DO
     !---Induction
     ! psi, vel
@@ -1444,19 +1495,27 @@ ELSE
     DO jr=1,nce
       DO l=1,3
         jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-          ! grad T terms
-          + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*rmul/(m_i*n) &
-          - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*rmul/(m_i*n**2.d0) &
-          ! dyadic b terms
+          ! Maxwell stress (1/n factor)
           - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),btmp)*btmp(l)*int_factor*rmul/(mu0*m_i*n**2.d0) &
-          - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc),btmp)*btmp(l)*int_factor*rmul/(mu0*m_i*n**2.d0) &
-          + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn,btmp)*btmp(l)*int_factor*rmul/(mu0*m_i*n**3.d0) &
           + dt_fac*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp,btmp)*int_factor*rmul/(2.d0*mu0*m_i*n**2.d0) &
-          + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp,btmp)*int_factor*rmul/(2.d0*mu0*m_i*n**2.d0) &
-          - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp,btmp)*int_factor*rmul/(mu0*m_i*n**3.d0) &
           ! velocity dissipation terms
           - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc),dvel(l,:))*int_factor*rmul/n &
           + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn,dvel(l,:))*int_factor*rmul/n**2
+        IF(incomp)THEN
+          ! Pressure (1/n factor)
+          jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
+            + dt_fac*basis_vals(jc)*T*basis_grads(l,jr)*int_factor*rmul/(m_i*n**2)
+        ELSE
+          jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
+            ! grad T terms
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*rmul/(m_i*n) &
+            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*rmul/(m_i*n**2.d0) &
+            ! Maxwell stress (grad(n) terms)
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc),btmp)*btmp(l)*int_factor*rmul/(mu0*m_i*n**2.d0) &
+            + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn,btmp)*btmp(l)*int_factor*rmul/(mu0*m_i*n**3.d0) &
+            + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp,btmp)*int_factor*rmul/(2.d0*mu0*m_i*n**2.d0) &
+            - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp,btmp)*int_factor*rmul/(mu0*m_i*n**3.d0)
+        END IF
       END DO
     END DO
   END DO
@@ -1473,6 +1532,9 @@ IF(cyl_flag)THEN
       ! vel, n
       jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
         - dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(2.d0*mu0*m_i*n**2)
+      ! Curvature term of the incompressible pressure gradient (integrated by parts)
+      IF(incomp)jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
+        + dt_fac*basis_vals(jr)*basis_vals(jc)*T*int_factor/(m_i*n**2)
       jac_loc(3,1)%m(jr,jc) = jac_loc(3,1)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(1)*btmp(2))*int_factor/(mu0*m_i*n**2)
       ! vel, vel
@@ -1572,10 +1634,12 @@ END DO
 IF(linear)THEN
   DO jc=1,nce
     DO jr=1,nce
+      ! The 1/n dependence of the conduction term is evaluated with the steady-state
+      ! temperature equation for the equilibrium
       jac_loc(5,1)%m(jr,jc) = jac_loc(5,1)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel,dT)*int_factor*rmul/(n*(gamma-1)) &
-        + dt_fac*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor*rmul/n &
-        - dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:,jr),dT)*int_factor*rmul/n &
+        + dt_fac*basis_vals(jr)*basis_vals(jc)*T*div_vel*int_factor*rmul/n &
+        + dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:,jr),dT)*int_factor*rmul/n &
         - dt_fac*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor*rmul/(n**2)
     END DO
   END DO
@@ -1876,6 +1940,21 @@ IF(oft_env%head_proc)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine rst_save
+!---------------------------------------------------------------------------
+!> Save the fixed background fields (vacuum flux `psi_vac` and background field `B_0`)
+!! to an existing restart file
+!!
+!! The run drivers add these to the step-0 restart file, so that @ref xmhd_2d_plot can
+!! include them in the plotted totals.
+!---------------------------------------------------------------------------
+subroutine save_background(self,filename)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+character(LEN=*), intent(in) :: filename !< Name of restart file (must already exist)
+DEBUG_STACK_PUSH
+CALL oft_blagrange%vec_save(self%psi_vac,filename,'psi_vac',append=.TRUE.)
+IF(oft_env%head_proc)CALL hdf5_write(self%B_0,filename,'B_0')
+DEBUG_STACK_POP
+end subroutine save_background
 
 !---------------------------------------------------------------------------
 !> Plot the current solution state using XDMF/HDF5 output
@@ -1885,14 +1964,22 @@ end subroutine rst_save
 !! |------------|---------------|------------|
 !! | `rst_start=0`      | First restart file to read | int |
 !! | `rst_end=2000`     | Last restart file to read | int |
+!!
+!! The plotted poloidal flux `psi` and magnetic field (`B`, or `B*R` in cylindrical geometry)
+!! are the total values, including the vacuum flux (`psi_vac`) and the background field (`B_0`).
+!! Both are read from the step-0 restart file (`xmhd2d_00000.rst`), where the run drivers save
+!! them. If they are not found there, a warning is printed and they are not included.
 !------------------------------------------------------------------------------
-!---------------------------------------------------------------------------
 subroutine xmhd_2d_plot(self)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 class(oft_vector), pointer :: ux,uy,uz,v_lag
 type(oft_lag_bginterp) :: grad_psi
 class(oft_matrix), pointer :: lmop => NULL()
-real(r8), pointer :: plot_vals(:),plot_vec(:,:),plot_u0(:)
+real(r8), pointer :: plot_vals(:),plot_vec(:,:),plot_u0(:),psi_bg(:)
+real(r8) :: b0_plot(3)
+integer(i4) :: bg_err
+logical :: bg_found
+class(oft_vector), pointer :: psi_vac_plot
 !---Solver objects
 CLASS(oft_solver), POINTER :: lminv => NULL()
 class(oft_vector), pointer :: u,v,up, u0
@@ -1932,8 +2019,57 @@ lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre)
 ALLOCATE(plot_vec(3,v_lag%n))
-NULLIFY(plot_vals,plot_u0)
+NULLIFY(plot_vals,plot_u0,psi_bg)
 CALL grad_psi%setup(oft_blagrange)
+!---------------------------------------------------------------------------
+! Background fields (psi_vac and B_0) saved in the step-0 restart file
+!---------------------------------------------------------------------------
+100 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
+WRITE(rst_char,100)0
+file_tmp='xmhd2d_'//rst_char//'.rst'
+CALL oft_blagrange%vec_create(psi_vac_plot)
+CALL psi_vac_plot%set(0.d0)
+b0_plot=0.d0
+bg_found=oft_file_exist(TRIM(file_tmp))
+CALL oft_mpi_barrier(ierr)
+IF(bg_found)THEN
+  CALL oft_blagrange%vec_load(psi_vac_plot,TRIM(file_tmp),'psi_vac',err_flag=bg_err)
+  bg_found=(bg_err==0)
+END IF
+IF(bg_found)CALL hdf5_read(b0_plot,TRIM(file_tmp),'B_0',success=bg_found)
+IF(.NOT.bg_found)THEN
+  CALL psi_vac_plot%set(0.d0)
+  b0_plot=0.d0
+  IF(oft_env%head_proc)CALL oft_warn('Background fields (psi_vac, B_0) not found in "'//TRIM(file_tmp)// &
+    '"; if used, they are not included in the plotted psi and B')
+END IF
+!---------------------------------------------------------------------------
+! Background flux added to the plotted psi: the vacuum flux plus the flux of the
+! in-plane background field (B_0z*x - B_0x*z planar, B_0Z*R^2/2 cylindrical)
+!---------------------------------------------------------------------------
+CALL psi_vac_plot%get_local(psi_bg)
+CALL psi_vac_plot%delete
+DEALLOCATE(psi_vac_plot)
+BLOCK
+INTEGER(i4) :: i,j
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: f(3),pt(3)
+ALLOCATE(cell_dofs(oft_blagrange%nce))
+DO i=1,mesh%nc
+  CALL oft_blagrange%ncdofs(i,cell_dofs)
+  DO j=1,oft_blagrange%nce
+    CALL oft_blag_npos(oft_blagrange,i,j,f)
+    pt=mesh%log2phys(i,f)
+    IF(self%cyl_flag)THEN
+      plot_vec(1,cell_dofs(j))=b0_plot(3)*pt(1)**2/2.d0
+    ELSE
+      plot_vec(1,cell_dofs(j))=b0_plot(3)*pt(1)-b0_plot(1)*pt(2)
+    END IF
+  END DO
+END DO
+DEALLOCATE(cell_dofs)
+END BLOCK
+psi_bg=psi_bg+plot_vec(1,:)
 
 !---------------------------------------------------------------------------
 ! Pass 1: main fields (n, V, psi, B, and T if compressible) on the full-order mesh
@@ -1959,7 +2095,6 @@ END IF
 !---------------------------------------------------------------------------
 ! Loop through rst files
 !---------------------------------------------------------------------------
-100 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
 rst_cur = rst_start
 DO
   IF(rst_cur > rst_end) EXIT
@@ -2001,9 +2136,10 @@ DO
     CALL u%get_local(plot_vals,5)
     CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'T')
   END IF
-  !Plot psi
+  !Plot total psi (including vacuum flux and background field)
   NULLIFY(plot_vals)
   CALL u%get_local(plot_vals,6)
+  plot_vals=plot_vals+psi_bg
   CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'psi')
   !Plot B
   CALL grad_psi%u%restore_local(plot_vals)
@@ -2021,6 +2157,8 @@ DO
   plot_vec(2,:)=plot_vals
   CALL u%get_local(plot_vals,7)
   plot_vec(3,:)=plot_vals
+  ! Out-of-plane background field (only valid in planar geometry)
+  IF(.NOT.self%cyl_flag)plot_vec(3,:)=plot_vec(3,:)+b0_plot(2)
   IF(self%cyl_flag)THEN
     CALL mesh%save_vertex_vector(plot_vec,xdmf_plot,'B*R')
   ELSE
@@ -2065,6 +2203,7 @@ DEALLOCATE(u,up,v,u0,ux,uy,uz)
 IF(ASSOCIATED(plot_vals))DEALLOCATE(plot_vals)
 IF(ASSOCIATED(plot_vec))DEALLOCATE(plot_vec)
 IF(ASSOCIATED(plot_u0))DEALLOCATE(plot_u0)
+IF(ASSOCIATED(psi_bg))DEALLOCATE(psi_bg)
 end subroutine xmhd_2d_plot
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
