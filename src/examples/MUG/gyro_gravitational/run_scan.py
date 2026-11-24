@@ -8,7 +8,10 @@
 # Eq. 15, and the result of Roberts and Taylor (Eq. 11).
 #
 # Usage (from the directory containing MUG_gyro_grav, oft.in, and oft_in.xml):
-#   python run_scan.py [--beta 1.E-4 1.E-3 ...] [--no-gyro] [--hall] [--plot]
+#   python run_scan.py [--beta 1.E-4 1.E-3 ...] [--no-gyro] [--hall] [--eps EPS] [--plot]
+#
+# The growth rate is fit over the exponential growth phase of the kinetic energy (see growth_rate). Use
+# --exe ./MUG_gyro_grav_lag for the Lagrange variant.
 import argparse
 import os
 import re
@@ -89,28 +92,84 @@ class gravity_case:
         return max(0.0, np.max(roots.imag))*np.sqrt(self.g/self.Ln)
 
 
-def growth_rate(hist_file, omega_i, fit_frac=0.3):
-    '''Growth rate [Omega_i] from the kinetic energy, gamma = (1/2) d ln(E_k)/dt, fit over the last
-    `fit_frac` of the run'''
+def smoothed_slope(t, y, width):
+    '''Local slope dy/dt from least-squares line fits over `width` neighboring points'''
+    n = len(t)
+    half = max(1, width//2)
+    slope = np.zeros(n)
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        slope[i] = np.polyfit(t[lo:hi], y[lo:hi], 1)[0]
+    return slope
+
+
+def exponential_window(t, y, tol=0.1, min_frac=0.1):
+    '''Indices [i, j) of the longest window where the local growth rate d(y)/dt is positive and constant to
+    within +/- `tol` (relative), and that spans at least `min_frac` of the run, or None if there is none'''
+    n = len(t)
+    slope = smoothed_slope(t, y, max(5, n//25))
+    min_len = max(5, int(min_frac*n))
+    best = None
+    for i in range(n):
+        smin = slope[i]
+        smax = slope[i]
+        if smin <= 0.0:
+            continue
+        j = i + 1
+        while j < n:
+            smin = min(smin, slope[j])
+            smax = max(smax, slope[j])
+            if (smin <= 0.0) or (smax - smin > tol*(smax + smin)):
+                break
+            j += 1
+        if (j - i >= min_len) and ((best is None) or (j - i > best[1] - best[0])):
+            best = (i, j)
+    return best
+
+
+def growth_rate(hist_file, omega_i, fit_frac=None, tol=0.1):
+    '''Growth rate [Omega_i] from the kinetic energy, gamma = (1/2) d ln(E_k)/dt
+
+    By default ln(E_k) is fit over the exponential growth phase, the longest part of the run where its slope
+    is constant to within +/- `tol`, which excludes the initial transient and the late saturation or blow-up.
+    If `fit_frac` is set, the last `fit_frac` of the run is fit instead (the previous behavior).
+    Returns the growth rate [Omega_i] and the start and end of the fit window [1/Omega_i], all NaN if no
+    exponential phase is found.
+    '''
     hist = histfile(hist_file)
     t = np.asarray(hist['time'], dtype=float)
     ek = np.asarray(hist['ven'], dtype=float)
-    mask = (t >= t[-1] - fit_frac*(t[-1] - t[0])) & (ek > 0.0)
-    slope = np.polyfit(t[mask], np.log(ek[mask]), 1)[0]
-    return 0.5*slope/omega_i
+    mask = ek > 0.0
+    t = t[mask]
+    y = np.log(ek[mask])
+    if fit_frac is None:
+        window = exponential_window(t, y, tol=tol)
+        if window is None:
+            return np.nan, np.nan, np.nan
+        i, j = window
+    else:
+        i = np.searchsorted(t, t[-1] - fit_frac*(t[-1] - t[0]))
+        j = len(t)
+    slope = np.polyfit(t[i:j], y[i:j], 1)[0]
+    return 0.5*slope/omega_i, t[i]*omega_i, t[j-1]*omega_i
 
 
-def run_case(exe, template, beta, gyro, hall, nprocs):
-    '''Run one case in its own directory and return the measured growth rate [Omega_i]'''
+def run_case(exe, template, beta, gyro, hall, nprocs, eps=None, run=True):
+    '''Run one case in its own directory (unless `run` is False) and return the name of the directory'''
     case_dir = 'beta_{0:.3E}'.format(beta)
     if not gyro:
         case_dir += '_nogyro'
     if hall:
         case_dir += '_hall'
+    if not run:
+        return case_dir
     os.makedirs(case_dir, exist_ok=True)
     text = set_option(template, 'beta', '{0:.6E}'.format(beta))
     text = set_option(text, 'nu_gyro', '1.' if gyro else '-1.')
     text = set_option(text, 'xmhd_hall', 'T' if hall else 'F')
+    if eps is not None:
+        text = set_option(text, 'eps', '{0:.6E}'.format(eps))
     with open(os.path.join(case_dir, 'oft.in'), 'w') as fid:
         fid.write(text)
     # Copy the XML file, since long paths are truncated by the executable
@@ -122,7 +181,7 @@ def run_case(exe, template, beta, gyro, hall, nprocs):
         result = subprocess.run(cmd, cwd=case_dir, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode != 0:
         print('  WARNING: run for beta = {0:.3E} stopped early (see {1})'.format(beta, case_dir))
-    return growth_rate(os.path.join(case_dir, 'xmhd.hist'), gravity_case(text).omega_i)
+    return case_dir
 
 
 def main():
@@ -133,6 +192,13 @@ def main():
                         help='Include the Hall term (currently shows a spurious faster instability, see the docs)')
     parser.add_argument('--np', type=int, default=1, help='Number of MPI processes per run')
     parser.add_argument('--exe', default='./MUG_gyro_grav', help='Path to the MUG_gyro_grav executable')
+    parser.add_argument('--eps', type=float, default=None,
+                        help='Relative amplitude of the density perturbation (default: "eps" in oft.in)')
+    parser.add_argument('--fit-frac', type=float, default=None,
+                        help='Fit the last FIT_FRAC of each run instead of the exponential growth phase')
+    parser.add_argument('--fit-tol', type=float, default=0.1,
+                        help='Relative variation of the local growth rate allowed in the exponential phase')
+    parser.add_argument('--no-run', action='store_true', help='Only fit the results of a previous scan')
     parser.add_argument('--plot', action='store_true', help='Plot growth rate vs beta (gyro_grav_scan.png)')
     options = parser.parse_args()
     gyro = not options.no_gyro
@@ -141,13 +207,18 @@ def main():
         template = fid.read()
     case = gravity_case(template)
     exe = os.path.abspath(options.exe)
-    print('  beta       gamma (MUG)  gamma (Eq. 15)  gamma (Eq. 11)   [Omega_i]')
+    print('  beta       gamma (MUG)  gamma (Eq. 15)  gamma (Eq. 11)   fit window   [Omega_i]')
     results = []
     for beta in options.beta:
-        gamma = run_case(exe, template, beta, gyro, hall, options.np)
+        case_dir = run_case(exe, template, beta, gyro, hall, options.np, eps=options.eps, run=not options.no_run)
+        gamma, t_start, t_end = growth_rate(os.path.join(case_dir, 'xmhd.hist'), case.omega_i,
+                                            fit_frac=options.fit_frac, tol=options.fit_tol)
         theory = case.dispersion(beta, gyro=gyro, hall=hall)
         results.append([beta, gamma, theory])
-        print('  {0:.3E}  {1:12.4E}  {2:14.4E}  {3:14.4E}'.format(beta, gamma, theory, case.roberts_taylor(beta, hall=hall)))
+        print('  {0:.3E}  {1:12.4E}  {2:14.4E}  {3:14.4E}   {4:5.0f}-{5:5.0f}'.format(
+            beta, gamma, theory, case.roberts_taylor(beta, hall=hall), t_start, t_end))
+        if np.isnan(gamma):
+            print('  WARNING: no exponential growth phase found for beta = {0:.3E}'.format(beta))
     if options.plot:
         import matplotlib.pyplot as plt
         results = np.asarray(results)
