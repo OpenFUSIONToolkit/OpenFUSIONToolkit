@@ -85,16 +85,7 @@ END TYPE seam_list
 INTERFACE oft_global_dp
   MODULE PROCEDURE global_dp_r8
   MODULE PROCEDURE global_dp_c8
-  MODULE PROCEDURE global_dp_rc8
-  MODULE PROCEDURE global_dp_cr8
 END INTERFACE oft_global_dp
-!---------------------------------------------------------------------------------
-!> Perform a global 1-norm (sum of absolute values) for a vector with a given seam structure
-!---------------------------------------------------------------------------------
-INTERFACE oft_global_norm1
-  MODULE PROCEDURE global_norm1_r8
-  MODULE PROCEDURE global_norm1_c8
-END INTERFACE oft_global_norm1
 !---------------------------------------------------------------------------------
 !> Perform a global sum reduction for a vector with a given seam structure
 !---------------------------------------------------------------------------------
@@ -214,68 +205,6 @@ DO i=1,n
 END DO
 END FUNCTION owned_sum_c8
 !---------------------------------------------------------------------------------
-!> Local owned-only mixed real(r8)/complex(c8) dot product (explicit-shape arrays allow vectorization)
-!---------------------------------------------------------------------------------
-FUNCTION owned_dp_rc8(a,b,w,n) RESULT(c)
-INTEGER(i4), INTENT(in) :: n !< Length of local arrays
-REAL(r8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
-COMPLEX(c8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
-INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
-INTEGER(i4) :: i
-COMPLEX(c8) :: c
-c=(0.d0,0.d0)
-!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-DO i=1,n
-  c=c+a(i)*b(i)*REAL(w(i),r8)
-END DO
-END FUNCTION owned_dp_rc8
-!---------------------------------------------------------------------------------
-!> Local owned-only mixed complex(c8)/real(r8) dot product (explicit-shape arrays allow vectorization)
-!---------------------------------------------------------------------------------
-FUNCTION owned_dp_cr8(a,b,w,n) RESULT(c)
-INTEGER(i4), INTENT(in) :: n !< Length of local arrays
-COMPLEX(c8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
-REAL(r8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
-INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
-INTEGER(i4) :: i
-COMPLEX(c8) :: c
-c=(0.d0,0.d0)
-!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-DO i=1,n
-  c=c+CONJG(a(i))*b(i)*REAL(w(i),r8)
-END DO
-END FUNCTION owned_dp_cr8
-!---------------------------------------------------------------------------------
-!> Local owned-only real(r8) 1-norm (explicit-shape arrays allow vectorization)
-!---------------------------------------------------------------------------------
-FUNCTION owned_norm1_r8(a,w,n) RESULT(c)
-INTEGER(i4), INTENT(in) :: n !< Length of local array
-REAL(r8), INTENT(in) :: a(n) !< Local data for reduction
-INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
-INTEGER(i4) :: i
-REAL(r8) :: c
-c=0.d0
-!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-DO i=1,n
-  c=c+ABS(a(i))*REAL(w(i),r8)
-END DO
-END FUNCTION owned_norm1_r8
-!---------------------------------------------------------------------------------
-!> Local owned-only complex(c8) 1-norm (explicit-shape arrays allow vectorization)
-!---------------------------------------------------------------------------------
-FUNCTION owned_norm1_c8(a,w,n) RESULT(c)
-INTEGER(i4), INTENT(in) :: n !< Length of local array
-COMPLEX(c8), INTENT(in) :: a(n) !< Local data for reduction
-INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
-INTEGER(i4) :: i
-REAL(r8) :: c
-c=0.d0
-!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-DO i=1,n
-  c=c+ABS(a(i))*REAL(w(i),r8)
-END DO
-END FUNCTION owned_norm1_c8
-!---------------------------------------------------------------------------------
 !> real(r8) dot_product implementation of \ref oft_stitching::oft_global_reduction
 !---------------------------------------------------------------------------------
 function global_dp_r8(self,a,b,n,no_reduce) result(c)
@@ -338,72 +267,6 @@ IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_dp_c8
 !---------------------------------------------------------------------------------
-!> Mixed real(r8)/complex(c8) dot_product implementation of \ref oft_stitching::oft_global_dp
-!!
-!! Computes \f$ \sum_i a_i b_i \f$ (no conjugation is needed for real `a`)
-!---------------------------------------------------------------------------------
-function global_dp_rc8(self,a,b,n,no_reduce) result(c)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: n !< Length of local arrays
-real(r8), intent(in) :: a(n) !< Local vector 1 for dot_product
-COMPLEX(c8), intent(in) :: b(n) !< Local vector 2 for dot_product
-logical, optional, intent(in) :: no_reduce !< Skip global reduction step
-logical :: do_reduce
-integer(i4) :: i
-COMPLEX(c8) :: c
-DEBUG_STACK_PUSH
-do_reduce=(.NOT.self%full)
-IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
-!---Global reduction
-c=(0.d0,0.d0)
-IF(.NOT.self%skip)THEN
-  IF(self%nbe>0)THEN
-    IF(self%nown/=n)CALL seam_build_own(self,n)
-    c=owned_dp_rc8(a,b,self%own,n)
-  ELSE
-    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    do i=1,n
-      c=c+a(i)*b(i)
-    end do
-  END IF
-END IF
-IF(do_reduce)c=oft_mpi_sum(c)
-DEBUG_STACK_POP
-end function global_dp_rc8
-!---------------------------------------------------------------------------------
-!> Mixed complex(c8)/real(r8) dot_product implementation of \ref oft_stitching::oft_global_dp
-!!
-!! Computes \f$ \sum_i \overline{a_i} b_i \f$
-!---------------------------------------------------------------------------------
-function global_dp_cr8(self,a,b,n,no_reduce) result(c)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: n !< Length of local arrays
-COMPLEX(c8), intent(in) :: a(n) !< Local vector 1 for dot_product
-real(r8), intent(in) :: b(n) !< Local vector 2 for dot_product
-logical, optional, intent(in) :: no_reduce !< Skip global reduction step
-logical :: do_reduce
-integer(i4) :: i
-COMPLEX(c8) :: c
-DEBUG_STACK_PUSH
-do_reduce=(.NOT.self%full)
-IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
-!---Global reduction
-c=(0.d0,0.d0)
-IF(.NOT.self%skip)THEN
-  IF(self%nbe>0)THEN
-    IF(self%nown/=n)CALL seam_build_own(self,n)
-    c=owned_dp_cr8(a,b,self%own,n)
-  ELSE
-    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    do i=1,n
-      c=c+CONJG(a(i))*b(i)
-    end do
-  END IF
-END IF
-IF(do_reduce)c=oft_mpi_sum(c)
-DEBUG_STACK_POP
-end function global_dp_cr8
-!---------------------------------------------------------------------------------
 !> real(r8) array implementation of \ref oft_stitching::oft_global_reduction
 !---------------------------------------------------------------------------------
 function global_reduction_r8(self,a,n) result(c)
@@ -455,58 +318,6 @@ END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_reduction_c8
-!---------------------------------------------------------------------------------
-!> real(r8) implementation of \ref oft_stitching::oft_global_norm1
-!---------------------------------------------------------------------------------
-function global_norm1_r8(self,a,n) result(c)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: n !< Length of local array for reduction
-real(r8), intent(in) :: a(n) !< Local data for reduction
-integer(i4) :: i
-real(r8) :: c !< \f$ \sum_i |a_i| \f$ over owned entries on all processes
-DEBUG_STACK_PUSH
-!---Global reduction
-c=0.d0
-IF(.NOT.self%skip)THEN
-  IF(self%nbe>0)THEN
-    IF(self%nown/=n)CALL seam_build_own(self,n)
-    c=owned_norm1_r8(a,self%own,n)
-  ELSE
-    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    do i=1,n
-      c=c+ABS(a(i))
-    end do
-  END IF
-END IF
-IF(.NOT.self%full)c=oft_mpi_sum(c)
-DEBUG_STACK_POP
-end function global_norm1_r8
-!---------------------------------------------------------------------------------
-!> complex(c8) implementation of \ref oft_stitching::oft_global_norm1
-!---------------------------------------------------------------------------------
-function global_norm1_c8(self,a,n) result(c)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: n !< Length of local array for reduction
-COMPLEX(c8), intent(in) :: a(n) !< Local data for reduction
-integer(i4) :: i
-real(r8) :: c !< \f$ \sum_i |a_i| \f$ over owned entries on all processes
-DEBUG_STACK_PUSH
-!---Global reduction
-c=0.d0
-IF(.NOT.self%skip)THEN
-  IF(self%nbe>0)THEN
-    IF(self%nown/=n)CALL seam_build_own(self,n)
-    c=owned_norm1_c8(a,self%own,n)
-  ELSE
-    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    do i=1,n
-      c=c+ABS(a(i))
-    end do
-  END IF
-END IF
-IF(.NOT.self%full)c=oft_mpi_sum(c)
-DEBUG_STACK_POP
-end function global_norm1_c8
 !---------------------------------------------------------------------------------
 !> Build the scatter plan and combination lists used by global stitching
 !!

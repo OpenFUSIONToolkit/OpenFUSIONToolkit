@@ -29,8 +29,8 @@ USE, INTRINSIC :: iso_c_binding, only: c_int, c_int8_t
 USE oft_local
 USE oft_base
 USE oft_sort, ONLY: search_array, sort_array
-USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
-  oft_global_reduction, oft_global_norm1, oft_stitch_check, seam_free_plan, seam_build_own
+USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_stitch_check, seam_free_plan, &
+  seam_build_own
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &

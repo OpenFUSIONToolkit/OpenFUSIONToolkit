@@ -18,7 +18,7 @@
 !! by including a template file once per type combination, each time inside its own
 !! module with different type macros:
 !! - `native_kernels_vec.inc`: one value type (`nk_set`, `nk_scale`, `nk_maxpy`,
-!!   `nk_norm_inf`, `nk_owned_sum`, `nk_owned_norm1`, `nk_gather`, `nk_scatter`,
+!!   `nk_norm_inf`, `nk_owned_sum`, `nk_owned_norm1`, `nk_scatter`,
 !!   CSR row/column/diagonal operations and value insertion) for real and complex.
 !! - `native_kernels_upd.inc`: destination and source types (`nk_copy`, `nk_axpby`,
 !!   `nk_axpbypcz`, `nk_mult`, `nk_div`) for real/real, complex/real and
@@ -340,7 +340,7 @@ END MODULE oft_native_kernels_prod_cc
 !! description of native_kernels.F90) together with @ref oft_native_kernels_base.
 !! Generic kernels:
 !! - Single type: `nk_set`, `nk_scale`, `nk_maxpy`, `nk_norm_inf`, `nk_owned_sum`,
-!!   `nk_owned_norm1`, `nk_gather`, `nk_scatter`, `nk_csr_zero_rows`,
+!!   `nk_owned_norm1`, `nk_scatter`, `nk_csr_zero_rows`,
 !!   `nk_csr_zero_cols`, `nk_csr_identity_rows`, `nk_csr_get_diag`, `nk_set_at`,
 !!   `nk_add_at`, `nk_atomic_add_at` (real and complex)
 !! - Destination/source: `nk_copy`, `nk_axpby`, `nk_axpbypcz`, `nk_mult`, `nk_div`

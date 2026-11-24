@@ -24,7 +24,7 @@ USE oft_native_kernels_base
 IMPLICIT NONE
 PRIVATE
 PUBLIC :: nk_set, nk_scale, nk_maxpy, nk_norm_inf, nk_owned_sum, nk_owned_norm1
-PUBLIC :: nk_gather, nk_scatter, nk_csr_zero_rows, nk_csr_zero_cols, nk_csr_identity_rows
+PUBLIC :: nk_scatter, nk_csr_zero_rows, nk_csr_zero_cols, nk_csr_identity_rows
 PUBLIC :: nk_csr_get_diag, nk_set_at, nk_add_at, nk_atomic_add_at
 PUBLIC :: nk_dense_insert, nk_dense_zero_rows, nk_dense_zero_cols, nk_dense_get_diag
 INTERFACE nk_set
@@ -45,9 +45,6 @@ END INTERFACE nk_owned_sum
 INTERFACE nk_owned_norm1
   MODULE PROCEDURE k_owned_norm1
 END INTERFACE nk_owned_norm1
-INTERFACE nk_gather
-  MODULE PROCEDURE k_gather
-END INTERFACE nk_gather
 INTERFACE nk_scatter
   MODULE PROCEDURE k_scatter
 END INTERFACE nk_scatter
@@ -210,20 +207,6 @@ ELSE
   END DO
 END IF
 END FUNCTION k_owned_norm1
-!---------------------------------------------------------------------------------
-!> Gather entries by index, \f$ y_i = x_{idx(i)} \f$
-!---------------------------------------------------------------------------------
-SUBROUTINE k_gather(n,idx,x,y)
-INTEGER(i4), INTENT(in) :: n !< Number of entries to gather
-INTEGER(i4), INTENT(in) :: idx(n) !< Source index of each entry [n]
-KT, INTENT(in) :: x(:) !< Source array
-KT, INTENT(inout) :: y(n) !< Destination array [n]
-INTEGER(i4) :: i
-!$omp parallel do simd if(n>OFT_OMP_VTHRESH)
-DO i=1,n
-  y(i)=x(idx(i))
-END DO
-END SUBROUTINE k_gather
 !---------------------------------------------------------------------------------
 !> Scatter entries by index, \f$ y_{idx(i)} = x_i \f$
 !!
