@@ -15,7 +15,7 @@
 !--------------------------------------------------------------------------------
 MODULE oft_local
 USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
-USE, INTRINSIC :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
+USE, INTRINSIC :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
 #ifdef __INTEL_COMPILER
 USE ifport ! Intel fortran portability library
 #endif
@@ -112,6 +112,14 @@ ABSTRACT INTERFACE
     REAL(r8), INTENT(in) :: y !< Parameter 2
     REAL(r8) :: f !< Function value
   END FUNCTION oft_2d_func
+!------------------------------------------------------------------------------
+!> Generic interface for function of position
+!------------------------------------------------------------------------------
+  FUNCTION oft_poss_func(pt) result(val)
+  IMPORT r8
+  REAL(r8), INTENT(in) :: pt(3) !< Location to evaluate function
+  REAL(r8) :: val !< Value of function
+  END FUNCTION oft_poss_func
 END INTERFACE
 !---------------------------------------------------------------------------------
 !> Simple timer class
@@ -341,6 +349,22 @@ REAL(r8), INTENT(in) :: a(:) !< Array
 REAL(r8) :: c !< \f$ \sum_i a^2_i \f$
 c=SQRT(SUM(a**2))
 END FUNCTION magnitude
+!---------------------------------------------------------------------------------
+!> Clamp negative round-off in a quantity that should be non-negative (eg. a
+!! self dot-product before `SQRT`) to zero
+!!
+!! NaN is returned unchanged, unlike `MAX(x,0.d0)` whose result for a NaN argument
+!! is processor dependent, so that failures still propagate to error checks.
+!---------------------------------------------------------------------------------
+ELEMENTAL FUNCTION clamp_nonneg(x) RESULT(y)
+REAL(r8), INTENT(in) :: x !< Input value
+REAL(r8) :: y !< `MAX(x,0)`, or `x` if it is NaN
+IF(ieee_is_nan(x))THEN
+  y=x
+ELSE
+  y=MAX(x,0.d0)
+END IF
+END FUNCTION clamp_nonneg
 !---------------------------------------------------------------------------------
 !> Compute the 2-norm of an array
 !---------------------------------------------------------------------------------

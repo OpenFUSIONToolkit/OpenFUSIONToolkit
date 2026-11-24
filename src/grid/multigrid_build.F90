@@ -20,7 +20,7 @@ use oft_mesh_global, only: mesh_global_init, mesh_global_link, mesh_global_decom
 use oft_mesh_global_util, only: mesh_global_orient, mesh_global_stats, &
   mesh_global_boundary, mesh_global_save, mesh_global_igrnd, mesh_global_periodic, &
   bmesh_global_boundary, bmesh_global_periodic, bmesh_global_orient, bmesh_global_stats, &
-  mesh_global_set_curved
+  mesh_global_set_curved, bmesh_global_copy_ho
 use oft_stitching, only: oft_global_stitch
 USE oft_tetmesh_type, only: oft_tetmesh
 use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
@@ -28,7 +28,8 @@ use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
 use oft_mesh_native, only: native_load_vmesh, native_load_smesh, mesh_native_id, &
-  native_hobase, native_set_periodic, native_bset_periodic, native_finalize_setup
+  native_hobase, native_set_periodic, native_bset_periodic, native_cadlink, native_finalize_setup, &
+  native_reffix, native_add_quad
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
@@ -66,6 +67,7 @@ select case(cad_type)
   case(mesh_native_id) ! Native Mesh
     CALL native_load_vmesh(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
+    CALL native_cadlink(mg_mesh%mesh)
     CALL native_hobase(mg_mesh%mesh)
     CALL native_set_periodic(mg_mesh%mesh)
   case(mesh_t3d_id) ! T3D Mesh
@@ -109,7 +111,7 @@ CALL multigrid_reffix_ho(mg_mesh)
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
   case(mesh_native_id)
-    ! Do nothing
+    call native_reffix(mg_mesh)
   case(mesh_t3d_id)
     call mesh_t3d_reffix(mg_mesh)
   case(mesh_sphere_id)
@@ -172,7 +174,7 @@ CALL mesh_global_set_curved(mesh,1)
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
   case(mesh_native_id)
-    ! Do nothing CALL mesh_cube_add_quad
+    call native_add_quad(mg_mesh)
   case(mesh_t3d_id)
     call mesh_t3d_add_quad(mg_mesh)
   case(mesh_sphere_id)
@@ -184,24 +186,9 @@ select case(mesh%cad_type)
 end select
 CALL multigrid_check_ho(mg_mesh%mesh)
 !---Propogate to boundary mesh
+CALL bmesh_global_copy_ho(mesh)
 CALL mesh%bmesh%set_order(2)
 CALL mesh_global_set_curved(mesh%bmesh,1)
-!---Edge centers
-!!$omp parallel do private(j)
-do i=1,mesh%bmesh%ne
-  mesh%bmesh%ho_info%lep(1,i)=i
-  j=INT(ABS(mesh%bmesh%parent%le(i)),4)
-  mesh%bmesh%ho_info%r(:,i)=mesh%ho_info%r(:,mesh%ho_info%lep(1,j))
-enddo
-IF(mesh%ho_info%nfp==1)THEN
-  !---Face centers
-  !!$omp parallel do private(j)
-  do i=1,mesh%bmesh%nc
-    j=INT(ABS(mesh%bmesh%parent%lf(i)),4)
-    mesh%bmesh%ho_info%lcp(1,i)=i+mesh%bmesh%ne
-    mesh%bmesh%ho_info%r(:,i+mesh%bmesh%ne)=mesh%ho_info%r(:,mesh%ho_info%lfp(1,j))
-  enddo
-END IF
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_add_quad
@@ -413,14 +400,16 @@ integer(i4) :: cad_type = 0
 integer(i4) :: nlevels = 1
 integer(i4) :: nbase = 1
 integer(i4) :: grid_order = 1
+LOGICAL :: ho_curve_all = .FALSE.
 !---Read in mesh options
 namelist/mesh_options/meshname,cad_type,nlevels,nbase,grid_order, &
-fix_boundary,jac_ratio_tol,part_meth,cad_feature_angle
+fix_boundary,jac_ratio_tol,part_meth,cad_feature_angle,ho_curve_all
 DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,mesh_options,IOSTAT=ierr)
 CLOSE(io_unit)
-IF(ierr<0)CALL oft_abort('No mesh options found in input file.','multigrid_construct',__FILE__)
+IF(ierr<0)CALL oft_abort('No "mesh_options" found in input file.','multigrid_construct',__FILE__)
+IF(ierr>0)CALL oft_abort('Error parsing "mesh_options" in input file.','multigrid_construct',__FILE__)
 !---
 if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct',__FILE__)
 if(nbase<=0.OR.nbase>nlevels)call oft_abort('Invalid number of MG base levels','multigrid_construct',__FILE__)
@@ -443,6 +432,7 @@ end if
 !---Setup MG enviroment
 mg_mesh%mgmax=nlevels
 mg_mesh%nbase=nbase
+mg_mesh%ho_curve_all=ho_curve_all
 oft_env%nbase=nbase
 mg_mesh%mgdim=mg_mesh%mgmax
 allocate(mg_mesh%inter(mg_mesh%mgdim))
@@ -559,6 +549,9 @@ fmesh=>mg_mesh%meshes(mg_mesh%level+1) ! Get new mesh
 !---Replicate mesh to next level
 fmesh%cad_type=cmesh%cad_type
 fmesh%periodic%nper=cmesh%periodic%nper
+fmesh%periodic%vmap_mats=cmesh%periodic%vmap_mats
+fmesh%periodic%vmap_matsT=cmesh%periodic%vmap_matsT
+fmesh%periodic%revolved=cmesh%periodic%revolved
 fmesh%nreg=cmesh%nreg
 fmesh%meshname=cmesh%meshname
 fmesh%np=cmesh%np
@@ -823,14 +816,21 @@ DEBUG_STACK_POP
 end subroutine multigrid_reffix_surf
 !------------------------------------------------------------------------------
 !> Add node points for quadratic elements
+!!
+!! Native meshes whose quadratic nodes were supplied (by the reader or by refinement
+!! of a quadratic level) may be curved anywhere, so every cell is flagged as curved,
+!! as in @ref multigrid_add_quad. Otherwise only cells with a boundary edge are
+!! flagged, and the CAD-specific step adjusts the boundary nodes.
 !------------------------------------------------------------------------------
 subroutine multigrid_add_quad_surf(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 INTEGER(i4) :: i,j
 REAL(r8) :: pttmp(3)
+LOGICAL :: ho_supplied
 DEBUG_STACK_PUSH
+ho_supplied=ASSOCIATED(smesh%ho_info%r)
 !---Initialize high order points with straight edges
-IF(.NOT.ASSOCIATED(smesh%ho_info%r))THEN
+IF(.NOT.ho_supplied)THEN
   CALL smesh%set_order(2)
   DO i=1,smesh%ne
     smesh%ho_info%lep(1,i)=i
@@ -849,7 +849,11 @@ IF(.NOT.ASSOCIATED(smesh%ho_info%r))THEN
 ELSE
   CALL smesh%set_order(2)
 END IF
-CALL mesh_global_set_curved(smesh,2)
+IF(ho_supplied.AND.(smesh%cad_type==mesh_native_id))THEN
+  CALL mesh_global_set_curved(smesh,1)
+ELSE
+  CALL mesh_global_set_curved(smesh,2)
+END IF
 !---Select mesh type and adjust boundary
 select case(smesh%cad_type)
   case(mesh_native_id)
@@ -893,9 +897,10 @@ DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,mesh_options,IOSTAT=ierr)
 CLOSE(io_unit)
-IF(ierr<0)CALL oft_abort('No mesh options found in input file.','multigrid_construct_surf',__FILE__)
+IF(ierr<0)CALL oft_abort('No "mesh_options" found in input file.','multigrid_construct_surf',__FILE__)
+IF(ierr>0)CALL oft_abort('Error parsing "mesh_options" in input file.','multigrid_construct_surf',__FILE__)
 !---
-if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct',__FILE__)
+if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct_surf',__FILE__)
 if(nbase<=0.OR.nbase>nlevels)call oft_abort('Invalid number of MG base levels', &
   'multigrid_construct_surf',__FILE__)
 !---Setup basic mesh structure and runtime
@@ -999,6 +1004,9 @@ fmesh=>mg_mesh%smeshes(mg_mesh%level+1) ! Get new mesh
 !---Replicate mesh to next level
 fmesh%cad_type=cmesh%cad_type
 fmesh%periodic%nper=cmesh%periodic%nper
+fmesh%periodic%vmap_mats=cmesh%periodic%vmap_mats
+fmesh%periodic%vmap_matsT=cmesh%periodic%vmap_matsT
+fmesh%periodic%revolved=cmesh%periodic%revolved
 fmesh%nreg=cmesh%nreg
 fmesh%meshname=cmesh%meshname
 fmesh%dim=cmesh%dim

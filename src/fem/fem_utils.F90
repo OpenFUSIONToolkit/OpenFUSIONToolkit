@@ -21,6 +21,7 @@ USE oft_mesh_local, ONLY: mesh_local_partition
 USE oft_stitching, ONLY: oft_global_stitch
 USE oft_la_base, ONLY: oft_matrix
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type
+USE fem_composite, ONLY: oft_fem_comp_type
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -151,10 +152,13 @@ class(cc_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [SIZE(val)] (entries beyond SIZE(bcc,1) are zeroed)
+integer(i4) :: n
 DEBUG_STACK_PUSH
 !---
-val=self%bcc(:,cell)
+n=MIN(SIZE(val),SIZE(self%bcc,1))
+val(1:n)=self%bcc(1:n,cell)
+IF(SIZE(val)>n)val(n+1:)=0.d0
 DEBUG_STACK_POP
 end subroutine cc_interp_apply
 !------------------------------------------------------------------------------
@@ -376,6 +380,83 @@ END DO
 DEALLOCATE(tloc_p,tloc_e,tloc_f,tloc_c)
 DEBUG_STACK_POP
 end subroutine fem_partition
+!------------------------------------------------------------------------------
+!> Partition FE weights based on geometric connectivity
+!------------------------------------------------------------------------------
+subroutine comp_fem_partition(self_comp,part,nparts)
+class(oft_fem_comp_type), intent(inout) :: self_comp !< Finite element structure
+INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [self%ne]
+INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
+INTEGER(i4) :: i,j,k,ifield,nloc,offset,goffset,mycounts(4)
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: tloc
+TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: tloc_p,tloc_e,tloc_f,tloc_c
+DEBUG_STACK_PUSH
+IF(oft_debug_print(2))WRITE(*,'(2X,A,I4)')'Partitioning composite FE weights',nparts
+!---Partition mesh
+ALLOCATE(tloc_p(nparts),tloc_e(nparts))
+ALLOCATE(tloc_f(nparts),tloc_c(nparts))
+SELECT TYPE(this=>self_comp%fields(1)%fe)
+CLASS IS(oft_fem_type)
+  CALL mesh_local_partition(this%mesh,tloc_p,tloc_e,tloc_f,tloc_c,nparts)
+CLASS DEFAULT
+  CALL oft_abort("Invalid FE representation for partitioning", &
+    "comp_fem_partition",__FILE__)
+END SELECT
+!---Ownership
+!$omp parallel do private(i,j,k,ifield,nloc,mycounts,offset,goffset,tloc)
+DO k=1,nparts
+  mycounts=(/tloc_p(k)%n,tloc_e(k)%n,tloc_f(k)%n,tloc_c(k)%n/)
+  goffset=0
+  DO ifield=1,self_comp%nfields
+    SELECT TYPE(this=>self_comp%fields(ifield)%fe)
+    CLASS IS(oft_fem_type)
+      nloc=SUM(mycounts*this%gstruct)
+      ALLOCATE(tloc(nloc))
+      tloc=-1
+      nloc=0
+      offset=0
+      do j=1,tloc_p(k)%n
+        do i=1,this%gstruct(1)
+          nloc=nloc+1
+          tloc(nloc)=(tloc_p(k)%v(j)-1)*this%gstruct(1)+i
+        end do
+      end do
+      offset=this%gstruct(1)*this%mesh%np
+      do j=1,tloc_e(k)%n
+        do i=1,this%gstruct(2)
+          nloc=nloc+1
+          tloc(nloc)=(tloc_e(k)%v(j)-1)*this%gstruct(2)+i+offset
+        end do
+      end do
+      offset=offset+this%gstruct(2)*this%mesh%ne
+      do j=1,tloc_f(k)%n
+        do i=1,this%gstruct(3)
+          nloc=nloc+1
+          tloc(nloc)=(tloc_f(k)%v(j)-1)*this%gstruct(3)+i+offset
+        end do
+      end do
+      offset=offset+this%gstruct(3)*this%mesh%nf
+      do j=1,tloc_c(k)%n
+        do i=1,this%gstruct(4)
+          nloc=nloc+1
+          tloc(nloc)=(tloc_c(k)%v(j)-1)*this%gstruct(4)+i+offset
+        end do
+      end do
+      do i=1,nloc
+        part(goffset+tloc(i))=k
+      end do
+      goffset=goffset+this%ne
+      DEALLOCATE(tloc)
+    CLASS DEFAULT
+      CALL oft_abort("Invalid FE representation for partitioning", &
+        "comp_fem_partition",__FILE__)
+    END SELECT
+  END DO
+  DEALLOCATE(tloc_p(k)%v,tloc_e(k)%v,tloc_f(k)%v,tloc_c(k)%v)
+END DO
+DEALLOCATE(tloc_p,tloc_e,tloc_f,tloc_c)
+DEBUG_STACK_POP
+end subroutine comp_fem_partition
 !------------------------------------------------------------------------------
 !> Set diagonal elements to one on owned rows according to BC flag
 !------------------------------------------------------------------------------

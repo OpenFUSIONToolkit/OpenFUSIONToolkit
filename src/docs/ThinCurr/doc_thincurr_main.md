@@ -39,7 +39,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
 
 \subsection doc_tw_main_settings_xml XML input settings
 Settings for ThinCurr runs are contained in the `oft->thincurr` element, with the following elements:
-  * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
+  * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
   * `sens_mask`: Comma separated integer mask for removing regions from sensor signals (optional; default: 0 for all regions)
   * `icoils`: Definition of coils with fixed current for \ref thincurr_td and \ref thincurr_fr (see \ref doc_tw_main_filament_def)
   * `vcoils`: Definition of coils with fixed voltage (see \ref doc_tw_main_filament_def)

@@ -124,7 +124,6 @@ type, public, extends(oft_matrix) :: oft_native_matrix
   logical :: full_current = .FALSE. !< Is full matrix current?
   integer(i4) :: nnz = 0 !< Number of non-zero entries
   integer(i4) :: nred = 0 !< Number of redundant rows
-  integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
   integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows
   integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list
   integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list
@@ -791,7 +790,7 @@ SELECT CASE(itype)
     norm=oft_global_reduction(self%stitch_info,vtmp,self%n)
     DEALLOCATE(vtmp)
   CASE(2)
-    norm=SQRT(self%dot(self))
+    norm=SQRT(clamp_nonneg(self%dot(self))) ! Clamp negative round-off (safety net, NaN preserved)
   CASE(3)
     nloc=0.d0
     DO i=1,self%n
@@ -1643,7 +1642,7 @@ SELECT CASE(itype)
     norm=oft_global_reduction(self%stitch_info,vtmp,self%n)
     DEALLOCATE(vtmp)
   CASE(2)
-    norm=SQRT(REAL(self%dot(self),r8))
+    norm=SQRT(clamp_nonneg(REAL(self%dot(self),r8))) ! Clamp negative round-off (safety net, NaN preserved)
   CASE(3)
     nloc=0.d0
     DO i=1,self%n
@@ -2585,33 +2584,41 @@ IF(.NOT.uv%stitch_info%full)THEN
     neout=ncon(j)
     netmp=nrecv(j)
     !---Determine location of boundary points on other processors
+    !---Count matches first, then store them (with periodicity, an entry may match many remote copies)
     ncon(j)=0
-    neel=0
-    m=1
-    jp=1
-    last=0
-    do mm=1,netmp ! Loop over input points
-      IF(letmp(1,mm)==last.AND.periodic)THEN
-        m=jp
-      ELSE
-        last=letmp(1,mm)
+    DO k=1,2
+      IF(k==2)THEN
+        DEALLOCATE(lrmaps(j)%linktmp)
+        ALLOCATE(lrmaps(j)%linktmp(2,MAX(1,ncon(j))))
+        ncon(j)=0
       END IF
-      IF(m>neout)EXIT
-      do while(leout(1,m)<=letmp(1,mm))
-        IF(leout(1,m)<letmp(1,mm))jp=m+1
-        IF(leout(1,m)==letmp(1,mm))THEN
-          IF(leout(2,m)==letmp(2,mm))THEN ! Found match
-            ncon(j)=ncon(j)+1
-            lrmaps(j)%linktmp(:,ncon(j))=(/mm,m/)
-            neel=neel+1
-          ELSE IF(leout(2,m)>letmp(2,mm))THEN
-            EXIT
-          END IF
+      neel=0
+      m=1
+      jp=1
+      last=0
+      do mm=1,netmp ! Loop over input points
+        IF(letmp(1,mm)==last.AND.periodic)THEN
+          m=jp
+        ELSE
+          last=letmp(1,mm)
         END IF
-        m=m+1
         IF(m>neout)EXIT
+        do while(leout(1,m)<=letmp(1,mm))
+          IF(leout(1,m)<letmp(1,mm))jp=m+1
+          IF(leout(1,m)==letmp(1,mm))THEN
+            IF(leout(2,m)==letmp(2,mm))THEN ! Found match
+              ncon(j)=ncon(j)+1
+              IF(k==2)lrmaps(j)%linktmp(:,ncon(j))=(/mm,m/)
+              neel=neel+1
+            ELSE IF(leout(2,m)>letmp(2,mm))THEN
+              EXIT
+            END IF
+          END IF
+          m=m+1
+          IF(m>neout)EXIT
+        end do
       end do
-    end do
+    END DO
     self%linkage%kle(j)=neel
   end do
 END IF
@@ -2628,31 +2635,40 @@ IF(jn>0)THEN
     IF(leout(1,m)==0)EXIT
   END DO
   neout=m-1
-  m=1
-  jp=1
-  last=0
-  do mm=1,neout ! Loop over input points
-    IF(leout(1,mm)==last.AND.periodic)THEN
-      m=jp
-    ELSE
-      last=leout(1,mm)
+  !---Count matches first, then store them (with periodicity, an entry may match many local copies)
+  DO k=1,2
+    IF(k==2)THEN
+      DEALLOCATE(lrmaps(0)%linktmp)
+      ALLOCATE(lrmaps(0)%linktmp(2,MAX(1,ncon(0))))
+      ncon(0)=0
+      neel=0
     END IF
-    IF(m>neout)EXIT
-    do while(leout(1,m)<=leout(1,mm))
-      IF(leout(1,m)<leout(1,mm))jp=m+1
-      IF((leout(1,m)==leout(1,mm)).AND.(m/=mm))THEN
-        IF(leout(2,m)==leout(2,mm))THEN ! Found match
-          ncon(0)=ncon(0)+1
-          lrmaps(0)%linktmp(:,ncon(0))=(/mm,m/)
-          neel=neel+1
-        ELSE IF(leout(2,m)>leout(2,mm))THEN
-          EXIT
-        END IF
+    m=1
+    jp=1
+    last=0
+    do mm=1,neout ! Loop over input points
+      IF(leout(1,mm)==last.AND.periodic)THEN
+        m=jp
+      ELSE
+        last=leout(1,mm)
       END IF
-      m=m+1
       IF(m>neout)EXIT
+      do while(leout(1,m)<=leout(1,mm))
+        IF(leout(1,m)<leout(1,mm))jp=m+1
+        IF((leout(1,m)==leout(1,mm)).AND.(m/=mm))THEN
+          IF(leout(2,m)==leout(2,mm))THEN ! Found match
+            ncon(0)=ncon(0)+1
+            IF(k==2)lrmaps(0)%linktmp(:,ncon(0))=(/mm,m/)
+            neel=neel+1
+          ELSE IF(leout(2,m)>leout(2,mm))THEN
+            EXIT
+          END IF
+        END IF
+        m=m+1
+        IF(m>neout)EXIT
+      end do
     end do
-  end do
+  END DO
 END IF
 self%linkage%kle(0)=neel
 !---Condense linkage to sparse rep

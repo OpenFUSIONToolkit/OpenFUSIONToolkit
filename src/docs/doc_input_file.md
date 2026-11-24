@@ -71,6 +71,7 @@ created by edge division will remain at the mid point of the coarse level edge r
 | `nbase=1`         | Number of base refinements before decomposition to MPI | int |
 | `grid_order=1`    | Order of finest level tetrahedra (1-2) | int |
 | `fix_boundary=T`  | Adjust new boundary points to CAD boundary | bool |
+| `ho_curve_all=F`  | When refining a quadratic volume mesh, place new points with the quadratic mapping of every cell, not only cells touching the boundary (surface meshes always use every cell) | bool |
 
 # Finite element smoother settings {#doc_input_fem}
 
