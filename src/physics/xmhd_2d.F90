@@ -211,6 +211,7 @@ real(4) :: hist_r4(6)
 !---Timestep control
 integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dtin,dthist(XMHD_ITCACHE)
+real(r8) :: pre_jac_dt ! Value of jac_dt when the Jacobian/preconditioner was last built
 !---
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
@@ -262,6 +263,7 @@ END IF
 self%jac_dt=self%dt
 IF(self%timestep_cn)self%jac_dt=self%dt/2.d0
 CALL build_jacobian(self,u)
+pre_jac_dt=self%jac_dt
 IF(self%mfnk)THEN
   ALLOCATE(self%mf_mat)
   CALL up%set(1.d0)
@@ -341,9 +343,12 @@ DO i=1,self%nsteps
     self%jac_dt=self%dt
   END IF
   npre = npre + 1
+  ! Force rebuild if timestep has drifted >10% from value used for the last Jacobian/preconditioner build
+  IF(ABS(1.d0-self%jac_dt/pre_jac_dt)>0.1d0)npre=0
   IF((.NOT.self%mfnk).OR.MOD(npre,self%pre_freq)==0)THEN
     CALL update_jacobian(u)
     CALL solver%pre%update(.TRUE.)
+    pre_jac_dt=self%jac_dt
   END IF
   !
   DO j=maxextrap,2,-1
@@ -395,7 +400,6 @@ DO i=1,self%nsteps
   self%dt=self%ittarget*SUM(dthist)/SUM(itcount)
   IF(self%dt>dtin)self%dt=dtin
   IF(self%dt<1.d-3*dtin)CALL oft_abort('Time step dropped too low!','run_simulation',__FILE__)
-  IF(ABS(1.d0-self%dt/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
