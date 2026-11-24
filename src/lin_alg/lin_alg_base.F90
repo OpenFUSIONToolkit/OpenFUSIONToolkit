@@ -611,6 +611,42 @@ type, public :: oft_graph_ptr
   type(oft_graph), pointer :: g => NULL() !< Graph
 end type oft_graph_ptr
 !---------------------------------------------------------------------------------
+!> @name Cell adjacency types for growing overlapping subdomains
+!! Cells are considered adjacent if they share at least a point, edge or face
+!---------------------------------------------------------------------------------
+!@{
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_CELL_ADJ_POINT = 1 !< Cells adjacent through shared points (vertices)
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_CELL_ADJ_EDGE = 2 !< Cells adjacent through shared edges
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_CELL_ADJ_FACE = 3 !< Cells adjacent through shared faces
+!@}
+!---------------------------------------------------------------------------------
+!> DoF sets of cell-grown overlapping blocks (output of a cell overlap builder)
+!!
+!! All positions refer to the sorted list of union DoFs `gdof`.
+!---------------------------------------------------------------------------------
+TYPE, PUBLIC :: oft_overlap_dofs
+  INTEGER(i4) :: n = 0 !< Union size
+  INTEGER(i4) :: nblocks = 0 !< Number of blocks on this process
+  INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gdof !< Union global row ids, sorted unique [n]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: odof !< Owner process of each union DoF [n]
+  TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: blk !< Positions in `gdof` of each block's DoFs (sorted) [nblocks]
+  TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: asg !< Positions in `gdof` assigned to each block for restricted write-back (sorted, subset of `blk`) [nblocks]
+END TYPE oft_overlap_dofs
+!---------------------------------------------------------------------------------
+!> Abstract builder of cell-grown overlapping DoF sets for a matrix (implemented in `fem`)
+!!
+!! A matrix refers to its builder through `oft_matrix::cell_ovl`, without owning it.
+!---------------------------------------------------------------------------------
+TYPE, ABSTRACT, PUBLIC :: oft_cell_overlap_builder
+CONTAINS
+  !> Build the overlapping DoF sets (collective)
+  PROCEDURE(cell_ovl_build), DEFERRED :: build
+  !> Number of blocks on this process
+  PROCEDURE(cell_ovl_nblocks), DEFERRED :: nblocks
+  !> Release builder resources (default: nothing to do)
+  PROCEDURE :: delete => cell_ovl_delete
+END TYPE oft_cell_overlap_builder
+!---------------------------------------------------------------------------------
 !> Abstract matrix class
 !!
 !! Basic class for OFT matices (ex. fem operators)
@@ -626,6 +662,7 @@ type, abstract, public :: oft_matrix
   integer(i4) :: nrslice = 0 !< Number of owned rows
   integer(i4) :: ncslice = 0 !< Number of owned columns
   integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
+  class(oft_cell_overlap_builder), pointer :: cell_ovl => NULL() !< Cell overlap builder (not owned by the matrix)
   type(oft_map), pointer, dimension(:) :: i_map => NULL() !< Row block mapping
   type(oft_map), pointer, dimension(:) :: j_map => NULL() !< Column block mapping
   class(oft_vector), pointer :: D => NULL() !< Diagonal entries for scaling
@@ -709,6 +746,36 @@ end type oft_cmatrix
 type, public :: oft_cmatrix_ptr
   class(oft_cmatrix), pointer :: m => NULL() !< Matrix
 end type oft_cmatrix_ptr
+!--- Cell overlap builder interfaces
+ABSTRACT INTERFACE
+  !---------------------------------------------------------------------------------
+  !> Build cell-grown overlapping DoF sets for the rows of a matrix (collective)
+  !!
+  !! Must be called by all processes. Global row ids in `dofs` are
+  !! `i_map(f)%offsetg+i_map(f)%lge(j)` for row block `f` and local row `j` of `mat`.
+  !! Each block is grown by `layers` layers of cells (adjacent as defined by `adj`)
+  !! from its base cells, which are themselves grown by `base_layers` layers
+  !! (`base_layers<0` selects the default `base_layers=layers`).
+  !---------------------------------------------------------------------------------
+  SUBROUTINE cell_ovl_build(self,mat,u,layers,adj,base_layers,dofs)
+    IMPORT oft_cell_overlap_builder, oft_matrix, oft_vector, oft_overlap_dofs, i4
+    CLASS(oft_cell_overlap_builder), INTENT(inout) :: self !< Builder object
+    CLASS(oft_matrix), INTENT(inout) :: mat !< Matrix defining the row maps
+    CLASS(oft_vector), INTENT(inout) :: u !< Row-space vector (seam information)
+    INTEGER(i4), INTENT(in) :: layers !< Number of layers of cells to grow by
+    INTEGER(i4), INTENT(in) :: adj !< Cell adjacency (`OFT_CELL_ADJ_*`)
+    INTEGER(i4), INTENT(in) :: base_layers !< Number of layers used to grow the base cells (<0 for default)
+    TYPE(oft_overlap_dofs), INTENT(inout) :: dofs !< Resulting DoF sets
+  END SUBROUTINE cell_ovl_build
+  !---------------------------------------------------------------------------------
+  !> Number of blocks on this process
+  !---------------------------------------------------------------------------------
+  FUNCTION cell_ovl_nblocks(self) RESULT(nb)
+    IMPORT oft_cell_overlap_builder, i4
+    CLASS(oft_cell_overlap_builder), INTENT(inout) :: self !< Builder object
+    INTEGER(i4) :: nb !< Number of blocks
+  END FUNCTION cell_ovl_nblocks
+END INTERFACE
 !--- Real interfaces
 ABSTRACT INTERFACE
   !---------------------------------------------------------------------------------
@@ -914,8 +981,39 @@ ABSTRACT INTERFACE
   END SUBROUTINE oft_veccreate_proto
 END INTERFACE
 !---Declare public entities
-public vector_extrapolate
+public vector_extrapolate, overlap_dofs_delete
 contains
+!---------------------------------------------------------------------------------
+!> Release resources of a cell overlap builder (default: nothing to do)
+!---------------------------------------------------------------------------------
+SUBROUTINE cell_ovl_delete(self)
+CLASS(oft_cell_overlap_builder), INTENT(inout) :: self !< Builder object
+END SUBROUTINE cell_ovl_delete
+!---------------------------------------------------------------------------------
+!> Delete a set of overlapping DoFs and reset its counts
+!---------------------------------------------------------------------------------
+SUBROUTINE overlap_dofs_delete(self)
+TYPE(oft_overlap_dofs), INTENT(inout) :: self !< DoF sets to delete
+INTEGER(i4) :: i
+IF(ALLOCATED(self%blk))THEN
+  DO i=1,SIZE(self%blk)
+    IF(ASSOCIATED(self%blk(i)%v))DEALLOCATE(self%blk(i)%v)
+    self%blk(i)%n=0
+  END DO
+  DEALLOCATE(self%blk)
+END IF
+IF(ALLOCATED(self%asg))THEN
+  DO i=1,SIZE(self%asg)
+    IF(ASSOCIATED(self%asg(i)%v))DEALLOCATE(self%asg(i)%v)
+    self%asg(i)%n=0
+  END DO
+  DEALLOCATE(self%asg)
+END IF
+IF(ALLOCATED(self%gdof))DEALLOCATE(self%gdof)
+IF(ALLOCATED(self%odof))DEALLOCATE(self%odof)
+self%n=0
+self%nblocks=0
+END SUBROUTINE overlap_dofs_delete
 !---------------------------------------------------------------------------------
 !> Borrow the local values (or a block of them) of a vector
 !!
@@ -1258,6 +1356,7 @@ end subroutine matrix_applyt_cvec
 subroutine matrix_delete(self)
 class(oft_matrix), intent(inout) :: self
 call oft_warn('Finalizing general real matrix, this may indicate an error.')
+NULLIFY(self%cell_ovl)
 end subroutine matrix_delete
 !---------------------------------------------------------------------------------
 !> Save matrix

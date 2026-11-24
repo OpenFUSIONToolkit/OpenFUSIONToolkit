@@ -141,6 +141,7 @@ TYPE, PUBLIC :: oft_scatter_plan
 END TYPE oft_scatter_plan
 PUBLIC scatter_plan_setup, scatter_plan_setup_local, scatter_plan_delete, scatter_plan_check, scatter_plan_inflight
 PUBLIC index_set_create, index_set_delete, index_set_grow, index_set_map, index_set_contains
+PUBLIC oft_exchange_i8
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up a scatter plan from its index lists
@@ -458,6 +459,40 @@ DO WHILE(ilow<=ihigh)
   END IF
 END DO
 END FUNCTION index_set_contains
+!---------------------------------------------------------------------------------
+!> Exchange int8 data grouped by process with every other process (collective)
+!!
+!! `scnt(q)` values of `sbuf` (grouped by process in increasing rank order) go to
+!! process `q`; `rbuf` receives the values sent to this process, grouped likewise.
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_exchange_i8(scnt,sbuf,rcnt,rbuf)
+INTEGER(i4), INTENT(in) :: scnt(0:) !< Number of values sent to each process
+INTEGER(i8), INTENT(in) :: sbuf(:) !< Values to send
+INTEGER(i4), INTENT(out) :: rcnt(0:) !< Number of values received from each process
+INTEGER(i8), ALLOCATABLE, INTENT(out) :: rbuf(:) !< Values received
+#ifdef HAVE_MPI
+INTEGER(i4) :: i,ierr,np
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: sdisp,rdisp
+np=SIZE(scnt)
+CALL MPI_ALLTOALL(scnt,1,OFT_MPI_I4,rcnt,1,OFT_MPI_I4,oft_env%comm,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALL','oft_exchange_i8',__FILE__)
+ALLOCATE(sdisp(0:np-1),rdisp(0:np-1),rbuf(MAX(1,SUM(rcnt))))
+!---Zero-based displacements of each process' part of the buffers
+sdisp(0)=0
+rdisp(0)=0
+DO i=1,np-1
+  sdisp(i)=sdisp(i-1)+scnt(i-1)
+  rdisp(i)=rdisp(i-1)+rcnt(i-1)
+END DO
+CALL MPI_ALLTOALLV(sbuf,scnt,sdisp,OFT_MPI_I8,rbuf,rcnt,rdisp,OFT_MPI_I8,oft_env%comm,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALLV','oft_exchange_i8',__FILE__)
+DEALLOCATE(sdisp,rdisp)
+#else
+rcnt=scnt
+ALLOCATE(rbuf(MAX(1,SUM(rcnt))))
+IF(SUM(rcnt)>0)rbuf(1:SUM(rcnt))=sbuf(1:SUM(rcnt))
+#endif
+END SUBROUTINE oft_exchange_i8
 END MODULE oft_scatter_base
 !---------------------------------------------------------------------------------
 ! Value type instantiations of the scatter operations

@@ -182,7 +182,7 @@ DO i=1,mat%nr
     CALL ilist_push(rows_send(q),j) ! Value source (Mfull location) for the plan
   END DO
 END DO
-CALL exchange_i8(scnt,sbuf,rcnt,rbuf)
+CALL oft_exchange_i8(scnt,sbuf,rcnt,rbuf)
 DEALLOCATE(sbuf)
 !---Received entries: owned row, global column and owner, in arrival order
 m=0
@@ -464,7 +464,7 @@ DO k=self%nloc+1,nd
   ipos(q)=ipos(q)+1
   CALL ilist_push(ghost_recv(q),k)
 END DO
-CALL exchange_i8(scnt,sbuf,rcnt,rbuf)
+CALL oft_exchange_i8(scnt,sbuf,rcnt,rbuf)
 k=0
 DO q=0,np-1
   DO j=1,rcnt(q)
@@ -629,7 +629,7 @@ DO kk=1,nreq
   ordr(ip(oreq(kk)))=kk
   ip(oreq(kk))=ip(oreq(kk))+1
 END DO
-CALL exchange_i8(sc,sb,rc,rb)
+CALL oft_exchange_i8(sc,sb,rc,rb)
 !---Owner: reply with the structure of each requested complete row and record value sources
 ntot=0
 DO kk=1,SUM(rc)
@@ -658,7 +658,7 @@ DO qq=0,np-1
     END DO
   END DO
 END DO
-CALL exchange_i8(sc,sb2,rc,rb2)
+CALL oft_exchange_i8(sc,sb2,rc,rb2)
 !---Requester: store received rows (in request order per owner) and their value locations
 kk=0
 nn=0
@@ -858,37 +858,6 @@ END IF
 list%n=list%n+1
 list%v(list%n)=val
 END SUBROUTINE ilist_push
-!---------------------------------------------------------------------------------
-!> Exchange int8 data grouped by process with every other process (collective)
-!!
-!! `scnt(q)` values of `sbuf` (grouped by process in increasing rank order) go to
-!! process `q`; `rbuf` receives the values sent to this process, grouped likewise.
-!---------------------------------------------------------------------------------
-SUBROUTINE exchange_i8(scnt,sbuf,rcnt,rbuf)
-INTEGER(i4), INTENT(in) :: scnt(0:) !< Number of values sent to each process
-INTEGER(i8), INTENT(in) :: sbuf(:) !< Values to send
-INTEGER(i4), INTENT(out) :: rcnt(0:) !< Number of values received from each process
-INTEGER(i8), ALLOCATABLE, INTENT(out) :: rbuf(:) !< Values received
-#ifdef HAVE_MPI
-INTEGER(i4) :: ierr,np
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: sdisp,rdisp
-np=SIZE(scnt)
-CALL MPI_ALLTOALL(scnt,1,OFT_MPI_I4,rcnt,1,OFT_MPI_I4,oft_env%comm,ierr)
-IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALL','exchange_i8',__FILE__)
-ALLOCATE(sdisp(0:np-1),rdisp(0:np-1),rbuf(MAX(1,SUM(rcnt))))
-CALL csr_offsets(scnt,sdisp)
-CALL csr_offsets(rcnt,rdisp)
-sdisp=sdisp-1
-rdisp=rdisp-1
-CALL MPI_ALLTOALLV(sbuf,scnt,sdisp,OFT_MPI_I8,rbuf,rcnt,rdisp,OFT_MPI_I8,oft_env%comm,ierr)
-IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALLV','exchange_i8',__FILE__)
-DEALLOCATE(sdisp,rdisp)
-#else
-rcnt=scnt
-ALLOCATE(rbuf(MAX(1,SUM(rcnt))))
-IF(SUM(rcnt)>0)rbuf(1:SUM(rcnt))=sbuf(1:SUM(rcnt))
-#endif
-END SUBROUTINE exchange_i8
 !---------------------------------------------------------------------------------
 !> Build a scatter plan from per-process send and receive lists and a local part
 !!

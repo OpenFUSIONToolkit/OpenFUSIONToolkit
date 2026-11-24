@@ -2889,6 +2889,8 @@ IF((.NOT.ASSOCIATED(self%pattern)).AND.ASSOCIATED(self%kr))CALL native_matrix_ad
 CALL native_pattern_release(self%pattern)
 CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
 IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
+!---Cell overlap builder is not owned by the matrix
+NULLIFY(self%cell_ovl)
 DEBUG_STACK_POP
 end subroutine mat_delete
 !---------------------------------------------------------------------------------
