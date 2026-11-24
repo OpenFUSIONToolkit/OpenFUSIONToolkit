@@ -215,7 +215,8 @@ NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,tes
 !---Initialize MPI
 oft_main_thread=.TRUE.
 #ifdef HAVE_MPI
-CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
+!---Worker threads make MPI calls (inside OpenMP critical sections, and MPI_ABORT from @ref oft_abort)
+CALL MPI_INIT_THREAD(MPI_THREAD_SERIALIZED,thrdtype,ierr)
 #endif
 #ifdef OFT_STACK
 CALL oft_set_signal_handlers
@@ -230,6 +231,10 @@ oft_env%nprocs=1
 #endif
 IF(oft_env%rank==0)oft_env%head_proc=.TRUE.
 WRITE(oft_env%crank,'(I4.4)')oft_env%rank
+#ifdef HAVE_MPI
+IF(oft_env%head_proc.AND.(thrdtype<MPI_THREAD_SERIALIZED))CALL oft_warn( &
+  'MPI does not provide MPI_THREAD_SERIALIZED, MPI calls from OpenMP threads may be unsafe')
+#endif
 !---Read settings filename from command line
 IF(PRESENT(nthreads))THEN
   from_api=.TRUE.
@@ -427,6 +432,11 @@ END SUBROUTINE oft_finalize
 !! which ends the run itself if the process is still alive after 10 seconds.
 !! A call made while this thread is already aborting (eg. from
 !! @ref oft_abort_cb) skips printing and ends the run immediately.
+!!
+!! With more than one MPI task, the first caller waits 1 second after printing
+!! before calling MPI_ABORT, so the launcher can forward the error message
+!! (eg. MPICH's `mpiexec` discards output that is still in transit when the
+!! job is torn down).
 !------------------------------------------------------------------------------
 SUBROUTINE oft_abort(error_str,sname,fname)
 CHARACTER(LEN=*), INTENT(in) :: error_str !< Error string
@@ -490,6 +500,10 @@ IF(.NOT.oft_abort_active)THEN
     CALL oft_stack_print
     !---
     IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
+#ifdef HAVE_MPI
+    !---Let the launcher forward the error message before MPI_ABORT tears down the job
+    IF(oft_env%nprocs>1)ierr=oft_sleep(1)
+#endif
   END IF
 END IF
 !---Abort run
