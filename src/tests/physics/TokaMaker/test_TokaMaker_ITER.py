@@ -8,9 +8,15 @@ import os
 import pytest
 import numpy as np
 from tokamaker_testing import (mp_run, validate_dict, validate_eqdsk, validate_ifile, ifile_errors, ITER_eq_dict, test_dir,
-                               create_ITER_mesh, setup_ITER_gs, set_ITER_constraints, solve_ITER_eq)
+                               create_ITER_mesh, setup_ITER_gs, set_ITER_constraints, solve_ITER_eq, ifile_q_geom, xpoint_theta)
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
+
+# Relative error of q recomputed from X-point-packed i-file geometry (ntheta=129) against the file q, for
+# surfaces with normalized flux <= 0.9 and the outermost surface (lcfs_pad=0.001); about 3x the values found
+# with orders 2 and 3 (6E-5 and 1.6E-4 at order 2), where uniform angles give 8E-3 at the outermost surface
+QGEOM_CORE_TOL = 2.E-4
+QGEOM_EDGE_TOL = 5.E-4
 
 
 def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
@@ -69,6 +75,10 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
             mp_q.put([{'gamma': growth_rates[:5], 'nl_change': np.linalg.norm(psi1-psi0)}])
             oftpy_dump_cov()
             return
+        if test_type == 'ifile_theta':
+            mp_q.put([ITER_ifile_theta(mygs)])
+            oftpy_dump_cov()
+            return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
         if test_type == 'io':
             # A reloaded equilibrium must already be converged (one nonlinear iteration)
@@ -98,6 +108,67 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
     mp_q.put([eq_info])
     oftpy_dump_cov()
+
+
+def ITER_ifile_theta(mygs):
+    """i-files with uniform and X-point-packed poloidal angles and explicit radial nodes, and their checks"""
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    info = {}
+    # Default arguments and explicit uniform sampling (packing arguments ignored) write the same bytes
+    mygs.save_ifile('ifile_default.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True)
+    mygs.save_ifile('ifile_uniform.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,
+                    theta_sampling='uniform',xpoint_amp=5.0,xpoint_width=0.3)
+    with open('ifile_default.ifile','rb') as fid:
+        content_default = fid.read()
+    with open('ifile_uniform.ifile','rb') as fid:
+        info['uniform_same_bytes'] = (fid.read() == content_default)
+    # X-point packed angles: points on their flux surfaces at the reference packed angles
+    mygs.save_ifile('ifile_xpt.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,theta_sampling='xpoint')
+    info['xpt_psi_err'] = ifile_errors(mygs,'ifile_xpt.ifile')['ifile_psi_err']
+    ifile_u = read_ifile('ifile_default.ifile')
+    ifile_x = read_ifile('ifile_xpt.ifile')
+    R0, Z0 = ifile_x['R'][0,0], ifile_x['Z'][0,0]
+    theta = np.mod(np.arctan2(ifile_x['Z'][1:,:-1]-Z0,ifile_x['R'][1:,:-1]-R0),2.0*np.pi)
+    theta[:,0] = np.arctan2(ifile_x['Z'][1:,0]-Z0,ifile_x['R'][1:,0]-R0) # first point at 0 (may round below)
+    x_points, diverted = mygs.get_xpoints()
+    thx = [np.mod(np.arctan2(x_points[-1,1]-Z0,x_points[-1,0]-R0),2.0*np.pi)]
+    theta_ref = xpoint_theta(128,thx,3.0,0.15)
+    info['diverted'] = bool(diverted)
+    info['xpt_theta_err'] = np.max(np.abs(theta-theta_ref[None,:]))
+    info['xpt_theta_monotone'] = bool(np.all(np.diff(theta,axis=1) > 0.0))
+    info['xpt_periodic'] = bool(np.array_equal(ifile_x['R'][:,0],ifile_x['R'][:,-1]) and np.array_equal(ifile_x['Z'][:,0],ifile_x['Z'][:,-1]))
+    info['xpt_dtheta_ratio'] = np.max(np.diff(theta_ref))/np.min(np.diff(theta_ref))
+    # Flux grid, profiles and q do not depend on the poloidal sampling
+    info['xpt_same_profiles'] = bool(all(np.array_equal(ifile_u[key],ifile_x[key]) for key in ('psi','f','p','ffp','pp','psi_bounds')))
+    info['xpt_q_diff'] = np.max(np.abs(ifile_x['q']-ifile_u['q'])/np.abs(ifile_u['q']))
+    # q recomputed from the file geometry, uniform in the file label, against the file q
+    qrel_u = np.abs(ifile_q_geom(mygs,ifile_u)/ifile_u['q'][1:]-1.0)
+    qrel_x = np.abs(ifile_q_geom(mygs,ifile_x)/ifile_x['q'][1:]-1.0)
+    xn = (ifile_u['psi'][1:]-ifile_u['psi_bounds'][0])/(ifile_u['psi_bounds'][1]-ifile_u['psi_bounds'][0])
+    info['qgeom_err_uniform_core'] = np.max(qrel_u[xn <= 0.9])
+    info['qgeom_err_xpt_core'] = np.max(qrel_x[xn <= 0.9])
+    info['qgeom_err_uniform_edge'] = qrel_u[-1]
+    info['qgeom_err_xpt_edge'] = qrel_x[-1]
+    # Explicit radial nodes are honored (and override npsi, lcfs_pad, pack_lcfs, axis_pack)
+    nodes = np.r_[0.0, np.logspace(-4,-1,7), np.linspace(0.2,0.9,8), 1.0-np.logspace(-1.5,-3,6)]
+    mygs.save_ifile('ifile_nodes.ifile',npsi=17,lcfs_pad=0.05,pack_lcfs=False,axis_pack=1.E-3,ntheta=65,psi_bounds=True,profile_derivs=True,
+                    psi_nodes=nodes,theta_sampling='xpoint')
+    ifile_n = read_ifile('ifile_nodes.ifile')
+    xn = (ifile_n['psi']-ifile_n['psi_bounds'][0])/(ifile_n['psi_bounds'][1]-ifile_n['psi_bounds'][0])
+    info['nodes_npsi'] = int(ifile_n['npsi'])
+    info['nodes_err'] = np.max(np.abs(xn-nodes))
+    info['nodes_psi_err'] = ifile_errors(mygs,'ifile_nodes.ifile')['ifile_psi_err']
+    # Invalid input is rejected
+    info['bad_input_rejected'] = []
+    for kwargs in ({'theta_sampling': 'polar'}, {'psi_nodes': [0.1, 0.5, 0.9]}, {'psi_nodes': [0.0, 0.5, 0.5, 0.9]},
+                   {'psi_nodes': [0.0, 0.5, 1.0]}, {'theta_sampling': 'xpoint', 'xpoint_width': 0.0},
+                   {'theta_sampling': 'xpoint', 'xpoint_amp': -1.0}):
+        try:
+            mygs.save_ifile('ifile_bad.ifile',npsi=16,ntheta=33,**kwargs)
+            info['bad_input_rejected'].append(False)
+        except (ValueError, Exception):
+            info['bad_input_rejected'].append(True)
+    return info
 
 
 def ITER_eq_dict_helicity(helicity):
@@ -181,6 +252,34 @@ def test_ITER_eq(order,helicity):
     assert abs(x[1]-1.E-4) < 1.E-10
     assert np.all(dx > 0) and np.max(dx[1:]/dx[:-1]) < 1.7
     assert results[0]['ifile_psi_err_axis'] < 1.E-10
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("order", (2,3))
+def test_ITER_ifile_theta(order):
+    '''i-file poloidal sampling and explicit radial nodes on the ITER equilibrium: default output unchanged by
+    the new arguments; X-point-packed points lie on their flux surfaces at the reference packed angles (monotone,
+    periodic end point repeated), with the same flux grid, profiles and q as uniform sampling; q recomputed from the
+    file geometry (uniform in the file label) agrees with the file q, better than uniform angles at the outermost
+    surface; explicit radial nodes are honored; invalid input is rejected'''
+    results = mp_run(run_ITER_case,(1.0,(order,),'ifile_theta',1.0))
+    assert results is not None
+    info = results[0]
+    assert info['uniform_same_bytes']
+    assert info['diverted']
+    assert info['xpt_psi_err'] < 1.E-10
+    assert info['xpt_theta_err'] < 1.E-9
+    assert info['xpt_theta_monotone'] and info['xpt_periodic']
+    assert info['xpt_dtheta_ratio'] > 3.0
+    assert info['xpt_same_profiles']
+    assert info['xpt_q_diff'] < 1.E-12
+    assert info['qgeom_err_xpt_core'] < QGEOM_CORE_TOL
+    assert info['qgeom_err_xpt_edge'] < QGEOM_EDGE_TOL
+    assert info['qgeom_err_xpt_edge'] < 0.1*info['qgeom_err_uniform_edge']
+    assert info['nodes_npsi'] == 22
+    assert info['nodes_err'] < 1.E-12
+    assert info['nodes_psi_err'] < 1.E-10
+    assert all(info['bad_input_rejected'])
 
 
 @pytest.mark.coverage

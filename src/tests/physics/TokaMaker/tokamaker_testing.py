@@ -146,6 +146,48 @@ def ifile_errors(mygs,filename):
     }
 
 
+def ifile_q_geom(mygs,ifile):
+    r"""q of each i-file surface (axis excluded) recomputed from its geometry, uniform in the file's poloidal label
+
+    \f$ q = \frac{F}{2\pi} \oint \frac{dl}{R |\nabla\psi|} \f$ by the periodic trapezoid rule over the file points
+    (\f$ m_\theta = n_\theta - 1 \f$), with \f$ dl/ds \f$ from a periodic cubic spline of (R,Z) in the point index and
+    \f$ |\nabla\psi| \f$ from the equilibrium at the points.
+    """
+    from scipy.interpolate import CubicSpline
+    dpsi = mygs.get_field_eval('dPSI')
+    q = np.zeros(ifile['R'].shape[0]-1)
+    for j in range(1,ifile['R'].shape[0]):
+        R, Z = ifile['R'][j], ifile['Z'][j]
+        s = np.arange(R.shape[0])
+        dR = CubicSpline(s,R,bc_type='periodic')(s[:-1],1)
+        dZ = CubicSpline(s,Z,bc_type='periodic')(s[:-1],1)
+        grad = dpsi.eval(np.column_stack([R[:-1],Z[:-1]]))
+        q[j-1] = ifile['f'][j]*np.sum(np.hypot(dR,dZ)/(R[:-1]*np.hypot(grad[:,0],grad[:,1])))/(2.0*np.pi)
+    return q
+
+
+def xpoint_theta(n,thx,amp,wid):
+    r"""Polar angles of X-point packing (reference for `save_ifile(theta_sampling='xpoint')`), n points from 0
+
+    Density \f$ \propto 1 + A \sum_i \exp[-\Delta_i^2/(2\sigma^2)] \f$ with periodic \f$ \Delta_i = \theta - \theta_{x,i} \f$.
+    """
+    from scipy.special import erf
+    def wcum(t):
+        w = t.copy()
+        for tx in thx:
+            for m in range(-3,4):
+                w += amp*wid*np.sqrt(np.pi/2.0)*(erf((t-tx+2*np.pi*m)/(np.sqrt(2.0)*wid))-erf((-tx+2*np.pi*m)/(np.sqrt(2.0)*wid)))
+        return w
+    tgt = wcum(np.r_[2.0*np.pi])[0]*np.arange(n)/n
+    lo, hi = np.zeros(n), 2.0*np.pi*np.ones(n)
+    for _ in range(80):
+        mid = 0.5*(lo+hi)
+        below = wcum(mid) < tgt
+        lo = np.where(below,mid,lo)
+        hi = np.where(below,hi,mid)
+    return 0.5*(lo+hi)
+
+
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     '''Compare an i-file against a reference (relative paths are in the TokaMaker test folder)'''
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile

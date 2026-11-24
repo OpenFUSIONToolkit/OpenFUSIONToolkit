@@ -28,7 +28,7 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol, gs_ffprim_pprime, &
-  gs_trace_tol
+  gs_trace_tol, max_xpoints
 USE oft_gs_contour, ONLY: gs_rays_contour
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
@@ -944,17 +944,23 @@ end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Save an inverse-equilibrium (flux-coordinate) file, Fortran unformatted
 !!
-!! Surfaces at uniform polar angle about the O-point from the contour quadrature (tracer as fallback).
+!! Surfaces at uniform polar angle about the O-point from the contour quadrature (tracer as fallback), or with
+!! @p theta_mode = 1 at polar angles packed toward the X-point(s) (see @ref ifile_theta_nodes); either way each
+!! point is found on its flux surface of the FE solution. The last poloidal point repeats the first.
 !! Records (r8, or r4 if @p single_prec):
 !! 1. npsi, ntheta (i4)
 !! 2-5. psi, F, p, q on the npsi flux points
 !! 6-7. R(ntheta,npsi), Z(ntheta,npsi)
 !! 8-9. F*dF/dpsi, dp/dpsi (only if @p profile_derivs)
 !! 10. [psi_axis, psi_LCFS], unpadded (only if @p psi_bounds)
-!! Flux points: see @ref ifile_psi_nodes.
+!! Flux points: see @ref ifile_psi_nodes, or @p psi_nodes if present.
+!!
+!! X-point packing needs a diverted equilibrium: it puts a bump at the active X-point and at any other tracked
+!! X-point whose normalized flux is within `xpt_dn_window` of the LCFS (double null). For a limited plasma it
+!! fails (error, no file written) rather than falling back to uniform angles.
 !---------------------------------------------------------------------------
 subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str, &
-  axis_pack)
+  axis_pack,theta_mode,xpt_amp,xpt_width,psi_nodes)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Output filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
@@ -967,15 +973,23 @@ LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi 
 LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error message (empty on success)
 REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (<= 0: none)
+INTEGER(4), OPTIONAL, INTENT(in) :: theta_mode !< Poloidal sampling: 0 uniform polar angle (default), 1 packed toward the X-point(s)
+REAL(8), OPTIONAL, INTENT(in) :: xpt_amp !< X-point packing: relative point-density increase at the X-point (default 3)
+REAL(8), OPTIONAL, INTENT(in) :: xpt_width !< X-point packing: Gaussian width in polar angle [rad] (default 0.15)
+REAL(8), OPTIONAL, INTENT(in) :: psi_nodes(npsi) !< Explicit flux points in normalized flux (0 = axis first, strictly
+!< increasing, last < 1); overrides @p psi_pad, @p pack_lcfs and @p axis_pack
+REAL(8), PARAMETER :: xpt_dn_window = 1.d-2 !< Other X-points within this normalized flux of the LCFS also get a bump
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,xa,bounds(2)
 real(8), allocatable :: ptout(:,:)
-real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:),un(:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:),un(:),th(:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: j,k,cell,io_unit,ierr
+real(8) :: pad,amp,wid,thx(max_xpoints),px
+integer(4) :: j,k,cell,io_unit,ierr,tmode,nxb
 LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done(npsi)
+CHARACTER(LEN=OFT_ERROR_SLEN) :: err_msg
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
 device=>gseq%device
@@ -991,19 +1005,58 @@ IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
 IF(PRESENT(single_prec))save_single=single_prec
 IF(PRESENT(profile_derivs))save_derivs=profile_derivs
 IF(PRESENT(psi_bounds))save_bounds=psi_bounds
-!---Flux points
-xa=0.d0
-IF(PRESENT(axis_pack))xa=axis_pack/(1.d0-psi_pad)
-ALLOCATE(un(npsi))
-CALL ifile_psi_nodes(npsi,do_pack,xa,un,ierr)
-IF(ierr/=0)THEN
-  DEALLOCATE(un)
+tmode=0; amp=3.d0; wid=0.15d0
+IF(PRESENT(theta_mode))tmode=theta_mode
+IF(PRESENT(xpt_amp))amp=xpt_amp
+IF(PRESENT(xpt_width))wid=xpt_width
+pad=psi_pad
+!---Check options
+err_msg=""
+IF((tmode<0).OR.(tmode>1))THEN
+  err_msg="theta_mode must be 0 (uniform) or 1 (X-point packed)"
+ELSE IF((tmode==1).AND.(.NOT.((amp>=0.d0).AND.(wid>0.d0).AND.(wid<=pi))))THEN
+  err_msg="X-point packing needs xpt_amp >= 0 and 0 < xpt_width <= pi"
+ELSE IF((tmode==1).AND.(ntheta<3))THEN
+  err_msg="X-point packing needs ntheta >= 3"
+ELSE IF(PRESENT(psi_nodes))THEN
+  IF(npsi<3)THEN
+    err_msg="psi_nodes needs at least 3 nodes"
+  ELSE IF(psi_nodes(1)/=0.d0)THEN
+    err_msg="psi_nodes(1) must be 0 (the magnetic axis)"
+  ELSE IF(ANY(psi_nodes(2:npsi)-psi_nodes(1:npsi-1)<=0.d0))THEN
+    err_msg="psi_nodes must be strictly increasing"
+  ELSE IF(.NOT.(psi_nodes(npsi)<1.d0))THEN
+    err_msg="psi_nodes must end inside the LCFS (last node < 1)"
+  END IF
+END IF
+IF(err_msg/="")THEN
   IF(PRESENT(error_str))THEN
-    error_str="axis_pack must be below the LCFS and leave npsi room for the axis zone"
+    error_str=err_msg
     CALL oft_decrease_indent
     RETURN
   END IF
-  CALL oft_abort('Invalid axis_pack','gs_save_ifile',__FILE__)
+  CALL oft_abort(TRIM(err_msg),'gs_save_ifile',__FILE__)
+END IF
+!---Flux points
+ALLOCATE(un(npsi))
+IF(PRESENT(psi_nodes))THEN
+  !---Padding at the last node; un is the fraction of the padded axis-to-LCFS flux left to the last node
+  pad=1.d0-psi_nodes(npsi)
+  un=(1.d0-psi_nodes-pad)/(1.d0-pad)
+  un(1)=1.d0; un(npsi)=0.d0
+ELSE
+  xa=0.d0
+  IF(PRESENT(axis_pack))xa=axis_pack/(1.d0-psi_pad)
+  CALL ifile_psi_nodes(npsi,do_pack,xa,un,ierr)
+  IF(ierr/=0)THEN
+    DEALLOCATE(un)
+    IF(PRESENT(error_str))THEN
+      error_str="axis_pack must be below the LCFS and leave npsi room for the axis zone"
+      CALL oft_decrease_indent
+      RETURN
+    END IF
+    CALL oft_abort('Invalid axis_pack','gs_save_ifile',__FILE__)
+  END IF
 END IF
 !---
 raxis=gseq%o_point(1)
@@ -1015,11 +1068,46 @@ END IF
 bounds=[x2,x1]
 !
 xr = (x2-x1)
-x1 = x1 + xr*psi_pad
+x1 = x1 + xr*pad
 xr = (x2-x1)
 !
 psi_int%u=>gseq%psi
 CALL psi_int%setup(device%fe_rep)
+!---Poloidal angles packed toward the X-point(s) on the LCFS
+IF(tmode==1)THEN
+  nxb=0
+  IF(gseq%diverted.AND.(gseq%nx_points>0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
+    DO j=1,gseq%nx_points
+      IF(j<gseq%nx_points)THEN ! Active X-point is last; others only if near the LCFS in flux
+        cell=0
+        pt=[gseq%x_points(1,j),gseq%x_points(2,j),0.d0]
+        CALL bmesh_findcell(device%mesh,cell,pt,f)
+        IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )CYCLE
+        CALL psi_int%interp(cell,f,gop,psi_surf)
+        px=(gseq%plasma_bounds(2)-psi_surf(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
+        IF(ABS(px-1.d0)>xpt_dn_window)CYCLE
+      END IF
+      nxb=nxb+1
+      thx(nxb)=MODULO(ATAN2(gseq%x_points(2,j)-zaxis,gseq%x_points(1,j)-raxis),2.d0*pi)
+    END DO
+  END IF
+  IF(nxb==0)THEN
+    CALL psi_int%delete()
+    DEALLOCATE(un)
+    err_msg="X-point packing (theta_mode=1) needs a diverted equilibrium; this one is limited"
+    IF(PRESENT(error_str))THEN
+      error_str=err_msg
+      CALL oft_decrease_indent
+      RETURN
+    END IF
+    CALL oft_abort(TRIM(err_msg),'gs_save_ifile',__FILE__)
+  END IF
+  ALLOCATE(th(ntheta-1))
+  CALL ifile_theta_nodes(ntheta-1,nxb,thx(1:nxb),amp,wid,th)
+  IF(oft_debug_print(1))THEN
+    WRITE(*,'(2A,I2,A,2ES11.3)')oft_indent,'X-point packing: ',nxb,' bump(s), amp, width = ',amp,wid
+  END IF
+END IF
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
@@ -1066,7 +1154,11 @@ cc_done=.FALSE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
   ALLOCATE(psi_q(npsi-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1))
   psi_q=(cout(2:npsi,1)-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,cc_done(2:npsi))
+  IF(tmode==1)THEN
+    CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,cc_done(2:npsi),ang=th)
+  ELSE
+    CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,cc_done(2:npsi))
+  END IF
   DO j=2,npsi
     IF(.NOT.cc_done(j))CYCLE
     rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
@@ -1132,11 +1224,21 @@ do j=2,npsi
   rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
   CALL spline_fit(rz,"periodic")
   !---Resample trace
-  DO k=0,ntheta-1
-    CALL spline_eval(rz,k/REAL(ntheta-1,8),0)
-    rout(k+1,j)=rz%f(1)
-    zout(k+1,j)=rz%f(2)
-  END DO
+  IF(tmode==1)THEN
+    DO k=0,ntheta-2
+      CALL spline_eval(rz,th(k+1)/(2.d0*pi),0)
+      rout(k+1,j)=rz%f(1)
+      zout(k+1,j)=rz%f(2)
+    END DO
+    rout(ntheta,j)=rout(1,j)
+    zout(ntheta,j)=zout(1,j)
+  ELSE
+    DO k=0,ntheta-1
+      CALL spline_eval(rz,k/REAL(ntheta-1,8),0)
+      rout(k+1,j)=rz%f(1)
+      zout(k+1,j)=rz%f(2)
+    END DO
+  END IF
   !---Destroy Spline
   CALL spline_dealloc(rz)
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
@@ -1147,6 +1249,7 @@ DEALLOCATE(ptout,field)
 !$omp end parallel
 END IF
 CALL psi_int%delete()
+IF(ALLOCATED(th))DEALLOCATE(th)
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
     DEALLOCATE(cout,rout,zout)
@@ -1303,6 +1406,55 @@ f=s
 IF(pack)f=1.d0-(1.d0-s)**2
 END FUNCTION pfun
 END SUBROUTINE ifile_psi_nodes
+!------------------------------------------------------------------------------
+!> i-file polar angles about the O-point packed toward the X-point direction(s)
+!!
+!! Point density in polar angle \f$ \theta \f$ (from +R) proportional to
+!! \f$ w(\theta) = 1 + A \sum_i \exp[-\Delta_i^2/(2\sigma^2)] \f$, \f$ \Delta_i \f$ the periodic distance to
+!! \f$ \theta_{x,i} \f$: \f$ \theta_k \f$ solves \f$ W(\theta_k) = (k-1)\,W(2\pi)/n \f$, \f$ W(\theta)=\int_0^\theta w \f$
+!! (closed form with erf, Gaussian images to \f$ \pm 3 \f$ periods), so \f$ \theta_1 = 0 \f$ as for uniform angles and the
+!! angles increase strictly in \f$ [0,2\pi) \f$. \f$ A=0 \f$ gives uniform angles up to rounding.
+!------------------------------------------------------------------------------
+SUBROUTINE ifile_theta_nodes(n,nx,thx,amp,wid,th)
+INTEGER(i4), INTENT(in) :: n !< Number of angles (the periodic end point is not included)
+INTEGER(i4), INTENT(in) :: nx !< Number of X-point directions
+REAL(r8), INTENT(in) :: thx(nx) !< X-point polar angles [rad]
+REAL(r8), INTENT(in) :: amp !< Peak relative density increase \f$ A \ge 0 \f$
+REAL(r8), INTENT(in) :: wid !< Gaussian width \f$ \sigma \f$ [rad], in \f$ (0,\pi] \f$
+REAL(r8), INTENT(out) :: th(n) !< Angles [rad]
+REAL(r8) :: wtot,tgt,lo,hi,mid
+INTEGER(i4) :: k,it
+wtot=wcum(2.d0*pi)
+th(1)=0.d0
+DO k=2,n
+  tgt=wtot*REAL(k-1,r8)/REAL(n,r8)
+  lo=0.d0; hi=2.d0*pi
+  DO it=1,200
+    mid=0.5d0*(lo+hi)
+    IF((mid<=lo).OR.(mid>=hi))EXIT
+    IF(wcum(mid)<tgt)THEN
+      lo=mid
+    ELSE
+      hi=mid
+    END IF
+  END DO
+  th(k)=0.5d0*(lo+hi)
+END DO
+CONTAINS
+!> \f$ W(\theta) = \int_0^\theta w \f$
+PURE FUNCTION wcum(t) RESULT(w)
+REAL(r8), INTENT(in) :: t
+REAL(r8) :: w,c
+INTEGER(i4) :: i,m
+c=amp*wid*SQRT(pi/2.d0)
+w=t
+DO i=1,nx
+  DO m=-3,3
+    w=w+c*(ERF((t-thx(i)+2.d0*pi*m)/(SQRT(2.d0)*wid))-ERF((-thx(i)+2.d0*pi*m)/(SQRT(2.d0)*wid)))
+  END DO
+END DO
+END FUNCTION wcum
+END SUBROUTINE ifile_theta_nodes
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
