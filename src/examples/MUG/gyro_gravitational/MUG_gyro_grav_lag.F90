@@ -38,31 +38,31 @@ USE oft_base
 USE fem_utils, ONLY: fem_interp
 IMPLICIT NONE
 !------------------------------------------------------------------------------
-!> Initial condition for the gravitational instability (SI units)
+! Initial condition for the gravitational instability (SI units)
 !------------------------------------------------------------------------------
 TYPE, EXTENDS(fem_interp) :: grav_interp
-  CHARACTER(LEN=1) :: field = 'n' !< Field to evaluate ('n' or 'b')
-  REAL(r8) :: n0 = 1.d19 !< Density at the midplane [m^-3]
-  REAL(r8) :: B0 = 1.d0 !< Field at the midplane [T]
-  REAL(r8) :: Ln = 1.d0 !< Density gradient scale length [m]
-  REAL(r8) :: bcoef = 0.d0 !< \f$ 2 \mu_0 (m_i g L_n + k T) \f$
-  REAL(r8) :: eps = 1.d-6 !< Relative amplitude of the density perturbation
-  REAL(r8) :: kx = 1.d0 !< Wavenumber along x [m^-1]
-  REAL(r8) :: Lz = 1.d0 !< Distance between the walls [m]
+  CHARACTER(LEN=1) :: field = 'n' ! Field to evaluate ('n' or 'b')
+  REAL(r8) :: n0 = 1.d19 ! Density at the midplane [m^-3]
+  REAL(r8) :: B0 = 1.d0 ! Field at the midplane [T]
+  REAL(r8) :: Ln = 1.d0 ! Density gradient scale length [m]
+  REAL(r8) :: bcoef = 0.d0 ! \f$ 2 \mu_0 (m_i g L_n + k T) \f$
+  REAL(r8) :: eps = 1.d-6 ! Relative amplitude of the density perturbation
+  REAL(r8) :: kx = 1.d0 ! Wavenumber along x [m^-1]
+  REAL(r8) :: Lz = 1.d0 ! Distance between the walls [m]
 CONTAINS
-  !> Evaluate field
+  ! Evaluate field
   PROCEDURE :: interp => grav_interp_apply
 END TYPE grav_interp
 CONTAINS
 !------------------------------------------------------------------------------
-!> Evaluate the density (equilibrium plus perturbation) or the equilibrium field
+! Evaluate the density (equilibrium plus perturbation) or the equilibrium field
 !------------------------------------------------------------------------------
 SUBROUTINE grav_interp_apply(self,cell,f,gop,val)
-CLASS(grav_interp), INTENT(inout) :: self !< Interpolation object
-INTEGER(i4), INTENT(in) :: cell !< Cell for interpolation
-REAL(r8), INTENT(in) :: f(:) !< Position in cell in logical coord [4]
-REAL(r8), INTENT(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-REAL(r8), INTENT(out) :: val(:) !< Field value at the point
+CLASS(grav_interp), INTENT(inout) :: self ! Interpolation object
+INTEGER(i4), INTENT(in) :: cell ! Cell for interpolation
+REAL(r8), INTENT(in) :: f(:) ! Position in cell in logical coord [4]
+REAL(r8), INTENT(in) :: gop(3,4) ! Logical gradient vectors at f [3,4]
+REAL(r8), INTENT(out) :: val(:) ! Field value at the point
 REAL(r8) :: pt(3),neq
 pt=self%mesh%log2phys(cell,f)
 neq=self%n0*EXP(pt(3)/self%Ln)
@@ -112,15 +112,15 @@ TYPE(grav_interp), TARGET :: init_field
 TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: io_unit,ierr
 REAL(r8) :: d_i,omega_i,g_phys,T0,Lx,zmin,zmax
-INTEGER(i4) :: order = 2 !< FE order
-INTEGER(i4) :: minlev = 1 !< Lowest FE level for multigrid
-REAL(r8) :: n_bar = 1.d19 !< Reference density [m^-3]
-REAL(r8) :: B_bar = 1.d-2 !< Reference field [T]
-REAL(r8) :: beta = 1.d-3 !< Plasma beta at the midplane
-REAL(r8) :: g = 5.d-3 !< Gravity [d_i Omega_i^2]
-REAL(r8) :: Ln = 1.d2 !< Density gradient scale length [d_i]
-REAL(r8) :: I0 = 1.d2 !< Field at the midplane [B_bar]
-REAL(r8) :: eps = 1.d-6 !< Relative amplitude of the density perturbation
+INTEGER(i4) :: order = 2 ! FE order
+INTEGER(i4) :: minlev = 1 ! Lowest FE level for multigrid
+REAL(r8) :: n_bar = 1.d19 ! Reference density [m^-3]
+REAL(r8) :: B_bar = 1.d-2 ! Reference field [T]
+REAL(r8) :: beta = 1.d-3 ! Plasma beta at the midplane
+REAL(r8) :: g = 5.d-3 ! Gravity [d_i Omega_i^2]
+REAL(r8) :: Ln = 1.d2 ! Density gradient scale length [d_i]
+REAL(r8) :: I0 = 1.d2 ! Field at the midplane [B_bar]
+REAL(r8) :: eps = 1.d-6 ! Relative amplitude of the density perturbation
 NAMELIST/gyro_grav_options/order,minlev,n_bar,B_bar,beta,g,Ln,I0,eps
 !!\subsubsection doc_mug_gyro_grav_lag_ex_code_setup Mesh and FE setup
 CALL oft_init

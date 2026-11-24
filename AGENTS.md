@@ -173,8 +173,13 @@ indirectly: the `build_ex_docs` target runs `src/utilities/generate_doc.py`, whi
 reads `examples/*.F90`, `examples/*/*/*.F90`, and `examples/*/*/*.ipynb` and writes
 `docs/generated/doc_*.md`, which Doxygen then picks up through its `docs` entry.
 
-- **Example sources are documentation.** Fortran examples under `src/examples/` carry their own `!!` comment format, including Doxygen page anchors and linking commands (eg. `!!API Example 1 ... {#doc_api_ex1}`, `\section`, `\ref`), which `generate_doc.py` parses into published pages. The same applies to the example notebooks. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
-- **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!!` function blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
+- **Example sources are documentation pages.** `generate_doc.py` turns each Fortran example under `src/examples/` into a Doxygen page, much like the Markdown and code cells of a notebook. Every line that starts with `!!` (in the first column) is page text, and every other line goes into a code listing, so each `!!` block ends the listing before it.
+  - Use `!!` only for the narrative blocks between code sections, with page-style commands only: the page anchor (eg. `!!API Example 1 ... {#doc_api_ex1}`), `\section`, `\subsection`, `\ref`, `\f$ ... \f$`, `\note`, `\image`, and similar.
+  - Do not use Doxygen source sentinels (`!>`, `!<`) or documentation commands (`@param`, `@result`, `@brief`) in example sources. They are not parsed as documentation: they show up verbatim in the listings, and a `!!` continuation of a `!>` block splits a listing in two.
+  - Use plain `!` comments for notes inside code, including descriptions of routines, arguments and variables.
+  - `! START SOURCE` / `! STOP SOURCE` and `! OFT_DOC_INCLUDE: <file>` are directives for `generate_doc.py`.
+  - The example notebooks follow the same idea with Markdown cells. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
+- **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!<` documentation blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
 - Doxygen **linking** commands (`\section`, `\ref`, …) remain valid anywhere and may be used where they help, even in files whose functions need no documentation blocks.
 - Function-level documentation blocks in test code are **optional**.
 - Brief documentation is still helpful and welcome: a short line saying what a test covers or what an example demonstrates aids the next reader.
