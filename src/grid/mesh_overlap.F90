@@ -76,8 +76,9 @@ END SUBROUTINE mesh_base_gid_inverse
 !---------------------------------------------------------------------------------
 !> Find the foreign base cells within `layers` point layers of this process' base cells
 !!
-!! Runs a multi-source breadth-first search over the point adjacency (`kpc/lpc`) of the
-!! replicated base mesh, seeded by the base cells owned by this process
+!! Runs a multi-source breadth-first search over the point adjacency of the replicated
+!! base mesh, with points identified by their global index (`global%lp`, so that cells
+!! touching across a periodic seam are adjacent), seeded by the base cells owned by this process
 !! (`lcpart==rank+1`). Every cell reached within `layers` layers that is owned by
 !! another process is returned (sorted by owner, then by base cell index).
 !!
@@ -93,9 +94,9 @@ INTEGER(i4), INTENT(in) :: layers !< Number of point layers to grow by
 INTEGER(i4), INTENT(out) :: ncand !< Number of candidate base cells
 INTEGER(i4), ALLOCATABLE, DIMENSION(:), INTENT(out) :: cand !< Candidate base cell indices (in `meshes(nbase)`) [ncand]
 INTEGER(i4), ALLOCATABLE, DIMENSION(:), INTENT(out) :: cowner !< Owner rank of each candidate [ncand]
-INTEGER(i4) :: i,j,k,l,c,nc_base,me,nfront,nnew,q
+INTEGER(i4) :: i,j,k,l,c,nc_base,me,nfront,nnew,q,ngp
 INTEGER(i4), POINTER, DIMENSION(:) :: lcpart
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lvl,front,newf,ncnt
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lvl,front,newf,ncnt,kgc,lgc,gp
 CLASS(oft_mesh), POINTER :: bmesh
 DEBUG_STACK_PUSH
 ncand=0
@@ -111,6 +112,35 @@ nc_base=bmesh%nc
 lcpart=>ml_mesh%meshes(ml_mesh%nbase+1)%base%lcpart
 IF(.NOT.ASSOCIATED(lcpart))CALL oft_abort('Base cell partition not available','mesh_base_candidates',__FILE__)
 IF(SIZE(lcpart)/=nc_base)CALL oft_abort('Base cell partition size mismatch','mesh_base_candidates',__FILE__)
+!---Cells of each global point (periodic images share a global point)
+ngp=INT(bmesh%global%np,4)
+ALLOCATE(gp(bmesh%np),kgc(ngp+1),lgc(bmesh%cell_np*nc_base))
+DO i=1,bmesh%np
+  IF(bmesh%global%lp(i)<1_i8.OR.bmesh%global%lp(i)>bmesh%global%np)CALL oft_abort( &
+    'Base point global index out of range','mesh_base_candidates',__FILE__)
+  gp(i)=INT(bmesh%global%lp(i),4)
+END DO
+kgc=0
+DO c=1,nc_base
+  DO j=1,bmesh%cell_np
+    k=gp(bmesh%lc(j,c))
+    kgc(k+1)=kgc(k+1)+1
+  END DO
+END DO
+kgc(1)=1
+DO k=1,ngp
+  kgc(k+1)=kgc(k+1)+kgc(k)
+END DO
+ALLOCATE(ncnt(ngp))
+ncnt=kgc(1:ngp)
+DO c=1,nc_base
+  DO j=1,bmesh%cell_np
+    k=gp(bmesh%lc(j,c))
+    lgc(ncnt(k))=c
+    ncnt(k)=ncnt(k)+1
+  END DO
+END DO
+DEALLOCATE(ncnt)
 !---Multi-source BFS seeded by owned base cells
 ALLOCATE(lvl(nc_base),front(nc_base),newf(nc_base))
 lvl=-1
@@ -127,12 +157,12 @@ DO l=1,layers
   DO i=1,nfront
     c=front(i)
     DO j=1,bmesh%cell_np
-      k=bmesh%lc(j,c)
-      DO q=bmesh%kpc(k),bmesh%kpc(k+1)-1
-        IF(lvl(bmesh%lpc(q))<0)THEN
-          lvl(bmesh%lpc(q))=l
+      k=gp(bmesh%lc(j,c))
+      DO q=kgc(k),kgc(k+1)-1
+        IF(lvl(lgc(q))<0)THEN
+          lvl(lgc(q))=l
           nnew=nnew+1
-          newf(nnew)=bmesh%lpc(q)
+          newf(nnew)=lgc(q)
         END IF
       END DO
     END DO
@@ -164,7 +194,7 @@ DO i=1,nc_base
     cowner(ncnt(q))=q
   END IF
 END DO
-DEALLOCATE(lvl,front,newf,ncnt)
+DEALLOCATE(lvl,front,newf,ncnt,kgc,lgc,gp)
 DEBUG_STACK_POP
 END SUBROUTINE mesh_base_candidates
 !---------------------------------------------------------------------------------

@@ -41,7 +41,8 @@
 !! Steps B and D are skipped on shared meshes (`mesh%fullmesh`), where every cell is
 !! local. Global row ids always come from the matrix row maps
 !! (`i_map(f)%offsetg+i_map(f)%lge`), and owners from synchronizing the rank id by
-!! ownership on the row space seam. Periodic row maps are not supported.
+!! ownership on the row space seam. On periodic meshes the local images of a DoF share
+!! its global id and the cells on both sides of a seam share global point ids.
 !!
 !! @authors Chris Hansen
 !! @date November 2026
@@ -287,8 +288,12 @@ END SUBROUTINE clear_cell_sets
 !! matrix on the FE representation (one row block per field, in field order, with
 !! local rows numbered as the FE DoFs) and `u` a native vector of its row space.
 !!
-!! Requirements checked (abort otherwise): no periodic row maps; row maps consistent
-!! with the FE fields; unique global ids of local rows; uniform refinement above the
+!! Periodic meshes are supported: local images of a DoF share its global id, cells are
+!! adjacent across periodic seams through shared global point ids and each owned DoF
+!! is assigned through its owned copy (`leo`).
+!!
+!! Requirements checked (abort otherwise): row maps consistent with the FE fields;
+!! unique global ids of local rows on non-periodic maps; uniform refinement above the
 !! transfer level; every received reply has the expected size; consistent DoF owners;
 !! every owned DoF assigned to exactly one block and assigned DoFs within their block.
 !---------------------------------------------------------------------------------
@@ -312,7 +317,9 @@ INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: grow,gsorted,sbuf,rbuf,egid,pk,dk,lsor
 INTEGER(i8), ALLOCATABLE, DIMENSION(:,:) :: epts,hdof
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dtmp
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rown_r
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: needed,mark,inb
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: needed,mark,inb,lown
+LOGICAL :: periodic
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lastp
 INTEGER(i4), POINTER, DIMENSION(:) :: lcpart
 TYPE(ilist), ALLOCATABLE, DIMENSION(:) :: core,bx
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ldofs
@@ -349,8 +356,9 @@ IF(mat%ni/=self%nfields)CALL oft_abort('Matrix row blocks do not match FE fields
 IF(mat%nr/=self%ndofs)CALL oft_abort('Matrix rows do not match FE DoFs','fem_cell_overlap_build',__FILE__)
 ioff=0
 nce_tot=0
+periodic=.FALSE.
 DO f=1,self%nfields
-  IF(mat%i_map(f)%per)CALL oft_abort('Periodic row maps are not supported','fem_cell_overlap_build',__FILE__)
+  periodic=(periodic.OR.mat%i_map(f)%per)
   IF(mat%i_map(f)%n/=self%fields(f)%fe%ne.OR.mat%i_map(f)%offset/=ioff) &
     CALL oft_abort('Matrix row map does not match FE field','fem_cell_overlap_build',__FILE__)
   ioff=ioff+self%fields(f)%fe%ne
@@ -366,15 +374,26 @@ ALLOCATE(gsorted(mat%nr))
 gsorted=grow
 n8=INT(mat%nr,i8)
 CALL sort_array(gsorted,n8)
-DO i=2,mat%nr
-  IF(gsorted(i)==gsorted(i-1))CALL oft_abort('Duplicate global row ids','fem_cell_overlap_build',__FILE__)
-END DO
+IF(.NOT.periodic)THEN
+  DO i=2,mat%nr
+    IF(gsorted(i)==gsorted(i-1))CALL oft_abort('Duplicate global row ids','fem_cell_overlap_build',__FILE__)
+  END DO
+END IF
 DEALLOCATE(gsorted)
 ALLOCATE(rown_r(mat%nr),owner(mat%nr))
 rown_r=REAL(me,r8)
 CALL oft_global_stitch(uv%stitch_info,rown_r,0)
 owner=NINT(rown_r)
 DEALLOCATE(rown_r)
+!---Owned copies (interior rows and owned boundary rows; one per owned DoF)
+ALLOCATE(lown(mat%nr))
+lown=.TRUE.
+IF(uv%stitch_info%nbe>0)THEN
+  IF(.NOT.ASSOCIATED(uv%stitch_info%leo))CALL oft_abort('Seam ownership required','fem_cell_overlap_build',__FILE__)
+  DO i=1,uv%stitch_info%nbe
+    lown(uv%stitch_info%lbe(i))=uv%stitch_info%leo(i)
+  END DO
+END IF
 !---Local rows of each local cell (all fields, ncdofs order)
 ALLOCATE(lrow(nce_tot,nc))
 DO f=1,self%nfields
@@ -543,20 +562,26 @@ DO i=1,npair
   cnt(upos(i))=cnt(upos(i))+1
 END DO
 DEALLOCATE(cnt,pk,iperm)
-!---Cell adjacency: cells sharing at least thr points (two passes: count, fill)
+!---Cell adjacency: cells sharing at least thr distinct global points (two passes: count,
+!---fill). On periodic meshes a cell may hold two images of one global point and appear
+!---twice in its list, so each pair (cell, global point) is counted once.
 ALLOCATE(nnb(next),knb(next+1))
 DO pass=1,2
-  !$omp parallel private(e,e2,j,k,i,m,ntl,cnt,tl)
-  ALLOCATE(cnt(MAX(1,next)),tl(MAX(1,next)))
+  !$omp parallel private(e,e2,j,k,i,m,ntl,cnt,tl,lastp)
+  ALLOCATE(cnt(MAX(1,next)),tl(MAX(1,next)),lastp(MAX(1,next)))
   cnt=0
+  lastp=0
   !$omp do schedule(static)
   DO e=1,next
     ntl=0
     DO j=1,ncp
       k=upos((e-1)*ncp+j)
+      IF(ANY(upos((e-1)*ncp+1:(e-1)*ncp+j-1)==k))CYCLE ! Repeated global point of this cell
       DO i=kp(k),kp(k+1)-1
         e2=lpx(i)
         IF(e2==e)CYCLE
+        IF(lastp(e2)==k)CYCLE ! Repeated cell in this point's list
+        lastp(e2)=k
         IF(cnt(e2)==0)THEN
           ntl=ntl+1
           tl(ntl)=e2
@@ -571,11 +596,12 @@ DO pass=1,2
         IF(pass==2)lnb(knb(e)+m-1)=tl(i)
       END IF
       cnt(tl(i))=0
+      lastp(tl(i))=0
     END DO
     IF(pass==1)nnb(e)=m
   END DO
   !$omp end do
-  DEALLOCATE(cnt,tl)
+  DEALLOCATE(cnt,tl,lastp)
   !$omp end parallel
   IF(pass==1)THEN
     knb(1)=1
@@ -836,7 +862,7 @@ END DO
 nown=0
 DO i=1,mat%nr
   dtmp(i)=0
-  IF(owner(i)/=me)CYCLE
+  IF((owner(i)/=me).OR.(.NOT.lown(i)))CYCLE
   nown=nown+1
   j=INT(search_array(grow(i),dofs%gdof,n8),i4)
   IF(j==0)CALL oft_abort('Owned DoF missing from union','fem_cell_overlap_build',__FILE__)
@@ -875,7 +901,7 @@ DO b=1,nb
   IF(ALLOCATED(core(b)%v))DEALLOCATE(core(b)%v)
   IF(ALLOCATED(bx(b)%v))DEALLOCATE(bx(b)%v)
 END DO
-DEALLOCATE(core,bx,needed,egid,epts,eown,hdof,hdown,grow,owner,lrow,scnt,rcnt)
+DEALLOCATE(core,bx,needed,egid,epts,eown,hdof,hdown,grow,owner,lown,lrow,scnt,rcnt)
 IF(ALLOCATED(cand))DEALLOCATE(cand,cown)
 IF(ALLOCATED(cb))DEALLOCATE(cb)
 IF(ALLOCATED(inv))DEALLOCATE(inv)
