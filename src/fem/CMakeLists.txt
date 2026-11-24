@@ -2,6 +2,7 @@ set( FEM_OBJS
   fem_base.F90
   fem_composite.F90
   fem_utils.F90
+  fem_cell_overlap.F90
   lagrange_basis.F90
   lagrange_operators.F90
   blag_operators.F90
