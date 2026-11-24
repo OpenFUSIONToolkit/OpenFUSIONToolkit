@@ -12,12 +12,16 @@
 !! The current test cases are:
 !! - Exactness: with enough layers for every block to cover the whole mesh, restricted
 !!   Schwarz with direct sub-solves converges in one GMRES iteration to the reference
-!!   solution; additive Schwarz converges
+!!   solution; additive Schwarz converges. With one block per process the same holds in
+!!   graph mode with enough graph layers for every subdomain to cover the mesh
 !! - GMRES iteration counts for 0, 1 and 2 layers with point, edge and face adjacency,
 !!   next to graph overlap 0, 1 and 2 (written to `cell_schwarz.results` for checking
 !!   by the driver)
 !! - Numeric update after the operator values change matches a fresh setup
 !! - Delete and re-setup (and an update with a new pattern) reproduce the first solve
+!!
+!! The cube may be periodic (`ref_per` in `cube_options`), so that blocks and subdomains
+!! grow across periodic seams.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -29,6 +33,7 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_overlap_dofs, overlap_dofs_delete, OFT_ACCESS_READ, &
   OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE, OFT_CELL_ADJ_FACE
 USE oft_native_la, ONLY: oft_native_matrix
+USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_delete
 USE oft_native_solvers, ONLY: oft_schwarz_precond, oft_native_gmres_solver
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 USE oft_solver_base, ONLY: oft_solver
@@ -130,6 +135,17 @@ CALL check_tol('Exact blocks, restricted: solution'//tag,maxdiff(v,x)/maxabs(x),
 res(3)=solve(nparts,kfull,.TRUE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm)
 CALL check_tol('Exact blocks, additive: converged'//tag,rnorm,1.d-9)
 CALL check_tol('Exact blocks, additive: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-6)
+!---Graph mode exactness (one subdomain per process: graph growth crosses processes)
+IF(nparts==1)THEN
+  kfull=graph_cover()
+  k=solve(nparts,kfull,.FALSE.,OFT_CELL_ADJ_POINT,.FALSE.,v,rnorm)
+  CALL check_exact('Exact graph subdomains, restricted: 1 iteration'//tag,REAL(k,r8),1.d0)
+  CALL check_tol('Exact graph subdomains, restricted: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-8)
+  k=solve(nparts,kfull,.FALSE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm)
+  CALL check_tol('Exact graph subdomains, additive: converged'//tag,rnorm,1.d-9)
+  CALL check_tol('Exact graph subdomains, additive: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-6)
+  kfull=res(1)
+END IF
 CALL timing('Exactness',tag,t0)
 !---Iteration counts: (point, edge, face) x layers 0-2, graph overlap 0-2
 DO ia=1,3
@@ -150,6 +166,27 @@ CALL timing('Update and re-setup',tag,t0)
 NULLIFY(lop%cell_ovl)
 CALL cbld%delete
 END SUBROUTINE run_cases
+! Smallest number of graph layers for every process' subdomain to cover the whole mesh
+FUNCTION graph_cover() RESULT(kg)
+INTEGER(i4) :: kg,k
+TYPE(oft_native_overlap) :: ovl
+CLASS(oft_native_matrix), POINTER :: lnat
+SELECT TYPE(lop)
+CLASS IS(oft_native_matrix)
+  lnat=>lop
+CLASS DEFAULT
+  CALL oft_abort('Native matrix expected','graph_cover',__FILE__)
+END SELECT
+kg=-1
+DO k=0,128
+  CALL native_overlap_setup(ovl,lnat,u,k)
+  IF(-oft_mpi_max(-ovl%n)==lop%nrg)kg=k
+  CALL native_overlap_delete(ovl)
+  IF(kg>=0)EXIT
+END DO
+IF(kg<0)CALL oft_abort('Graph subdomains do not cover the mesh','graph_cover',__FILE__)
+IF(oft_env%head_proc)WRITE(*,'(A,I4)')'Graph layers covering the mesh: ',kg
+END FUNCTION graph_cover
 ! Print the wall time since the last call (or `t0` set by the caller)
 SUBROUTINE timing(label,tag,t0)
 CHARACTER(LEN=*), INTENT(in) :: label,tag

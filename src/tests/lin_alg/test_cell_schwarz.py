@@ -23,6 +23,7 @@ oft_in_template = """
 
 &cube_options
  mesh_type=1
+ ref_per={2}
 /
 
 &test_cell_schwarz_options
@@ -35,12 +36,12 @@ oft_in_template = """
 #  3-11: cell mode iterations for (point, edge, face) x layers 0-2,
 #  12-14: graph overlap 0-2, 15: before update, 16: after update, 17: after delete and
 #  re-setup, 18: after update with a new pattern
-def run_cell_schwarz(nprocs, nlevels, order, timeout=600):
+def run_cell_schwarz(nprocs, nlevels, order, timeout=600, ref_per='F,F,F'):
     os.chdir(test_dir)
     if os.path.isfile('cell_schwarz.results'):
         os.remove('cell_schwarz.results')
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nlevels, order))
+        fid.write(oft_in_template.format(nlevels, order, ref_per))
     if not run_OFT("./test_cell_schwarz", nprocs, timeout):
         return None
     with open('cell_schwarz.results', 'r') as fid:
@@ -85,6 +86,18 @@ expected = {
                 [10, 1, 1, 33, 14, 10, 33, 15, 12, 33, 19, 16, 62, 56, 56, 14, 14, 14, 14]],
 }
 
+# Cube periodic in x (`ref_per=T,F,F`): blocks and graph subdomains grow across the periodic seam
+expected_periodic = {
+    (1, 3, 3): [[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                [4, 1, 1, 35, 14, 11, 35, 16, 11, 35, 19, 16, 64, 21, 12, 14, 14, 14, 14]],
+    (2, 4, 3): [[3, 1, 1, 41, 15, 9, 41, 18, 11, 41, 22, 18, 58, 17, 9, 15, 15, 15, 15],
+                [4, 1, 1, 43, 16, 11, 43, 19, 14, 43, 25, 19, 76, 61, 55, 16, 16, 16, 16]],
+    (4, 4, 2): [[4, 1, 1, 34, 15, 9, 34, 17, 12, 34, 20, 17, 57, 17, 11, 15, 15, 15, 15],
+                [5, 1, 1, 38, 16, 11, 38, 18, 14, 38, 23, 18, 66, 59, 57, 16, 16, 16, 16]],
+    (2, 5, 2): [[5, 1, 1, 46, 19, 13, 46, 23, 17, 46, 27, 23, 60, 22, 14, 19, 19, 19, 19],
+                [9, 1, 1, 52, 22, 14, 52, 26, 18, 52, 31, 26, 82, 66, 63, 22, 22, 22, 22]],
+}
+
 @pytest.mark.coverage
 def test_serial():
     '''Cell mode Schwarz on a shared mesh (third order): exact blocks converge in one iteration,
@@ -117,3 +130,15 @@ def test_mpi4_refined():
     its = run_cell_schwarz(4, 5, 2, timeout=2400)
     assert its is not None
     check_counts(its, expected[(4, 5, 2)])
+
+@pytest.mark.parametrize('nprocs,nlevels,order', [pytest.param(1, 3, 3, id='serial'),
+                                                  pytest.param(2, 4, 3, id='mpi2', marks=pytest.mark.mpi),
+                                                  pytest.param(4, 4, 2, id='mpi4', marks=pytest.mark.mpi),
+                                                  pytest.param(2, 5, 2, id='mpi2_refined',
+                                                               marks=[pytest.mark.mpi, pytest.mark.slow])])
+def test_periodic(nprocs, nlevels, order):
+    '''Cell and graph mode Schwarz on a cube periodic in x (periodic images of seam DoFs on one
+    process, cells adjacent across the seam): the same checks as on the plain cube.'''
+    its = run_cell_schwarz(nprocs, nlevels, order, timeout=1200, ref_per='T,F,F')
+    assert its is not None
+    check_counts(its, expected_periodic[(nprocs, nlevels, order)])

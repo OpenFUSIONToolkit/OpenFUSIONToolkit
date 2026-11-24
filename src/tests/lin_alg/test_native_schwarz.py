@@ -85,10 +85,13 @@ def test_schwarz_mpi4():
     check_overlap_iterations(its)
     assert its[1] < its[0]
 
-@pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi)])
+@pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi),
+                                    pytest.param(4, id='mpi4', marks=pytest.mark.mpi)])
 def test_schwarz_periodic(nprocs):
-    '''Overlapping Schwarz with several blocks per process on a partially periodic cube (periodic images
-    on one process): overlap 0 reproduces block-Jacobi and overlap 1 reproduces block-Jacobi with
-    loverlap, bit for bit.'''
+    '''Overlapping Schwarz on a partially periodic cube (periodic images of seam DOFs on one process):
+    the same checks as on the plain cube, with subdomains grown across periodic seams and processes.'''
     its = run_schwarz(nprocs, 'T,F,F')
     assert its is not None
+    check_overlap_iterations(its)
+    if nprocs > 1:
+        assert its[1] < its[0]

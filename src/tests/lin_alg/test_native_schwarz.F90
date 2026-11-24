@@ -22,8 +22,8 @@
 !! - GMRES iteration counts with restricted and additive Schwarz for 0, 1 and 2
 !!   overlap layers (written to `schwarz.results` for checking by the driver)
 !!
-!! On periodic meshes only the first two (block-Jacobi equivalence) are checked, as
-!! overlap across processes is not supported there.
+!! All cases also run on periodic meshes, where a process holds several images of the
+!! DOFs on periodic seams.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -89,16 +89,6 @@ its(1)=solve(4,1,.FALSE.,.FALSE.,v)
 its(2)=solve(4,1,.FALSE.,.TRUE.,w)
 CALL check_exact('Local overlap 1 iterations = loverlap',REAL(its(2)-its(1),r8),0.d0)
 CALL check_exact('Local overlap 1 solution = loverlap',maxdiff(v,w),0.d0)
-!---Overlap across processes needs unique global indices (no periodic images)
-IF(mg_mesh%mesh%periodic%nper>0)THEN
-  IF(oft_env%head_proc)THEN
-    OPEN(NEWUNIT=io_unit,FILE='schwarz.results')
-    WRITE(io_unit,*)nfail
-    WRITE(io_unit,*)[its(1:2),its(1:2),its(1:2),its(1:2)]
-    CLOSE(io_unit)
-  END IF
-  CALL oft_finalize
-END IF
 !---Subdomain matrices against the assembled global matrix
 SELECT TYPE(lop)
 TYPE IS(oft_native_matrix)
