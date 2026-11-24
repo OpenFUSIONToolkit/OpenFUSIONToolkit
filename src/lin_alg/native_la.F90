@@ -1079,7 +1079,9 @@ end subroutine vec_stitch
 !! requires shared values to be consistent across processes at release. The values
 !! are compared with the result of `stitch(0)` on a copy, and all processes abort if
 !! any shared value differs from its owner's value by more than a relative 1.E-12.
-!! This is a collective operation.
+!! This is a collective operation unless the seam is local to the process (`skip`, or
+!! `full` when only periodic images on this process are compared), so it can be used
+!! on local vectors from worker threads (eg. block sub-solvers) without MPI calls.
 !---------------------------------------------------------------------------------
 subroutine native_check_shared(seam,vals,caller)
 type(oft_seam), intent(inout) :: seam !< Seam structure of the vector
@@ -1088,6 +1090,7 @@ character(LEN=*), intent(in) :: caller !< Name of calling routine (for error mes
 integer(i4) :: i,j,nbad
 real(r8) :: dmax
 real(r8), allocatable, dimension(:) :: tmp
+IF(seam%skip)RETURN
 ALLOCATE(tmp(SIZE(vals)))
 tmp=vals
 CALL oft_global_stitch(seam,tmp,0)
@@ -1103,7 +1106,7 @@ END DO
 DEALLOCATE(tmp)
 IF(nbad>0)WRITE(*,'(A,I8,A,I8,A,ES12.4)')'Rank ',oft_env%rank,': ',nbad, &
   ' shared values differ from owner, max abs difference ',dmax
-nbad=oft_mpi_sum(nbad)
+IF(.NOT.seam%full)nbad=oft_mpi_sum(nbad)
 IF(nbad>0)CALL oft_abort('Shared values inconsistent after release_local with sync=.FALSE. ('//caller//')', &
   'native_check_shared',__FILE__)
 end subroutine native_check_shared

@@ -661,8 +661,10 @@ end subroutine seam_check_plan
 !!   links and its own value are not included), in neighbour order.
 !!
 !! The plan, its buffers and the sorted-sum scratch belong to the seam, so a given
-!! seam must not be stitched concurrently; MPI calls are made from the calling
-!! thread only.
+!! seam must not be stitched concurrently. MPI calls are made from the calling
+!! thread only (see the MPI rules of oft_scatter.F90): with `MPI_THREAD_SERIALIZED`
+!! this need not be the thread that initialized MPI, but no other thread may make
+!! MPI calls at the same time.
 !---------------------------------------------------------------------------------
 subroutine global_stitch_r8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
