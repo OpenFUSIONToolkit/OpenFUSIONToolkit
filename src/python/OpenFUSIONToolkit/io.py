@@ -349,7 +349,7 @@ class XDMF_plot_mesh:
                         raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i))
                     if (name not in self.time_fields[i+1]):
                         raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i+1))
-                    return (self.time_fields[i][name]-self.time_fields[i+1][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
+                    return (self.time_fields[i+1][name]-self.time_fields[i][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
             raise ValueError("Requested time outside available range [{0:.6E},{1:.6E}]".format(self.times[0],self.times[-1]))
         else:
             if name not in self.static_fields:
