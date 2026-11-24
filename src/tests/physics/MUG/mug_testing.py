@@ -94,7 +94,7 @@ SOUND_TEMPLATE = """
  ni=1,1,4
  rscale=1.,1.,2.
  shift=-0.5,-0.5,-1.
- ref_per=T,T,T
+ ref_per={ref_per}
 /
 
 &test_sound_options
@@ -214,27 +214,33 @@ def mpi_ranks(nbase, nlevels):
     return 2 if nbase != nlevels else 1
 
 
-def mug_command(exe, nlevels, order, minlev, petsc=False):
+def mug_command(exe, nlevels, order, minlev, petsc=False, xml=None):
     '''Command line for a 3-D xMHD test program, with an XML file selecting a fast preconditioner
 
     The tests do not need to exercise the default preconditioners, so native runs use a block-Jacobi/LU
     preconditioner: inside one GMRES iteration (`oft_in_xmhd.xml`) on a single level, or as the GMRES smoother of a
     multigrid preconditioner (`oft_in_xmhd_mg.xml`). The FE levels run from `minlev` to the mesh levels plus
-    `order-1`. PETSc runs keep the default preconditioners.
+    `order-1`. PETSc runs keep the default preconditioners. `xml` replaces the XML file of native runs.
     '''
     if petsc:
         return exe
+    if xml is not None:
+        return "{0} oft.in {1}".format(exe, xml)
     if nlevels + order - 1 > minlev:
         return "{0} oft.in oft_in_xmhd_mg.xml".format(exe)
     return "{0} oft.in oft_in_xmhd.xml".format(exe)
 
 
-def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False):
+def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False,
+                periodic=True,xml=None,nparts=1):
     '''Write the input for a traveling sound wave and run test_sound (`representation` 'hcurl') or test_sound_lag
     ('lagrange')
 
     `nu_mhd` gives the multigrid smoother iterations per level. Matrix-free Jacobian products (`mf`, nonlinear runs
-    only) are finite-difference approximations, so the linear tolerance is relaxed.
+    only) are finite-difference approximations, so the linear tolerance is relaxed. `periodic=False` replaces the
+    triply periodic box by a box with walls (the wave is then no longer a solution, so errors are regression values
+    only), `xml` replaces the XML file of native runs and `nparts` sets the number of local partitions per process
+    (`xmhd_nparts`).
     '''
     exe, rep_options, timeout = {'hcurl': ('./test_sound', " bbc='bc'\n nu_visc=0.\n", 2000),
                                  'lagrange': ('./test_sound_lag', " bbc='bc'\n nu_visc=0.\n k_db=1.\n", 1000)}[representation]
@@ -246,14 +252,21 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
     if (not linear) and mf:
         lin_tol = '1.E-9'
         mfnk = True
+    nprocs = mpi_ranks(nbase, nlevels)
+    if nparts > 1:
+        # xmhd: total partitions per FE level (divided across processes); xmhd_lag: partitions per process
+        if representation == 'hcurl':
+            rep_options += " xmhd_nparts={0}\n".format(','.join([str(nparts*nprocs)]*(nlevels+order-1)))
+        else:
+            rep_options += " xmhd_nparts={0}\n".format(nparts)
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(SOUND_TEMPLATE.format(nbase=nbase, nlevels=nlevels, order=order, minlev=minlev, nu_mhd=nu_mhd,
                                         linear=namelist_flag(linear), dt='1.e-6', nsteps='100', lin_tol=lin_tol,
                                         mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                         mesh_type=(2 if hex_mesh else 1), two_temp=namelist_flag(two_temp),
-                                        rep_options=rep_options))
-    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc), mpi_ranks(nbase, nlevels), timeout)
+                                        rep_options=rep_options, ref_per=('T,T,T' if periodic else 'F,F,F')))
+    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc, xml), nprocs, timeout)
 
 
 def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp=False):
