@@ -788,7 +788,24 @@ DO qq=0,np-1
   END DO
 END DO
 CALL oft_exchange_i8(sc,sb2,rc,rb2)
-!---Requester: store received rows (in request order per owner) and their value locations
+!---Requester: grow received row storage once for all received rows
+mm=0
+nn=0
+DO kk=1,nreq
+  rr=INT(rb2(nn+1),4)
+  mm=mm+rr
+  nn=nn+1+2*rr
+END DO
+ALLOCATE(t4(ng_rows+nreq+1))
+t4(1:ng_rows+1)=gkr(1:ng_rows+1)
+CALL MOVE_ALLOC(t4,gkr)
+ALLOCATE(t8(MAX(1,gkr(ng_rows+1)-1+mm)))
+IF(gkr(ng_rows+1)>1)t8(1:gkr(ng_rows+1)-1)=gg(1:gkr(ng_rows+1)-1)
+CALL MOVE_ALLOC(t8,gg)
+ALLOCATE(t4(MAX(1,gkr(ng_rows+1)-1+mm)))
+IF(gkr(ng_rows+1)>1)t4(1:gkr(ng_rows+1)-1)=go(1:gkr(ng_rows+1)-1)
+CALL MOVE_ALLOC(t4,go)
+!---Store received rows (in request order per owner) and their value locations
 kk=0
 nn=0
 DO qq=0,np-1
@@ -796,17 +813,7 @@ DO qq=0,np-1
     kk=kk+1
     ng_rows=ng_rows+1
     rr=INT(rb2(nn+1),4)
-    !---Grow received row storage
-    ALLOCATE(t4(ng_rows+1))
-    t4(1:ng_rows)=gkr(1:ng_rows)
-    t4(ng_rows+1)=gkr(ng_rows)+rr
-    CALL MOVE_ALLOC(t4,gkr)
-    ALLOCATE(t8(MAX(1,gkr(ng_rows+1)-1)))
-    IF(gkr(ng_rows)>1)t8(1:gkr(ng_rows)-1)=gg(1:gkr(ng_rows)-1)
-    CALL MOVE_ALLOC(t8,gg)
-    ALLOCATE(t4(MAX(1,gkr(ng_rows+1)-1)))
-    IF(gkr(ng_rows)>1)t4(1:gkr(ng_rows)-1)=go(1:gkr(ng_rows)-1)
-    CALL MOVE_ALLOC(t4,go)
+    gkr(ng_rows+1)=gkr(ng_rows)+rr
     DO mm=1,rr
       gg(gkr(ng_rows)+mm-1)=rb2(nn+2*mm)
       go(gkr(ng_rows)+mm-1)=INT(rb2(nn+2*mm+1),4)
