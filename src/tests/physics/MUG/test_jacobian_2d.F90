@@ -6,12 +6,13 @@
 !> @file test_jacobian_2d.F90
 !
 !> Regression test for the 2D xMHD module. The approximate Jacobian assembled by
-!! build_approx_jacobian is compared with a central finite-difference derivative of the
+!! build_approx_jacobian_comp (or _incomp) is compared with a central finite-difference derivative of the
 !! nonlinear residual about a pseudo-random state, one field (column block) at a time.
 !! The relative error of every row block is printed and the largest is reported.
 !!
 !! If `check_abort=T` a nonlinear run is started instead, so that the input checks made by
-!! run_simulation can be tested.
+!! run_simulation can be tested. If `check_plot=T` the plotting routine is called instead, which
+!! is used to test plotting when no restart files (and so no saved background fields) exist.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -35,15 +36,17 @@ INTEGER(i4) :: order = 2
 LOGICAL :: cyl = .FALSE.
 LOGICAL :: incomp = .FALSE.
 LOGICAL :: check_abort = .FALSE.
+LOGICAL :: check_plot = .FALSE.
 REAL(r8) :: b0(3) = 0.d0
 REAL(r8) :: dt = 1.d-5
 REAL(r8) :: fd_eps = 1.d-6
-NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,b0,dt,fd_eps
+NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,check_plot,b0,dt,fd_eps
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,xmhd_jac_options,IOSTAT=ierr)
 CLOSE(io_unit)
+IF(ierr/=0)CALL oft_abort('Error reading "xmhd_jac_options" from input file','test_jacobian_2d',__FILE__)
 !---------------------------------------------------------------------------
 ! Setup grid and simulation
 !---------------------------------------------------------------------------
@@ -103,12 +106,21 @@ IF(check_abort)THEN
   CALL mhd_sim%run_simulation()
   CALL oft_finalize
 END IF
+IF(check_plot)THEN
+  CALL xmhd_2d_plot(mhd_sim)
+  WRITE(*,'(A)')'PLOT_DONE'
+  CALL oft_finalize
+END IF
 !---------------------------------------------------------------------------
 ! Compare Jacobian with finite-difference derivative of the residual
 !---------------------------------------------------------------------------
 mhd_sim%jac_dt=dt
 mhd_sim%nlfun%dt=dt
-CALL build_approx_jacobian(mhd_sim,u)
+IF(incomp)THEN
+  CALL build_approx_jacobian_incomp(mhd_sim,u)
+ELSE
+  CALL build_approx_jacobian_comp(mhd_sim,u)
+END IF
 CALL mhd_sim%nlfun%apply(u,f0)
 max_err=0.d0
 DO ic=1,7

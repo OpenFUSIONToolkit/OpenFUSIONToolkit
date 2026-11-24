@@ -402,7 +402,7 @@ CONTAINS
 !! | `xmhd_lin_bdf2=T` | Linear runs only: use second-order BDF2 time integration (otherwise first-order backward Euler) | bool |
 !! | `xmhd_lin_euler_start=F` | Linear runs only: take one backward Euler step before BDF2, instead of using the initial condition for both BDF2 history levels (costs one extra preconditioner update) | bool |
 !! | `bbc="bc"`         | Magnetic field boundary condition ("bc", "ic") | str(2) |
-!! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`) | str(4) |
+!! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`; velocity is always fixed in solid regions) | str(4) |
 !! | `nbc="d"`          | Density boundary condition ("d", "n", "x": per surface from `<den_bc>`) | str(1) |
 !! | `tbc="d"`          | Temperature boundary condition ("d", "n", "x": per surface from `<temp_bc>`) | str(1) |
 !! | `visc_type="kin"`  | Fluid viscosity type ("kin", "iso") | str(3) |
@@ -3005,15 +3005,15 @@ IF(vbc(1:4)=='none')THEN
   !---Do nothing
 ELSE IF(vbc(1:3)=='all')THEN
   DO i=1,oft_lagrange%ne
-    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=1
+    IF(oft_lagrange%global%gbe(i))oft_xmhd_ops%v_bc_type(i)=1
   END DO
 ELSE IF(vbc(1:4)=='norm')THEN
   DO i=1,oft_lagrange%ne
-    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=2
+    IF(oft_lagrange%global%gbe(i))oft_xmhd_ops%v_bc_type(i)=2
   END DO
 ELSE IF(vbc(1:4)=='tang')THEN
   DO i=1,oft_lagrange%ne
-    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=3
+    IF(oft_lagrange%global%gbe(i))oft_xmhd_ops%v_bc_type(i)=3
   END DO
 ELSE IF(vbc(1:3)=='xml')THEN
   IF(.NOT.xmhd_root_node%associated())CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
@@ -3048,6 +3048,10 @@ ELSE IF(vbc(1:3)=='xml')THEN
 ELSE
   CALL oft_abort('Invalid V Boundary Condition.','xmhd_bc',__FILE__)
 END IF
+!---Fix velocity at all nodes in solid regions
+DO i=1,oft_lagrange%ne
+  IF(oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=1
+END DO
 !---Zero the velocity components normal to the axis (y,z) on the axis of revolved
 !   meshes (v_bc_type=-1); assumes rotation about x, as in the axis detection of
 !   oft_lag_setup

@@ -126,19 +126,20 @@ def alfven_linear(nu_gyro, hall=False, me_factor=100.):
     x = expm(np.linalg.solve(mass, mat)*t_final) @ x0
     return np.array([[-x[0].imag, x[0].real], [-x[1].imag, x[1].real]])
 
-def gyro_case(nu_gyro, hall=False, me_factor=100., linear=False):
+def gyro_case(nu_gyro, hall=False, me_factor=100., linear=False, exe='./test_MUG_gyro'):
     '''Write the input for an Alfven wave with ion temperature ti0 and run test_MUG_gyro
 
     `hall` enables the Hall, electron pressure, and electron inertia terms, with electron mass factor `me_factor`.
     `linear` advances the wave with the linearized model (xmhd_lin_run, started with a backward Euler step) about
-    the uniform equilibrium instead of the nonlinear model.
+    the uniform equilibrium instead of the nonlinear model. `exe` selects the driver program (`./test_MUG_gyro_lag`
+    for the Lagrange-only module).
     '''
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(ti0, eta, nu_visc, nu_gyro, 'T' if hall else 'F', me_factor,
                                          'T' if linear else 'F'))
     # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command)
-    return run_OFT("./test_MUG_gyro oft.in oft_in_xmhd.xml", 1, 600)
+    return run_OFT("{0} oft.in oft_in_xmhd.xml".format(exe), 1, 600)
 
 def validate_result(nu_gyro, err_exp, hall=False, me_factor=100.):
     '''Compare the final transverse velocity with linear theory
