@@ -332,12 +332,12 @@ class XDMF_plot_mesh:
 
         When `time` is given the field is linearly interpolated between the two saved timesteps that
         bracket it, which requires the stored TIME values to be non-decreasing in file order. If
-        several consecutive timesteps share the requested time (a zero-width interval), the first
-        of them in file order is returned unchanged.
+        several consecutive timesteps share the requested time (a zero-width interval), a copy of
+        the first of them in file order is returned.
 
         @param name Name of field
         @param time Time value to evaluate field (linear interpolation)
-        @param timestep Timestep index to retrieve (0-based, negative indices are not allowed)
+        @param timestep Timestep index to retrieve (0-based, negative indices count from the last timestep)
         @result Field data as a `numpy.ndarray`
         '''
         if (timestep is not None) or (time is not None):
@@ -349,8 +349,10 @@ class XDMF_plot_mesh:
             if name not in self.time_field_names:
                 raise KeyError('"{0}" is not one of the timestep fields'.format(name))
         if timestep is not None:
-            if (timestep < 0) or (timestep > ntimes-1):
-                raise ValueError("Requested timestep {0} outside available range [0,{1}]".format(timestep,ntimes-1))
+            if (timestep < -ntimes) or (timestep > ntimes-1):
+                raise ValueError("Requested timestep {0} outside available range [{1},{2}]".format(timestep,-ntimes,ntimes-1))
+            if timestep < 0:
+                timestep += ntimes
             if (name not in self.time_fields[timestep]):
                 raise KeyError('"{0}" is not available at requested timestep {1}'.format(name,timestep))
             return self.time_fields[timestep][name]
@@ -366,9 +368,9 @@ class XDMF_plot_mesh:
                     break
             if (name not in self.time_fields[i]):
                 raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i))
-            # Exact match (including zero-width intervals and single-timestep meshes): return stored data
+            # Exact match (including zero-width intervals and single-timestep meshes): return a copy of the stored data
             if self.times[i] == time:
-                return self.time_fields[i][name]
+                return numpy.array(self.time_fields[i][name], dtype=numpy.float64)
             if (name not in self.time_fields[i+1]):
                 raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i+1))
             return (self.time_fields[i+1][name]-self.time_fields[i][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
