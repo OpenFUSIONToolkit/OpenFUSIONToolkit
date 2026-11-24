@@ -38,9 +38,16 @@
 !!   subdomain DOFs (local copies owned elsewhere and ghosts) are requested from
 !!   their owners, keyed by global index (`lge` of the row maps).
 !!
-!! Invariants relied on: every DOF has exactly one owner (`leo`); global indices are
-!! unique per DOF (meshes with periodic images on one process are not supported);
-!! the matrix pattern is fixed after setup (values are refreshed by
+!! Periodic meshes hold several local images of a DOF (local rows sharing a global
+!! index). The full local matrix keeps the assembled row of one image (the others are
+!! replaced by identity rows, `redind`), so complete rows are built from non-redundant
+!! rows only. Each global index is represented by one local row for vector values: the
+!! owned copy (`leo`) on its owner, the lowest local index elsewhere; values are gathered
+!! from and written back to it (other images are synchronized by the caller's
+!! stitching).
+!!
+!! Invariants relied on: every DOF has exactly one owned copy (`leo`) over all
+!! processes and images; the matrix pattern is fixed after setup (values are refreshed by
 !! @ref native_overlap_update with fixed scatter plans); vectors are consistent across
 !! copies when gathered.
 !!
@@ -176,11 +183,12 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: owner,orow,olist,scnt,rcnt,ckr,co,gkr,
   rrow,rown,krec,lrec,isort,dlist_own,dsrc,kr_sub,lpos,sub_of_d,newo
 INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr,lc
 INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gidx,gsorted,sbuf,rbuf,cg,gg,rg,tmp8,dlist,front,newg,dsorted
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: gperm,dperm
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: gperm,dperm,gimg,kimg,lrep
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: lown,lred
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rown_r
 TYPE(ilist), ALLOCATABLE, DIMENSION(:) :: rows_send,rows_recv,ghost_send,ghost_recv
 TYPE(oft_native_pattern), POINTER :: pattern
-INTEGER(i4) :: nd,nfront,nnew,ng_rows,ngv,nsub_nnz
+INTEGER(i4) :: nd,nfront,nnew,ng_rows,ngv,nsub_nnz,nrun
 INTEGER(i4) :: nsum,nmax
 INTEGER(i8) :: nsent0
 TYPE(oft_timer) :: stimer
@@ -206,7 +214,6 @@ me=oft_env%rank
 !---Global index of each local row
 ALLOCATE(gidx(mat%nr))
 DO i=1,mat%ni
-  IF(mat%i_map(i)%per)CALL oft_abort('Periodic row maps are not supported','native_overlap_setup',__FILE__)
   DO j=1,mat%i_map(i)%n
     gidx(mat%i_map(i)%offset+j)=mat%i_map(i)%offsetg+mat%i_map(i)%lge(j)
   END DO
@@ -221,16 +228,67 @@ rown_r=REAL(me,r8)
 CALL oft_global_stitch(self%seam,rown_r,0)
 owner=NINT(rown_r)
 DEALLOCATE(rown_r)
+!---Owned copies (interior rows and owned boundary rows)
+ALLOCATE(lown(mat%nr))
+lown=.TRUE.
+IF(self%seam%nbe>0)THEN
+  IF(.NOT.ASSOCIATED(self%seam%leo))CALL oft_abort('Seam ownership required','native_overlap_setup',__FILE__)
+  DO i=1,self%seam%nbe
+    lown(self%seam%lbe(i))=self%seam%leo(i)
+  END DO
+END IF
+!---Local images of each global index (runs of gsorted; several on periodic meshes):
+!---images of run k are gimg(kimg(k):kimg(k+1)-1), representative row lrep(i)
+ALLOCATE(gimg(mat%nr),kimg(mat%nr+1),lrep(mat%nr))
+gimg=gperm
+m=0
+DO i=1,mat%nr
+  IF(i>1)THEN
+    IF(gsorted(i)==gsorted(i-1))CYCLE
+  END IF
+  m=m+1
+  kimg(m)=i
+END DO
+nrun=m
+kimg(nrun+1)=mat%nr+1
+DO k=1,nrun
+  r=0
+  ntmp=0
+  DO j=kimg(k),kimg(k+1)-1
+    i=gimg(j)
+    IF((owner(i)==me).AND.lown(i))THEN
+      r=i
+      ntmp=ntmp+1
+    END IF
+  END DO
+  IF(owner(gimg(kimg(k)))==me)THEN
+    IF(ntmp/=1)CALL oft_abort('Owned DOF without a unique owned copy','native_overlap_setup',__FILE__)
+  ELSE
+    IF(ntmp/=0)CALL oft_abort('Owned copy of a DOF owned elsewhere','native_overlap_setup',__FILE__)
+    r=MINVAL(gimg(kimg(k):kimg(k+1)-1))
+  END IF
+  DO j=kimg(k),kimg(k+1)-1
+    IF(owner(gimg(j))/=owner(r))CALL oft_abort('Inconsistent owners of DOF images','native_overlap_setup',__FILE__)
+    lrep(gimg(j))=r
+    gperm(j)=r ! local_index returns the representative
+  END DO
+END DO
 !---Full local matrix
 CALL native_matrix_setup_full(mat,u)
 kr=>mat%kr
 lc=>mat%lc
-!---Owned rows
+!---Redundant rows (identity rows of all but one local image on periodic meshes) hold no values
+ALLOCATE(lred(mat%nr))
+lred=.FALSE.
+DO i=1,mat%nred
+  lred(mat%redind(i))=.TRUE.
+END DO
+!---Owned rows (one per owned global index: the owned copy)
 ALLOCATE(orow(mat%nr))
 orow=0
 nown_rows=0
 DO i=1,mat%nr
-  IF(owner(i)==me)THEN
+  IF((owner(i)==me).AND.(lrep(i)==i))THEN
     nown_rows=nown_rows+1
     orow(i)=nown_rows
   END IF
@@ -245,14 +303,14 @@ END DO
 ALLOCATE(scnt(0:np-1),rcnt(0:np-1),rows_send(0:np-1),rows_recv(0:np-1))
 scnt=0
 DO i=1,mat%nr
-  IF(owner(i)==me)CYCLE
+  IF((owner(i)==me).OR.lred(i))CYCLE
   scnt(owner(i))=scnt(owner(i))+2+2*(kr(i+1)-kr(i))
 END DO
 ALLOCATE(sbuf(MAX(1,SUM(scnt))),ipos(0:np-1))
 CALL csr_offsets(scnt,ipos)
 DO i=1,mat%nr
   q=owner(i)
-  IF(q==me)CYCLE
+  IF((q==me).OR.lred(i))CYCLE
   sbuf(ipos(q))=gidx(i)
   sbuf(ipos(q)+1)=kr(i+1)-kr(i)
   ipos(q)=ipos(q)+2
@@ -310,13 +368,22 @@ ckr(1)=1
 ALLOCATE(cg(MAX(1,kr(mat%nr+1)-1+m)),co(MAX(1,kr(mat%nr+1)-1+m)))
 DO r=1,nown_rows
   i=olist(r)
-  ntmp=(kr(i+1)-kr(i))+(krec(r+1)-krec(r))
+  ntmp=krec(r+1)-krec(r)
+  q=image_run(i)
+  DO jp=kimg(q),kimg(q+1)-1
+    IF(lred(gimg(jp)))CYCLE
+    ntmp=ntmp+kr(gimg(jp)+1)-kr(gimg(jp))
+  END DO
   ALLOCATE(tmp8(ntmp),isort(ntmp),itmp(ntmp))
   ntmp=0
-  DO j=kr(i),kr(i+1)-1
-    ntmp=ntmp+1
-    tmp8(ntmp)=gidx(lc(j))
-    itmp(ntmp)=owner(lc(j))
+  q=image_run(i)
+  DO jp=kimg(q),kimg(q+1)-1
+    IF(lred(gimg(jp)))CYCLE
+    DO j=kr(gimg(jp)),kr(gimg(jp)+1)-1
+      ntmp=ntmp+1
+      tmp8(ntmp)=gidx(lc(j))
+      itmp(ntmp)=owner(lc(j))
+    END DO
   END DO
   DO k=krec(r),krec(r+1)-1
     ntmp=ntmp+1
@@ -358,11 +425,15 @@ DEALLOCATE(rbuf)
 ALLOCATE(lpos(MAX(1,kr(mat%nr+1)-1)),itmp(MAX(1,kr(mat%nr+1)-1)))
 ntmp=0
 DO r=1,nown_rows
-  i=olist(r)
-  DO j=kr(i),kr(i+1)-1
-    ntmp=ntmp+1
-    itmp(ntmp)=j
-    lpos(ntmp)=complete_pos(r,gidx(lc(j)))
+  q=image_run(olist(r))
+  DO jp=kimg(q),kimg(q+1)-1
+    i=gimg(jp)
+    IF(lred(i))CYCLE
+    DO j=kr(i),kr(i+1)-1
+      ntmp=ntmp+1
+      itmp(ntmp)=j
+      lpos(ntmp)=complete_pos(r,gidx(lc(j)))
+    END DO
   END DO
 END DO
 CALL build_plan(self%plan_rows,rows_send,rows_recv,ntmp,itmp,lpos)
@@ -531,7 +602,7 @@ CALL scatter_plan_setup_local(self%plan_own,m,isort,itmp)
 DEALLOCATE(isort,itmp)
 ALLOCATE(self%acc(self%nr))
 !---Cleanup
-DEALLOCATE(gidx,gsorted,gperm,owner,orow,olist,scnt,rcnt,ipos,ckr,cg,co,gkr,gg,go)
+DEALLOCATE(gidx,gsorted,gperm,gimg,kimg,lrep,lown,lred,owner,orow,olist,scnt,rcnt,ipos,ckr,cg,co,gkr,gg,go)
 DEALLOCATE(dlist,newo,dsrc,dsorted,dperm,sub_of_d)
 IF(ALLOCATED(front))DEALLOCATE(front)
 IF(ALLOCATED(rbuf))DEALLOCATE(rbuf)
@@ -647,6 +718,29 @@ CALL request_rows(nnew,newg,itmp,nd)
 nd=nd+nnew
 DEALLOCATE(newg,itmp)
 END SUBROUTINE select_dofs
+!> Run of local images (index into kimg) of local row `il`
+FUNCTION image_run(il) RESULT(k)
+INTEGER(i4), INTENT(in) :: il
+INTEGER(i4) :: k
+INTEGER(i4) :: ilow,ihigh,imid
+INTEGER(i8) :: g
+g=gidx(il)
+k=0
+ilow=1
+ihigh=nrun
+DO WHILE(ilow<=ihigh)
+  imid=(ilow+ihigh)/2
+  IF(gsorted(kimg(imid))==g)THEN
+    k=imid
+    RETURN
+  ELSE IF(gsorted(kimg(imid))<g)THEN
+    ilow=imid+1
+  ELSE
+    ihigh=imid-1
+  END IF
+END DO
+CALL oft_abort('Local row without image run','native_overlap_setup',__FILE__)
+END FUNCTION image_run
 !> Local index of a global index (0 if not held locally)
 FUNCTION local_index(g) RESULT(il)
 INTEGER(i8), INTENT(in) :: g
