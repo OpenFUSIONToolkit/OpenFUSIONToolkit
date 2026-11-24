@@ -44,9 +44,10 @@ oft_in_template = """
  incomp={2}
  b0={3}
  check_abort={4}
- upwind={5}
- diff_set={6:.4E}
- dt={7:.4E}
+ check_plot={5}
+ upwind={6}
+ diff_set={7:.4E}
+ dt={8:.4E}
 /
 """
 
@@ -54,17 +55,28 @@ oft_in_template = """
 JAC_TOL = 1.E-6
 
 
-def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=None, upwind=False, diff_set=-1.0):
+def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=None, check_plot=False,
+                      run_dir=None, upwind=False, diff_set=-1.0):
     # With upwinding a larger time step is used, so that the advection and upwinding terms are not
     # dominated by the mass matrix and errors in their derivatives are detected
     dt = 1.E-3 if upwind else 1.E-5
-    os.chdir(test_dir)
+    # run_dir (relative to the test directory) is used to run without any restart files present
+    work_dir = test_dir
+    command = "./test_jacobian_2d"
+    if run_dir is not None:
+        work_dir = os.path.join(test_dir, run_dir)
+        os.makedirs(work_dir, exist_ok=True)
+        command = os.path.join(test_dir, "test_jacobian_2d")
+    os.chdir(work_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(order, 'T' if cyl else 'F', 'T' if incomp else 'F',
                                          ','.join('{0:.4E}'.format(val) for val in b0),
-                                         'T' if check_abort else 'F', 'T' if upwind else 'F',
-                                         diff_set, dt))
-    return run_OFT("./test_jacobian_2d", 1, 600, return_stdout=True, expect_abort=expect_abort)
+                                         'T' if check_abort else 'F', 'T' if check_plot else 'F',
+                                         'T' if upwind else 'F', diff_set, dt))
+    try:
+        return run_OFT(command, 1, 600, return_stdout=True, expect_abort=expect_abort)
+    finally:
+        os.chdir(test_dir)
 
 
 def validate_result(result):
@@ -113,8 +125,18 @@ def test_upwind_zero_diff_abort():
     assert status
 
 
+def test_plot_without_restart():
+    '''Plotting without a step-0 restart file (no saved psi_vac/B_0) warns and continues instead of aborting.'''
+    rst_path = os.path.join(test_dir, 'jac2d_plot', 'xmhd2d_00000.rst')
+    if os.path.exists(rst_path):
+        os.remove(rst_path)
+    status, std_out = jacobian_2d_setup(2, False, False, (1.E-2, 0.0, 0.0), check_plot=True, run_dir='jac2d_plot')
+    assert status
+    assert std_out.find('PLOT_DONE') > -1
+
+
 def test_cyl_b0_abort():
     '''A background field with R or phi components is rejected in cylindrical geometry.'''
     status, _ = jacobian_2d_setup(2, True, False, (1.E-2, 0.0, 0.0), check_abort=True,
-                                  expect_abort='Only a Z-directed background field')
+                                  expect_abort='Only vertical B_0')
     assert status
