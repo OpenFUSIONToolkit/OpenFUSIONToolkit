@@ -364,10 +364,26 @@ class ThinCurr():
     def build_XDMF(self,repeat_static=False,pretty=False):
         '''! Build XDMF plot metadata files for model
 
+        @note When run with MPI, plot files are written by the head process only and this method does
+        nothing (returns `None`) on other processes
+
         @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
         @param pretty Use pretty printing (indentation) in XDMF files?
         '''
+        if not self._oft_env.head_proc:
+            return None
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
+
+    def _check_mpi_direct(self,direct):
+        '''! Check that a requested solve is supported with the current number of MPI processes
+
+        @param direct Use direct solver?
+        '''
+        if self._oft_env.nprocs > 1:
+            if direct:
+                raise ValueError('Direct solves are not supported with MPI, use "direct=False" with HODLR compression')
+            if not self.Lmat_hodlr:
+                raise ValueError('Only HODLR inductance matrices are supported with MPI, use "compute_Lmat(use_hodlr=True)"')
 
     def scale_va(self,data,div_flag=False):
         '''! Scale a vertex array by vertex areas (eg. B_n -> flux)
@@ -426,9 +442,11 @@ class ThinCurr():
         '''! Compute the self-inductance matrix for this model
 
         @param cache_file Path to cache file to store/load matrix
-        @param use_hodlr Use HODLR compression for the matrix
+        @param use_hodlr Use HODLR compression for the matrix (required when run with MPI)
         @result Self-inductance matrix (`(:,:)` if `use_hodlr=False` else reference to HODLR object)
         '''
+        if (not use_hodlr) and (self._oft_env.nprocs > 1):
+            raise ValueError('Only HODLR inductance matrices are supported with MPI, use "use_hodlr=True"')
         if cache_file is None:
             cache_string = self._oft_env.path2c("")
         else:
@@ -732,6 +750,7 @@ class ThinCurr():
         @result Eigenvalues `(neigs)`
         @result Eigenvectors `(neigs,:)`
         '''
+        self._check_mpi_direct(direct)
         eig_vals = numpy.zeros((neigs,), dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.nelems), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -753,6 +772,7 @@ class ThinCurr():
         @param direct Use direct solver?
         @result Real/Imaginary eddy current response
         '''
+        self._check_mpi_direct(direct)
         if fdriver is not None:
             if vdriver is not None:
                 raise ValueError('"fdriver" and "vdriver" cannot be specified simultaneously')
@@ -796,6 +816,7 @@ class ThinCurr():
           specified by setup_io(basepath=...). By default they are written to the current
           working directory.
         '''
+        self._check_mpi_direct(direct)
         vec_ic = numpy.zeros((self.nelems,), dtype=numpy.float64)
         if coil_currs is None:
             ncurr = c_int(0)

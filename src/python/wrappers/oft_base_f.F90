@@ -74,6 +74,32 @@ IF(c_associated(abort_fun))CALL c_f_procpointer(abort_fun,oft_abort_cb)
 slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]
 END SUBROUTINE oftpy_init
 !---------------------------------------------------------------------------------
+!> Finalize MPI at interpreter exit (if initialized and not already finalized)
+!!
+!! Python processes do not call \ref oft_base::oft_finalize "oft_finalize", which also stops the program, so MPI
+!! is finalized separately to allow clean exit of runs launched with `mpirun`/`mpiexec`.
+!---------------------------------------------------------------------------------
+SUBROUTINE oftpy_finalize_mpi() BIND(C,NAME="oftpy_finalize_mpi")
+#ifdef HAVE_MPI
+LOGICAL :: flag
+INTEGER(i4) :: ierr
+CALL MPI_INITIALIZED(flag,ierr)
+IF(.NOT.flag)RETURN
+CALL MPI_FINALIZED(flag,ierr)
+IF(flag)RETURN
+CALL MPI_FINALIZE(ierr)
+#endif
+END SUBROUTINE oftpy_finalize_mpi
+!---------------------------------------------------------------------------------
+!> Get MPI information for the current process (requires initialization)
+!---------------------------------------------------------------------------------
+SUBROUTINE oftpy_get_mpi_info(info) BIND(C,NAME="oftpy_get_mpi_info")
+TYPE(c_ptr), VALUE, INTENT(in) :: info !< MPI information [nprocs,rank] (2)
+INTEGER(i4), POINTER, DIMENSION(:) :: info_tmp
+CALL c_f_pointer(info, info_tmp, [2])
+info_tmp=[oft_env%nprocs,oft_env%rank]
+END SUBROUTINE oftpy_get_mpi_info
+!---------------------------------------------------------------------------------
 !> Get string lengths used by the compiled library (does not require initialization)
 !---------------------------------------------------------------------------------
 SUBROUTINE oftpy_get_slens(slens) BIND(C,NAME="oftpy_get_slens")

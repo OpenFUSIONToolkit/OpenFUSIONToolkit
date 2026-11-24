@@ -261,7 +261,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Path to root di
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_debug !< Save model debug information?
 LOGICAL(c_bool), VALUE, INTENT(in) :: legacy_hdf5 !< Use legacy HDF5 format?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
-INTEGER(4) :: i,j,k,npts,nedges
+INTEGER(4) :: i,j,k,npts,nedges,ierr
 INTEGER(4), ALLOCATABLE :: lctmp(:,:)
 REAL(r8), ALLOCATABLE :: rtmp(:,:)
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
@@ -272,13 +272,21 @@ CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
   tw_obj%rst_prefix=TRIM(pathprefix)
-  CALL tw_obj%xdmf%setup('thincurr',pathprefix,.NOT.LOGICAL(legacy_hdf5))
-  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
   tw_obj%rst_prefix=''
-  CALL tw_obj%xdmf%setup('thincurr',persistent_space_tracking=.NOT.LOGICAL(legacy_hdf5))
-  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 END IF
+!---Plot files are written by the head processor only (every processor holds the full model)
+IF(oft_env%head_proc)CALL setup_plot_files()
+CALL oft_mpi_barrier(ierr)
+CONTAINS
+!> Setup plot files and save static fields
+SUBROUTINE setup_plot_files()
+IF(TRIM(pathprefix)/='')THEN
+  CALL tw_obj%xdmf%setup('thincurr',pathprefix,.NOT.LOGICAL(legacy_hdf5))
+ELSE
+  CALL tw_obj%xdmf%setup('thincurr',persistent_space_tracking=.NOT.LOGICAL(legacy_hdf5))
+END IF
+CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 IF(tw_obj%n_vcoils>0)THEN
   npts=0
   nedges=0
@@ -334,6 +342,7 @@ IF(tw_obj%n_icoils>0)THEN
   DEALLOCATE(rtmp,lctmp)
 END IF
 IF(save_debug)CALL tw_obj%save_debug()
+END SUBROUTINE setup_plot_files
 END SUBROUTINE thincurr_setup_io
 !---------------------------------------------------------------------------------
 !> Save current field from ThinCurr to plot files
@@ -348,8 +357,8 @@ TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(fieldname,name_tmp)
 CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
-!---Save plot fields
-CALL tw_save_pfield(tw_obj,vals_tmp,TRIM(name_tmp))
+!---Save plot fields (head processor only)
+IF(oft_env%head_proc)CALL tw_save_pfield(tw_obj,vals_tmp,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_field
 !---------------------------------------------------------------------------------
 !> Reconstruct current field on mesh
@@ -457,8 +466,8 @@ TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(fieldname,name_tmp)
 CALL c_f_pointer(vals, vals_tmp, [tw_obj%mesh%np])
-!---Save plot fields
-CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,tw_obj%xdmf,TRIM(name_tmp))
+!---Save plot fields (head processor only)
+IF(oft_env%head_proc)CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,tw_obj%xdmf,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_scalar
 !---------------------------------------------------------------------------------
 !> Scale a vertex array by vertex areas (eg. B_n -> flux)
@@ -570,6 +579,10 @@ IF((tw_obj%n_vcoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Acoil2coil)))THEN
   RETURN
 END IF
 CALL copy_string('',error_str)
+IF((.NOT.use_hodlr).AND.(oft_env%nprocs>1))THEN
+  CALL copy_string('Dense inductance matrices are not supported with MPI, use HODLR compression',error_str)
+  RETURN
+END IF
 !
 CALL copy_string_rev(cache_file,filename)
 IF(use_hodlr)THEN
@@ -608,6 +621,10 @@ TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string('',error_str)
+IF((.NOT.c_associated(hodlr_ptr)).AND.(oft_env%nprocs>1))THEN
+  CALL copy_string('Dense B-field operators are not supported with MPI, use HODLR compression',error_str)
+  RETURN
+END IF
 !
 IF(B_dx>0.d0)THEN
   tw_obj%B_dx=B_dx
@@ -752,11 +769,11 @@ SELECT TYPE(this=>tw_obj%Uloc)
     CALL oft_abort('Failed to allocate "Uloc" vector','thincurr_set_coil_types',__FILE__)
 END SELECT
 !---Print update summary
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Updating coil types:'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Updating coil types:'
 CALL oft_increase_indent
-WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',tw_obj%n_vcoils
-WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',tw_obj%n_icoils
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',tw_obj%n_vcoils
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',tw_obj%n_icoils
 CALL oft_decrease_indent
 END SUBROUTINE thincurr_set_coil_types
 !---------------------------------------------------------------------------------

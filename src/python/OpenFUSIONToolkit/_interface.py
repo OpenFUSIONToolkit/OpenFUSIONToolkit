@@ -113,6 +113,13 @@ oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
 oftpy_get_slens = ctypes_subroutine(oftpy_lib.oftpy_get_slens,
     [ctypes_numpy_array(int32,1)])
 
+# oftpy_finalize_mpi()
+oftpy_finalize_mpi = ctypes_subroutine(oftpy_lib.oftpy_finalize_mpi)
+
+# oftpy_get_mpi_info(info)
+oftpy_get_mpi_info = ctypes_subroutine(oftpy_lib.oftpy_get_mpi_info,
+    [ctypes_numpy_array(int32,1)])
+
 # oftpy_set_debug(debug_level)
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
     [c_int])
