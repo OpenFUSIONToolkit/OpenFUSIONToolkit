@@ -215,7 +215,8 @@ NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,tes
 !---Initialize MPI
 oft_main_thread=.TRUE.
 #ifdef HAVE_MPI
-CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
+!---Worker threads make MPI calls (inside OpenMP critical sections, and MPI_ABORT from @ref oft_abort)
+CALL MPI_INIT_THREAD(MPI_THREAD_SERIALIZED,thrdtype,ierr)
 #endif
 #ifdef OFT_STACK
 CALL oft_set_signal_handlers
@@ -230,6 +231,10 @@ oft_env%nprocs=1
 #endif
 IF(oft_env%rank==0)oft_env%head_proc=.TRUE.
 WRITE(oft_env%crank,'(I4.4)')oft_env%rank
+#ifdef HAVE_MPI
+IF(oft_env%head_proc.AND.(thrdtype<MPI_THREAD_SERIALIZED))CALL oft_warn( &
+  'MPI does not provide MPI_THREAD_SERIALIZED, MPI calls from OpenMP threads may be unsafe')
+#endif
 !---Read settings filename from command line
 IF(PRESENT(nthreads))THEN
   from_api=.TRUE.
