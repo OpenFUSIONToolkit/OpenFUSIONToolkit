@@ -20,6 +20,10 @@ ERRORS = {
     'hcurl': (1.324993E+00, 1.327518E+00, 4.073417E+00),
     'lagrange': (1.324987E+00, 1.327513E+00, 4.073380E+00),
 }
+ERRORS_GMG = {
+    'hcurl': (7.398874E-01, 7.431498E-01, 4.300015E+00),
+    'lagrange': (7.398845E-01, 7.431477E-01, 4.299890E+00),
+}
 # Reference errors of test_sound.py and test_sound_lag.py (test_nl_r1_p3_mpi)
 PERIODIC_ERRORS = {
     'hcurl': (3.067332E-03, 3.070297E-03, 3.355874E-03),
@@ -50,3 +54,17 @@ def test_nl_r1_p2_walls_mpi(representation, pre, nparts):
     xml = 'oft_in_xmhd_mg_cell.xml' if pre == 'cell' else None
     assert sound_setup(representation,1,2,2,2,'0,2,2',periodic=False,xml=xml,nparts=nparts)
     assert validate_sound(*ERRORS[representation])
+
+#============================================================================
+# Nonlinear runs, once-refined tetrahedral mesh, quadratic elements, geometric and p-multigrid
+@pytest.mark.mpi
+@pytest.mark.parametrize("representation", REPRESENTATIONS)
+@pytest.mark.parametrize("pre,nparts", (('block_jacobi', 1), ('cell', 1), ('cell', 2)))
+def test_nl_r2_p2_walls_gmg_mpi(representation, pre, nparts):
+    '''Nonlinear sound wave in a box with walls, quadratic elements on a once-refined tetrahedral mesh on two MPI
+    processes, with multigrid down to the linear elements on the distributed coarse mesh (geometric and
+    p-multigrid). The smoother preconditioner is block-Jacobi (reference) or cell-mode Schwarz, which on the coarse
+    mesh level builds its blocks from that level's cells.'''
+    xml = 'oft_in_xmhd_mg_cell.xml' if pre == 'cell' else None
+    assert sound_setup(representation,1,3,2,2,'0,0,2,2',periodic=False,xml=xml,nparts=nparts)
+    assert validate_sound(*ERRORS_GMG[representation])
