@@ -181,11 +181,22 @@ REAL(r8), ALLOCATABLE, DIMENSION(:) :: rown_r
 TYPE(ilist), ALLOCATABLE, DIMENSION(:) :: rows_send,rows_recv,ghost_send,ghost_recv
 TYPE(oft_native_pattern), POINTER :: pattern
 INTEGER(i4) :: nd,nfront,nnew,ng_rows,ngv,nsub_nnz
+INTEGER(i4) :: nsum,nmax
+INTEGER(i8) :: nsent0
+TYPE(oft_timer) :: stimer
+CHARACTER(LEN=40) :: slabel
 DEBUG_STACK_PUSH
 IF(.NOT.native_vector_cast(uv,u))CALL oft_abort('Native vector required','native_overlap_setup',__FILE__)
 IF(mat%nr/=mat%nc)CALL oft_abort('Square matrix required','native_overlap_setup',__FILE__)
 IF(PRESENT(gdof).NEQV.PRESENT(odof))CALL oft_abort('DOF list requires owners','native_overlap_setup',__FILE__)
 CALL native_overlap_delete(self)
+CALL stimer%tick
+nsent0=oft_exchange_nsent
+IF(levels>=0)THEN
+  WRITE(slabel,'(A,I0,A)')'overlap (graph, levels=',levels,')'
+ELSE
+  slabel='overlap (DoF list)'
+END IF
 self%parent=>mat
 self%seam=>uv%stitch_info
 self%levels=levels
@@ -356,6 +367,8 @@ DO r=1,nown_rows
 END DO
 CALL build_plan(self%plan_rows,rows_send,rows_recv,ntmp,itmp,lpos)
 DEALLOCATE(lpos,itmp,rrow,rg,rown,krec,lrec)
+CALL oft_exchange_report(TRIM(slabel)//' complete owned rows',stimer,nsent0)
+nsent0=oft_exchange_nsent
 !------------------------------------------------------------------------------
 ! Subdomain DOFs (dlist): owned first, then non-owned with rows requested from owners
 !------------------------------------------------------------------------------
@@ -373,6 +386,8 @@ END IF
 CALL build_plan(self%plan_ghost,ghost_send,ghost_recv,0,[0],[0])
 ALLOCATE(self%cvals(MAX(1,self%ncr+ngv)))
 self%cvals=0.d0
+CALL oft_exchange_report(TRIM(slabel)//' rows of other DoFs',stimer,nsent0)
+nsent0=oft_exchange_nsent
 !------------------------------------------------------------------------------
 ! Subdomain numbering: local DOFs (increasing local index), then ghosts (by global index)
 !------------------------------------------------------------------------------
@@ -522,6 +537,13 @@ IF(ALLOCATED(front))DEALLOCATE(front)
 IF(ALLOCATED(rbuf))DEALLOCATE(rbuf)
 DEALLOCATE(rows_send,rows_recv,ghost_send,ghost_recv)
 CALL native_overlap_update(self)
+CALL oft_exchange_report(TRIM(slabel)//' matrix and plans',stimer,nsent0)
+IF(oft_env%debug>=1)THEN
+  nsum=oft_mpi_sum(self%n)
+  nmax=oft_mpi_max(self%n)
+  IF(oft_env%head_proc)WRITE(*,'(3A,I12,A,I10,A)')oft_indent,'Setup timing: ',TRIM(slabel)// &
+    ' subdomain size =',nsum,' (max',nmax,')'
+END IF
 DEBUG_STACK_POP
 CONTAINS
 !> Grow the subdomain from the owned rows by `levels` layers along the graph

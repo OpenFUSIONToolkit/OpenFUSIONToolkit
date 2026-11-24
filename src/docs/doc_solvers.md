@@ -133,6 +133,10 @@ exchanges whatever the overlap. With `overlap=0` the blocks are the DoFs of the 
 already overlap at process and block interfaces. The restricted combination takes each owned DoF
 from the one block it is assigned to.
 
+With `debug>=1` in `runtime_options`, the setup of the Schwarz subdomains (both modes) prints the
+time of each phase (maximum over processes) and the number of int8 index values sent between
+processes (total and maximum per process) as `Setup timing:` lines.
+
 \section doc_solvers_krylov Krylov Solvers
 
 \subsection doc_solvers_krylov_cg Conjugate Gradient

@@ -51,7 +51,7 @@ MODULE fem_cell_overlap
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
 USE oft_stitching, ONLY: oft_global_stitch
-USE oft_scatter_base, ONLY: oft_exchange_i8
+USE oft_scatter_base, ONLY: oft_exchange_i8, oft_exchange_report, oft_exchange_nsent
 USE oft_mesh_type, ONLY: oft_mesh
 USE multigrid, ONLY: multigrid_mesh
 USE oft_mesh_overlap, ONLY: mesh_overlap_nchild, mesh_base_gid_inverse, mesh_base_candidates, &
@@ -316,6 +316,8 @@ LOGICAL, ALLOCATABLE, DIMENSION(:) :: needed,mark,inb
 INTEGER(i4), POINTER, DIMENSION(:) :: lcpart
 TYPE(ilist), ALLOCATABLE, DIMENSION(:) :: core,bx
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ldofs
+TYPE(oft_timer) :: stimer
+INTEGER(i8) :: nsent0
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%mesh))CALL oft_abort('Builder not created','fem_cell_overlap_build',__FILE__)
 IF(.NOT.native_vector_cast(uv,u))CALL oft_abort('Native vector required','fem_cell_overlap_build',__FILE__)
@@ -332,6 +334,8 @@ CASE DEFAULT
 END SELECT
 CALL overlap_dofs_delete(dofs)
 CALL clear_cell_sets(self)
+CALL stimer%tick
+nsent0=oft_exchange_nsent
 mesh=>self%mesh
 np=oft_env%nprocs
 me=oft_env%rank
@@ -466,6 +470,7 @@ IF(.NOT.mesh%fullmesh)THEN
   END DO
   nhalo=SUM(rcnt)/(1+ncp)
 END IF
+CALL oft_exchange_report('cell overlap A-B (halo topology)',stimer,nsent0)
 !---------------------------------------------------------------------------------
 ! Step C: extended cell graph and block growth
 !---------------------------------------------------------------------------------
@@ -671,6 +676,8 @@ DO b=1,nb
   n8=INT(bx(b)%n,i8)
   CALL sort_array(self%blk_cells(b)%v,n8)
 END DO
+CALL oft_exchange_report('cell overlap C (layers)',stimer,oft_exchange_nsent)
+nsent0=oft_exchange_nsent
 !---------------------------------------------------------------------------------
 ! Step D: DoFs (global id and owner) of the used halo cells from their owners
 !---------------------------------------------------------------------------------
@@ -860,6 +867,7 @@ DO b=1,nb
 END DO
 IF(SUM(dofs%asg(:)%n)/=nown)CALL oft_abort('Owned DoF count mismatch','fem_cell_overlap_build',__FILE__)
 DEALLOCATE(hit,dtmp)
+CALL oft_exchange_report('cell overlap D-E (halo DoFs)',stimer,nsent0)
 !---Clean up
 DO b=1,nb
   IF(ALLOCATED(core(b)%v))DEALLOCATE(core(b)%v)
