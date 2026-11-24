@@ -44,9 +44,15 @@
 !! allocation per call once it has been used.
 !!
 !! MPI rules:
-!! - MPI calls are only made from the calling thread (MPI is initialized with
-!!   `MPI_THREAD_FUNNELED`); pack and unpack loops are threaded internally, so plan
-!!   operations must be called from serial code.
+!! - MPI calls are only made by the thread that calls a plan operation, never from
+!!   inside the internally threaded pack and unpack loops. MPI is initialized with
+!!   `MPI_THREAD_SERIALIZED`, so this need not be the thread that initialized MPI, but
+!!   no other thread may make MPI calls at the same time: operations that communicate
+!!   (`scatter_begin`, `scatter_end` and its steps) must not be called concurrently
+!!   from several threads. They are normally called from serial code, so their
+!!   internal parallel loops are active. `scatter_local` makes no MPI calls and may be
+!!   called concurrently for different plans (eg. one block per thread), in which case
+!!   its loops run as inactive nested regions.
 !! - Each plan carries an MPI tag (`tag`, see `OFT_TAG_*`). At most one operation may
 !!   be in flight on a plan at a time (checked). Operations on different plans that
 !!   share a tag must be started in the same order on all processes, which holds for

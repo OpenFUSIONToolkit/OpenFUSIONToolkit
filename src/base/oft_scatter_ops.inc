@@ -100,7 +100,7 @@ ELSE
   CALL pack_vals(nout,plan%lsend,plan%SSBUF)
   IF(doloc)CALL pack_vals(plan%nloc,plan%lsrc,plan%SRBUF(plan%nrecv+1:),nout)
 END IF
-!---Post sends from the calling thread (MPI is initialized with MPI_THREAD_FUNNELED)
+!---Post sends from the calling thread, outside of threaded loops (see MPI rules in oft_scatter)
 #ifdef HAVE_MPI
 DO j=1,plan%nnbr
   IF(rev)THEN
