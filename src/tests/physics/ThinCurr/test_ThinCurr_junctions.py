@@ -9,11 +9,14 @@
 # independent unknowns, mapped through the junction map P (eg. L = P^T L_x P). Mesh files are written to the test
 # folder and passed to the solver by name, relative to the folder mp_run() runs in.
 import os
+import re
+import sys
 import copy
+import subprocess
 import numpy as np
 import scipy.sparse
 import pytest
-from thincurr_testing import mp_run, test_dir
+from thincurr_testing import mp_run, test_dir, oft_testing
 from OpenFUSIONToolkit.ThinCurr.junctions import (split_junctions, junction_table, find_junction_holes,
                                                   current_loop_count, has_junctions)
 from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh, read_ThinCurr_mesh
@@ -521,6 +524,102 @@ def test_hodlr_coarse():
     assert not any(res is None or res is False for res in (ref, out))
     assert np.max(np.abs(ref)) > 0.0
     assert np.allclose(out, ref, rtol=0.0, atol=1.E-5*np.max(np.abs(ref)))
+
+
+def nested_tori(ribs=True, nphi=24, ntheta=12):
+    '''Two concentric tori (major radius 1, minor radii 0.5 and 0.55, regions 1 and 2), joined by toroidal ribs at
+    poloidal angles 0, 90, 180 and 270 degrees (regions 3-6) if `ribs`: eight closed junction lines'''
+    def toroidal(a, theta):
+        '''Points at minor radius `a` and poloidal angle `theta`, toroidal angle 2 pi u'''
+        def mapping(u, v):
+            R = 1.0 + a(v)*np.cos(theta(v))
+            return np.c_[R*np.cos(2*np.pi*u), R*np.sin(2*np.pi*u), a(v)*np.sin(theta(v))]
+        return mapping
+    sheets = [sheet(nphi, ntheta, toroidal(lambda v, a=a: a, lambda v: 2*np.pi*v), region)
+              for region, a in ((1, 0.5), (2, 0.55))]
+    if ribs:
+        for k in range(4):
+            sheets.append(sheet(nphi, 2, toroidal(lambda v: 0.5 + 0.05*v, lambda v, k=k: 0.5*np.pi*k + 0*v), 3 + k))
+    return merge(*sheets)
+
+
+# Runs a time-domain simulation and a frequency response with dense L (direct) and HODLR L (iterative) in a fresh
+# Python process, so that Fortran output is unbuffered (GFORTRAN_UNBUFFERED_ALL) and the CG iteration counts printed
+# for each time step can be read. Arguments: mesh file, pre_single (0/1), output file.
+JUNCTION_HODLR_DRIVER = '''
+import sys
+import numpy as np
+import h5py
+from OpenFUSIONToolkit import OFT_env
+from OpenFUSIONToolkit.ThinCurr import ThinCurr
+mesh_file, pre_single, out_file = sys.argv[1], sys.argv[2] == '1', sys.argv[3]
+myOFT = OFT_env(nthreads=-1)
+out = {}
+for use_hodlr in (False, True):
+    tw = ThinCurr(myOFT)
+    tw.setup_model(mesh_file=mesh_file)
+    basepath = 'hodlr_{0}/'.format(use_hodlr)
+    tw.setup_io(basepath=basepath)
+    if use_hodlr:
+        tw.set_hodlr_options(target_size=100, pre_single=pre_single)
+    Mc = tw.compute_Mcoil()
+    tw.compute_Lmat(use_hodlr=use_hodlr)
+    tw.compute_Rmat()
+    if use_hodlr:
+        print('HODLR_TD_START', flush=True)
+    tw.run_td(2.E-4, 8, direct=(not use_hodlr), coil_currs=np.array([[0.0, 1.E6], [4.E-3, 0.0], [1.0, 0.0]]),
+              status_freq=1, plot_freq=8, lin_tol=1.E-10, lin_rtol=1.E-7)
+    if use_hodlr:
+        print('HODLR_TD_END', flush=True)
+    with h5py.File(basepath + 'pThinCurr_0008.rst', 'r') as fid:
+        out['U_{0}'.format(use_hodlr)] = np.array(fid['U'])
+    fdriver = np.zeros((2, tw.nelems))
+    fdriver[0, :] = Mc[0, :]
+    out['fr_{0}'.format(use_hodlr)] = tw.compute_freq_response(fdriver=fdriver, freq=1.E3, direct=(not use_hodlr))
+np.savez(out_file, **out)
+'''
+
+
+def run_junction_hodlr(tmp_path, ribs, pre_single=False):
+    '''Nested tori with or without ribs: CG iterations of each HODLR time step, and the HODLR and direct results'''
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
+    tag = 'nested_{0}_{1}'.format('ribs' if ribs else 'noribs', int(pre_single))
+    r, lc, reg = nested_tori(ribs)
+    coil = ThinCurr_Icoil('IC')
+    coil.add_circular_subcoil([1.1, 0.0])
+    write_ThinCurr_mesh(str(tmp_path / (tag + '.h5')), r, lc, reg, eta_surf=1.257E-5*np.ones(reg.max()),
+                        coil_sets=[coil])
+    compute_homology(str(tmp_path / (tag + '.h5')))
+    (tmp_path / 'driver.py').write_text(JUNCTION_HODLR_DRIVER)
+    import OpenFUSIONToolkit
+    # The package location (set up by the test harness through sys.path, not the environment)
+    pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(OpenFUSIONToolkit.__file__)))
+    python_path = os.pathsep.join([pkg_dir] + [p for p in os.environ.get('PYTHONPATH', '').split(os.pathsep) if p])
+    env = dict(os.environ, GFORTRAN_UNBUFFERED_ALL='1', PYTHONPATH=python_path)
+    timeout = 240*(4 if oft_testing.env_flag('OFT_DEBUG_TEST') else 1)
+    # Relative file names: OFT rejects long paths
+    proc = subprocess.run([sys.executable, 'driver.py', tag + '-homology.h5', str(int(pre_single)), tag + '.npz'],
+                          cwd=tmp_path, env=env, capture_output=True, text=True, timeout=timeout)
+    print(proc.stdout[-5000:], proc.stderr[-5000:])
+    assert proc.returncode == 0
+    td_out = proc.stdout.split('HODLR_TD_START')[1].split('HODLR_TD_END')[0]
+    its = [int(m) for m in re.findall(r'^\s*\d+\s+\S+E[-+]\d+\s+\S+E[-+]\d+\s+(\d+)\s+\S+\s*$', td_out, re.MULTILINE)]
+    assert len(its) == 8
+    return its, np.load(tmp_path / (tag + '.npz'))
+
+
+@pytest.mark.parametrize('pre_single', (False, True))
+def test_hodlr_junction_preconditioner(tmp_path, pre_single):
+    '''HODLR time-domain and frequency-response runs on nested tori joined by ribs (closed junction lines) match the
+    dense direct solution, and the block preconditioner (the inverse of the projected blocks, (P^T B P)^-1) converges
+    in a number of CG iterations comparable to the same tori without ribs (applying P^T B^-1 P took over 10x more)'''
+    its_ref, _ = run_junction_hodlr(tmp_path, False, pre_single)
+    its, out = run_junction_hodlr(tmp_path, True, pre_single)
+    print('CG iterations: ribs {0}, no ribs {1}'.format(its, its_ref))
+    assert max(its) <= 2*max(its_ref)
+    # HODLR approximation of L (hole columns in particular) limits agreement on this ill-conditioned system
+    for key in ('U', 'fr'):
+        assert rel_err(out[key + '_True'], out[key + '_False']) < 1.E-2
 
 
 def test_jumpers(tmp_path):

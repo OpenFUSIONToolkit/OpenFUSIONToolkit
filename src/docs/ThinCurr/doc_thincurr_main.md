@@ -337,6 +337,15 @@ stored in double precision. Alternatively, by setting `pre_single=T` (`pre_singl
 the inverse is computed, stored, and applied in single precision. This halves the memory required for the preconditioner and reduces
 the cost of both constructing and applying it, at the cost of a small perturbation to the preconditioner itself.
 
+For models split at junctions (\ref doc_tw_main_junctions) the diagonal blocks \f$ \textrm{B}_i \f$ are formed on the elements of
+the split mesh, and the preconditioner is the exact inverse of their projection onto the joined model,
+\f$ (\textrm{P}^T \textrm{B} \textrm{P})^{-1} \f$ with \f$ \textrm{B} = diag(\textrm{B}_i) \f$. Most reduced unknowns lie within a
+single block, so this matrix is block diagonal apart from the few unknowns whose columns of \f$ \textrm{P} \f$ span several blocks
+(for example the unknowns shared along a closed junction line). It is applied by inverting the projected blocks of the other unknowns
+and solving a small dense Schur complement for these interface unknowns, at about the cost of block-Jacobi on a model without
+junctions. Applying \f$ \textrm{P}^T \textrm{B}^{-1} \textrm{P} \f$ instead (projecting the inverse of the split-mesh blocks)
+approximates the inverse of the reduced operator poorly along those unknowns, and needed one to two orders of magnitude more iterations.
+
 Block-Jacobi preconditioning cannot represent smooth, long-range current patterns, which limits its effect on large models.
 Setting `pre_coarse=T` (`pre_coarse=True` in
 \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") adds a global coarse correction
