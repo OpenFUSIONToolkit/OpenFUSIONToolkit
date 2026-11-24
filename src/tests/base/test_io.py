@@ -6,7 +6,6 @@ import h5py
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import run_OFT
-from OpenFUSIONToolkit.io import XDMF_plot_file
 
 # Basic template for input file
 oft_in_template = """
@@ -61,6 +60,8 @@ def test_base(test_id,parallel):
 def test_xdmf_get_field_time(tmp_path):
     '''Check that `XDMF_plot_mesh.get_field(name, time=t)` linearly interpolates between saved timesteps
     and returns the stored field exactly at saved times (issue #460).'''
+    # Import here, not at module level, so collecting the Fortran-driven tests above does not load liboftpy
+    from OpenFUSIONToolkit.io import XDMF_plot_file
     # One-triangle plot file with field "F" saved at uneven times, so interior intervals are exercised
     times = (0.0, 1.0, 3.0)
     values = (0.0, 1.0, 5.0)
