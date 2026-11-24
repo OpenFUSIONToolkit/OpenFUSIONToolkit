@@ -18,3 +18,6 @@ install(FILES MUG-coax_railgun-hex.h5 DESTINATION examples/MUG/railgun COMPONENT
 configure_file( MUG-coax_railgun-hex.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 # Binary
 oft_add_exe( MUG-railgun.F90 )
+# Post-processing script
+install(FILES plot_railgun.py DESTINATION examples/MUG/railgun COMPONENT examples)
+configure_file( plot_railgun.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)

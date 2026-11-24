@@ -3,7 +3,6 @@
 /
 
 &mesh_options
- meshname='test'      ! Unused
  cad_type=0           ! Mesh interface type
  nlevels=2            ! Total number of grid levels
  nbase=1              ! Number of base levels (grid on every MPI task)
@@ -12,9 +11,9 @@
 /
 
 &native_mesh_options
-  filename='MUG-railgun-tet.h5'
-  reflect=T           ! Reflect mesh across X-Y plane?
-  ref_periodic=T      ! Make specified faces periodic?
+ filename='MUG-railgun-tet.h5'
+ reflect=T            ! Reflect mesh across X-Y plane?
+ ref_periodic=T       ! Make specified faces periodic?
 /
 
 &railgun_options
@@ -22,7 +21,8 @@
  plot_run=F           ! Perform plotting run?
  n0=5.E19             ! Initial density [m^-3]
  t0=6.                ! Initial temperature [eV]
- voltage=1.E2         ! Bias voltage
+ voltage=5.E2         ! Bias voltage [V]
+ ramp_time=1.E-6      ! Bias voltage ramp time [s]
  pm=F                 ! Show solver iterations?
 /
 
@@ -31,18 +31,18 @@
  xmhd_adv_temp=T      ! Advance plasma temperature?
  xmhd_ohmic=F         ! Include Ohmic heating?
  xmhd_visc_heat=F     ! Include viscous heating?
- bbc='bc'             ! BC for B-field (perfectly-conducting)
- vbc='xml'            ! BC for velocity (XML specified)
- nbc='x'              ! BC for density (XML specified)
- tbc='x'              ! BC for temperature (XML specified)
+ bbc='bc'             ! BC for B-field (perfectly-conducting walls)
+ vbc='xml'            ! BC for velocity (per nodeset from XML)
+ nbc='x'              ! BC for density (per nodeset from XML)
+ tbc='x'              ! BC for temperature (per nodeset from XML)
  dt=3.e-8             ! Maximum time step [s]
  mu_ion=2.            ! Ion mass (atomic units)
- eta=25.0             ! Resistivity
- nu_visc=400.         ! Fluid viscosity
- d_dens=10.           ! Density diffusion
- kappa_par=1.E3       ! Parallel thermal conduction
- kappa_perp=1.E3      ! Perpendicular thermal conduction
- nsteps=500           ! Number of time steps to perform before stopping
+ eta=25.0             ! Resistivity [m^2/s]
+ nu_visc=400.         ! Fluid viscosity [m^2/s]
+ d_dens=10.           ! Density diffusion [m^2/s]
+ kappa_par=1.E3       ! Parallel thermal conduction [m^2/s]
+ kappa_perp=1.E3      ! Perpendicular thermal conduction [m^2/s]
+ nsteps=350           ! Number of time steps to perform before stopping
  rst_freq=10          ! Restart file frequency
  lin_tol=1.E-10       ! Linear solver tolerance
  nl_tol=1.E-5         ! Non-linear solver tolerance
@@ -58,5 +58,5 @@
  t0=1.E-8             ! Starting time
  dt=-1.E-6            ! Time-step (negative to plot all `*rst` files)
  rst_start=0          ! Starting restart file
- rst_end=500          ! Last restart file
+ rst_end=350          ! Last restart file
 /

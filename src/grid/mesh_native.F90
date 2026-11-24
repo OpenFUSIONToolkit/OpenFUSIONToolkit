@@ -1011,19 +1011,20 @@ END DO
 IF(i<=mesh%nbf)THEN
     ind=mesh%periodic%lf(j)
     CALL periodic_face_normal(j,mesh%periodic%vmap_mats(:,1,1))
-    mesh%periodic%vmap_mats(:,2,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),[0.d0,0.d0,1.d0])
-    mesh%periodic%vmap_mats(:,2,1)=mesh%periodic%vmap_mats(:,2,1)/magnitude(mesh%periodic%vmap_mats(:,2,1))
-    mesh%periodic%vmap_mats(:,3,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),mesh%periodic%vmap_mats(:,2,1))
-    mesh%periodic%vmap_mats(:,3,1)=mesh%periodic%vmap_mats(:,3,1)/magnitude(mesh%periodic%vmap_mats(:,3,1))
-    CALL periodic_face_normal(ind,mesh%periodic%vmap_mats(:,1,2))
-    mesh%periodic%vmap_mats(:,1,2)=-mesh%periodic%vmap_mats(:,1,2)
-    mesh%periodic%vmap_mats(:,2,2)=-cross_product(mesh%periodic%vmap_mats(:,1,2),[0.d0,0.d0,1.d0])
-    mesh%periodic%vmap_mats(:,2,2)=mesh%periodic%vmap_mats(:,2,2)/magnitude(mesh%periodic%vmap_mats(:,2,2))
-    mesh%periodic%vmap_mats(:,3,2)=cross_product(mesh%periodic%vmap_mats(:,1,2),mesh%periodic%vmap_mats(:,2,2))
-    mesh%periodic%vmap_mats(:,3,2)=mesh%periodic%vmap_mats(:,3,2)/magnitude(mesh%periodic%vmap_mats(:,3,2))
+    !---Planar periodicity in z needs no mapping (test first, as the basis below is undefined when n = +/-z)
     IF(ABS(mesh%periodic%vmap_mats(3,1,1))>1.d0-1.d-8)THEN
         mesh%periodic%vmap_mats=0.d0
     ELSE
+        mesh%periodic%vmap_mats(:,2,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),[0.d0,0.d0,1.d0])
+        mesh%periodic%vmap_mats(:,2,1)=mesh%periodic%vmap_mats(:,2,1)/magnitude(mesh%periodic%vmap_mats(:,2,1))
+        mesh%periodic%vmap_mats(:,3,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),mesh%periodic%vmap_mats(:,2,1))
+        mesh%periodic%vmap_mats(:,3,1)=mesh%periodic%vmap_mats(:,3,1)/magnitude(mesh%periodic%vmap_mats(:,3,1))
+        CALL periodic_face_normal(ind,mesh%periodic%vmap_mats(:,1,2))
+        mesh%periodic%vmap_mats(:,1,2)=-mesh%periodic%vmap_mats(:,1,2)
+        mesh%periodic%vmap_mats(:,2,2)=-cross_product(mesh%periodic%vmap_mats(:,1,2),[0.d0,0.d0,1.d0])
+        mesh%periodic%vmap_mats(:,2,2)=mesh%periodic%vmap_mats(:,2,2)/magnitude(mesh%periodic%vmap_mats(:,2,2))
+        mesh%periodic%vmap_mats(:,3,2)=cross_product(mesh%periodic%vmap_mats(:,1,2),mesh%periodic%vmap_mats(:,2,2))
+        mesh%periodic%vmap_mats(:,3,2)=mesh%periodic%vmap_mats(:,3,2)/magnitude(mesh%periodic%vmap_mats(:,3,2))
         mesh%periodic%revolved=.TRUE.
         mesh%periodic%vmap_matsT(:,:,1)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,1))
         mesh%periodic%vmap_matsT(:,:,2)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,2))
