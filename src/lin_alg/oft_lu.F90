@@ -1059,6 +1059,7 @@ logical :: thread_safe
 thread_safe=.TRUE.
 IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 IF(self%package(1:6)=='superd')thread_safe=.FALSE.
+IF(self%package(1:9)=='strumpack')thread_safe=.FALSE.
 end function lusolver_check_thread
 !------------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage

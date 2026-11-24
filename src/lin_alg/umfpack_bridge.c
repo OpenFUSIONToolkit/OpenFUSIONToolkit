@@ -75,6 +75,11 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
           return;
         }
         LUfactors = (factors_t*) malloc(sizeof(factors_t));
+        if ( !LUfactors ) {
+          printf("UMFPACK: Unable to allocate factor structure\n");
+          *info = UMFPACK_ERROR_out_of_memory;
+          return;
+        }
         LUfactors->Symbolic = NULL;
         LUfactors->Numeric = NULL;
         LUfactors->Ap = NULL;
@@ -87,6 +92,14 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
         } else {
           LUfactors->Control[UMFPACK_IRSTEP] = 0;
           LUfactors->W  = (double *) malloc(n * sizeof(double));
+        }
+        if ( !LUfactors->Wi || !LUfactors->W ) {
+          printf("UMFPACK: Unable to allocate work arrays\n");
+          free(LUfactors->Wi);
+          free(LUfactors->W);
+          free(LUfactors);
+          *info = UMFPACK_ERROR_out_of_memory;
+          return;
         }
         *f_factors = LUfactors;
         refactor = false;
@@ -102,6 +115,15 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
         free(LUfactors->Ai);
         LUfactors->Ap = (umf_int *) malloc((n+1) * sizeof(umf_int));
         LUfactors->Ai = (umf_int *) malloc(nnz * sizeof(umf_int));
+        if ( !LUfactors->Ap || !LUfactors->Ai ) {
+          printf("UMFPACK: Unable to allocate 64-bit index arrays\n");
+          free(LUfactors->Ap);
+          free(LUfactors->Ai);
+          LUfactors->Ap = NULL;
+          LUfactors->Ai = NULL;
+          *info = UMFPACK_ERROR_out_of_memory;
+          return;
+        }
         for (i = 0; i <= n; i++) LUfactors->Ap[i] = rowptr[i];
         for (i = 0; i < nnz; i++) LUfactors->Ai[i] = colind[i];
       }

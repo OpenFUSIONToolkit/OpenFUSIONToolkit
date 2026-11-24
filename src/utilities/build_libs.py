@@ -2345,6 +2345,12 @@ packages.append(LIBXML2(not options.libxml2_shared))
 # Are we building ARPACK?
 if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
+# The 64-bit UMFPACK interface needs UMFPACK built here (not through PETSc)
+if options.umfpack_long:
+    if options.build_petsc == 1:
+        parser.exit(-1, '--umfpack_long is not supported with PETSc\n')
+    if options.build_umfpack != 1:
+        parser.exit(-1, '--umfpack_long requires --build_umfpack=1\n')
 # Are we building PETSc?
 if options.build_petsc == 1:
     if options.build_strumpack == 1:

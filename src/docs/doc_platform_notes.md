@@ -71,5 +71,7 @@ the corresponding development files, so the MPICH build in `build_libs.py` fails
 By default OFT uses the 32-bit integer UMFPACK interface (`umfpack_di_*`), which limits the size of
 UMFPACK's internal workspace to roughly 16 GB per factorization. Larger factorizations fail with
 "UMFPACK: Out of Memory in factorization", even when sufficient memory is available. To use the
-64-bit integer interface (`umfpack_dl_*`), pass `--umfpack_long` to `build_libs.py`
-(`-DOFT_UMFPACK_LONG:BOOL=TRUE` in `config_cmake.sh`).
+64-bit integer interface (`umfpack_dl_*`), pass `--umfpack_long` together with `--build_umfpack=1`
+to `build_libs.py` (`-DOFT_UMFPACK_LONG:BOOL=TRUE` in `config_cmake.sh`). The option applies only to
+the UMFPACK library built by `build_libs.py` for OFT's native solvers; it is not available in PETSc
+builds (`--build_petsc=1`), and `build_libs.py` stops with an error if either condition is not met.
