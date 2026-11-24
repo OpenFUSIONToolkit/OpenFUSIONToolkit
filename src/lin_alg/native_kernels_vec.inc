@@ -243,8 +243,8 @@ END SUBROUTINE k_scatter
 !---------------------------------------------------------------------------------
 !> Zero entries in a set of CSR rows
 !!
-!! Row `ioff+irows(i)` is zeroed for each `i`. Unless `zero_diag` is set, entries in
-!! column `irows(i)` are kept.
+!! Row `ioff+irows(i)` is zeroed for each `i`. Unless `zero_diag` is set, its
+!! diagonal entry (column `ioff+irows(i)`) is kept.
 !---------------------------------------------------------------------------------
 SUBROUTINE k_csr_zero_rows(nrows,irows,ioff,kr,lc,zero_diag,vals)
 INTEGER(i4), INTENT(in) :: nrows !< Number of rows to zero
@@ -259,7 +259,7 @@ INTEGER(i4) :: i,j,ir
 DO i=1,nrows
   ir=ioff+irows(i)
   DO j=kr(ir),kr(ir+1)-1
-    IF(zero_diag.OR.(lc(j)/=irows(i)))vals(j)=KZERO
+    IF(zero_diag.OR.(lc(j)/=ir))vals(j)=KZERO
   END DO
 END DO
 END SUBROUTINE k_csr_zero_rows

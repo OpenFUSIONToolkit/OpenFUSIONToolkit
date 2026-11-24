@@ -24,6 +24,8 @@
 !! - Shared matrix non-zero patterns: sharing by FE operators, identical results for
 !!   independent and pattern-sharing matrices (real and complex), linkage built once,
 !!   and patterns freed with their last reference
+!! - Zeroing rows and columns of block matrices (real and complex), with and without
+!!   keeping diagonal entries, against the expected entries of the CSR structure
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -65,6 +67,7 @@ CALL test_bc()
 CALL test_stitch()
 CALL test_accumulate()
 CALL test_pattern()
+CALL test_zero()
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='native_la.results')
   WRITE(io_unit,*)nfail
@@ -883,6 +886,137 @@ CALL z%delete
 CALL w%delete
 DEALLOCATE(x,y,z,w)
 END SUBROUTINE test_pattern
+! Zero rows and columns of block CSR matrices and compare every entry with the expected
+! result: zeroed entries in the selected rows/columns of the selected block, original values
+! elsewhere and, with keep_diag, on the diagonal
+SUBROUTINE test_zero()
+INTEGER(i4) :: i,j,k,ne,nsel,roff,coff
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: isel
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: mref
+CLASS(oft_vector), POINTER :: xs,xv
+CLASS(oft_matrix), POINTER :: sq => NULL()
+CLASS(oft_matrix), POINTER :: rect => NULL()
+CLASS(oft_cmatrix), POINTER :: csq => NULL()
+TYPE(oft_graph_ptr) :: graphs(3,3)
+TYPE(oft_native_matrix), POINTER :: A,R
+TYPE(oft_native_cmatrix), POINTER :: C
+CALL ML_oft_lagrange%vec_create(xs)
+CALL ML_oft_vlagrange%vec_create(xv)
+ne=ML_oft_lagrange%current_level%ne
+ALLOCATE(graphs(1,1)%g)
+graphs(1,1)%g%nr=ne
+graphs(1,1)%g%nrg=ML_oft_lagrange%current_level%global%ne
+graphs(1,1)%g%nc=ne
+graphs(1,1)%g%ncg=ML_oft_lagrange%current_level%global%ne
+graphs(1,1)%g%nnz=ML_oft_lagrange%current_level%nee
+graphs(1,1)%g%kr=>ML_oft_lagrange%current_level%kee
+graphs(1,1)%g%lc=>ML_oft_lagrange%current_level%lee
+DO i=1,3
+  DO j=1,3
+    graphs(i,j)%g=>graphs(1,1)%g
+  END DO
+END DO
+!---Square 3x3 block matrix (vector Lagrange) and rectangular 1x3 block matrix
+CALL create_matrix(sq,graphs,xv,xv)
+CALL create_matrix(rect,graphs(1:1,:),xs,xv)
+A=>native_cast(sq)
+R=>native_cast(rect)
+!---Rows and columns selected in each block (block-local indices)
+nsel=MIN(5,ne)
+ALLOCATE(isel(nsel))
+DO i=1,nsel
+  isel(i)=1+((i-1)*ne)/nsel
+END DO
+ALLOCATE(mref(A%nnz))
+DO i=1,A%nnz
+  mref(i)=1.d0+REAL(i,r8)
+END DO
+!---Rows of block 2, keeping diagonal entries
+roff=A%i_map(2)%offset
+A%M=mref
+CALL sq%zero_rows(nsel,isel,2,keep_diag=.TRUE.)
+CALL check_exact('zero_rows block, keep_diag',REAL(oft_mpi_sum(zero_errs(A%nr,A%kr,A%lc,mref,A%M,roff,nsel,isel,.TRUE.,.TRUE.)),r8),0.d0)
+!---Rows of block 2, including diagonal entries
+A%M=mref
+CALL sq%zero_rows(nsel,isel,2)
+CALL check_exact('zero_rows block',REAL(oft_mpi_sum(zero_errs(A%nr,A%kr,A%lc,mref,A%M,roff,nsel,isel,.TRUE.,.FALSE.)),r8),0.d0)
+!---Columns of block 3, keeping diagonal entries
+coff=A%j_map(3)%offset
+A%M=mref
+CALL A%zero_cols(nsel,isel,3,keep_diag=.TRUE.)
+CALL check_exact('zero_cols block, keep_diag',REAL(oft_mpi_sum(zero_errs(A%nr,A%kr,A%lc,mref,A%M,coff,nsel,isel,.FALSE.,.TRUE.)),r8),0.d0)
+!---Columns of block 2 of the rectangular matrix (column offset differs from any row offset)
+DEALLOCATE(mref)
+ALLOCATE(mref(R%nnz))
+DO i=1,R%nnz
+  mref(i)=1.d0+REAL(i,r8)
+END DO
+coff=R%j_map(2)%offset
+R%M=mref
+CALL R%zero_cols(nsel,isel,2)
+CALL check_exact('zero_cols rectangular block',REAL(oft_mpi_sum(zero_errs(R%nr,R%kr,R%lc,mref,R%M,coff,nsel,isel,.FALSE.,.FALSE.)),r8),0.d0)
+!---Complex matrix with the same pattern
+DEALLOCATE(mref)
+ALLOCATE(mref(A%nnz))
+DO i=1,A%nnz
+  mref(i)=1.d0+REAL(i,r8)
+END DO
+CALL native_matrix_share(sq,csq)
+SELECT TYPE(csq)
+CLASS IS(oft_native_cmatrix)
+  C=>csq
+CLASS DEFAULT
+  CALL oft_abort('Native complex matrix expected','test_zero',__FILE__)
+END SELECT
+roff=C%i_map(2)%offset
+C%M=CMPLX(mref,-mref,c8)
+CALL csq%zero_rows(nsel,isel,2,keep_diag=.TRUE.)
+k=zero_errs(C%nr,C%kr,C%lc,mref,REAL(C%M,r8),roff,nsel,isel,.TRUE.,.TRUE.) &
+  +zero_errs(C%nr,C%kr,C%lc,-mref,AIMAG(C%M),roff,nsel,isel,.TRUE.,.TRUE.)
+CALL check_exact('Complex zero_rows block, keep_diag',REAL(oft_mpi_sum(k),r8),0.d0)
+coff=C%j_map(3)%offset
+C%M=CMPLX(mref,-mref,c8)
+CALL C%zero_cols(nsel,isel,3,keep_diag=.TRUE.)
+k=zero_errs(C%nr,C%kr,C%lc,mref,REAL(C%M,r8),coff,nsel,isel,.FALSE.,.TRUE.) &
+  +zero_errs(C%nr,C%kr,C%lc,-mref,AIMAG(C%M),coff,nsel,isel,.FALSE.,.TRUE.)
+CALL check_exact('Complex zero_cols block, keep_diag',REAL(oft_mpi_sum(k),r8),0.d0)
+DEALLOCATE(isel,mref)
+CALL csq%delete
+CALL sq%delete
+CALL rect%delete
+DEALLOCATE(csq,sq,rect)
+DEALLOCATE(graphs(1,1)%g)
+CALL xs%delete
+CALL xv%delete
+DEALLOCATE(xs,xv)
+END SUBROUTINE test_zero
+! Number of CSR entries that differ from the expected result of zeroing rows (`rows`) or
+! columns `off+isel(:)`, with the diagonal entries kept if `keep`
+FUNCTION zero_errs(nr,kr,lc,mref,mval,off,nsel,isel,rows,keep) RESULT(nerr)
+INTEGER(i4), INTENT(in) :: nr,off,nsel
+INTEGER(i4), INTENT(in) :: kr(:),lc(:),isel(:)
+REAL(r8), INTENT(in) :: mref(:),mval(:)
+LOGICAL, INTENT(in) :: rows,keep
+INTEGER(i4) :: nerr
+INTEGER(i4) :: i,j
+LOGICAL :: zeroed
+nerr=0
+DO i=1,nr
+  DO j=kr(i),kr(i+1)-1
+    IF(rows)THEN
+      zeroed=ANY(off+isel(1:nsel)==i)
+    ELSE
+      zeroed=ANY(off+isel(1:nsel)==lc(j))
+    END IF
+    IF(keep.AND.(lc(j)==i))zeroed=.FALSE.
+    IF(zeroed)THEN
+      IF(mval(j)/=0.d0)nerr=nerr+1
+    ELSE
+      IF(mval(j)/=mref(j))nerr=nerr+1
+    END IF
+  END DO
+END DO
+END FUNCTION zero_errs
 ! Cast a matrix to a native CRS matrix pointer (aborts otherwise)
 FUNCTION native_cast(mat) RESULT(nmat)
 CLASS(oft_matrix), POINTER, INTENT(in) :: mat

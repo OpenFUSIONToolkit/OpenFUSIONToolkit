@@ -52,7 +52,8 @@ def test_native_la():
     (zero-copy) vector access in each access mode against get_local/restore_local, copy, maxpy
     (bitwise equal to successive add calls) and mdot (against individual dot products) for real
     and complex vectors, boundary condition operators that skip synchronization, complex stitching
-    and accumulate access against get_local/restore_local(add=.TRUE.).'''
+    and accumulate access against get_local/restore_local(add=.TRUE.). Also zeroing rows and columns of
+    block matrices with and without keeping diagonal entries.'''
     assert run_native_la(1)
 
 @pytest.mark.mpi

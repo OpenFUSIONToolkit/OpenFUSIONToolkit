@@ -2806,7 +2806,7 @@ integer(i4) :: ioff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 ioff=0
 IF(PRESENT(iblock))ioff=self%i_map(iblock)%offset
 CALL nk_csr_zero_rows(nrows,irows,ioff,self%kr,self%lc,zero_diag,self%M)
@@ -2826,9 +2826,9 @@ integer(i4) :: coff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 coff=0
-IF(PRESENT(jblock))coff=self%i_map(jblock)%offset
+IF(PRESENT(jblock))coff=self%j_map(jblock)%offset
 CALL nk_csr_zero_cols(self%nr,ncols,icols,coff,self%kr,self%lc,zero_diag,self%M)
 DEBUG_STACK_POP
 end subroutine mat_zero_cols
@@ -3767,7 +3767,7 @@ integer(i4) :: ioff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 ioff=0
 IF(PRESENT(iblock))ioff=self%i_map(iblock)%offset
 CALL nk_csr_zero_rows(nrows,irows,ioff,self%kr,self%lc,zero_diag,self%M)
@@ -3787,9 +3787,9 @@ integer(i4) :: coff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 coff=0
-IF(PRESENT(jblock))coff=self%i_map(jblock)%offset
+IF(PRESENT(jblock))coff=self%j_map(jblock)%offset
 CALL nk_csr_zero_cols(self%nr,ncols,icols,coff,self%kr,self%lc,zero_diag,self%M)
 DEBUG_STACK_POP
 end subroutine cmat_zero_cols
@@ -4025,7 +4025,7 @@ logical :: zero_diag
 integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 offset=0
 IF(PRESENT(iblock))offset=self%i_map(iblock)%offset
 CALL nk_dense_zero_rows(self%nr,self%nc,self%M,nrows,irows,offset,zero_diag)
@@ -4044,7 +4044,7 @@ logical :: zero_diag
 integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 offset=0
 IF(PRESENT(jblock))offset=self%j_map(jblock)%offset
 CALL nk_dense_zero_cols(self%nr,self%nc,self%M,ncols,icols,offset,zero_diag)
@@ -4271,7 +4271,7 @@ logical :: zero_diag
 integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 offset=0
 IF(PRESENT(iblock))offset=self%i_map(iblock)%offset
 CALL nk_dense_zero_rows(self%nr,self%nc,self%M,nrows,irows,offset,zero_diag)
@@ -4290,7 +4290,7 @@ logical :: zero_diag
 integer(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
-IF(PRESENT(keep_diag))zero_diag=keep_diag
+IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
 offset=0
 IF(PRESENT(jblock))offset=self%j_map(jblock)%offset
 CALL nk_dense_zero_cols(self%nr,self%nc,self%M,ncols,icols,offset,zero_diag)
