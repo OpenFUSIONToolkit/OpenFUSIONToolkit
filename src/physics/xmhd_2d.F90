@@ -119,7 +119,8 @@ TYPE, public :: oft_xmhd_2d_sim
   LOGICAL :: mfnk = .FALSE. !< Use matrix free method?
   LOGICAL :: cyl_flag = .FALSE. !Use cylindrical coordinates
   LOGICAL :: incomp = .FALSE. !Run incompressible MHD?
-  LOGICAL :: linear = .FALSE. !Run sim. in linear mode
+  LOGICAL :: linear = .FALSE. !< Linear mode of the last run, set by the run drivers (`run_lin_simulation` sets T and
+                              !< `run_simulation` sets F). Set it before calling `xmhd_2d_plot` without a run
   LOGICAL :: timestep_cn = .FALSE. ! Use Crank-Nicolson timestep
   INTEGER(i4) :: nsteps = -1 !< # of timesteps
   INTEGER(i4) :: rst_base = 0 !< starting index of restart files
@@ -231,6 +232,7 @@ integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
 real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
+self%linear=.FALSE. ! Track the active driver (nonlinear)
 CALL check_settings(self)
 !---------------------------------------------------------------------------
 ! Create solver fields
@@ -445,6 +447,7 @@ integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time,diag_save(5)
 real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
+self%linear=.TRUE. ! Track the active driver (linear)
 !---------------------------------------------------------------------------
 ! Set boundary conditions not alreadys set
 !---------------------------------------------------------------------------
@@ -517,8 +520,8 @@ IF(oft_env%head_proc)THEN
   CALL hist_file%add_field('lits', 'i4', desc="Linear iteration count")
   CALL hist_file%add_field('nlits','i4', desc="Non-linear iteration count")
   CALL hist_file%add_field('time', 'r4', desc="Simulation time [s]")
-  CALL hist_file%add_field('men',  'r4', desc="Magnetic energy [J*(2*mu0)]")
-  CALL hist_file%add_field('ven',  'r4', desc="Kinetic energy [J]")
+  CALL hist_file%add_field('men',  'r4', desc="Perturbed magnetic energy, excluding B_0 [J*(2*mu0)]")
+  CALL hist_file%add_field('ven',  'r4', desc="Perturbed kinetic energy, with the equilibrium density [J]")
   CALL hist_file%add_field('ne',   'r4', desc="Average density [m^-3]")
   CALL hist_file%add_field('ti',   'r4', desc="Average temperature [eV]")
   CALL hist_file%add_field('stime','r4', desc="Walltime [s]")
@@ -734,6 +737,9 @@ DO i=1,mesh%nc
     END DO
     n_ke = n_ke*self%parent_sim%den_scale
 
+    !---In linear runs a holds the perturbation, so the magnetic energy excludes the uniform B_0
+    !   (psi_vac is part of the equilibrium and is not added above)
+    IF(linear)pt%btmp = pt%btmp - self%parent_sim%B_0
     diag_vals(1) = diag_vals(1) + DOT_PRODUCT(pt%btmp,pt%btmp)*int_factor*rmul
     diag_vals(2) = diag_vals(2) + 0.5d0*pt%m_i*n_ke*DOT_PRODUCT(pt%vel,pt%vel)*int_factor*rmul
     diag_vals(3) = diag_vals(3) + pt%n*int_factor*rmul

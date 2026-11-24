@@ -341,5 +341,12 @@ force, \f$ -g \, \delta n / n_0 \, \hat{z} \f$ (from \f$ +\delta n \, \nabla p_0
 exact steady state: \f$ R(u_0) \f$ is not included, so a non-equilibrium \f$ u_0 \f$ only changes the operator about which the
 perturbation evolves.
 
-In the history file (`xmhd_2d.hist`) of a linear run, the kinetic energy `ven` is \f$ \int \frac{1}{2} m_i n_0 |\delta V|^2 \f$,
-using the equilibrium density, so its growth rate is twice the growth rate of the perturbation.
+In the history file (`xmhd_2d.hist`) of a linear run, both energies are those of the perturbation, so their growth
+rates are twice the growth rate of the perturbation:
+ - `ven` is the kinetic energy \f$ \int \frac{1}{2} m_i n_0 |\delta V|^2 \f$, using the equilibrium density.
+ - `men` is \f$ \int |\delta B|^2 \f$ (the magnetic energy times \f$ 2 \mu_0 \f$), where \f$ \delta B \f$ is formed from the
+   perturbed \f$ \psi \f$ and \f$ B_y \f$ only. It excludes \f$ B_0 \f$, \f$ \psi_v \f$ and the equilibrium field.
+
+In nonlinear runs `ven` and `men` are the total kinetic and magnetic energies, with \f$ B_0 \f$ and \f$ \psi_v \f$ included in
+\f$ B \f$. In both cases they are integrated over the domain with the volume element \f$ R \, dR \, dZ \f$ (per radian) in
+cylindrical geometry, or per unit length in \f$ y \f$ in planar geometry.
