@@ -48,7 +48,8 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof and the Sauter factors,
+!! applied as is to the selected tracer type (`trace_type`), <0 for default (testing only)
 !> Flux-surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`, the averages,
 !! the toroidal flux map and the Sauter factors: 0 contour where supported, 1 field-line tracer (testing only;
 !! the sawtooth reset needs the contour and is skipped)
@@ -182,6 +183,8 @@ TYPE :: gs_factory
   INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
   INTEGER(i4) :: nl_its = 0 !< Number of nonlinear iterations to converge most recent solve
   INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
+  INTEGER(i4) :: trace_type = 3 !< Field-line tracer for flux surface tracing, when the contour method is not used
+  !! (1: LSODE, 3: Runge-Kutta with steps limited at cell boundaries; see @ref tracing_2d::set_tracer "set_tracer")
   INTEGER(i4) :: ncoils = 0 !< Number of coils in device
   INTEGER(i4) :: ncoils_ext = 0 !< Number of external (non-meshed) coils in device
   INTEGER(i4) :: ncoil_regs = 0 !< Number of meshed coil regions in device
@@ -317,6 +320,8 @@ TYPE :: gs_equil
   REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Location of limiting point or active X-point
   REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Location of tracked X-points
   REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
+  REAL(r8) :: x_cut(2) = 0.d0 !< Normal of the second cut at the active X-point, toward the core (zero if none)
+  LOGICAL :: x_cut_skipped = .FALSE. !< Second cut skipped (core axis more than 60 degrees from O - X)
   REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
@@ -1171,6 +1176,8 @@ self%o_point=source%o_point
 self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
+self%x_cut=source%x_cut
+self%x_cut_skipped=source%x_cut_skipped
 self%vcontrol_val=source%vcontrol_val
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
@@ -2840,6 +2847,7 @@ IF(i>self%maxits)THEN
   IF(tmap_fails>0)error_flag=-9 ! Ran out of iterations on a stale toroidal flux map
   IF(equil%prof_failed)error_flag=-10
 END IF
+IF(equil%x_cut_skipped)CALL oft_warn('X-point core axis more than 60 degrees from O - X, second cut skipped')
 IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
@@ -3806,6 +3814,7 @@ REAL(8) :: x_point(2,max_xpoints),t1,t2,x_psi(max_xpoints),x_psi_sort(max_xpoint
 REAL(8) :: x_point_old(2,max_xpoints),x_vec_old(2,max_xpoints)
 REAL(8), POINTER :: psi_vals(:)
 REAL(8), PARAMETER :: tol=1.d-8, bounds_exp=2.5d-2
+logical :: x_cut_on
 logical, allocatable :: x_masked(:)
 type(gs_factory), pointer :: device
 device=>self%device
@@ -3867,6 +3876,8 @@ self%plasma_bounds(1)=-1.d99
 
 !---Look for X-points
 self%nx_points=0
+self%x_cut=0.d0
+self%x_cut_skipped=.FALSE.
 self%diverted=.FALSE.
 x_psi_sort=1.d99
 zmin=device%spatial_bounds(1,2)
@@ -3932,6 +3943,7 @@ IF(self%nx_points>0)THEN
     self%plasma_bounds(1)=x_psi_sort(i)
   END DO
   self%nx_points=j
+  x_cut_on=ANY(x_masked).AND.(.NOT.device%dipole_mode)
   DEALLOCATE(x_masked)
 END IF
 
@@ -3999,6 +4011,9 @@ IF(v>self%plasma_bounds(1).OR.self%nx_points==0)THEN
   IF(self%plasma_bounds(1)<-1.d98)self%plasma_bounds(1)=v
 ELSE
   self%lim_point=self%x_points(:,self%nx_points)
+  !---Also cut at the active X-point across its own core axis: at a skewed X-point (e.g. with a second
+  !---X-point nearby) the O - X cut alone lets part of its private-flux region past it
+  IF(x_cut_on)CALL core_axis(self%x_points(:,self%nx_points),self%x_vecs(:,self%nx_points),self%x_cut)
   IF(oft_debug_print(1))THEN
     WRITE(*,'(2A,5ES11.3)')oft_indent,'  Active X-point:',self%plasma_bounds(1), &
       self%x_points(:,self%nx_points),self%o_point
@@ -4019,6 +4034,38 @@ IF(oft_debug_print(1).AND.oft_env%pm)THEN
   WRITE(*,'(2A,4ES11.3)')oft_indent,'New plasma bounds',self%plasma_bounds,self%o_point
 END IF
 device%timing(4)=device%timing(4)+(omp_get_wtime()-t1)
+CONTAINS
+!> Unit vector along the Hessian eigenvector of \f$ \psi \f$ at the X-point `pt` along which \f$ \psi \f$
+!! rises toward the axis value (into the core and the private-flux region), on the side of `vec`
+SUBROUTINE core_axis(pt,vec,cut)
+REAL(8), INTENT(in) :: pt(2) !< X-point
+REAL(8), INTENT(in) :: vec(2) !< A vector toward the O-point
+REAL(8), INTENT(inout) :: cut(2) !< The core axis (unchanged off the mesh)
+TYPE(oft_lag_bg2interp) :: psi_g2interp
+INTEGER(4) :: icell
+REAL(8) :: fl(3),gop(3,3),vol,d2(6),lam,ax(2)
+icell=0
+CALL bmesh_findcell(device%fe_rep%mesh,icell,pt,fl)
+IF((icell==0).OR.(MAXVAL(fl)>1.d0+tol).OR.(MINVAL(fl)<-tol))RETURN
+CALL psi_g2interp%shared_setup(psi_interp)
+CALL device%fe_rep%mesh%jacobian(icell,fl,gop,vol)
+CALL psi_g2interp%interp(icell,fl,gop,d2)
+CALL psi_g2interp%delete()
+!---Hessian eigenvalue with the sign of psi_axis - psi_X, and its eigenvector
+lam=(d2(1)+d2(4))/2.d0+SIGN(SQRT(((d2(1)-d2(4))/2.d0)**2+d2(2)**2),self%plasma_bounds(2)-self%plasma_bounds(1))
+IF(ABS(lam-d2(1))>ABS(lam-d2(4)))THEN
+  ax=[d2(2),lam-d2(1)]
+ELSE
+  ax=[lam-d2(4),d2(2)]
+END IF
+IF(SUM(ax**2)==0.d0)RETURN
+!---Core side ambiguous (axis within 30 degrees of normal to O - X): keep the O - X cut only
+IF(ABS(DOT_PRODUCT(ax,vec))<0.5d0*SQRT(SUM(ax**2)*SUM(vec**2)))THEN
+  self%x_cut_skipped=.TRUE.
+  RETURN
+END IF
+cut=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
+END SUBROUTINE core_axis
 end subroutine gs_update_bounds
 !------------------------------------------------------------------------------
 !> Analyze psi and location stationary points where \f$ | \nabla \psi | = 0 \f$
@@ -4268,6 +4315,8 @@ in_bounds=in_bounds.AND.(pt(2)>=self%device%spatial_bounds(1,2).AND.pt(2)<=self%
 DO i=1,self%nx_points
   in_bounds=in_bounds.AND.(DOT_PRODUCT(pt-self%x_points(:,i),self%x_vecs(:,i))>0.d0)
 END DO
+IF((self%nx_points>0).AND.ANY(self%x_cut/=0.d0))in_bounds=in_bounds.AND. &
+  (DOT_PRODUCT(pt-self%x_points(:,self%nx_points),self%x_cut)>0.d0)
 end function gs_test_bounds
 !------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
@@ -4664,7 +4713,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(gseq%device%trace_type)
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
 !$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
 NULLIFY(ptout)
@@ -4699,9 +4748,9 @@ do j=1,nr
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
   IF(psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
+    active_tracer%tol=gs_trace_tol(gseq%device,1.d-8,1.d-10)
   ELSE
-    active_tracer%tol=1.d-8
+    active_tracer%tol=gs_trace_tol(gseq%device,1.d-6,1.d-8)
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<=0.02d0)
   !
@@ -4737,27 +4786,25 @@ do j=1,nr
     CYCLE
   end if
   !------------------------------------------------------------------------------
-  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters
+  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters.
   !------------------------------------------------------------------------------
   IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
-    IF(active_tracer%nsteps>nlcfs)THEN
-      !---Allocate and fit spline
-      CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
-      lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
-      CALL spline_fit(lcfs_rz,"periodic")
-      !---Resample trace
-      DO i=0,nlcfs-1
-        CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
-        ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
-        ptout(2,i+1)=lcfs_rz%f(1)
-        ptout(3,i+1)=lcfs_rz%f(2)
-      END DO
-      !---Destroy Spline
-      CALL spline_dealloc(lcfs_rz)
-      active_tracer%nsteps=nlcfs
-    END IF
+    !---Allocate and fit spline
+    CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+    lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+    CALL spline_fit(lcfs_rz,"periodic")
+    !---Resample trace
+    DO i=0,nlcfs-1
+      CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+      ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+      ptout(2,i+1)=lcfs_rz%f(1)
+      ptout(3,i+1)=lcfs_rz%f(2)
+    END DO
+    !---Destroy Spline
+    CALL spline_dealloc(lcfs_rz)
+    active_tracer%nsteps=nlcfs
     !---Per-surface extrema, used for elongation and triangularity
     IF(PRESENT(shape_geo))THEN
       imin_r=1; imax_r=1; imin_z=1; imax_z=1
@@ -4827,6 +4874,24 @@ DEALLOCATE(field)
 CALL psi_int%delete()
 end subroutine gs_get_qprof
 !------------------------------------------------------------------------------
+!> Get the tolerance for flux surface tracing with the selected field-line tracer
+!!
+!! The error of the Runge-Kutta tracer (`trace_type=3`) tracks the requested tolerance on
+!! finite element fields, while the error of LSODE (`trace_type=1`) is typically 100-600
+!! times larger, so each use of the tracer sets a tolerance for each type.
+!------------------------------------------------------------------------------
+PURE FUNCTION gs_trace_tol(device,tol_rk,tol_lsode) RESULT(tol)
+CLASS(gs_factory), INTENT(in) :: device !< TokaMaker device (`trace_type`)
+REAL(r8), INTENT(in) :: tol_rk !< Tolerance for the Runge-Kutta tracer
+REAL(r8), INTENT(in) :: tol_lsode !< Tolerance for LSODE
+REAL(r8) :: tol !< Tolerance for the selected tracer
+IF(device%trace_type==1)THEN
+  tol=tol_lsode
+ELSE
+  tol=tol_rk
+END IF
+END FUNCTION gs_trace_tol
+!------------------------------------------------------------------------------
 !> Points on one flux surface: 1000 contour points at uniform polar angle about the O-point
 !! (field-line tracer if the contour backend is off or fails)
 !------------------------------------------------------------------------------
@@ -4887,17 +4952,17 @@ pt_last=[rmax,zaxis,0.d0]
 !   CALL oft_decrease_indent
 ! END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(gseq%device%trace_type)
 !!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
-IF(gseq%diverted.AND.psi_in<0.02d0)THEN ! Use higher tracing tolerance near divertor
-  active_tracer%tol=1.d-10
+IF(psi_in<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS (as in @ref gs_get_qprof)
+  active_tracer%tol=gs_trace_tol(gseq%device,1.d-8,1.d-10)
 ELSE
-  active_tracer%tol=1.d-8
+  active_tracer%tol=gs_trace_tol(gseq%device,1.d-6,1.d-8)
 END IF
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis

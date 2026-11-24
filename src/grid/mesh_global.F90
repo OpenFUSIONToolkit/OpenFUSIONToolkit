@@ -26,6 +26,7 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh, oft_init_seam
 USE oft_mesh_local, ONLY: mesh_local_init, mesh_local_init, oft_metis_partmesh, &
   bmesh_local_init
 USE oft_stitching, ONLY: oft_seam, oft_stitch_check
+USE oft_mesh_global_util, ONLY: bmesh_global_copy_ho
 IMPLICIT NONE
 #include "local.h"
 contains
@@ -142,29 +143,9 @@ END DO
 DEALLOCATE(lptmp)
 !---
 CALL bmesh_local_init(self%bmesh,self)
-!---Copy high-order mapping if available
-IF(ASSOCIATED(self%ho_info%r))THEN
-  self%bmesh%order=1
-  self%bmesh%ho_info%nep=self%ho_info%nep
-  self%bmesh%ho_info%ncp=self%ho_info%nfp
-  ALLOCATE(self%bmesh%ho_info%r(3,self%bmesh%ne+self%bmesh%nc))
-  ALLOCATE(self%bmesh%ho_info%lep(self%bmesh%ho_info%nep,self%bmesh%ne))
-  ALLOCATE(self%bmesh%ho_info%lcp(self%bmesh%ho_info%ncp,self%bmesh%nc))
-  !!$omp parallel do private(j)
-  do i=1,self%bmesh%ne
-    self%bmesh%ho_info%lep(1,i)=i
-    j=INT(ABS(self%bmesh%parent%le(i)),4)
-    self%bmesh%ho_info%r(:,i)=self%ho_info%r(:,self%ho_info%lep(1,j))
-  enddo
-  IF(self%bmesh%ho_info%ncp==1)THEN
-    !!$omp parallel do private(j)
-    do i=1,self%bmesh%nc
-      j=INT(ABS(self%bmesh%parent%lf(i)),4)
-      self%bmesh%ho_info%lcp(1,i)=i+self%bmesh%ne
-      self%bmesh%ho_info%r(:,i+self%bmesh%ne)=self%ho_info%r(:,self%ho_info%lfp(1,j))
-    enddo
-  END IF
-END IF
+!---Copy high-order nodes if available (boundary mapping stays linear)
+self%bmesh%order=1
+CALL bmesh_global_copy_ho(self)
 DEBUG_STACK_POP
 end subroutine bmesh_global_init
 !---------------------------------------------------------------------------------

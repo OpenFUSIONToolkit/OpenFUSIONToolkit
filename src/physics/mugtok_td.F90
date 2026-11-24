@@ -23,7 +23,7 @@ USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_epsilon, gs_equil, gs_factory, gs_update_bounds, gs_test_bounds, flux_func, build_dels
 USE oft_gs_td, ONLY: oft_tmaker_td_mfop, build_vac_op, apply_rhs
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
-USE xmhd_2d, ONLY: oft_xmhd_2d_sim, build_approx_jacobian
+USE xmhd_2d, ONLY: oft_xmhd_2d_sim, build_approx_jacobian_incomp
 USE oft_stitching, ONLY: seam_list
 IMPLICIT NONE
 #include "local.h"
@@ -474,7 +474,7 @@ subroutine step_mugtok_td(self,coil_currents,time,dt,nl_its,lin_its,nretry)
 CLASS(oft_mugtok_td), target, intent(inout) :: self !< Simulation object
 REAL(r8), INTENT(in) :: coil_currents(:) !< Prescribed I-coil currents for this step (size ncoils)
 REAL(8), INTENT(inout) :: time,dt !< Current time and desired timestep size [s]
-INTEGER(4), INTENT(out) :: nl_its,lin_its,nretry !< Number of nonlinear and linear iterations, and number of retries
+INTEGER(4), INTENT(out) :: nl_its,lin_its,nretry !< Number of nonlinear and linear iterations, and number of retries (-4 if the step failed, in which case time, dt and the solution are unchanged)
 INTEGER(4) :: i,j
 REAL(r8), pointer :: tmp_arr(:), currs_tmp(:)
 CLASS(oft_vector), pointer :: tmp_vec
@@ -523,23 +523,39 @@ DO j = 1,4
     END IF
     !Run the nonlinear solver
     CALL self%nksolver%apply(self%u,self%rhs)
-    IF(self%nksolver%cits<0)THEN
-        CALL self%u%add(0.d0,1.d0,self%tmp)
-        self%nlfun%dt=self%nlfun%dt/2.d0
-        CALL build_mugtok_td_jacobian(self, self%nlfun%jac_op, self%u, update_vac = .TRUE.)
-        CALL self%pre%update(.TRUE.)
-        CALL apply_rhs_mugtok(self%nlfun,self%u,self%rhs)
-        CYCLE
-    ELSE
-        EXIT
-    END IF
+    IF(self%nksolver%cits>=0)EXIT
+    !---Failed: restore the starting state, then retry with half the timestep
+    CALL self%u%add(0.d0,1.d0,self%tmp)
+    IF(j==4)CYCLE ! Out of retries, so do not reduce the timestep again
+    self%nlfun%dt=self%nlfun%dt/2.d0
+    !---Keep every sub-operator on the reduced timestep (TokaMaker LHS/vacuum operator use tkmr%dt)
+    self%mug%dt = self%nlfun%dt
+    self%tkmr%dt = self%nlfun%dt
+    CALL build_mugtok_td_jacobian(self, self%nlfun%jac_op, self%u, update_vac = .TRUE.)
+    CALL self%pre%update(.TRUE.)
+    CALL apply_rhs_mugtok(self%nlfun,self%u,self%rhs)
 END DO
-
-!Advance time and return iteration counts
-time=time+self%nlfun%dt
-dt=self%nlfun%dt
 nl_its=self%nksolver%nlits
 lin_its=self%nksolver%lits
+
+!---Every attempt failed: leave time, the solution and the equilibrium unchanged, and put
+!   all sub-operators back on the requested timestep so the next call starts from a clean state
+IF(j>4)THEN
+    nretry=-4
+    self%nlfun%dt = dt
+    self%mug%dt = dt
+    self%tkmr%dt = dt
+    CALL build_vac_op(self%tkmr,self%tkmr%vac_op) ! the next call only rebuilds it if dt changes
+    IF(ASSOCIATED(currs_tmp))DEALLOCATE(currs_tmp)
+    RETURN
+END IF
+
+!---Number of timestep reductions
+nretry=j-1
+
+!Advance time and return the timestep actually taken
+time=time+self%nlfun%dt
+dt=self%nlfun%dt
 
 !Update equilibrium object to use the coil currents (field 8) 
 !and psi (field 6 + coil vaccum flux) from the converged solution vector 
@@ -1153,7 +1169,8 @@ end select
 
 !Populate MUG and TokaMaker Jacobian matrices
 self%mug%jac_dt = self%nlfun%dt
-CALL build_approx_jacobian(self%mug, a)
+! MUGTok only supports incompressible flow (enforced in setup_mugtok_td)
+CALL build_approx_jacobian_incomp(self%mug, a)
 IF (PRESENT(update_vac)) THEN
     IF (update_vac) CALL build_vac_op(self%tkmr,self%tkmr%vac_op)
 ELSE

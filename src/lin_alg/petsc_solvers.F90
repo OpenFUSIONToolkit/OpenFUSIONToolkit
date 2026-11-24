@@ -235,6 +235,7 @@ contains
   !> Setup PETSc solver object
   PROCEDURE :: setup_ksp => direct_setup_ksp
 end type oft_petsc_direct_solver
+PRIVATE asm_set_local_subdomains, gasm_set_subdomains
 !---Start subroutines
 contains
 !------------------------------------------------------------------------------
@@ -1428,7 +1429,7 @@ TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
 TYPE(tpc) :: pc_local
 TYPE(tksp), POINTER, DIMENSION(:) :: ksp
-TYPE(tis), POINTER, DIMENSION(:) :: is_parts,is_outer
+TYPE(tis), POINTER, DIMENSION(:) :: is_parts
 TYPE(tmat) :: sub_mat
 !---
 INTEGER(i4) :: i,iblk,j,ierr,n_local,loc_start,loc_end,ncolor,node_num
@@ -1475,14 +1476,7 @@ IF(self%n_local==-1)THEN
       END IF
       loc_start=loc_start+loc_end
     END DO
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-    CALL PCGASMSetSubdomains(pc,n_local,is_parts,PETSC_NULL_IS,ierr)
-#else
-    CALL PCGASMSetSubdomains(pc,n_local,is_parts,[PETSC_NULL_IS],ierr)
-    DO i=1,n_local
-      CALL ISDestroy(is_parts(i),ierr)
-    END DO
-#endif
+    CALL gasm_set_subdomains(pc,mat%M,self%overlap,is_parts)
     DEALLOCATE(is_parts)
   ELSE
     ALLOCATE(is_parts(n_local))
@@ -1492,11 +1486,7 @@ IF(self%n_local==-1)THEN
       CALL ISCreateStride(PETSC_COMM_SELF,loc_end,loc_start,1,is_parts(i),ierr)
       loc_start=loc_start+loc_end
     END DO
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-    CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
-#else
-    CALL PCASMSetLocalSubdomains(pc,n_local,[PETSC_NULL_IS],is_parts,ierr)
-#endif
+    CALL asm_set_local_subdomains(pc,mat%M,self%overlap,is_parts)
     DEALLOCATE(is_parts)
   END IF
 ELSE IF(self%n_local>=1)THEN
@@ -1533,11 +1523,7 @@ ELSE IF(self%n_local>=1)THEN
         loc_start=loc_start+loc_end
       END DO
     END IF
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-    CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
-#else
-    CALL PCASMSetLocalSubdomains(pc,n_local,[PETSC_NULL_IS],is_parts,ierr)
-#endif
+    CALL asm_set_local_subdomains(pc,mat%M,self%overlap,is_parts)
     DEALLOCATE(is_parts)
   ELSE
     IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
@@ -1550,29 +1536,13 @@ ELSE IF(self%n_local>=1)THEN
       ELSE
         CALL ISCreateStride(oft_env%node_comm,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
       END IF
-      ALLOCATE(is_outer(n_local))
-      DO i=1,n_local
-        CALL ISDuplicate(is_parts(i),is_outer(i),ierr)
-      END DO
-      CALL MatIncreaseOverlapSplit(mat%M,n_local,is_outer,self%overlap,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-      CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
-#else
-      CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
-      DO i=1,n_local
-        CALL ISDestroy(is_parts(i),ierr)
-      END DO
-#endif
-      DEALLOCATE(is_parts,is_outer)
+      CALL gasm_set_subdomains(pc,mat%M,self%overlap,is_parts)
+      DEALLOCATE(is_parts)
     ELSE
       ALLOCATE(is_parts(n_local))
       CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
       CALL ISCreateStride(PETSC_COMM_SELF,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-      CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
-#else
-      CALL PCASMSetLocalSubdomains(pc,n_local,[PETSC_NULL_IS],is_parts,ierr)
-#endif
+      CALL asm_set_local_subdomains(pc,mat%M,self%overlap,is_parts)
       DEALLOCATE(is_parts)
     END IF
   END IF
@@ -1611,6 +1581,76 @@ DEALLOCATE(ksp)
 #endif
 DEBUG_STACK_POP
 end subroutine asprecond_setup
+!------------------------------------------------------------------------------
+!> Set local subdomains for a PETSc ASM preconditioner
+!!
+!! Overlapping subdomains are constructed explicitly from copies of the
+!! non-overlapping subdomains (`is_parts`), extended by `overlap` using
+!! `MatIncreaseOverlap`, instead of passing `PETSC_NULL_IS` and letting PETSc
+!! build them. The Fortran bindings of PETSc 3.23 do not translate a null
+!! object array (`[PETSC_NULL_IS]`) to `NULL`, which causes PETSc to use
+!! invalid index sets.
+!!
+!! @note On exit the index sets in `is_parts` have been destroyed. This is safe
+!! for all supported PETSc versions (3.20+), as `PCASMSetLocalSubdomains` takes
+!! its own reference to each index set.
+!------------------------------------------------------------------------------
+SUBROUTINE asm_set_local_subdomains(pc,mat,overlap,is_parts)
+TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
+TYPE(tmat), INTENT(in) :: mat !< PETSc matrix defining subdomain connectivity
+INTEGER(i4), INTENT(in) :: overlap !< Number of levels of overlap to add
+TYPE(tis), INTENT(inout) :: is_parts(:) !< Non-overlapping local subdomains
+TYPE(tis), ALLOCATABLE, DIMENSION(:) :: is_outer
+INTEGER(i4) :: i,n,ierr
+DEBUG_STACK_PUSH
+n=SIZE(is_parts)
+ALLOCATE(is_outer(n))
+DO i=1,n
+  CALL ISDuplicate(is_parts(i),is_outer(i),ierr)
+END DO
+IF(overlap>0)CALL MatIncreaseOverlap(mat,n,is_outer,overlap,ierr)
+CALL PCASMSetLocalSubdomains(pc,n,is_outer,is_parts,ierr)
+DO i=1,n
+  CALL ISDestroy(is_outer(i),ierr)
+  CALL ISDestroy(is_parts(i),ierr)
+END DO
+DEALLOCATE(is_outer)
+DEBUG_STACK_POP
+END SUBROUTINE asm_set_local_subdomains
+!------------------------------------------------------------------------------
+!> Set subdomains for a PETSc GASM preconditioner
+!!
+!! Outer (overlapping) subdomains are constructed explicitly from copies of the
+!! inner subdomains (`is_parts`), extended by `overlap` using
+!! `MatIncreaseOverlapSplit`, instead of passing `PETSC_NULL_IS` (see
+!! @ref asm_set_local_subdomains).
+!!
+!! @note On exit the index sets in `is_parts` have been destroyed. This is safe
+!! for all supported PETSc versions (3.20+), as `PCGASMSetSubdomains` takes
+!! its own reference to each index set.
+!------------------------------------------------------------------------------
+SUBROUTINE gasm_set_subdomains(pc,mat,overlap,is_parts)
+TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
+TYPE(tmat), INTENT(in) :: mat !< PETSc matrix defining subdomain connectivity
+INTEGER(i4), INTENT(in) :: overlap !< Number of levels of overlap to add
+TYPE(tis), INTENT(inout) :: is_parts(:) !< Inner (non-overlapping) subdomains
+TYPE(tis), ALLOCATABLE, DIMENSION(:) :: is_outer
+INTEGER(i4) :: i,n,ierr
+DEBUG_STACK_PUSH
+n=SIZE(is_parts)
+ALLOCATE(is_outer(n))
+DO i=1,n
+  CALL ISDuplicate(is_parts(i),is_outer(i),ierr)
+END DO
+IF(overlap>0)CALL MatIncreaseOverlapSplit(mat,n,is_outer,overlap,ierr)
+CALL PCGASMSetSubdomains(pc,n,is_parts,is_outer,ierr)
+DO i=1,n
+  CALL ISDestroy(is_outer(i),ierr)
+  CALL ISDestroy(is_parts(i),ierr)
+END DO
+DEALLOCATE(is_outer)
+DEBUG_STACK_POP
+END SUBROUTINE gasm_set_subdomains
 !------------------------------------------------------------------------------
 !> Setup additive Schwarz preconditioner from XML definition
 !------------------------------------------------------------------------------

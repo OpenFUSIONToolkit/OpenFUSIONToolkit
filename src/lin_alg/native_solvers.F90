@@ -375,7 +375,7 @@ end if
 if(associated(self%pre))call u%new(s)
 if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
-uu = u%dot(u)
+uu = clamp_nonneg(u%dot(u))
 if(uu==0.d0)then
   alfa=1.d0; f=0.d0
   call q%set(0.d0)
@@ -396,7 +396,7 @@ if(associated(self%pre))then
   call p%copy(s)
 end if
 gg = g%dot(p)
-ggin = g%dot(g)
+ggin = clamp_nonneg(g%dot(g)) ! Clamp round-off (see GMRES Arnoldi step)
 100 FORMAT (I6,3ES14.6)
 110 FORMAT (I6,4ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,f,SQRT(uu),SQRT(ggin)
@@ -446,13 +446,13 @@ do k=1,max_its
   gg=g%dot(q)
   ! Without preconditioning or orthogonalization q==g, so skip the redundant reduction
   if(associated(self%pre).OR.associated(self%orthog))then
-    ggnew = g%dot(g)
+    ggnew = clamp_nonneg(g%dot(g))
   else
-    ggnew = gg
+    ggnew = clamp_nonneg(gg)
   end if
   beta=gg/ggold
   if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.oft_env%pm)THEN
-    uu=u%dot(u) ! Only needed for output
+    uu=clamp_nonneg(u%dot(u)) ! Only needed for output
     if(oft_env%head_proc)write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
   END IF
   if(k==its)exit
@@ -626,13 +626,13 @@ allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
 allocate(hdots(nrits+1),vw(nrits+1),znorm(nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
-uu = u%dot(u)
+uu = clamp_nonneg(u%dot(u))
 IF(uu>0.d0)call A%apply(u,w)
 if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add(0.d0,1.d0,g,-1.d0,w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = r%dot(r)
+gg = clamp_nonneg(r%dot(r)) ! Clamp round-off (see Arnoldi step)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -665,7 +665,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
-    IF(res_u_tol>0.d0)znorm(i)=SQRT(z(i)%f%dot(z(i)%f))
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(clamp_nonneg(z(i)%f%dot(z(i)%f)))
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration (CGS with selective re-orthogonalization)
@@ -675,15 +675,18 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     vw(i+1)%f=>w
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=hdots(1:i)
-    wnorm0=SQRT(hdots(i+1))
+    wnorm0=SQRT(clamp_nonneg(hdots(i+1)))
     call w%maxpy(-h(1:i,i),v(1:i),i)
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    h(i+1,i)=SQRT(w%dot(w))
+    ! Safety net: after near-complete cancellation (eg. an exact preconditioner) clamp any
+    ! negative round-off in the self dot-product to zero, so this is treated as a (lucky)
+    ! breakdown instead of producing NaN. NaN itself is preserved so failures still propagate.
+    h(i+1,i)=SQRT(clamp_nonneg(w%dot(w)))
     IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=w%mdot(v(1:i),i)
       call w%maxpy(-hdots(1:i),v(1:i),i)
       h(1:i,i)=h(1:i,i)+hdots(1:i)
-      h(i+1,i)=SQRT(w%dot(w))
+      h(i+1,i)=SQRT(clamp_nonneg(w%dot(w)))
     END IF
     IF(h(i+1,i)>0.d0)call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
@@ -714,7 +717,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
         call w%copy(u) ! Form iterate in w (used as scratch)
         call w%maxpy(hdots(1:i),z(1:i),i)
-        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(w%dot(w)))
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(clamp_nonneg(w%dot(w))))
         IF(inner_conv)EXIT
       END IF
     END IF
@@ -738,8 +741,8 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = r%dot(r)
-  uu = u%dot(u)
+  gg = clamp_nonneg(r%dot(r)) ! Clamp round-off (see Arnoldi step)
+  uu = clamp_nonneg(u%dot(u))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
@@ -915,13 +918,13 @@ allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
 allocate(hdots(nrits+1),vw(nrits+1),znorm(nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
-uu = REAL(u%dot(u))
+uu = clamp_nonneg(REAL(u%dot(u),r8))
 IF(uu>0.d0)call A%apply(u,w)
 if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = REAL(r%dot(r))
+gg = clamp_nonneg(REAL(r%dot(r),r8)) ! Clamp round-off (see Arnoldi step)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -954,7 +957,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
-    IF(res_u_tol>0.d0)znorm(i)=SQRT(REAL(z(i)%f%dot(z(i)%f),r8))
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(clamp_nonneg(REAL(z(i)%f%dot(z(i)%f),r8)))
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration (CGS with selective re-orthogonalization)
@@ -964,15 +967,18 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     vw(i+1)%f=>w
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=CONJG(hdots(1:i)) ! mdot gives w^H v_k
-    wnorm0=SQRT(REAL(hdots(i+1),r8))
+    wnorm0=SQRT(clamp_nonneg(REAL(hdots(i+1),r8)))
     call w%maxpy(-h(1:i,i),v(1:i),i)
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    ! Safety net: after near-complete cancellation (eg. an exact preconditioner) clamp any
+    ! negative round-off in the self dot-product to zero, so this is treated as a (lucky)
+    ! breakdown instead of producing NaN. NaN itself is preserved so failures still propagate.
+    h(i+1,i)=SQRT(clamp_nonneg(REAL(w%dot(w),r8)))
     IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=CONJG(w%mdot(v(1:i),i))
       call w%maxpy(-hdots(1:i),v(1:i),i)
       h(1:i,i)=h(1:i,i)+hdots(1:i)
-      h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+      h(i+1,i)=SQRT(clamp_nonneg(REAL(w%dot(w),r8)))
     END IF
     IF(ABS(h(i+1,i))>0.d0)call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
@@ -1003,7 +1009,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
         call w%copy(u) ! Form iterate in w (used as scratch)
         call w%maxpy(hdots(1:i),z(1:i),i)
-        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(w%dot(w),r8)))
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(clamp_nonneg(REAL(w%dot(w),r8))))
         IF(inner_conv)EXIT
       END IF
     END IF
@@ -1026,8 +1032,8 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = REAL(r%dot(r))
-  uu = REAL(u%dot(u))
+  gg = clamp_nonneg(REAL(r%dot(r),r8)) ! Clamp round-off (see Arnoldi step)
+  uu = clamp_nonneg(REAL(u%dot(u),r8))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
@@ -1407,8 +1413,8 @@ outer: do i=0,its
     call self%A%apply(u,v)
     call v%add(1.d0,-1.d0,g)
     IF(ASSOCIATED(self%bc))call self%bc%apply(v)
-    res=v%dot(v)
-    uu=u%dot(u)
+    res=clamp_nonneg(v%dot(v))
+    uu=clamp_nonneg(u%dot(u))
     if(oft_env%head_proc)met_time=met_time+mytimer%tock()
     if((res<resp).OR.(.NOT.self%backtrack))exit ! If residual has decreased exit
     !---If residual has reached an acceptable value exit
@@ -1854,8 +1860,8 @@ REAL(r8) :: uu,res
 real(r8), pointer :: vals(:)
 IF(oft_env%head_proc)WRITE(*,'(2X,A,A,I4)')'Residual ',stage,self%level
 IF(self%report_err==1)THEN
-  res = SQRT(g%dot(g))
-  uu = SQRT(u%dot(u))
+  res = SQRT(clamp_nonneg(g%dot(g)))
+  uu = SQRT(clamp_nonneg(u%dot(u)))
   IF(oft_env%head_proc)WRITE(*,'(4X,2ES14.6)')uu,res
 ELSE IF(self%report_err==2)THEN
   CALL u%new(gtmp)
@@ -1865,12 +1871,12 @@ ELSE IF(self%report_err==2)THEN
     vals=0.d0
     CALL u%get_local(vals,i)
     CALL gtmp%restore_local(vals,i)
-    uu = SQRT(gtmp%dot(gtmp))
+    uu = SQRT(clamp_nonneg(gtmp%dot(gtmp)))
     CALL gtmp%set(0.d0)
     vals=0.d0
     CALL g%get_local(vals,i)
     CALL gtmp%restore_local(vals,i)
-    res = SQRT(gtmp%dot(gtmp))
+    res = SQRT(clamp_nonneg(gtmp%dot(gtmp)))
     IF(oft_env%head_proc)WRITE(*,'(4X,2ES14.6)')uu,res
   END DO
   CALL gtmp%delete()
@@ -2015,7 +2021,7 @@ LOGICAL, POINTER, DIMENSION(:) :: eflag
 INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc
-REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals,uinit
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
@@ -2273,20 +2279,32 @@ IF(self%nlocal>1)THEN
   NULLIFY(uvals,gvals)
   CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
   CALL g%borrow_local(gvals,OFT_ACCESS_READ)
-  !---Each block (and its local vectors) is only accessed by one thread
-  !$omp parallel if(thread_safe)
-  !$omp do schedule(dynamic,1)
-  DO i=1,self%nlocal
-    !---Get local slice for solve
-    CALL scatter_local(self%bplans(i),gvals,self%glocs(i)%v,OFT_SCATTER_INSERT)
-    CALL scatter_local(self%bplans(i),uvals,self%ulocs(i)%v,OFT_SCATTER_INSERT)
-    !---Solve sub-system
-    self%solvers(i)%s%A=>self%alocals(i)
-    CALL self%solvers(i)%s%apply(self%ulocs(i),self%glocs(i))
-    !---Replace local slice into solution (rows with non-zero weight only)
-    CALL scatter_local(self%bplans(i),self%ulocs(i)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
-  END DO
-  !$omp end parallel
+  !---With overlap, blocks read rows assigned to other blocks. Take initial guesses
+  !   from a copy so they do not depend on the order blocks are solved in.
+  IF(self%loverlap)THEN
+    ALLOCATE(uinit(SIZE(uvals)))
+    uinit=uvals
+  ELSE
+    uinit=>uvals
+  END IF
+  !---Only open a parallel region if the sub-solver is thread safe and we are
+  !   not already in an active parallel region. Sub-solvers that are not thread
+  !   safe (eg. SuperLU-DIST, MUMPS) may use OpenMP internally, and even an
+  !   inactive outer region makes their teams nested. On targets where libgomp
+  !   uses its POSIX barrier (eg. macOS) nested teams that create tasks can
+  !   deadlock or release threads early. Each block (and its local vectors) is
+  !   only accessed by one thread.
+  IF(thread_safe.AND.(.NOT.omp_in_parallel()))THEN
+    !$omp parallel do schedule(dynamic,1)
+    DO i=1,self%nlocal
+      CALL apply_block(i)
+    END DO
+  ELSE
+    DO i=1,self%nlocal
+      CALL apply_block(i)
+    END DO
+  END IF
+  IF(self%loverlap)DEALLOCATE(uinit)
   !---Local solves on shared rows differ between processes, so synchronize from owner
   CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=.TRUE.)
   CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
@@ -2333,6 +2351,21 @@ ELSE
 END IF
 self%update_slice=.FALSE.
 DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Solve the local sub-system for a single block
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE apply_block(ii)
+INTEGER(i4), INTENT(in) :: ii !< Index of block to solve
+!---Get local slice for solve
+CALL scatter_local(self%bplans(ii),gvals,self%glocs(ii)%v,OFT_SCATTER_INSERT)
+CALL scatter_local(self%bplans(ii),uinit,self%ulocs(ii)%v,OFT_SCATTER_INSERT)
+!---Solve sub-system
+self%solvers(ii)%s%A=>self%alocals(ii)
+CALL self%solvers(ii)%s%apply(self%ulocs(ii),self%glocs(ii))
+!---Replace local slice into solution (rows with non-zero weight only)
+CALL scatter_local(self%bplans(ii),self%ulocs(ii)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
+END SUBROUTINE apply_block
 END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
 !> Setup a persistent local vector for @ref oft_bjprecond, (re)allocating if needed

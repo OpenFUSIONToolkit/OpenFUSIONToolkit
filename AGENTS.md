@@ -25,7 +25,7 @@ src/
 ├── base/           # Core runtime (I/O, XML, sorting, stitching)
 ├── grid/           # Mesh types, readers (Cubit, Gmsh, native, T3D), multigrid
 ├── fem/            # Finite element basis functions and operators (H1, Hcurl, Lagrange)
-├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK)
+├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK, STRUMPACK)
 ├── physics/        # Physics modules (Grad-Shafranov, thin-wall, Taylor, xMHD, tracing)
 ├── bin/            # Standalone Fortran executables
 ├── python/
@@ -105,7 +105,7 @@ Python code is linted with **ruff**. Configuration is in `src/python/pyproject.t
 cd src/python && ruff check
 ```
 
-Rules: Pyflakes (`F`) + pycodestyle (`E`) with ignores for `E722`, `F403`, `F405`, `E741`. Target: Python 3.7.
+Rules are selected explicitly (keep both `pyproject.toml` files in sync): Pyflakes (`F`) + pycodestyle (`E4`, `E7`, `E9`, `W6`) + a few bug-finding checks (`B006`, `B023`, `PLW0127`), with ignores for `E722`, `F403`, `F405`, `E741`. Target: Python 3.7. CI pins ruff to a tested version range in `lint.yaml`; raise it deliberately when upgrading.
 
 ### Fortran stack checking
 
