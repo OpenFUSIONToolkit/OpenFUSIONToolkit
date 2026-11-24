@@ -118,7 +118,7 @@ each process. `overlap=0` is block-Jacobi.
 | `type`     | Combination of subdomain solutions: `restricted` (default) or `additive` (native only) | str | No |
 | `overlap_mode` | How blocks are grown: `graph` (default, matrix graph) or `cell` (layers of mesh cells; native only) | str | No |
 | `adjacency` | Cell contact defining a layer in cell mode: `point` (default), `edge` or `face` (native only) | str | No |
-| `base_layers` | Layers of base mesh cells bounding the cells exchanged between processes in cell mode (default -1: equal to `overlap`, always sufficient; native only) | int | Yes |
+| `base_layers` | Layers of base mesh cells bounding the cells exchanged between processes in cell mode (default -1: equal to `overlap`, always sufficient; smaller values can truncate blocks at process boundaries and print a warning; native only) | int | Yes |
 
 **Cell mode** (`<overlap_mode>cell</overlap_mode>`, native only): blocks are grown by `overlap`
 layers of mesh cells instead of layers of the matrix graph. Cells are adjacent if they share at

@@ -399,6 +399,8 @@ IF(.NOT.mesh%fullmesh)THEN
   lcpart=>self%ml_mesh%meshes(self%ml_mesh%nbase+1)%base%lcpart
   kb=layers
   IF(base_layers>=0)kb=base_layers
+  IF(oft_env%head_proc.AND.(kb<layers))WRITE(*,'(A,I4,A,I4,A)')' WARNING: Cell overlap base layers (', &
+    kb,') < overlap (',layers,'), blocks may be truncated at process boundaries'
   CALL mesh_base_candidates(self%ml_mesh,kb,ncand,cand,cown)
   CALL mesh_cell_base_index(self%ml_mesh,mesh,cb,nref)
   CALL mesh_base_gid_inverse(self%ml_mesh,inv)

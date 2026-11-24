@@ -2610,8 +2610,9 @@ do level=levelin,xmhd_minlev,-1
     IF(j<=0)CALL oft_abort('Coloring results in fewer than one block per processor (xmhd_nparts < nprocs)','xmhd_alloc_ops',__FILE__)
   END IF
   !---Create cell overlap builder and set element coloring (both from the same partition)
+  !---(native matrices only; other back ends keep the plain FE coloring)
   SELECT TYPE(this=>ops%J)
-    CLASS IS(oft_matrix)
+    CLASS IS(oft_native_matrix)
       IF(j>1)THEN
         ALLOCATE(this%color(this%nr))
         CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_lagrange%ml_mesh,xmhd_rep,j,this%color)
@@ -2619,6 +2620,11 @@ do level=levelin,xmhd_minlev,-1
         CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_lagrange%ml_mesh,xmhd_rep,j)
       END IF
       this%cell_ovl=>xmhd_cell_ovl(level)
+    CLASS IS(oft_matrix)
+      IF(j>1)THEN
+        ALLOCATE(this%color(this%nr))
+        CALL comp_fem_partition(xmhd_rep,this%color,j)
+      END IF
   END SELECT
 end do
 IF(mesh%periodic%revolved)THEN
