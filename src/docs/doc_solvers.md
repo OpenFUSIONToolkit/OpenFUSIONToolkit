@@ -114,8 +114,24 @@ each process. `overlap=0` is block-Jacobi.
 |------------|-------------|-----------|------|
 | `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
 | `groups`   | Group index for each field in multi-field vector [n] (native only) | int | Yes |
-| `overlap`  | Overlap size (native default: 1) | int | Yes |
+| `overlap`  | Overlap size (native default: 1; layers of cells in cell mode) | int | Yes |
 | `type`     | Combination of subdomain solutions: `restricted` (default) or `additive` (native only) | str | No |
+| `overlap_mode` | How blocks are grown: `graph` (default, matrix graph) or `cell` (layers of mesh cells; native only) | str | No |
+| `adjacency` | Cell contact defining a layer in cell mode: `point` (default), `edge` or `face` (native only) | str | No |
+| `base_layers` | Layers of base mesh cells bounding the cells exchanged between processes in cell mode (default -1: equal to `overlap`, always sufficient; native only) | int | Yes |
+
+**Cell mode** (`<overlap_mode>cell</overlap_mode>`, native only): blocks are grown by `overlap`
+layers of mesh cells instead of layers of the matrix graph. Cells are adjacent if they share at
+least a point, an edge or a face (`adjacency`), and a block contains every DoF of its cells. The
+cells and the number of blocks per process are defined by a cell overlap builder
+(\ref fem_cell_overlap::oft_fem_cell_overlap "oft_fem_cell_overlap") that the physics module or
+application attaches to the matrix (`cell_ovl`); cell mode aborts if none is attached, and the
+builder's block count replaces `nlocal` (field based blocks and `boverlap` are not supported). Blocks
+may cross process boundaries for any number of blocks per process: the union of the blocks of each
+process is assembled as one subdomain across processes, so the setup needs a fixed number of
+exchanges whatever the overlap. With `overlap=0` the blocks are the DoFs of the core cells, which
+already overlap at process and block interfaces. The restricted combination takes each owned DoF
+from the one block it is assigned to.
 
 \section doc_solvers_krylov Krylov Solvers
 
