@@ -100,7 +100,7 @@ TYPE :: xmhd_2d_qpt
   REAL(r8) :: div_vel !< Velocity divergence
   REAL(r8) :: T !< Temperature (pressure if incompressible)
   REAL(r8) :: dT(3) !< Temperature (pressure if incompressible) gradient
-  REAL(r8) :: dp_h(3) !< Gradient of the group finite element pressure \f$ p_h = \sum_j 2 k n_j T_j \phi_j \f$ (compressible only)
+  REAL(r8) :: dp_h(3) !< Gradient of the group FE pressure interpolant (compressible only)
   REAL(r8) :: psi !< Poloidal flux, including the vacuum offset
   REAL(r8) :: dpsi(3) !< Poloidal flux gradient, including the vacuum offset
   REAL(r8) :: by !< Out-of-plane magnetic field component
@@ -791,8 +791,9 @@ LOGICAL :: incomp, linear
 INTEGER(i4) :: i
 REAL(r8) :: diag_vals(5)
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights,psi_vac_weights, &
-                              T_res, n_res, psi_res, by_res, velx_res, vely_res, velz_res, n0_weights
+                              T_res, n_res, psi_res, by_res, velx_res, vely_res, velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
+REAL(r8), POINTER, DIMENSION(:) :: n0_weights
 quad=>oft_blagrange%quad
 NULLIFY(n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res, n0_weights)
 
@@ -946,8 +947,8 @@ self%diag_vals=oft_mpi_sum(diag_vals,5)
 !---Cleanup remaining storage
 DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
         n_weights,vel_weights, T_weights, psi_weights, by_weights)
-DEALLOCATE(psi_vac_weights)
 IF(linear)DEALLOCATE(n0_weights)
+DEALLOCATE(psi_vac_weights)
 end subroutine mfun_apply
 !---------------------------------------------------------------------------
 !> Compute the NL error function, where we are solving F(x) = 0
@@ -972,7 +973,6 @@ NULLIFY(n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res, vad_weights
 
 !---Get weights from solution vector
 CALL get_field_weights(self%parent_sim,a,n_weights,vel_weights,T_weights,psi_weights,by_weights,psi_vac_weights)
-g_accel = self%parent_sim%g_accel
 !---Advecting velocity for upwinding: the solution at the start of the time step (parent_sim%u)
 upwind = upwind_active(self%parent_sim)
 IF(upwind)THEN
@@ -986,6 +986,7 @@ cyl_flag = self%parent_sim%cyl_flag
 IF(cyl_flag.AND.ANY(B_0(1:2)/=0.d0))CALL oft_abort( &
   "Only vertical B_0 (B_0(3)) is supported in cylindrical coordinates","nlfun_apply",__FILE__)
 incomp = self%parent_sim%incomp
+g_accel = self%parent_sim%g_accel
 !---Field 5 is pressure on its own space when incompressible, otherwise temperature
 IF(incomp)THEN
   T_fe=>oft_blagrange_p
@@ -1074,8 +1075,8 @@ DO i=1,mesh%nc
     CALL eval_fields(self%parent_sim,pt,coords,basis_vals,basis_grads,n_loc,vel_loc,psi_loc,by_loc, &
       basis_vals_T,basis_grads_T,T_loc)
     n = pt%n; dn = pt%dn; vel = pt%vel; dvel = pt%dvel; div_vel = pt%div_vel
-    T = pt%T; dT = pt%dT; psi = pt%psi; dpsi = pt%dpsi; by = pt%by; dby = pt%dby
-    btmp = pt%btmp; rmul = pt%rmul; rden = pt%rden; dp_h = pt%dp_h
+    T = pt%T; dT = pt%dT; psi = pt%psi; dpsi = pt%dpsi; by = pt%by; dby = pt%dby; dp_h = pt%dp_h
+    btmp = pt%btmp; rmul = pt%rmul; rden = pt%rden
     ! dpsi_0 excludes the vacuum flux psi_vac (gradient of the solved psi only)
     dpsi_0 = 0.d0
     DO jr=1,oft_blagrange%nce
@@ -1552,9 +1553,9 @@ DO jr=1,SIZE(basis_vals_T)
   pt%T=pt%T+T_loc(jr)*basis_vals_T(jr)
   pt%dT=pt%dT+T_loc(jr)*basis_grads_T(:,jr)
 END DO
-!---Gradient of the pressure interpolant p_h = sum_j 2*k*n_j*T_j*phi_j, a group finite element
-!   form of p = 2nkT (C. A. J. Fletcher, Comput. Methods Appl. Mech. Eng. 37, 225 (1983)).
-!   In the compressible model n and T share the same basis.
+!---Gradient of the pressure interpolant p_h = sum_j 2*k*n_j*T_j*phi_j, a group finite element form
+!   of p = 2nkT (C. A. J. Fletcher, Comput. Methods Appl. Mech. Eng. 37, 225 (1983)). Field 5 shares
+!   the main basis in the compressible model.
 pt%dp_h=0.d0
 IF(.NOT.self%incomp)THEN
   DO jr=1,SIZE(basis_vals)
@@ -1698,9 +1699,7 @@ DO jc=1,nce
       + dt_fac*eta(1)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/rden
   END DO
 END DO
-!---Momentum, vel-n coupling. The same exact derivative is used in linear runs, so the linearized
-!   model includes the response of the 1/n force factors (eg. the buoyancy force with gravity).
-!   The pressure part of the compressible model is added in jac_add_comp.
+!---Momentum, vel-n coupling (the compressible pressure terms are added in jac_add_comp)
 DO jc=1,nce
   DO jr=1,nce
     DO l=1,3
@@ -1803,27 +1802,28 @@ TYPE(oft_local_mat), INTENT(INOUT) :: jac_loc(:,:) !< Local (cell) Jacobian
 TYPE(xmhd_2d_qpt), INTENT(IN) :: pt !< Quadrature point state
 REAL(r8), INTENT(IN) :: basis_vals(:) !< Basis values [nce]
 REAL(r8), INTENT(IN) :: basis_grads(:,:) !< Basis gradients [3,nce]
-REAL(r8), INTENT(IN) :: n_loc(:) !< Local density weights (scaled by `den_scale`) [nce]
+REAL(r8), INTENT(IN) :: n_loc(:) !< Local density weights, normalized by den_scale [nce]
 REAL(r8), INTENT(IN) :: T_loc(:) !< Local temperature weights [nce]
 REAL(r8), INTENT(IN) :: dt_fac !< Time step factor
 LOGICAL :: cyl_flag
 INTEGER(i4) :: jr,jc,l,nce
-REAL(r8) :: n,dn(3),vel(3),div_vel,T,dT(3),dp_h(3),rmul,int_factor,m_i,chi,gamma
+REAL(r8) :: n,dn(3),vel(3),div_vel,T,dT(3),dp_h(3),rmul,int_factor,m_i,chi,gamma,den_scale
 !---Local copies (avoids reloads through possible aliasing with jac_loc pointers)
-cyl_flag=self%cyl_flag
+cyl_flag=self%cyl_flag; den_scale=self%den_scale
 n=pt%n; dn=pt%dn; vel=pt%vel; div_vel=pt%div_vel; T=pt%T; dT=pt%dT; dp_h=pt%dp_h
 rmul=pt%rmul; int_factor=pt%int_factor; m_i=pt%m_i; chi=pt%chi; gamma=pt%gamma
 nce=SIZE(basis_vals)
 !---Terms common to every geometry and mode
 DO jc=1,nce
   DO jr=1,nce
-    ! vel, n and vel, T: exact derivatives of grad(p_h)/(m_i n), p_h = sum_j 2*k*n_j*T_j*phi_j
+    ! vel, n and vel, T: pressure force grad(p_h)/(m_i n), with the group FE pressure
+    ! p_h = sum_j 2*k*n_j*T_j*phi_j (Fletcher 1983; see eval_fields)
     DO l=1,3
       jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
         + dt_fac*basis_vals(jr)*2.d0*k_boltz*T_loc(jc)*basis_grads(l,jc)*int_factor*rmul/(m_i*n) &
         - dt_fac*basis_vals(jr)*basis_vals(jc)*dp_h(l)*int_factor*rmul/(m_i*n**2)
       jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
-        + dt_fac*basis_vals(jr)*2.d0*k_boltz*n_loc(jc)*self%den_scale*basis_grads(l,jc)*int_factor*rmul/(m_i*n)
+        + dt_fac*basis_vals(jr)*2.d0*k_boltz*n_loc(jc)*den_scale*basis_grads(l,jc)*int_factor*rmul/(m_i*n)
     END DO
     ! T, vel
     DO l=1,3
@@ -1840,7 +1840,7 @@ DO jc=1,nce
       - dt_fac*basis_vals(jr)*chi*DOT_PRODUCT(dn,basis_grads(:,jc))*int_factor*rmul/n
   END DO
 END DO
-!---T, n coupling (the same exact derivative is used in linear runs)
+!---T, n coupling
 DO jc=1,nce
   DO jr=1,nce
     jac_loc(5,1)%m(jr,jc) = jac_loc(5,1)%m(jr,jc) &

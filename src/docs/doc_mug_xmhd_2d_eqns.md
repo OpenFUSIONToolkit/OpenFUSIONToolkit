@@ -15,8 +15,8 @@ in \ref doc_mug_xmhd_2d_eqns_linear.
 
 The 2D implementation solves a reduced model compared to the
 \ref doc_mug_xmhd_eqns "3D implementation": single-fluid resistive MHD with a single temperature,
-isotropic thermal conduction, optional gravity and streamline upwinding (\ref doc_mug_xmhd_2d_eqns_upwind), and no
-Hall, heating, floor, or hyper-diffusion terms. It also supports an incompressible model. All fields use scalar Lagrange elements of the same order (the
+isotropic thermal conduction, optional streamline upwinding (\ref doc_mug_xmhd_2d_eqns_upwind), and no Hall, heating,
+floor, or hyper-diffusion terms. It also supports an incompressible model. All fields use scalar Lagrange elements of the same order (the
 incompressible pressure uses one order lower).
 
 Unlike the 3D implementation, the 2D model has no input-file namelist. Settings are components of the

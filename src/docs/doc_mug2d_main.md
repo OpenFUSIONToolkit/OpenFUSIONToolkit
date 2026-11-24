@@ -21,7 +21,7 @@ The following examples illustrate how to use MUG 2D.
 
 Additional verification cases are in the regression tests in `src/tests/physics/MUG/`: `test_alfven_2d.F90`
 (Alfven wave), `test_sound_2d.F90` (sound wave), `test_taylor_green_2d.F90` (incompressible Taylor-Green vortex) and
-`test_rt_2d.F90` (Rayleigh-Taylor growth rates with gravity).
+`test_rt_2d.F90` (gravity and Rayleigh-Taylor growth rates).
 `test_jacobian_2d.F90` checks that the approximate Jacobian matches the nonlinear residual.
 
 \section doc_mug2d_main_eqns MHD System
