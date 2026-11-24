@@ -33,6 +33,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_fourier
  - \subpage doc_tCurr_xml
  - \subpage doc_tCurr_junctions
+ - \subpage doc_tCurr_junctions_td
 
 \section doc_tw_main_settings ThinCurr settings groups
 
@@ -278,7 +279,8 @@ unknowns is checked against the number of cycles of the graph.
 
 Junctions are not yet supported for periodic models (`nfp`, or a periodic point map `pmap`).
 
-See \ref doc_tCurr_junctions for an example.
+See \ref doc_tCurr_junctions for an example, and \ref doc_tCurr_junctions_td for a time-domain simulation of a
+larger structure with closed junction lines.
 
 \subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
 In the standard BFEM approach described above every element interacts with every other element, leading to a dense \f$ \textrm{L} \f$ and
