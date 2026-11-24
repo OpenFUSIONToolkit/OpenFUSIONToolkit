@@ -30,14 +30,22 @@ USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
+USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=4
 INTEGER(i4) :: io_unit,ierr
+INTEGER(i4) :: cell_parts=0
+TYPE(oft_fem_cell_overlap), TARGET :: cbld
+NAMELIST/test_solver_xml_options/cell_parts
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 !---Initialize enviroment
 CALL oft_init
+!---Number of cell overlap blocks (0: no cell overlap builder)
+OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
+READ(io_unit,test_solver_xml_options,IOSTAT=ierr)
+CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
@@ -73,6 +81,11 @@ CALL ML_oft_lagrange%vec_create(v)
 !---Get FE operators
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
 CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
+!---Cell overlap builder for cell mode Schwarz
+IF(cell_parts>0)THEN
+  CALL fem_cell_overlap_create(cbld,mg_mesh,ML_oft_lagrange%current_level,cell_parts)
+  lop%cell_ovl=>cbld
+END IF
 !---Setup matrix solver
 CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr)
 IF(ierr==0)THEN
