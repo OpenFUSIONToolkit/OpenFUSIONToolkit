@@ -546,14 +546,14 @@ def nested_tori(ribs=True, nphi=24, ntheta=12):
 
 # Runs a time-domain simulation and a frequency response with dense L (direct) and HODLR L (iterative) in a fresh
 # Python process, so that Fortran output is unbuffered (GFORTRAN_UNBUFFERED_ALL) and the CG iteration counts printed
-# for each time step can be read. Arguments: mesh file, pre_single (0/1), output file.
+# for each time step can be read. Arguments: mesh file, pre_single (0/1), output file, pre_coarse (0/1).
 JUNCTION_HODLR_DRIVER = '''
 import sys
 import numpy as np
 import h5py
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.ThinCurr import ThinCurr
-mesh_file, pre_single, out_file = sys.argv[1], sys.argv[2] == '1', sys.argv[3]
+mesh_file, pre_single, out_file, pre_coarse = sys.argv[1], sys.argv[2] == '1', sys.argv[3], sys.argv[4] == '1'
 myOFT = OFT_env(nthreads=-1)
 out = {}
 for use_hodlr in (False, True):
@@ -562,7 +562,7 @@ for use_hodlr in (False, True):
     basepath = 'hodlr_{0}/'.format(use_hodlr)
     tw.setup_io(basepath=basepath)
     if use_hodlr:
-        tw.set_hodlr_options(target_size=100, pre_single=pre_single)
+        tw.set_hodlr_options(target_size=100, pre_single=pre_single, pre_coarse=pre_coarse)
     Mc = tw.compute_Mcoil()
     tw.compute_Lmat(use_hodlr=use_hodlr)
     tw.compute_Rmat()
@@ -581,10 +581,10 @@ np.savez(out_file, **out)
 '''
 
 
-def run_junction_hodlr(tmp_path, ribs, pre_single=False):
+def run_junction_hodlr(tmp_path, ribs, pre_single=False, pre_coarse=False):
     '''Nested tori with or without ribs: CG iterations of each HODLR time step, and the HODLR and direct results'''
     from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
-    tag = 'nested_{0}_{1}'.format('ribs' if ribs else 'noribs', int(pre_single))
+    tag = 'nested_{0}_{1}_{2}'.format('ribs' if ribs else 'noribs', int(pre_single), int(pre_coarse))
     r, lc, reg = nested_tori(ribs)
     coil = ThinCurr_Icoil('IC')
     coil.add_circular_subcoil([1.1, 0.0])
@@ -599,7 +599,8 @@ def run_junction_hodlr(tmp_path, ribs, pre_single=False):
     env = dict(os.environ, GFORTRAN_UNBUFFERED_ALL='1', PYTHONPATH=python_path)
     timeout = 240*(4 if oft_testing.env_flag('OFT_DEBUG_TEST') else 1)
     # Relative file names: OFT rejects long paths
-    proc = subprocess.run([sys.executable, 'driver.py', tag + '-homology.h5', str(int(pre_single)), tag + '.npz'],
+    proc = subprocess.run([sys.executable, 'driver.py', tag + '-homology.h5', str(int(pre_single)), tag + '.npz',
+                           str(int(pre_coarse))],
                           cwd=tmp_path, env=env, capture_output=True, text=True, timeout=timeout)
     print(proc.stdout[-5000:], proc.stderr[-5000:])
     assert proc.returncode == 0
@@ -619,6 +620,17 @@ def test_hodlr_junction_preconditioner(tmp_path, pre_single):
     print('CG iterations: ribs {0}, no ribs {1}'.format(its, its_ref))
     assert max(its) <= 2*max(its_ref)
     # HODLR approximation of L (hole columns in particular) limits agreement on this ill-conditioned system
+    for key in ('U', 'fr'):
+        assert rel_err(out[key + '_True'], out[key + '_False']) < 1.E-2
+
+
+def test_hodlr_junction_coarse(tmp_path):
+    '''On nested tori joined by ribs, the two-level preconditioner (smoothed coarse space, balancing correction) needs
+    far fewer CG iterations than block-Jacobi alone, and matches the dense direct solution'''
+    its_ref, _ = run_junction_hodlr(tmp_path, True)
+    its, out = run_junction_hodlr(tmp_path, True, pre_coarse=True)
+    print('CG iterations: two-level {0}, block-Jacobi {1}'.format(its, its_ref))
+    assert sum(its) <= 0.4*sum(its_ref)
     for key in ('U', 'fr'):
         assert rel_err(out[key + '_True'], out[key + '_False']) < 1.E-2
 

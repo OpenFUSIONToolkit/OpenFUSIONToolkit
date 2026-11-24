@@ -348,15 +348,27 @@ and solving a small dense Schur complement for these interface unknowns, at abou
 junctions. Applying \f$ \textrm{P}^T \textrm{B}^{-1} \textrm{P} \f$ instead (projecting the inverse of the split-mesh blocks)
 approximates the inverse of the reduced operator poorly along those unknowns, and needed one to two orders of magnitude more iterations.
 
-Block-Jacobi preconditioning cannot represent smooth, long-range current patterns, which limits its effect on large models.
-Setting `pre_coarse=T` (`pre_coarse=True` in
+Block-Jacobi preconditioning cannot represent smooth, long-range current patterns that extend over many blocks, which
+limits its effect on large models and on models with junctions. Setting `pre_coarse=T` (`pre_coarse=True` in
 \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") adds a global coarse correction
-\f$ \textrm{Z} (\textrm{Z}^T \textrm{A} \textrm{Z})^{-1} \textrm{Z}^T \f$ (two-level preconditioner). The coarse space
-\f$ \textrm{Z} \f$ holds, on each diagonal block, a constant and linear functions of position, plus one vector for each
-hole and V-coil. This usually reduces the number of iterations substantially, but setting it up costs one HODLR
-matrix-vector product per coarse vector, so it is off by default. With `pre_coarse=T`, setting `pre_neigs` to a positive
-value (`pre_neigs=N` in
+(two-level preconditioner) for time-dependent runs. The coarse space \f$ \textrm{Z} \f$ starts from a constant and the
+linear and quadratic functions of position on each diagonal block, plus one vector for each hole and V-coil. Because
+these functions jump at block boundaries, which gives them a large inductive and resistive energy, each vector is then
+smoothed `pre_smooth` times (default 3) with the block preconditioner \f$ \textrm{M} \f$,
+\f$ \textrm{Z} \leftarrow (\textrm{I} - \textrm{M} \textrm{A}) \textrm{Z} \f$. The correction is applied in the
+balancing form \f$ (\textrm{I} - \textrm{Q} \textrm{A}) \textrm{M} (\textrm{I} - \textrm{A} \textrm{Q}) + \textrm{Q} \f$,
+with \f$ \textrm{Q} = \textrm{Z} (\textrm{Z}^T \textrm{A} \textrm{Z})^{-1} \textrm{Z}^T \f$ and
+\f$ \textrm{A} = \textrm{L} + \beta \textrm{R} \f$ the time-step matrix.
+
+This typically reduces the number of CG iterations several-fold (four to more than ten times on the nested-tori and
+ports examples), and the most on models with junctions. Building the coarse space costs a few matrix-matrix products
+with the HODLR operator per coarse vector, and it is rebuilt whenever the time step changes. It also adds four dense
+products with \f$ \textrm{Z} \f$ and \f$ \textrm{A} \textrm{Z} \f$ to each iteration. The setup cost can outweigh the
+savings on short runs of models that already converge quickly, so it is off by default. Fewer smoothing steps
+(`pre_smooth`) make the setup cheaper at the cost of more iterations.
+
+With `pre_coarse=T`, setting `pre_neigs` to a positive value (`pre_neigs=N` in
 \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") also adds the `pre_neigs`
-slowest \f$ \textrm{L}/\textrm{R} \f$ eigenmodes to the coarse space for time-dependent runs, which targets the slowly
-decaying current patterns that limit convergence on large models. The eigenmodes are computed with ARPACK on the first
-run and reused by later runs on the same model while the resistivity is unchanged.
+slowest \f$ \textrm{L}/\textrm{R} \f$ eigenmodes to the coarse space before smoothing. The eigenmodes are computed with
+ARPACK on the first run and reused by later runs on the same model while the resistivity is unchanged. These physical
+decay modes are usually not the modes that limit convergence, so they rarely reduce the iteration count further.

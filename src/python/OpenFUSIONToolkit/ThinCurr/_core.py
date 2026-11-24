@@ -43,7 +43,8 @@ class ThinCurr():
             'B_aca_rel_tol': '0.05',
             'pre_single': 'F',
             'pre_coarse': 'F',
-            'pre_neigs': '0'
+            'pre_neigs': '0',
+            'pre_smooth': '3'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -382,7 +383,7 @@ class ThinCurr():
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
                           L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None,
-                          pre_neigs=None):
+                          pre_neigs=None,pre_smooth=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -397,6 +398,8 @@ class ThinCurr():
         @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires
         `pre_coarse` and ARPACK; computed once and reused by later `run_td` calls on the same model while the
         resistivity is unchanged)
+        @param pre_smooth Number of smoothing steps applied to the coarse space of the two-level preconditioner
+        (default 3; requires `pre_coarse`)
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -420,6 +423,10 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_coarse'] = 'T' if pre_coarse else 'F'
         if pre_neigs is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_neigs'] = '{0:d}'.format(pre_neigs)
+        if pre_smooth is not None:
+            if pre_smooth < 0:
+                raise ValueError('"pre_smooth" must be >= 0')
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_smooth'] = '{0:d}'.format(pre_smooth)
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
