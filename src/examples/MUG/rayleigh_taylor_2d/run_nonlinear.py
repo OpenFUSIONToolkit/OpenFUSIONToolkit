@@ -12,7 +12,7 @@
 # diffusion and thermal conduction are turned off (D_diff = chi = 0), since they also spread the layer in the
 # nonlinear runs, which the linearized model does not include; the other options come from oft.in.
 #
-# Usage (from the directory containing MUG_rt_2d, oft.in, and oft_in.xml):
+# Usage (from the directory containing MUG_rt_2d, oft.in, oft_in.xml, and oft_in_mpi.xml for --np > 1):
 #   python run_nonlinear.py [--B_0 0. 2.E-4] [--nsteps_lin 400] [--np 1] [--plot] [--skip_run]
 import argparse
 import os
@@ -20,14 +20,17 @@ import shutil
 import subprocess
 import numpy as np
 from OpenFUSIONToolkit.io import XDMF_plot_file
-from run_scan import read_option, set_option
+from run_scan import read_option, set_option, parallel_settings, run_command
+from plot_rt_2d import plot_files
 
 
 def mode_amplitude(run_dir, k):
     '''Return (t, a): the amplitude of the cos(kx) component of v_z over the whole domain at each plot time'''
     times, amps = None, []
-    filenames = sorted(f for f in os.listdir(os.path.join(run_dir, 'all')) if f.endswith('.h5'))
-    meshes = [XDMF_plot_file(os.path.join(run_dir, 'all', f))['xmhd_2d']['smesh'] for f in filenames]
+    filenames = plot_files(run_dir)
+    if len(filenames) == 0:
+        raise FileNotFoundError('No plot files in {0} (see {0}/run.log and plot.log)'.format(run_dir))
+    meshes = [XDMF_plot_file(f)['xmhd_2d']['smesh'] for f in filenames]
     times = meshes[0].times
     for istep in range(times.shape[0]):
         num, den = 0.0, 0.0
@@ -43,10 +46,9 @@ def mode_amplitude(run_dir, k):
 def run(exe, text, run_dir, nprocs):
     '''Run a case and convert its restart files to plot files'''
     os.makedirs(run_dir, exist_ok=True)
-    shutil.copy('oft_in.xml', run_dir)
-    cmd = [exe, 'oft.in', 'oft_in.xml']
-    if nprocs > 1:
-        cmd = ['mpirun', '-np', str(nprocs)] + cmd
+    text, xml_file = parallel_settings(text, nprocs)
+    shutil.copy(xml_file, run_dir)
+    cmd = run_command(exe, xml_file, nprocs)
     for plot in ('F', 'T'):
         with open(os.path.join(run_dir, 'oft.in'), 'w') as fid:
             fid.write(set_option(text, 'plot_run', plot))
@@ -59,6 +61,9 @@ def run(exe, text, run_dir, nprocs):
 def fit_rate(t, a, a_max):
     '''Growth rate from the slope of ln(a) over the part of the run where 0.03 a_max < a < 0.3 a_max'''
     mask = (a > 0.03*a_max) & (a < 0.3*a_max)
+    if np.count_nonzero(mask) < 3:
+        print('  WARNING: fewer than 3 plot times in the fit window (run longer, or change --a_max)')
+        return np.nan, np.nan, np.nan
     return np.polyfit(t[mask], np.log(a[mask]), 1)[0], t[mask].min(), t[mask].max()
 
 
@@ -100,7 +105,7 @@ def main():
         gamma_nl, t0, t1 = fit_rate(*curves[False], options.a_max)
         t_lin, a_lin = curves[True]
         mask = (t_lin >= t0) & (t_lin <= t1)
-        gamma_lin = np.polyfit(t_lin[mask], np.log(a_lin[mask]), 1)[0]
+        gamma_lin = np.polyfit(t_lin[mask], np.log(a_lin[mask]), 1)[0] if np.count_nonzero(mask) >= 2 else np.nan
         results.append((B_0, gamma_lin, gamma_nl, t0, t1, curves))
     print('  B_0 [T]    window [us]      gamma linear   gamma nonlinear   ratio')
     for B_0, gamma_lin, gamma_nl, t0, t1, _ in results:

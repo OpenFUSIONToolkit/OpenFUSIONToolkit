@@ -6,7 +6,7 @@
 # Plot the density from one or more runs of the 2D Rayleigh-Taylor example (MUG_rt_2d) at a set of times, and
 # report the minimum density and temperature over each run.
 #
-# Each run directory must contain the XDMF/HDF5 plot files written with `plot_run=T` (in "all/"). One row is
+# Each run directory must contain the XDMF/HDF5 plot files written with `plot_run=T` (oft_xdmf.*.h5). One row is
 # drawn per run and one column per time; the nearest plotted time is used. Times are given either as one list for
 # all runs, or as one comma-separated group per run (each group with the same number of times).
 #
@@ -20,9 +20,18 @@ import numpy as np
 from OpenFUSIONToolkit.io import XDMF_plot_file
 
 
+def plot_files(run_dir):
+    '''Plot files of a run (one per MPI process), in `run_dir` or, from older versions, in `run_dir/all`'''
+    for sub_dir in ('', 'all'):
+        files = sorted(glob.glob(os.path.join(run_dir, sub_dir, 'oft_xdmf.*.h5')))
+        if len(files) > 0:
+            return files
+    return []
+
+
 def load_run(run_dir):
-    '''Load the plot meshes of a run (one per MPI process) from `run_dir/all`'''
-    files = sorted(glob.glob(os.path.join(run_dir, 'all', 'oft_xdmf.*.h5')))
+    '''Load the plot meshes of a run (one per MPI process)'''
+    files = plot_files(run_dir)
     if len(files) == 0:
         raise FileNotFoundError('No plot files in {0} (run with plot_run=T first)'.format(run_dir))
     return [XDMF_plot_file(filename)['xmhd_2d']['smesh'] for filename in files]
