@@ -14,6 +14,10 @@
 !!   `loverlap` bit for bit (restricted)
 !! - Subdomain matrices with overlap across processes match the entries of the
 !!   globally assembled matrix (assembled independently from all local matrices)
+!! - Subdomains from a given DOF list: the DOFs of a graph-grown subdomain reproduce
+!!   it exactly (numbering, matrix, gathered values), an arbitrary list (not all owned
+!!   DOFs) matches the assembled matrix, global indices map back to subdomain indices,
+!!   and submatrices of the subdomain matrix follow its values through updates
 !! - Updating the preconditioner after the operator values change
 !! - GMRES iteration counts with restricted and additive Schwarz for 0, 1 and 2
 !!   overlap layers (written to `schwarz.results` for checking by the driver)
@@ -29,9 +33,11 @@ USE oft_sort, ONLY: sort_array
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
+USE oft_stitching, ONLY: oft_seam
 USE oft_la_base, ONLY: oft_vector, oft_matrix, OFT_ACCESS_READ
-USE oft_native_la, ONLY: oft_native_matrix
-USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_delete
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_submatrix
+USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_setup_dofs, &
+  native_overlap_update, native_overlap_gather, native_overlap_index, native_overlap_delete
 USE oft_native_solvers, ONLY: oft_bjprecond, oft_schwarz_precond, oft_native_gmres_solver
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 USE oft_solver_base, ONLY: oft_solver
@@ -47,6 +53,10 @@ TYPE(oft_lag_zerob), TARGET :: lag_zerob
 CLASS(oft_vector), POINTER :: u,v,w,g,g0
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
+TYPE(oft_native_matrix), POINTER :: A => NULL()
+INTEGER(i4) :: nukey = 0
+INTEGER(i8), ALLOCATABLE :: ukey(:)
+REAL(r8), ALLOCATABLE :: uval(:)
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -90,8 +100,18 @@ IF(mg_mesh%mesh%periodic%nper>0)THEN
   CALL oft_finalize
 END IF
 !---Subdomain matrices against the assembled global matrix
+SELECT TYPE(lop)
+TYPE IS(oft_native_matrix)
+  A=>lop
+CLASS DEFAULT
+  CALL oft_abort('Native matrix expected','main',__FILE__)
+END SELECT
+CALL assemble_global()
 CALL check_subdomain(1)
 CALL check_subdomain(2)
+!---Subdomains from a given DOF list
+CALL check_dofs(1)
+CALL check_dofs(2)
 !---Iteration counts with overlap across processes
 its(1)=solve(1,0,.FALSE.,.TRUE.,v)
 its(2)=solve(1,1,.FALSE.,.TRUE.,v)
@@ -194,27 +214,14 @@ TYPE IS(oft_native_matrix)
 END SELECT
 CALL sw%delete
 END SUBROUTINE check_update
-! Subdomain matrix with overlap across processes against the assembled global matrix
-SUBROUTINE check_subdomain(levels)
-INTEGER(i4), INTENT(in) :: levels
-TYPE(oft_native_overlap) :: ovl
-TYPE(oft_native_matrix), POINTER :: A
-INTEGER(i4) :: i,j,k,nloc,ntot,nmiss,ierr,ir,ic
-INTEGER(i4), ALLOCATABLE :: counts(:),displs(:)
-INTEGER(i8), ALLOCATABLE :: gidx(:),lrow(:),lcol(:),grow(:),gcol(:),key(:),ukey(:)
-INTEGER(i4), ALLOCATABLE :: perm(:),sp(:)
-INTEGER(i8), ALLOCATABLE :: sg(:)
-REAL(r8), ALLOCATABLE :: lval(:),gval(:),uval(:)
-REAL(r8) :: dmax,ref
-INTEGER(i8) :: ng,p8
-SELECT TYPE(lop)
-TYPE IS(oft_native_matrix)
-  A=>lop
-CLASS DEFAULT
-  CALL oft_abort('Native matrix expected','check_subdomain',__FILE__)
-END SELECT
-CALL native_overlap_setup(ovl,A,u,levels)
-!---Global matrix assembled from the local (unassembled) matrices of all processes
+! Global matrix assembled from the local (unassembled) matrices of all processes,
+! as sorted unique keys (row-1)*nrg+col with summed values
+SUBROUTINE assemble_global()
+INTEGER(i4) :: i,j,k,nloc,ntot,ierr
+INTEGER(i4), ALLOCATABLE :: counts(:),displs(:),perm(:)
+INTEGER(i8), ALLOCATABLE :: gidx(:),lrow(:),lcol(:),grow(:),gcol(:),key(:)
+REAL(r8), ALLOCATABLE :: lval(:),gval(:)
+INTEGER(i8) :: ng
 ALLOCATE(gidx(A%nr))
 DO i=1,A%nr
   gidx(i)=A%i_map(1)%offsetg+A%i_map(1)%lge(i)
@@ -270,17 +277,29 @@ DO k=1,ntot
   ukey(j)=key(k)
   uval(j)=gval(perm(k))
 END DO
+nukey=j
+END SUBROUTINE assemble_global
+! Subdomain matrix entries and pattern against the assembled global matrix
+SUBROUTINE check_entries(ovl,label)
+TYPE(oft_native_overlap), INTENT(in) :: ovl
+CHARACTER(LEN=*), INTENT(in) :: label
+INTEGER(i4) :: i,k,nmiss,ir,ic
+INTEGER(i4), ALLOCATABLE :: sp(:)
+INTEGER(i8), ALLOCATABLE :: sg(:)
+REAL(r8) :: dmax,ref
+INTEGER(i8) :: ng,p8
+ng=A%nrg
 !---Every subdomain entry matches the global matrix
 dmax=0.d0
 DO i=1,ovl%n
   DO k=ovl%amat%kr(i),ovl%amat%kr(i+1)-1
-    p8=search_sorted((ovl%gsub(i)-1)*ng+ovl%gsub(ovl%amat%lc(k)),ukey,INT(j,i8))
+    p8=search_sorted((ovl%gsub(i)-1)*ng+ovl%gsub(ovl%amat%lc(k)),ukey,INT(nukey,i8))
     ref=0.d0
     IF(p8>0)ref=uval(p8)
     dmax=MAX(dmax,ABS(ovl%amat%M(k)-ref)/MAX(1.d0,ABS(ref)))
   END DO
 END DO
-CALL check_tol('Subdomain entries match assembled matrix (overlap '//CHAR(48+levels)//')',oft_mpi_max(dmax),1.d-12)
+CALL check_tol('Subdomain entries match assembled matrix ('//label//')',oft_mpi_max(dmax),1.d-12)
 !---Every non-zero global entry within the subdomain is in the subdomain matrix
 ALLOCATE(sg(MAX(1,ovl%n)),sp(MAX(1,ovl%n)))
 DO i=1,ovl%n
@@ -289,7 +308,7 @@ DO i=1,ovl%n
 END DO
 IF(ovl%n>0)CALL sort_array(sg,sp,ovl%n)
 nmiss=0
-DO k=1,j
+DO k=1,nukey
   IF(uval(k)==0.d0)CYCLE
   p8=search_sorted((ukey(k)-1)/ng+1,sg,INT(ovl%n,i8))
   IF(p8==0)CYCLE
@@ -299,13 +318,138 @@ DO k=1,j
   ic=sp(p8)
   IF(.NOT.ANY(ovl%amat%lc(ovl%amat%kr(ir):ovl%amat%kr(ir+1)-1)==ic))nmiss=nmiss+1
 END DO
-CALL check_exact('Subdomain pattern contains all entries (overlap '//CHAR(48+levels)//')', &
-  REAL(oft_mpi_sum(nmiss),r8),0.d0)
+CALL check_exact('Subdomain pattern contains all entries ('//label//')',REAL(oft_mpi_sum(nmiss),r8),0.d0)
+END SUBROUTINE check_entries
+! Subdomain matrix with overlap across processes against the assembled global matrix
+SUBROUTINE check_subdomain(levels)
+INTEGER(i4), INTENT(in) :: levels
+TYPE(oft_native_overlap) :: ovl
+CALL native_overlap_setup(ovl,A,u,levels)
+CALL check_entries(ovl,'overlap '//CHAR(48+levels))
 !---Subdomain contains the owned rows
 CALL check_exact('Subdomain grows the owned rows (overlap '//CHAR(48+levels)//')', &
   REAL(oft_mpi_sum(COUNT(ovl%osub(1:ovl%nloc)==oft_env%rank)-A%nrslice),r8),0.d0)
 CALL native_overlap_delete(ovl)
 END SUBROUTINE check_subdomain
+! Subdomains from a given DOF list: reproduce a graph-grown subdomain from its DOFs,
+! check an arbitrary list, the global to subdomain index map and submatrices of the
+! subdomain matrix through a numeric update
+SUBROUTINE check_dofs(levels)
+INTEGER(i4), INTENT(in) :: levels
+TYPE(oft_native_overlap) :: ovl,ovd
+TYPE(oft_native_submatrix) :: sub
+TYPE(oft_seam), TARGET :: lseam
+TYPE(oft_native_vector), TARGET :: uskip
+INTEGER(i4) :: i,k,n,m,nbad
+INTEGER(i4), ALLOCATABLE :: sp(:),so(:),idx(:),rows(:)
+INTEGER(i8), ALLOCATABLE :: sg(:),gq(:)
+REAL(r8), ALLOCATABLE :: x(:),xs(:),xd(:),m0(:)
+CHARACTER(LEN=9) :: lab
+lab='overlap '//CHAR(48+levels)
+CALL native_overlap_setup(ovl,A,u,levels)
+!---Sorted DOF list of the graph-grown subdomain
+n=ovl%n
+ALLOCATE(sg(MAX(1,n)),sp(MAX(1,n)),so(MAX(1,n)))
+DO i=1,n
+  sg(i)=ovl%gsub(i)
+  sp(i)=i
+END DO
+IF(n>0)CALL sort_array(sg,sp,n)
+DO i=1,n
+  so(i)=ovl%osub(sp(i))
+END DO
+CALL native_overlap_setup_dofs(ovd,A,u,n,sg,so)
+!---Same numbering, pattern and values (exact)
+nbad=0
+IF((ovd%n/=ovl%n).OR.(ovd%nloc/=ovl%nloc).OR.(ovd%nown/=ovl%nown))THEN
+  nbad=1
+ELSE IF(ovd%amat%nnz/=ovl%amat%nnz)THEN
+  nbad=1
+ELSE
+  nbad=nbad+COUNT(ovd%gsub/=ovl%gsub)+COUNT(ovd%osub/=ovl%osub)+COUNT(ovd%lsub/=ovl%lsub)
+  nbad=nbad+COUNT(ovd%amat%kr/=ovl%amat%kr)
+  nbad=nbad+COUNT(ovd%amat%lc(1:ovl%amat%nnz)/=ovl%amat%lc(1:ovl%amat%nnz))
+  nbad=nbad+COUNT(ovd%amat%M(1:ovl%amat%nnz)/=ovl%amat%M(1:ovl%amat%nnz))
+END IF
+CALL check_exact('DOF list reproduces graph subdomain ('//lab//')',REAL(oft_mpi_sum(nbad),r8),0.d0)
+!---Gathered values: global index of each DOF, identical for both subdomains
+ALLOCATE(x(MAX(1,A%nr)),xs(MAX(1,n)),xd(MAX(1,n)))
+DO i=1,A%nr
+  x(i)=REAL(A%i_map(1)%offsetg+A%i_map(1)%lge(i),r8)
+END DO
+xs=0.d0
+xd=-1.d0
+CALL native_overlap_gather(ovl,x,xs)
+CALL native_overlap_gather(ovd,x,xd)
+nbad=0
+IF(ovd%n==n)THEN
+  DO i=1,n
+    IF((xs(i)/=xd(i)).OR.(xd(i)/=REAL(ovd%gsub(i),r8)))nbad=nbad+1
+  END DO
+END IF
+CALL check_exact('DOF list gathers identical values ('//lab//')',REAL(oft_mpi_sum(nbad),r8),0.d0)
+!---Global to subdomain index map (and absent indices)
+ALLOCATE(gq(n+2),idx(n+2))
+gq(1:n)=ovd%gsub(1:n)
+gq(n+1)=0_i8
+gq(n+2)=A%nrg+1
+CALL native_overlap_index(ovd,n+2,gq,idx)
+nbad=COUNT(idx(n+1:n+2)/=0)
+DO i=1,n
+  IF(idx(i)/=i)nbad=nbad+1
+END DO
+CALL check_exact('Subdomain index map round trip ('//lab//')',REAL(oft_mpi_sum(nbad),r8),0.d0)
+!---Submatrix of all rows of the subdomain matrix, also after a numeric update
+lseam%skip=.TRUE.
+uskip%n=ovd%n
+uskip%stitch_info=>lseam
+ALLOCATE(rows(n))
+rows=[(i,i=1,n)]
+CALL sub%setup(ovd%amat,uskip,rows=rows)
+nbad=0
+IF(sub%nnz/=ovd%amat%nnz)THEN
+  nbad=1
+ELSE
+  nbad=COUNT(sub%M(1:sub%nnz)/=ovd%amat%M(1:sub%nnz))
+END IF
+CALL check_exact('Submatrix of subdomain matrix ('//lab//')',REAL(oft_mpi_sum(nbad),r8),0.d0)
+ALLOCATE(m0(MAX(1,ovd%amat%nnz)))
+m0=ovd%amat%M
+A%M=2.d0*A%M
+A%full_current=.FALSE.
+CALL native_overlap_update(ovd)
+CALL sub%update_slice
+nbad=0
+IF(sub%nnz==ovd%amat%nnz)THEN
+  nbad=COUNT(sub%M(1:sub%nnz)/=ovd%amat%M(1:sub%nnz))+COUNT(ovd%amat%M(1:sub%nnz)/=2.d0*m0(1:sub%nnz))
+END IF
+CALL check_exact('Submatrix follows subdomain update ('//lab//')',REAL(oft_mpi_sum(nbad),r8),0.d0)
+A%M=0.5d0*A%M
+A%full_current=.FALSE.
+CALL sub%delete
+CALL native_overlap_delete(ovd)
+!---Arbitrary list: the graph subdomain without every third owned DOF
+m=0
+DO i=1,n
+  IF((so(i)==oft_env%rank).AND.(MOD(sg(i),3_i8)==0))CYCLE
+  m=m+1
+  sg(m)=sg(i)
+  so(m)=so(i)
+END DO
+CALL native_overlap_setup_dofs(ovd,A,u,m,sg,so)
+CALL check_entries(ovd,'DOF list, '//lab)
+nbad=0
+IF(ovd%n/=m)THEN
+  nbad=1
+ELSE
+  DO k=1,m
+    IF(ovd%gsub(ovd%gperm(k))/=sg(k))nbad=nbad+1
+  END DO
+END IF
+CALL check_exact('Subdomain is the given DOF list ('//lab//')',REAL(oft_mpi_sum(nbad),r8),0.d0)
+CALL native_overlap_delete(ovd)
+CALL native_overlap_delete(ovl)
+END SUBROUTINE check_dofs
 ! Binary search in a sorted int8 array
 FUNCTION search_sorted(item,list,n) RESULT(pos)
 INTEGER(i8), INTENT(in) :: item,n

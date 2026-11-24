@@ -35,7 +35,7 @@ def run_schwarz(nprocs, ref_per='F,F,F'):
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nlevels, ref_per))
-    if not run_OFT("./test_native_schwarz", nprocs, 120):
+    if not run_OFT("./test_native_schwarz", nprocs, 240):
         return None
     with open('schwarz.results', 'r') as fid:
         nfail = int(fid.readline())

@@ -7,10 +7,21 @@
 !
 !> Overlapping subdomains across processes for native CRS matrices (Schwarz methods)
 !!
-!! Builds, on each process, the matrix of a subdomain made of the process' owned
-!! rows plus `levels` layers of overlap grown along the global matrix graph, which
-!! may include rows held only by other processes ("ghost" rows), together with scatter
-!! plans moving vector values between the distributed vector and the subdomain.
+!! Builds, on each process, the matrix of a subdomain, which may include rows held
+!! only by other processes ("ghost" rows), together with scatter plans moving vector
+!! values between the distributed vector and the subdomain. The subdomain is given by
+!! one of two entry points:
+!! - @ref native_overlap_setup: the process' owned rows plus `levels` layers of
+!!   overlap grown along the global matrix graph (one exchange per layer);
+!! - @ref native_overlap_setup_dofs: a given list of DOFs (global index and owner
+!!   rank), eg. from cell adjacency, whose non-owned rows are requested in one
+!!   exchange.
+!!
+!! Both share the remaining steps: completion of the owned rows, numbering, subdomain
+!! matrix (`amat`, R A Rᵀ of the complete rows) and vector plans. The subdomain matrix
+!! also holds a current full local matrix (`Mfull`, skip linkage), so it can be the
+!! parent of @ref oft_native_la::oft_native_submatrix "oft_native_submatrix" blocks;
+!! global indices are mapped to subdomain indices with @ref native_overlap_index.
 !!
 !! Matrices are stored unassembled per process, so rows are first made complete:
 !! - The full local matrix (`Mfull`, see @ref oft_native_la::native_matrix_setup_full
@@ -66,7 +77,7 @@ END TYPE ilist
 !! index) followed by ghost DOFs (in increasing global index).
 !---------------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_native_overlap
-  INTEGER(i4) :: levels = 0 !< Number of overlap layers
+  INTEGER(i4) :: levels = 0 !< Number of overlap layers (-1 for a subdomain from a given DOF list)
   INTEGER(i4) :: n = 0 !< Number of subdomain DOFs
   INTEGER(i4) :: nloc = 0 !< Number of subdomain DOFs held locally (numbered first)
   INTEGER(i4) :: nown = 0 !< Number of subdomain DOFs owned by this process
@@ -75,6 +86,8 @@ TYPE, PUBLIC :: oft_native_overlap
   INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gsub !< Global index of each subdomain DOF [n]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lsub !< Local index of each locally held subdomain DOF [nloc]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: osub !< Owner rank of each subdomain DOF [n]
+  INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gsorted !< Subdomain global indices in increasing order [n]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: gperm !< Subdomain index of each entry of `gsorted` [n]
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: cvals !< Complete owned rows, then rows received from owners
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: acc !< Accumulation storage for additive write-back [nr]
   TYPE(oft_scatter_plan) :: plan_rows !< Local `Mfull` values to complete owned rows (`cvals(1:ncr)`)
@@ -82,12 +95,12 @@ TYPE, PUBLIC :: oft_native_overlap
   TYPE(oft_scatter_plan) :: plan_vals !< Row values (`cvals`) to subdomain matrix values
   TYPE(oft_scatter_plan) :: plan_vec !< Distributed vector to subdomain vector (reverse: add back)
   TYPE(oft_scatter_plan) :: plan_own !< Owned subdomain DOFs (restricted write-back)
-  TYPE(oft_native_matrix), POINTER :: amat => NULL() !< Subdomain matrix [n,n]
+  TYPE(oft_native_matrix), POINTER :: amat => NULL() !< Subdomain matrix [n,n] (`Mfull` kept current)
   CLASS(oft_native_matrix), POINTER :: parent => NULL() !< Parent (distributed) matrix
   TYPE(oft_seam), POINTER :: seam => NULL() !< Seam of the parent row space
 END TYPE oft_native_overlap
-PUBLIC native_overlap_setup, native_overlap_update, native_overlap_gather, native_overlap_scatter
-PUBLIC native_overlap_delete
+PUBLIC native_overlap_setup, native_overlap_setup_dofs, native_overlap_update, native_overlap_gather
+PUBLIC native_overlap_scatter, native_overlap_index, native_overlap_delete
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up an overlapping subdomain of a distributed native matrix (collective)
@@ -101,8 +114,64 @@ TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
 CLASS(oft_native_matrix), TARGET, INTENT(inout) :: mat !< Parent matrix (square)
 CLASS(oft_vector), INTENT(inout) :: u !< Vector of the parent row space
 INTEGER(i4), INTENT(in) :: levels !< Number of overlap layers
+IF(levels<0)CALL oft_abort('Number of overlap layers must be non-negative','native_overlap_setup',__FILE__)
+CALL overlap_build(self,mat,u,levels)
+END SUBROUTINE native_overlap_setup
+!---------------------------------------------------------------------------------
+!> Set up the subdomain of a distributed native matrix made of a given list of DOFs
+!! (collective)
+!!
+!! The subdomain is exactly the given list, which need not contain all owned DOFs.
+!! Entries owned by this process must be local rows owned here; the complete rows of
+!! all other entries are requested from their owners in one exchange. Numbering,
+!! subdomain matrix (complete rows restricted to subdomain columns) and plans are as
+!! for @ref native_overlap_setup. Every process must call this, even with `n=0`.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_overlap_setup_dofs(self,mat,u,n,gdof,odof)
+TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
+CLASS(oft_native_matrix), TARGET, INTENT(inout) :: mat !< Parent matrix (square)
+CLASS(oft_vector), INTENT(inout) :: u !< Vector of the parent row space
+INTEGER(i4), INTENT(in) :: n !< Number of subdomain DOFs
+INTEGER(i8), INTENT(in) :: gdof(n) !< Global index (`offsetg+lge` of the row maps) of each DOF, increasing [n]
+INTEGER(i4), INTENT(in) :: odof(n) !< Owner rank of each DOF [n]
+CALL overlap_build(self,mat,u,-1,gdof,odof)
+END SUBROUTINE native_overlap_setup_dofs
+!---------------------------------------------------------------------------------
+!> Subdomain index of each of a list of global indices (0 if not in the subdomain)
+!---------------------------------------------------------------------------------
+SUBROUTINE native_overlap_index(self,n,g,idx)
+TYPE(oft_native_overlap), INTENT(in) :: self !< Overlap object
+INTEGER(i4), INTENT(in) :: n !< Number of global indices
+INTEGER(i8), INTENT(in) :: g(n) !< Global indices [n]
+INTEGER(i4), INTENT(out) :: idx(n) !< Subdomain index of each global index (0 if absent) [n]
+INTEGER(i4) :: i
+INTEGER(i8) :: p8
+idx=0
+IF(self%n==0)RETURN
+DO i=1,n
+  p8=search_array(g(i),self%gsorted,INT(self%n,i8))
+  IF(p8>0)idx(i)=self%gperm(p8)
+END DO
+END SUBROUTINE native_overlap_index
+!---------------------------------------------------------------------------------
+!> Build an overlapping subdomain (collective; see @ref native_overlap_setup and
+!! @ref native_overlap_setup_dofs)
+!!
+!! Steps: complete the owned rows (`plan_rows`); select the subdomain DOFs, either by
+!! growing `levels` layers along the graph or from the given list, requesting complete
+!! rows of non-owned DOFs from their owners (`plan_ghost`); number the subdomain;
+!! build the subdomain matrix (`plan_vals`) and the vector plans (`plan_vec`,
+!! `plan_own`).
+!---------------------------------------------------------------------------------
+SUBROUTINE overlap_build(self,mat,u,levels,gdof,odof)
+TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
+CLASS(oft_native_matrix), TARGET, INTENT(inout) :: mat !< Parent matrix (square)
+CLASS(oft_vector), INTENT(inout) :: u !< Vector of the parent row space
+INTEGER(i4), INTENT(in) :: levels !< Number of overlap layers (ignored with `gdof`)
+INTEGER(i8), OPTIONAL, INTENT(in) :: gdof(:) !< Global indices of the subdomain DOFs (increasing)
+INTEGER(i4), OPTIONAL, INTENT(in) :: odof(:) !< Owner rank of each subdomain DOF
 CLASS(oft_native_vector), POINTER :: uv
-INTEGER(i4) :: i,j,k,m,q,r,np,me,nown_rows,ntmp,lev,nnz,jp,jn
+INTEGER(i4) :: i,j,k,m,q,r,np,me,nown_rows,ntmp,nnz,jp,jn
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: owner,orow,olist,scnt,rcnt,ckr,co,gkr,go,ipos,itmp, &
   rrow,rown,krec,lrec,isort,dlist_own,dsrc,kr_sub,lpos,sub_of_d,newo
 INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr,lc
@@ -115,6 +184,7 @@ INTEGER(i4) :: nd,nfront,nnew,ng_rows,ngv,nsub_nnz
 DEBUG_STACK_PUSH
 IF(.NOT.native_vector_cast(uv,u))CALL oft_abort('Native vector required','native_overlap_setup',__FILE__)
 IF(mat%nr/=mat%nc)CALL oft_abort('Square matrix required','native_overlap_setup',__FILE__)
+IF(PRESENT(gdof).NEQV.PRESENT(odof))CALL oft_abort('DOF list requires owners','native_overlap_setup',__FILE__)
 CALL native_overlap_delete(self)
 self%parent=>mat
 self%seam=>uv%stitch_info
@@ -287,65 +357,18 @@ END DO
 CALL build_plan(self%plan_rows,rows_send,rows_recv,ntmp,itmp,lpos)
 DEALLOCATE(lpos,itmp,rrow,rg,rown,krec,lrec)
 !------------------------------------------------------------------------------
-! Grow the subdomain from the owned rows, requesting rows of new DOFs from owners
+! Subdomain DOFs (dlist): owned first, then non-owned with rows requested from owners
 !------------------------------------------------------------------------------
 ALLOCATE(ghost_send(0:np-1),ghost_recv(0:np-1))
-nd=nown_rows
-ALLOCATE(dlist(MAX(1,nd)),newo(MAX(1,nd)),dsrc(MAX(1,nd)))
-DO r=1,nown_rows
-  dlist(r)=gidx(olist(r))
-  newo(r)=me
-  dsrc(r)=r
-END DO
 ng_rows=0
 ngv=0
 ALLOCATE(gkr(1),gg(1),go(1))
 gkr(1)=1
-nfront=nd
-ALLOCATE(front(MAX(1,nfront)))
-IF(nd>0)front(1:nd)=dlist(1:nd)
-DO lev=1,levels
-  !---Candidate DOFs: columns of the rows of the front not yet in the subdomain
-  CALL sorted_copy(dlist,nd,dsorted)
-  ALLOCATE(newg(MAX(1,count_front_cols())),itmp(MAX(1,count_front_cols())))
-  nnew=0
-  DO k=1,nfront
-    j=dlist_index(front(k))
-    CALL row_entries(dsrc(j))
-  END DO
-  !---Unique new DOFs
-  IF(nnew>0)THEN
-    ALLOCATE(isort(nnew),rown(nnew))
-    isort=[(k,k=1,nnew)]
-    rown=itmp(1:nnew)
-    CALL sort_array(newg,isort,nnew)
-    m=0
-    DO k=1,nnew
-      IF(m>0)THEN
-        IF(newg(k)==newg(m))CYCLE
-      END IF
-      m=m+1
-      newg(m)=newg(k)
-      itmp(m)=rown(isort(k))
-    END DO
-    nnew=m
-    DEALLOCATE(isort,rown)
-  END IF
-  !---Append to the subdomain and request their rows from their owners
-  CALL grow_arrays(nd+nnew)
-  DO k=1,nnew
-    dlist(nd+k)=newg(k)
-    newo(nd+k)=itmp(k)
-    IF(itmp(k)==me)CALL oft_abort('Owned DOF outside the owned set','native_overlap_setup',__FILE__)
-  END DO
-  CALL request_rows(nnew,newg,itmp,nd)
-  nd=nd+nnew
-  DEALLOCATE(front)
-  ALLOCATE(front(MAX(1,nnew)))
-  IF(nnew>0)front(1:nnew)=newg(1:nnew)
-  nfront=nnew
-  DEALLOCATE(newg,itmp,dsorted)
-END DO
+IF(PRESENT(gdof))THEN
+  CALL select_dofs()
+ELSE
+  CALL grow_graph()
+END IF
 !---Rows received from owners follow the complete owned rows in cvals
 CALL build_plan(self%plan_ghost,ghost_send,ghost_recv,0,[0],[0])
 ALLOCATE(self%cvals(MAX(1,self%ncr+ngv)))
@@ -402,6 +425,9 @@ IF(nd>0)THEN
   dperm(1:nd)=[(k,k=1,nd)]
   CALL sort_array(dsorted,dperm,nd)
 END IF
+ALLOCATE(self%gsorted(nd),self%gperm(nd))
+self%gsorted=dsorted(1:nd)
+self%gperm=dperm(1:nd)
 !------------------------------------------------------------------------------
 ! Subdomain matrix: entries of each subdomain row with columns in the subdomain
 !------------------------------------------------------------------------------
@@ -443,6 +469,7 @@ self%amat%j_map(1)%n=nd
 CALL native_pattern_create(pattern,nd,nd,kr,lc)
 CALL native_matrix_set_pattern(self%amat,pattern)
 ALLOCATE(self%amat%M(MAX(1,nsub_nnz)))
+CALL amat_setup_full(self%amat)
 CALL scatter_plan_setup_local(self%plan_vals,nsub_nnz,lpos)
 DEALLOCATE(kr_sub,lpos,dlist_own)
 !------------------------------------------------------------------------------
@@ -490,12 +517,114 @@ DEALLOCATE(isort,itmp)
 ALLOCATE(self%acc(self%nr))
 !---Cleanup
 DEALLOCATE(gidx,gsorted,gperm,owner,orow,olist,scnt,rcnt,ipos,ckr,cg,co,gkr,gg,go)
-DEALLOCATE(dlist,newo,dsrc,front,dsorted,dperm,sub_of_d)
+DEALLOCATE(dlist,newo,dsrc,dsorted,dperm,sub_of_d)
+IF(ALLOCATED(front))DEALLOCATE(front)
 IF(ALLOCATED(rbuf))DEALLOCATE(rbuf)
 DEALLOCATE(rows_send,rows_recv,ghost_send,ghost_recv)
 CALL native_overlap_update(self)
 DEBUG_STACK_POP
 CONTAINS
+!> Grow the subdomain from the owned rows by `levels` layers along the graph
+SUBROUTINE grow_graph()
+INTEGER(i4) :: k,j,m,r,lev
+nd=nown_rows
+ALLOCATE(dlist(MAX(1,nd)),newo(MAX(1,nd)),dsrc(MAX(1,nd)))
+DO r=1,nown_rows
+  dlist(r)=gidx(olist(r))
+  newo(r)=me
+  dsrc(r)=r
+END DO
+nfront=nd
+ALLOCATE(front(MAX(1,nfront)))
+IF(nd>0)front(1:nd)=dlist(1:nd)
+DO lev=1,levels
+  !---Candidate DOFs: columns of the rows of the front not yet in the subdomain
+  CALL sorted_copy(dlist,nd,dsorted)
+  ALLOCATE(newg(MAX(1,count_front_cols())),itmp(MAX(1,count_front_cols())))
+  nnew=0
+  DO k=1,nfront
+    j=dlist_index(front(k))
+    CALL row_entries(dsrc(j))
+  END DO
+  !---Unique new DOFs
+  IF(nnew>0)THEN
+    ALLOCATE(isort(nnew),rown(nnew))
+    isort=[(k,k=1,nnew)]
+    rown=itmp(1:nnew)
+    CALL sort_array(newg,isort,nnew)
+    m=0
+    DO k=1,nnew
+      IF(m>0)THEN
+        IF(newg(k)==newg(m))CYCLE
+      END IF
+      m=m+1
+      newg(m)=newg(k)
+      itmp(m)=rown(isort(k))
+    END DO
+    nnew=m
+    DEALLOCATE(isort,rown)
+  END IF
+  !---Append to the subdomain and request their rows from their owners
+  CALL grow_arrays(nd+nnew)
+  DO k=1,nnew
+    dlist(nd+k)=newg(k)
+    newo(nd+k)=itmp(k)
+    IF(itmp(k)==me)CALL oft_abort('Owned DOF outside the owned set','native_overlap_setup',__FILE__)
+  END DO
+  CALL request_rows(nnew,newg,itmp,nd)
+  nd=nd+nnew
+  DEALLOCATE(front)
+  ALLOCATE(front(MAX(1,nnew)))
+  IF(nnew>0)front(1:nnew)=newg(1:nnew)
+  nfront=nnew
+  DEALLOCATE(newg,itmp,dsorted)
+END DO
+END SUBROUTINE grow_graph
+!> Subdomain from the given DOF list (validated), requesting non-owned rows in one round
+SUBROUTINE select_dofs()
+INTEGER(i4) :: k,il,nlist
+nlist=SIZE(gdof)
+IF(SIZE(odof)/=nlist)CALL oft_abort('DOF and owner lists differ in size','native_overlap_setup_dofs',__FILE__)
+nd=0
+DO k=1,nlist
+  IF(k>1)THEN
+    IF(gdof(k)<=gdof(k-1))CALL oft_abort('DOF list not sorted and unique','native_overlap_setup_dofs',__FILE__)
+  END IF
+  IF((odof(k)<0).OR.(odof(k)>=np))CALL oft_abort('Invalid owner rank','native_overlap_setup_dofs',__FILE__)
+  il=local_index(gdof(k))
+  IF(odof(k)==me)THEN
+    IF(il==0)CALL oft_abort('DOF listed as owned is not a local row','native_overlap_setup_dofs',__FILE__)
+    IF(orow(il)==0)CALL oft_abort('DOF listed as owned is owned by another process', &
+      'native_overlap_setup_dofs',__FILE__)
+    nd=nd+1
+  ELSE IF(il>0)THEN
+    IF(owner(il)/=odof(k))CALL oft_abort('Wrong owner of a local DOF','native_overlap_setup_dofs',__FILE__)
+  END IF
+END DO
+ALLOCATE(dlist(MAX(1,nlist)),newo(MAX(1,nlist)),dsrc(MAX(1,nlist)))
+ALLOCATE(newg(MAX(1,nlist-nd)),itmp(MAX(1,nlist-nd)))
+nd=0
+nnew=0
+DO k=1,nlist
+  IF(odof(k)==me)THEN
+    nd=nd+1
+    dlist(nd)=gdof(k)
+    newo(nd)=me
+    dsrc(nd)=orow(local_index(gdof(k)))
+  ELSE
+    nnew=nnew+1
+    newg(nnew)=gdof(k)
+    itmp(nnew)=odof(k)
+  END IF
+END DO
+DO k=1,nnew
+  dlist(nd+k)=newg(k)
+  newo(nd+k)=itmp(k)
+END DO
+CALL request_rows(nnew,newg,itmp,nd)
+nd=nd+nnew
+DEALLOCATE(newg,itmp)
+END SUBROUTINE select_dofs
 !> Local index of a global index (0 if not held locally)
 FUNCTION local_index(g) RESULT(il)
 INTEGER(i8), INTENT(in) :: g
@@ -740,13 +869,29 @@ IF(nd==0)RETURN
 p8=search_array(g,dsorted(1:nd),INT(nd,i8))
 IF(p8>0)si=dperm(p8)
 END FUNCTION sub_index
-END SUBROUTINE native_overlap_setup
+END SUBROUTINE overlap_build
+!---------------------------------------------------------------------------------
+!> Give a subdomain matrix a skip linkage, so its full local matrix (`Mfull`) is a
+!! copy of its values (@ref oft_native_la::matrix_update_slice "update_slice") and it
+!! can be the parent of submatrices
+!---------------------------------------------------------------------------------
+SUBROUTINE amat_setup_full(amat)
+TYPE(oft_native_matrix), INTENT(inout) :: amat !< Subdomain matrix (pattern set)
+TYPE(oft_seam), TARGET :: lseam
+TYPE(oft_native_vector), TARGET :: lvec
+lseam%skip=.TRUE.
+lvec%n=amat%nr
+lvec%stitch_info=>lseam
+CALL native_matrix_setup_full(amat,lvec)
+END SUBROUTINE amat_setup_full
 !---------------------------------------------------------------------------------
 !> Refresh the subdomain matrix values from the parent matrix (collective)
 !!
 !! Updates the parent's full local matrix, completes the owned rows, transfers the
 !! rows of non-owned subdomain DOFs from their owners and gathers the subdomain matrix
-!! values, all with the scatter plans built by @ref native_overlap_setup.
+!! values, all with the scatter plans built by @ref native_overlap_setup. The full
+!! local matrix of the subdomain matrix (`amat%Mfull`) is refreshed too, so
+!! submatrices of `amat` are current after their own `update_slice`.
 !---------------------------------------------------------------------------------
 SUBROUTINE native_overlap_update(self)
 TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
@@ -757,6 +902,8 @@ CALL scatter_end(self%plan_rows,self%cvals,OFT_SCATTER_INSERT)
 CALL scatter_begin(self%plan_ghost,self%cvals)
 CALL scatter_end(self%plan_ghost,self%cvals,OFT_SCATTER_INSERT)
 CALL scatter_local(self%plan_vals,self%cvals,self%amat%M,OFT_SCATTER_INSERT)
+self%amat%full_current=.FALSE.
+CALL self%amat%update_slice
 DEBUG_STACK_POP
 END SUBROUTINE native_overlap_update
 !---------------------------------------------------------------------------------
@@ -813,6 +960,8 @@ TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
 IF(ALLOCATED(self%gsub))DEALLOCATE(self%gsub)
 IF(ALLOCATED(self%lsub))DEALLOCATE(self%lsub)
 IF(ALLOCATED(self%osub))DEALLOCATE(self%osub)
+IF(ALLOCATED(self%gsorted))DEALLOCATE(self%gsorted)
+IF(ALLOCATED(self%gperm))DEALLOCATE(self%gperm)
 IF(ALLOCATED(self%cvals))DEALLOCATE(self%cvals)
 IF(ALLOCATED(self%acc))DEALLOCATE(self%acc)
 CALL scatter_plan_delete(self%plan_rows)
