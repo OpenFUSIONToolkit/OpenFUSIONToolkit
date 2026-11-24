@@ -25,12 +25,12 @@
 !! @ingroup doxy_oft_native_la
 !---------------------------------------------------------------------------------
 MODULE oft_native_la
-USE, INTRINSIC :: iso_c_binding, only: c_int
+USE, INTRINSIC :: iso_c_binding, only: c_int, c_int8_t
 USE oft_local
 USE oft_base
 USE oft_sort, ONLY: search_array, sort_array
 USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
-  oft_global_reduction, oft_global_norm1, oft_stitch_check, seam_free_plan
+  oft_global_reduction, oft_global_norm1, oft_stitch_check, seam_free_plan, seam_build_own
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
@@ -371,10 +371,8 @@ INTERFACE
   INTEGER(c_int), INTENT(inout) :: info !< Parition return status
   END SUBROUTINE oft_metis_partgraph
 END INTERFACE
-!> Empty shared-entry lists for seams without shared entries (see @ref native_seam_owned)
-INTEGER(i4), TARGET :: native_no_lbe(1) = 0
-!> Empty shared-entry ownership flags (see @ref native_seam_owned)
-LOGICAL, TARGET :: native_no_leo(1) = .TRUE.
+!> Empty ownership weights for seams without shared entries (see @ref native_seam_owned)
+INTEGER(c_int8_t), TARGET :: native_no_own(1) = 1_c_int8_t
 !---------------------------------------------------------------------------------
 !> Get a contiguous pointer to the local values of a vector (in place for native vectors)
 !---------------------------------------------------------------------------------
@@ -441,26 +439,27 @@ end select
 DEBUG_STACK_POP
 end FUNCTION native_vector_cast
 !---------------------------------------------------------------------------------
-!> Get the shared-entry lists of a seam for reductions over owned entries
+!> Get the ownership weights of a seam for reductions over owned entries
 !!
-!! Returns `.FALSE.` if reductions are skipped for this seam (`seam%skip`). Empty lists
-!! are returned when the seam has no shared entries, so the result can always be
-!! passed to the `nk_owned_*` kernels.
+!! Returns `.FALSE.` if reductions are skipped for this seam (`seam%skip`). When the
+!! seam has shared entries, `w` holds the 0/1 ownership weight of each of the `nw=n`
+!! local entries (built on first use with `seam_build_own`, which must happen outside
+!! of OpenMP parallel regions); otherwise `nw=0` and every entry is owned. The result
+!! can always be passed to the `nk_owned_*` kernels.
 !---------------------------------------------------------------------------------
-FUNCTION native_seam_owned(seam,nbe,lbe,leo) RESULT(active)
-TYPE(oft_seam), INTENT(in) :: seam !< Seam structure
-INTEGER(i4), INTENT(out) :: nbe !< Number of shared entries
-INTEGER(i4), POINTER, CONTIGUOUS, INTENT(out) :: lbe(:) !< Location of shared entries [nbe]
-LOGICAL, POINTER, CONTIGUOUS, INTENT(out) :: leo(:) !< Ownership flag of shared entries [nbe]
+FUNCTION native_seam_owned(seam,n,nw,w) RESULT(active)
+TYPE(oft_seam), INTENT(inout) :: seam !< Seam structure
+INTEGER(i4), INTENT(in) :: n !< Number of local entries
+INTEGER(i4), INTENT(out) :: nw !< Number of weights (`n` or 0)
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, INTENT(out) :: w(:) !< Ownership weight of each entry [nw]
 LOGICAL :: active !< Perform reduction?
 active=(.NOT.seam%skip)
-nbe=0
-lbe=>native_no_lbe
-leo=>native_no_leo
-IF(seam%nbe>0)THEN
-  nbe=seam%nbe
-  lbe=>seam%lbe
-  leo=>seam%leo
+nw=0
+w=>native_no_own
+IF(active.AND.(seam%nbe>0))THEN
+  IF(seam%nown/=n)CALL seam_build_own(seam,n)
+  nw=n
+  w=>seam%own
 END IF
 END FUNCTION native_seam_owned
 !---------------------------------------------------------------------------------
@@ -925,15 +924,14 @@ function vec_dot_vec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
 real(r8) :: dot !< \f$ \sum_i self_i a_i \f$
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_dot_vec',__FILE__)
     dot=0.d0
-    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(native_seam_owned(self%stitch_info,self%n,nw,w))dot=nk_owned_dot(self%n,self%v,this%v,nw,w)
     IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','vec_dot_vec',__FILE__)
@@ -947,15 +945,14 @@ function vec_dot_cvec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_dot_cvec',__FILE__)
     dot=(0.d0,0.d0)
-    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(native_seam_owned(self%stitch_info,self%n,nw,w))dot=nk_owned_dot(self%n,self%v,this%v,nw,w)
     IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','vec_dot_cvec',__FILE__)
@@ -976,9 +973,8 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: k,nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: k,nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -992,7 +988,7 @@ DO k=1,n
 END DO
 dots=0.d0
 IF(n>0)THEN
-  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
 DEBUG_STACK_POP
@@ -1007,9 +1003,8 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: k,nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: k,nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -1023,7 +1018,7 @@ DO k=1,n
 END DO
 dots=(0.d0,0.d0)
 IF(n>0)THEN
-  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
 DEBUG_STACK_POP
@@ -1034,12 +1029,11 @@ end function vec_mdot_cvec
 function vec_sum(self) result(sum)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8) :: sum !< Sum of vector elements
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 sum=0.d0
-IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))sum=nk_owned_sum(self%n,self%v,nbe,lbe,leo)
+IF(native_seam_owned(self%stitch_info,self%n,nw,w))sum=nk_owned_sum(self%n,self%v,nw,w)
 IF(.NOT.self%stitch_info%full)sum=oft_mpi_sum(sum)
 DEBUG_STACK_POP
 end function vec_sum
@@ -1050,14 +1044,13 @@ function vec_norm(self,itype) result(norm)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
 real(r8) :: norm !< Specified norm of vector
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
     norm=0.d0
-    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))norm=nk_owned_norm1(self%n,self%v,nbe,lbe,leo)
+    IF(native_seam_owned(self%stitch_info,self%n,nw,w))norm=nk_owned_norm1(self%n,self%v,nw,w)
     IF(.NOT.self%stitch_info%full)norm=oft_mpi_sum(norm)
   CASE(2)
     norm=SQRT(clamp_nonneg(self%dot(self))) ! Clamp negative round-off (safety net, NaN preserved)
@@ -1883,15 +1876,14 @@ function cvec_dot_vec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_vector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_dot_vec',__FILE__)
     dot=(0.d0,0.d0)
-    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(native_seam_owned(self%stitch_info,self%n,nw,w))dot=nk_owned_dot(self%n,self%v,this%v,nw,w)
     IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','cvec_dot_vec',__FILE__)
@@ -1905,15 +1897,14 @@ function cvec_dot_cvec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_cvector)
     if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_dot_cvec',__FILE__)
     dot=(0.d0,0.d0)
-    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))dot=nk_owned_dot(self%n,self%v,this%v,nbe,lbe,leo)
+    IF(native_seam_owned(self%stitch_info,self%n,nw,w))dot=nk_owned_dot(self%n,self%v,this%v,nw,w)
     IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
   class default
     CALL oft_abort('"a" is not a native vector.','cvec_dot_cvec',__FILE__)
@@ -1930,9 +1921,8 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: k,nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: k,nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -1946,7 +1936,7 @@ DO k=1,n
 END DO
 dots=(0.d0,0.d0)
 IF(n>0)THEN
-  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
 DEBUG_STACK_POP
@@ -1961,9 +1951,8 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: k,nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: k,nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
@@ -1977,7 +1966,7 @@ DO k=1,n
 END DO
 dots=(0.d0,0.d0)
 IF(n>0)THEN
-  IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))CALL nk_owned_mdot(self%n,n,self%v,vals,nbe,lbe,leo,dots)
+  IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
 DEBUG_STACK_POP
@@ -1988,12 +1977,11 @@ end function cvec_mdot_cvec
 function cvec_sum(self) result(sum)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8) :: sum !< Sum of vector elements
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 sum=(0.d0,0.d0)
-IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))sum=nk_owned_sum(self%n,self%v,nbe,lbe,leo)
+IF(native_seam_owned(self%stitch_info,self%n,nw,w))sum=nk_owned_sum(self%n,self%v,nw,w)
 IF(.NOT.self%stitch_info%full)sum=oft_mpi_sum(sum)
 DEBUG_STACK_POP
 end function cvec_sum
@@ -2004,14 +1992,13 @@ function cvec_norm(self,itype) result(norm)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
 real(r8) :: norm !< Specified norm of vector
-integer(i4) :: nbe
-integer(i4), pointer, contiguous, dimension(:) :: lbe
-logical, pointer, contiguous, dimension(:) :: leo
+integer(i4) :: nw
+integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
     norm=0.d0
-    IF(native_seam_owned(self%stitch_info,nbe,lbe,leo))norm=nk_owned_norm1(self%n,self%v,nbe,lbe,leo)
+    IF(native_seam_owned(self%stitch_info,self%n,nw,w))norm=nk_owned_norm1(self%n,self%v,nw,w)
     IF(.NOT.self%stitch_info%full)norm=oft_mpi_sum(norm)
   CASE(2)
     norm=SQRT(clamp_nonneg(REAL(self%dot(self),r8))) ! Clamp negative round-off (safety net, NaN preserved)

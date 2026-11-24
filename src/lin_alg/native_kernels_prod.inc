@@ -20,6 +20,7 @@
 ! only the generic names are public, so generics of the same name from each
 ! instantiation merge in oft_native_kernels.
 !---------------------------------------------------------------------------------
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int8_t
 USE omp_lib
 USE oft_local
 USE oft_base, ONLY: oft_thread_slice
@@ -51,30 +52,33 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Local dot product over owned entries, \f$ \sum_{i \in owned} \overline{a_i} x_i \f$
 !!
-!! The left operand is conjugated when it is complex. Shared entries `lbe(i)` with
-!! `leo(i)==.FALSE.` are owned by another process and are excluded (no reduction
-!! across processes).
+!! The left operand is conjugated when it is complex. With `nw=n`, entry `i` is
+!! weighted by the ownership weight `w(i)` (1 if owned by this process, 0 if owned by
+!! another), so values shared between processes are counted once overall; with
+!! `nw=0` all entries are owned. Only owned entries are summed, rather than summing
+!! all entries and subtracting the shared ones, which avoids catastrophic
+!! cancellation when shared entries dominate. No reduction across processes.
 !---------------------------------------------------------------------------------
-FUNCTION k_owned_dot(n,a,x,nbe,lbe,leo) RESULT(c)
+FUNCTION k_owned_dot(n,a,x,nw,w) RESULT(c)
 INTEGER(i4), INTENT(in) :: n !< Number of entries
 KA, INTENT(in) :: a(n) !< Left operand [n]
 KB, INTENT(in) :: x(n) !< Right operand [n]
-INTEGER(i4), INTENT(in) :: nbe !< Number of shared entries
-INTEGER(i4), INTENT(in) :: lbe(nbe) !< Location of shared entries [nbe]
-LOGICAL, INTENT(in) :: leo(nbe) !< Ownership flag of shared entries [nbe]
+INTEGER(i4), INTENT(in) :: nw !< Number of weights (`n`, or 0 if all entries are owned)
+INTEGER(c_int8_t), INTENT(in) :: w(nw) !< Ownership weight (1/0) of each entry [nw]
 KR :: c !< Local dot product
 INTEGER(i4) :: i
 c=KRZERO
-!$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-!$omp do simd
-DO i=1,n
-  c=c+KCONJ(a(i))*x(i)
-END DO
-!$omp do simd
-DO i=1,nbe
-  IF(.NOT.leo(i))c=c-KCONJ(a(lbe(i)))*x(lbe(i))
-END DO
-!$omp end parallel
+IF(nw>0)THEN
+  !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  DO i=1,n
+    c=c+KCONJ(a(i))*x(i)*REAL(w(i),r8)
+  END DO
+ELSE
+  !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  DO i=1,n
+    c=c+KCONJ(a(i))*x(i)
+  END DO
+END IF
 END FUNCTION k_owned_dot
 !---------------------------------------------------------------------------------
 !> Local dot products with several arrays over owned entries
@@ -82,47 +86,43 @@ END FUNCTION k_owned_dot
 !! \f$ c_k = \sum_{i \in owned} \overline{a_i} x_{k,i} \f$, computed in a single pass
 !! over row blocks of @ref oft_native_kernels_base::native_vec_chunk "native_vec_chunk"
 !! entries, so each block of `a` is loaded once for all `m` products. Each thread
-!! processes one contiguous range of rows. See @ref k_owned_dot for the treatment of
-!! shared entries.
+!! processes one contiguous range of rows. See @ref k_owned_dot for the ownership
+!! weights.
 !---------------------------------------------------------------------------------
-SUBROUTINE k_owned_mdot(n,m,a,x,nbe,lbe,leo,c)
+SUBROUTINE k_owned_mdot(n,m,a,x,nw,w,c)
 INTEGER(i4), INTENT(in) :: n !< Number of entries
 INTEGER(i4), INTENT(in) :: m !< Number of right operands
 KA, INTENT(in) :: a(n) !< Left operand [n]
 TYPE(KBPTR), INTENT(in) :: x(m) !< Right operands, each [n] [m]
-INTEGER(i4), INTENT(in) :: nbe !< Number of shared entries
-INTEGER(i4), INTENT(in) :: lbe(nbe) !< Location of shared entries [nbe]
-LOGICAL, INTENT(in) :: leo(nbe) !< Ownership flag of shared entries [nbe]
+INTEGER(i4), INTENT(in) :: nw !< Number of weights (`n`, or 0 if all entries are owned)
+INTEGER(c_int8_t), INTENT(in) :: w(nw) !< Ownership weight (1/0) of each entry [nw]
 KR, INTENT(out) :: c(m) !< Local dot products [m]
-INTEGER(i4) :: i,j,k,ib,ie,i1,i2
+INTEGER(i4) :: i,k,ib,ie,i1,i2
 KB, POINTER, CONTIGUOUS, DIMENSION(:) :: xv
 KR :: tmp
 c=KRZERO
 IF(m<1)RETURN
-!$omp parallel private(i1,i2,ib,ie,j,k,i,tmp,xv) reduction(+:c) if(n>OFT_OMP_VTHRESH)
+!$omp parallel private(i1,i2,ib,ie,k,i,tmp,xv) reduction(+:c) if(n>OFT_OMP_VTHRESH)
 CALL oft_thread_slice(omp_get_thread_num(),omp_get_num_threads(),n,i1,i2)
 DO ib=i1,i2,native_vec_chunk
   ie=MIN(i2,ib+native_vec_chunk-1)
   DO k=1,m
     xv=>x(k)%v
     tmp=KRZERO
-    !$omp simd reduction(+:tmp)
-    DO i=ib,ie
-      tmp=tmp+KCONJ(a(i))*xv(i)
-    END DO
+    IF(nw>0)THEN
+      !$omp simd reduction(+:tmp)
+      DO i=ib,ie
+        tmp=tmp+KCONJ(a(i))*xv(i)*REAL(w(i),r8)
+      END DO
+    ELSE
+      !$omp simd reduction(+:tmp)
+      DO i=ib,ie
+        tmp=tmp+KCONJ(a(i))*xv(i)
+      END DO
+    END IF
     c(k)=c(k)+tmp
   END DO
 END DO
-!---Remove values not owned by this process
-!$omp do schedule(static)
-DO i=1,nbe
-  IF(leo(i))CYCLE
-  j=lbe(i)
-  DO k=1,m
-    c(k)=c(k)-KCONJ(a(j))*x(k)%v(j)
-  END DO
-END DO
-!$omp end do nowait
 !$omp end parallel
 END SUBROUTINE k_owned_mdot
 !---------------------------------------------------------------------------------

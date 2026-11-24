@@ -16,6 +16,7 @@
 ! only the generic names are public, so generics of the same name from each
 ! instantiation merge in oft_native_kernels.
 !---------------------------------------------------------------------------------
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int8_t
 USE omp_lib
 USE oft_local
 USE oft_base, ONLY: oft_thread_slice
@@ -159,53 +160,55 @@ END FUNCTION k_norm_inf
 !---------------------------------------------------------------------------------
 !> Local sum over owned entries, \f$ \sum_{i \in owned} x_i \f$
 !!
-!! Shared entries `lbe(i)` with `leo(i)==.FALSE.` are owned by another process and
-!! are excluded (no reduction across processes).
+!! With `nw=n`, entry `i` is weighted by the ownership weight `w(i)` (1 if owned by
+!! this process, 0 if owned by another); with `nw=0` all entries are owned. As for
+!! `nk_owned_dot`, only owned entries are summed (no cancellation of shared entries).
+!! No reduction across processes.
 !---------------------------------------------------------------------------------
-FUNCTION k_owned_sum(n,x,nbe,lbe,leo) RESULT(c)
+FUNCTION k_owned_sum(n,x,nw,w) RESULT(c)
 INTEGER(i4), INTENT(in) :: n !< Number of entries
 KT, INTENT(in) :: x(n) !< Array [n]
-INTEGER(i4), INTENT(in) :: nbe !< Number of shared entries
-INTEGER(i4), INTENT(in) :: lbe(nbe) !< Location of shared entries [nbe]
-LOGICAL, INTENT(in) :: leo(nbe) !< Ownership flag of shared entries [nbe]
+INTEGER(i4), INTENT(in) :: nw !< Number of weights (`n`, or 0 if all entries are owned)
+INTEGER(c_int8_t), INTENT(in) :: w(nw) !< Ownership weight (1/0) of each entry [nw]
 KT :: c !< Local sum
 INTEGER(i4) :: i
 c=KZERO
-!$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-!$omp do simd
-DO i=1,n
-  c=c+x(i)
-END DO
-!$omp do simd
-DO i=1,nbe
-  IF(.NOT.leo(i))c=c-x(lbe(i))
-END DO
-!$omp end parallel
+IF(nw>0)THEN
+  !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  DO i=1,n
+    c=c+x(i)*REAL(w(i),r8)
+  END DO
+ELSE
+  !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  DO i=1,n
+    c=c+x(i)
+  END DO
+END IF
 END FUNCTION k_owned_sum
 !---------------------------------------------------------------------------------
 !> Local 1-norm over owned entries, \f$ \sum_{i \in owned} |x_i| \f$
 !!
-!! See @ref k_owned_sum for the treatment of shared entries.
+!! See @ref k_owned_sum for the ownership weights.
 !---------------------------------------------------------------------------------
-FUNCTION k_owned_norm1(n,x,nbe,lbe,leo) RESULT(c)
+FUNCTION k_owned_norm1(n,x,nw,w) RESULT(c)
 INTEGER(i4), INTENT(in) :: n !< Number of entries
 KT, INTENT(in) :: x(n) !< Array [n]
-INTEGER(i4), INTENT(in) :: nbe !< Number of shared entries
-INTEGER(i4), INTENT(in) :: lbe(nbe) !< Location of shared entries [nbe]
-LOGICAL, INTENT(in) :: leo(nbe) !< Ownership flag of shared entries [nbe]
+INTEGER(i4), INTENT(in) :: nw !< Number of weights (`n`, or 0 if all entries are owned)
+INTEGER(c_int8_t), INTENT(in) :: w(nw) !< Ownership weight (1/0) of each entry [nw]
 REAL(r8) :: c !< Local 1-norm
 INTEGER(i4) :: i
 c=0.d0
-!$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-!$omp do simd
-DO i=1,n
-  c=c+ABS(x(i))
-END DO
-!$omp do simd
-DO i=1,nbe
-  IF(.NOT.leo(i))c=c-ABS(x(lbe(i)))
-END DO
-!$omp end parallel
+IF(nw>0)THEN
+  !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  DO i=1,n
+    c=c+ABS(x(i))*REAL(w(i),r8)
+  END DO
+ELSE
+  !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  DO i=1,n
+    c=c+ABS(x(i))
+  END DO
+END IF
 END FUNCTION k_owned_norm1
 !---------------------------------------------------------------------------------
 !> Gather entries by index, \f$ y_i = x_{idx(i)} \f$

@@ -214,6 +214,68 @@ DO i=1,n
 END DO
 END FUNCTION owned_sum_c8
 !---------------------------------------------------------------------------------
+!> Local owned-only mixed real(r8)/complex(c8) dot product (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_dp_rc8(a,b,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+REAL(r8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
+COMPLEX(c8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+COMPLEX(c8) :: c
+c=(0.d0,0.d0)
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+a(i)*b(i)*REAL(w(i),r8)
+END DO
+END FUNCTION owned_dp_rc8
+!---------------------------------------------------------------------------------
+!> Local owned-only mixed complex(c8)/real(r8) dot product (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_dp_cr8(a,b,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+COMPLEX(c8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
+REAL(r8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+COMPLEX(c8) :: c
+c=(0.d0,0.d0)
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+CONJG(a(i))*b(i)*REAL(w(i),r8)
+END DO
+END FUNCTION owned_dp_cr8
+!---------------------------------------------------------------------------------
+!> Local owned-only real(r8) 1-norm (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_norm1_r8(a,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local array
+REAL(r8), INTENT(in) :: a(n) !< Local data for reduction
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+REAL(r8) :: c
+c=0.d0
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+ABS(a(i))*REAL(w(i),r8)
+END DO
+END FUNCTION owned_norm1_r8
+!---------------------------------------------------------------------------------
+!> Local owned-only complex(c8) 1-norm (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_norm1_c8(a,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local array
+COMPLEX(c8), INTENT(in) :: a(n) !< Local data for reduction
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+REAL(r8) :: c
+c=0.d0
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+ABS(a(i))*REAL(w(i),r8)
+END DO
+END FUNCTION owned_norm1_c8
+!---------------------------------------------------------------------------------
 !> real(r8) dot_product implementation of \ref oft_stitching::oft_global_reduction
 !---------------------------------------------------------------------------------
 function global_dp_r8(self,a,b,n,no_reduce) result(c)
@@ -295,16 +357,15 @@ IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
 !---Global reduction
 c=(0.d0,0.d0)
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+a(i)*b(i)
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-a(self%lbe(i))*b(self%lbe(i))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_dp_rc8(a,b,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+a(i)*b(i)
+    end do
+  END IF
 END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -329,16 +390,15 @@ IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
 !---Global reduction
 c=(0.d0,0.d0)
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+CONJG(a(i))*b(i)
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-CONJG(a(self%lbe(i)))*b(self%lbe(i))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_dp_cr8(a,b,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+CONJG(a(i))*b(i)
+    end do
+  END IF
 END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -408,16 +468,15 @@ DEBUG_STACK_PUSH
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+ABS(a(i))
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-ABS(a(self%lbe(i)))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_norm1_r8(a,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+ABS(a(i))
+    end do
+  END IF
 END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -435,16 +494,15 @@ DEBUG_STACK_PUSH
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+ABS(a(i))
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-ABS(a(self%lbe(i)))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_norm1_c8(a,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+ABS(a(i))
+    end do
+  END IF
 END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
