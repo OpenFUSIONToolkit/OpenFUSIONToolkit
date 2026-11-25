@@ -1067,28 +1067,30 @@ REAL(r8), INTENT(in) :: xs(:) !< Subdomain values [n]
 REAL(r8), INTENT(inout) :: x(:) !< Local values of the distributed vector [nr]
 LOGICAL, INTENT(in) :: additive !< Sum contributions of all subdomains?
 LOGICAL, OPTIONAL, INTENT(in) :: weighted !< Weight additive contributions by a partition of unity? (default: no)
-INTEGER(i4) :: i
-LOGICAL :: pu
+INTEGER(i4) :: i,nr
+LOGICAL :: pu,lomp
 DEBUG_STACK_PUSH
 pu=.FALSE.
 IF(PRESENT(weighted))pu=weighted
+nr=self%nr
+lomp=(nr>OFT_OMP_VTHRESH)
 IF(additive)THEN
   IF(pu.AND.(.NOT.ALLOCATED(self%wpu)))CALL native_overlap_pu_setup(self)
-  !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
+  !$omp parallel do simd if(lomp)
+  DO i=1,nr
     self%acc(i)=0.d0
   END DO
   CALL scatter_begin(self%plan_vec,xs,reverse=.TRUE.)
   CALL scatter_end(self%plan_vec,self%acc,OFT_SCATTER_ADD)
   CALL oft_global_stitch(self%seam,self%acc,1)
   IF(pu)THEN
-    !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
-    DO i=1,self%nr
+    !$omp parallel do simd if(lomp)
+    DO i=1,nr
       x(i)=self%wpu(i)*self%acc(i)
     END DO
   ELSE
-    !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
-    DO i=1,self%nr
+    !$omp parallel do simd if(lomp)
+    DO i=1,nr
       x(i)=self%acc(i)
     END DO
   END IF
