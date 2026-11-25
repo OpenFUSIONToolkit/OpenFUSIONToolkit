@@ -136,7 +136,7 @@ def ITER_ifile_theta(mygs):
     theta[:,0] = np.arctan2(ifile_x['Z'][1:,0]-Z0,ifile_x['R'][1:,0]-R0) # first point at 0 (may round below)
     x_points, diverted = mygs.get_xpoints()
     thx = [np.mod(np.arctan2(x_points[-1,1]-Z0,x_points[-1,0]-R0),2.0*np.pi)]
-    theta_ref = xpoint_theta(128,thx,3.0,0.15)
+    theta_ref = xpoint_theta(128,thx,7.0,0.10)
     info['diverted'] = bool(diverted)
     info['xpt_theta_err'] = np.max(np.abs(theta-theta_ref[None,:]))
     info['xpt_theta_monotone'] = bool(np.all(np.diff(theta,axis=1) > 0.0))
@@ -275,7 +275,7 @@ def test_ITER_ifile_theta(order):
     assert info['xpt_psi_err'] < 1.E-10
     assert info['xpt_theta_err'] < 1.E-9
     assert info['xpt_theta_monotone'] and info['xpt_periodic']
-    assert info['xpt_dtheta_ratio'] > 3.0
+    assert info['xpt_dtheta_ratio'] > 7.0
     assert info['xpt_same_profiles']
     assert info['xpt_q_diff'] < 1.E-12
     assert info['qgeom_err_xpt_core'] < QGEOM_CORE_TOL

@@ -2387,7 +2387,7 @@ class TokaMaker():
         self._tMaker_equil.save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,lcfs_pad,rcentr,truncate_eq,limiter_file,lcfs_pressure,cocos)
 
     def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0,
-                   theta_sampling='auto',xpoint_amp=3.0,xpoint_width=0.15,psi_nodes=None):
+                   theta_sampling='auto',xpoint_amp=7.0,xpoint_width=0.10,psi_nodes=None):
         r'''! Save current equilibrium to iFile format
 
         @param filename Filename to save equilibrium to
@@ -2413,7 +2413,11 @@ class TokaMaker():
         angles, so the default files of a diverted equilibrium differ from before; `theta_sampling='uniform'` writes the earlier
         files exactly
         @param xpoint_amp X-point packing only: peak relative increase \f$A \ge 0\f$ of the point density at the X-point direction
+        (default 7). With one X-point the largest-to-smallest angular spacing is about \f$1 + A\f$ (8 for the defaults), and the
+        point density away from the X-point is lower than for uniform angles by the factor \f$1 + A\sigma/\sqrt{2\pi}\f$
+        (1.28 for the defaults)
         @param xpoint_width X-point packing only: Gaussian width \f$\sigma\f$ in polar angle [rad], \f$0 < \sigma \le \pi\f$
+        (default 0.10)
         @param psi_nodes Explicit radial nodes in normalized flux (0 at the axis, first node 0, strictly increasing, last node
         \f$< 1\f$; keep a small pad below 1, as for `lcfs_pad`). Overrides `npsi`, `lcfs_pad`, `pack_lcfs` and `axis_pack`
         '''
@@ -4150,7 +4154,7 @@ class TokaMaker_equilibrium():
             raise Exception(error_string.value)
 
     def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0,
-                   theta_sampling='auto',xpoint_amp=3.0,xpoint_width=0.15,psi_nodes=None):
+                   theta_sampling='auto',xpoint_amp=7.0,xpoint_width=0.10,psi_nodes=None):
         r'''! Save current equilibrium to iFile format
 
         @param filename Filename to save equilibrium to
@@ -4176,7 +4180,11 @@ class TokaMaker_equilibrium():
         angles, so the default files of a diverted equilibrium differ from before; `theta_sampling='uniform'` writes the earlier
         files exactly
         @param xpoint_amp X-point packing only: peak relative increase \f$A \ge 0\f$ of the point density at the X-point direction
+        (default 7). With one X-point the largest-to-smallest angular spacing is about \f$1 + A\f$ (8 for the defaults), and the
+        point density away from the X-point is lower than for uniform angles by the factor \f$1 + A\sigma/\sqrt{2\pi}\f$
+        (1.28 for the defaults)
         @param xpoint_width X-point packing only: Gaussian width \f$\sigma\f$ in polar angle [rad], \f$0 < \sigma \le \pi\f$
+        (default 0.10)
         @param psi_nodes Explicit radial nodes in normalized flux (0 at the axis, first node 0, strictly increasing, last node
         \f$< 1\f$; keep a small pad below 1, as for `lcfs_pad`). Overrides `npsi`, `lcfs_pad`, `pack_lcfs` and `axis_pack`
         '''

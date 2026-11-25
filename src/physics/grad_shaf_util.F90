@@ -977,8 +977,8 @@ CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error messa
 REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (<= 0: none)
 INTEGER(4), OPTIONAL, INTENT(in) :: theta_mode !< Poloidal sampling: 0 uniform polar angle, 1 packed toward the X-point(s),
 !< 2 (default) packed if diverted, uniform if limited
-REAL(8), OPTIONAL, INTENT(in) :: xpt_amp !< X-point packing: relative point-density increase at the X-point (default 3)
-REAL(8), OPTIONAL, INTENT(in) :: xpt_width !< X-point packing: Gaussian width in polar angle [rad] (default 0.15)
+REAL(8), OPTIONAL, INTENT(in) :: xpt_amp !< X-point packing: relative point-density increase at the X-point (default 7)
+REAL(8), OPTIONAL, INTENT(in) :: xpt_width !< X-point packing: Gaussian width in polar angle [rad] (default 0.1)
 REAL(8), OPTIONAL, INTENT(in) :: psi_nodes(npsi) !< Explicit flux points in normalized flux (0 = axis first, strictly
 !< increasing, last < 1); overrides @p psi_pad, @p pack_lcfs and @p axis_pack
 REAL(8), PARAMETER :: xpt_dn_window = 1.d-2 !< Other X-points within this normalized flux of the LCFS also get a bump
@@ -1008,7 +1008,7 @@ IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
 IF(PRESENT(single_prec))save_single=single_prec
 IF(PRESENT(profile_derivs))save_derivs=profile_derivs
 IF(PRESENT(psi_bounds))save_bounds=psi_bounds
-tmode=2; amp=3.d0; wid=0.15d0
+tmode=2; amp=7.d0; wid=0.1d0
 IF(PRESENT(theta_mode))tmode=theta_mode
 IF(PRESENT(xpt_amp))amp=xpt_amp
 IF(PRESENT(xpt_width))wid=xpt_width
