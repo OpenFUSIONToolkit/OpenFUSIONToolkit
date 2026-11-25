@@ -101,6 +101,7 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of jphi_saw
   REAL(c_double)  :: saw_ramp = 1.d-2             !< Reset weight ramp in q deficit (0 = hard trigger)
   INTEGER(c_int)  :: saw_rule = 2                 !< Reset rule: 1 fuse (axis to rho_m), 2 local (each dip, two-sided)
+  INTEGER(c_int)  :: bs_interp = 2                !< Kinetic gradients and sawtooth reset: 1 linterp, 2 hermite, 3 cubic
 END TYPE tokamaker_boot_ops_type
 !---------------------------------------------------------------------------------
 !> TokaMaker wrapper object for Python API
@@ -377,11 +378,12 @@ END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,split_nlev,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), INTENT(out) :: fe_ptr !< Pointer to FE representation object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: split_nlev !< Plasma-boundary cells split into 4**split_nlev sub-cells in plasma integrals
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
 TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Pointer to coil inductance matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -428,6 +430,7 @@ CALL tMaker_obj%device%setup(tMaker_obj%ML_oft_blagrange)
 !------------------------------------------------------------------------------
 tMaker_obj%device%save_visit=.FALSE.
 tMaker_obj%device%full_domain=full_domain
+tMaker_obj%device%split_nlev=split_nlev
 CALL gs_setup_walls(tMaker_obj%device)
 CALL tMaker_obj%device%load_limiters
 CALL tMaker_obj%device%init()
@@ -656,6 +659,7 @@ TYPE IS (jphi_bs_flux_func)
   I%boot_ops%saw_relax = bops%saw_relax
   I%boot_ops%saw_ramp = bops%saw_ramp
   I%boot_ops%saw_rule = bops%saw_rule
+  I%boot_ops%bs_interp = bops%bs_interp
 CLASS DEFAULT
   CALL copy_string('Run set_profiles with a jphi-split-bootstrap profile before calling set_boot_ops.',error_str)
 END SELECT
@@ -691,6 +695,7 @@ TYPE IS (jphi_bs_flux_func)
   bops%saw_relax = I%boot_ops%saw_relax
   bops%saw_ramp = I%boot_ops%saw_ramp
   bops%saw_rule = I%boot_ops%saw_rule
+  bops%bs_interp = I%boot_ops%bs_interp
 CLASS DEFAULT
   initialized = .FALSE. ! Not a bootstrap profile: no options
 END SELECT

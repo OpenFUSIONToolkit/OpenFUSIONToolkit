@@ -46,6 +46,7 @@ class tokamaker_boot_ops_struct(c_struct):
      - `saw_relax` Under-relaxation of the jphi_saw update (default 1)
      - `saw_ramp` Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger (default 0.01)
      - `saw_rule` Reset rule: 1 fuse (axis to the sawtooth radius, FUSE's saw_crash!), 2 local (each dip, two-sided; default)
+     - `bs_interp` Profile interpolation in the bootstrap update: 1 linterp, 2 hermite (pchip; default), 3 cubic (C2)
     '''
     _fields_ = [('isolate_edge_jbs', c_bool),
                 ('scale_jbs', c_double),
@@ -59,7 +60,8 @@ class tokamaker_boot_ops_struct(c_struct):
                 ('saw_tol', c_double),
                 ('saw_relax', c_double),
                 ('saw_ramp', c_double),
-                ('saw_rule', c_int)]
+                ('saw_rule', c_int),
+                ('bs_interp', c_int)]
 
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
 tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
@@ -77,9 +79,9 @@ tokamaker_equil_set = ctypes_subroutine(oftpy_lib.tokamaker_equil_set,
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
     [c_void_p, c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int, c_char_p])
 
-# tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str)
+# tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,split_nlev,ncoils,coil_Lmat,error_str)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_void_p, c_void_ptr_ptr, c_int, c_bool, c_int_ptr, c_double_ptr_ptr, c_char_p])
+    [c_void_p, c_void_ptr_ptr, c_int, c_bool, c_int, c_int_ptr, c_double_ptr_ptr, c_char_p])
 
 # tokamaker_destroy(tMaker_ptr,error_str)
 tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
