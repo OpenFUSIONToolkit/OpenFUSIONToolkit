@@ -101,8 +101,9 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     if mygs_last is not None:
         del mygs_last
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
-    mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
-    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
+    # Uniform angles, as in the stored reference i-file (the default packs this diverted equilibrium toward the X-point)
+    mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,theta_sampling='uniform')
+    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True,theta_sampling='uniform')
     eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
     mygs.save_ifile('tokamaker_axis.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,axis_pack=1.E-4)
     eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
@@ -114,18 +115,21 @@ def ITER_ifile_theta(mygs):
     """i-files with uniform and X-point-packed poloidal angles and explicit radial nodes, and their checks"""
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     info = {}
-    # Default arguments and explicit uniform sampling (packing arguments ignored) write the same bytes
+    def same_bytes(file1,file2):
+        with open(file1,'rb') as fid1, open(file2,'rb') as fid2:
+            return fid1.read() == fid2.read()
+    # The default ('auto') packs this diverted equilibrium: same bytes as explicit X-point packing
     mygs.save_ifile('ifile_default.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True)
-    mygs.save_ifile('ifile_uniform.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,
-                    theta_sampling='uniform',xpoint_amp=5.0,xpoint_width=0.3)
-    with open('ifile_default.ifile','rb') as fid:
-        content_default = fid.read()
-    with open('ifile_uniform.ifile','rb') as fid:
-        info['uniform_same_bytes'] = (fid.read() == content_default)
-    # X-point packed angles: points on their flux surfaces at the reference packed angles
     mygs.save_ifile('ifile_xpt.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,theta_sampling='xpoint')
+    info['default_is_xpt'] = same_bytes('ifile_default.ifile','ifile_xpt.ifile')
+    # Uniform sampling ignores the packing arguments
+    mygs.save_ifile('ifile_uniform.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,theta_sampling='uniform')
+    mygs.save_ifile('ifile_uniform2.ifile',npsi=64,ntheta=129,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,
+                    theta_sampling='uniform',xpoint_amp=5.0,xpoint_width=0.3)
+    info['uniform_same_bytes'] = same_bytes('ifile_uniform.ifile','ifile_uniform2.ifile')
+    # X-point packed angles: points on their flux surfaces at the reference packed angles
     info['xpt_psi_err'] = ifile_errors(mygs,'ifile_xpt.ifile')['ifile_psi_err']
-    ifile_u = read_ifile('ifile_default.ifile')
+    ifile_u = read_ifile('ifile_uniform.ifile')
     ifile_x = read_ifile('ifile_xpt.ifile')
     R0, Z0 = ifile_x['R'][0,0], ifile_x['Z'][0,0]
     theta = np.mod(np.arctan2(ifile_x['Z'][1:,:-1]-Z0,ifile_x['R'][1:,:-1]-R0),2.0*np.pi)
@@ -257,14 +261,15 @@ def test_ITER_eq(order,helicity):
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))
 def test_ITER_ifile_theta(order):
-    '''i-file poloidal sampling and explicit radial nodes on the ITER equilibrium: default output unchanged by
-    the new arguments; X-point-packed points lie on their flux surfaces at the reference packed angles (monotone,
+    '''i-file poloidal sampling and explicit radial nodes on the ITER equilibrium: the default ('auto') packs this
+    diverted equilibrium (same bytes as 'xpoint'); 'uniform' ignores the packing arguments; X-point-packed points lie on their flux surfaces at the reference packed angles (monotone,
     periodic end point repeated), with the same flux grid, profiles and q as uniform sampling; q recomputed from the
     file geometry (uniform in the file label) agrees with the file q, better than uniform angles at the outermost
     surface; explicit radial nodes are honored; invalid input is rejected'''
     results = mp_run(run_ITER_case,(1.0,(order,),'ifile_theta',1.0))
     assert results is not None
     info = results[0]
+    assert info['default_is_xpt']
     assert info['uniform_same_bytes']
     assert info['diverted']
     assert info['xpt_psi_err'] < 1.E-10

@@ -944,9 +944,11 @@ end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Save an inverse-equilibrium (flux-coordinate) file, Fortran unformatted
 !!
-!! Surfaces at uniform polar angle about the O-point from the contour quadrature (tracer as fallback), or with
-!! @p theta_mode = 1 at polar angles packed toward the X-point(s) (see @ref ifile_theta_nodes); either way each
-!! point is found on its flux surface of the FE solution. The last poloidal point repeats the first.
+!! Surfaces at polar angles about the O-point from the contour quadrature (tracer as fallback): uniform
+!! (@p theta_mode = 0) or packed toward the X-point(s) (@p theta_mode = 1, see @ref ifile_theta_nodes). The default
+!! (@p theta_mode = 2) packs a diverted equilibrium and samples a limited one uniformly; this default changed from
+!! uniform angles, and @p theta_mode = 0 writes the earlier files exactly. Either way each point is found on its flux
+!! surface of the FE solution. The last poloidal point repeats the first.
 !! Records (r8, or r4 if @p single_prec):
 !! 1. npsi, ntheta (i4)
 !! 2-5. psi, F, p, q on the npsi flux points
@@ -956,8 +958,8 @@ end subroutine gs_load_tokamaker
 !! Flux points: see @ref ifile_psi_nodes, or @p psi_nodes if present.
 !!
 !! X-point packing needs a diverted equilibrium: it puts a bump at the active X-point and at any other tracked
-!! X-point whose normalized flux is within `xpt_dn_window` of the LCFS (double null). For a limited plasma it
-!! fails (error, no file written) rather than falling back to uniform angles.
+!! X-point whose normalized flux is within `xpt_dn_window` of the LCFS (double null). For a limited plasma
+!! @p theta_mode = 1 fails (error, no file written), while the default @p theta_mode = 2 uses uniform angles.
 !---------------------------------------------------------------------------
 subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str, &
   axis_pack,theta_mode,xpt_amp,xpt_width,psi_nodes)
@@ -973,7 +975,8 @@ LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi 
 LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error message (empty on success)
 REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (<= 0: none)
-INTEGER(4), OPTIONAL, INTENT(in) :: theta_mode !< Poloidal sampling: 0 uniform polar angle (default), 1 packed toward the X-point(s)
+INTEGER(4), OPTIONAL, INTENT(in) :: theta_mode !< Poloidal sampling: 0 uniform polar angle, 1 packed toward the X-point(s),
+!< 2 (default) packed if diverted, uniform if limited
 REAL(8), OPTIONAL, INTENT(in) :: xpt_amp !< X-point packing: relative point-density increase at the X-point (default 3)
 REAL(8), OPTIONAL, INTENT(in) :: xpt_width !< X-point packing: Gaussian width in polar angle [rad] (default 0.15)
 REAL(8), OPTIONAL, INTENT(in) :: psi_nodes(npsi) !< Explicit flux points in normalized flux (0 = axis first, strictly
@@ -1005,16 +1008,16 @@ IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
 IF(PRESENT(single_prec))save_single=single_prec
 IF(PRESENT(profile_derivs))save_derivs=profile_derivs
 IF(PRESENT(psi_bounds))save_bounds=psi_bounds
-tmode=0; amp=3.d0; wid=0.15d0
+tmode=2; amp=3.d0; wid=0.15d0
 IF(PRESENT(theta_mode))tmode=theta_mode
 IF(PRESENT(xpt_amp))amp=xpt_amp
 IF(PRESENT(xpt_width))wid=xpt_width
 pad=psi_pad
 !---Check options
 err_msg=""
-IF((tmode<0).OR.(tmode>1))THEN
-  err_msg="theta_mode must be 0 (uniform) or 1 (X-point packed)"
-ELSE IF((tmode==1).AND.(.NOT.((amp>=0.d0).AND.(wid>0.d0).AND.(wid<=pi))))THEN
+IF((tmode<0).OR.(tmode>2))THEN
+  err_msg="theta_mode must be 0 (uniform), 1 (X-point packed) or 2 (auto)"
+ELSE IF((tmode>=1).AND.(.NOT.((amp>=0.d0).AND.(wid>0.d0).AND.(wid<=pi))))THEN
   err_msg="X-point packing needs xpt_amp >= 0 and 0 < xpt_width <= pi"
 ELSE IF((tmode==1).AND.(ntheta<3))THEN
   err_msg="X-point packing needs ntheta >= 3"
@@ -1037,6 +1040,7 @@ IF(err_msg/="")THEN
   END IF
   CALL oft_abort(TRIM(err_msg),'gs_save_ifile',__FILE__)
 END IF
+IF((tmode==2).AND.(ntheta<3))tmode=0
 !---Flux points
 ALLOCATE(un(npsi))
 IF(PRESENT(psi_nodes))THEN
@@ -1073,8 +1077,8 @@ xr = (x2-x1)
 !
 psi_int%u=>gseq%psi
 CALL psi_int%setup(device%fe_rep)
-!---Poloidal angles packed toward the X-point(s) on the LCFS
-IF(tmode==1)THEN
+!---Poloidal angles packed toward the X-point(s) on the LCFS (auto: only if diverted)
+IF(tmode>=1)THEN
   nxb=0
   IF(gseq%diverted.AND.(gseq%nx_points>0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
     DO j=1,gseq%nx_points
@@ -1091,7 +1095,9 @@ IF(tmode==1)THEN
       thx(nxb)=MODULO(ATAN2(gseq%x_points(2,j)-zaxis,gseq%x_points(1,j)-raxis),2.d0*pi)
     END DO
   END IF
-  IF(nxb==0)THEN
+  IF((nxb==0).AND.(tmode==2))THEN
+    tmode=0 ! Limited: uniform angles
+  ELSE IF(nxb==0)THEN
     CALL psi_int%delete()
     DEALLOCATE(un)
     err_msg="X-point packing (theta_mode=1) needs a diverted equilibrium; this one is limited"
@@ -1102,10 +1108,13 @@ IF(tmode==1)THEN
     END IF
     CALL oft_abort(TRIM(err_msg),'gs_save_ifile',__FILE__)
   END IF
-  ALLOCATE(th(ntheta-1))
-  CALL ifile_theta_nodes(ntheta-1,nxb,thx(1:nxb),amp,wid,th)
-  IF(oft_debug_print(1))THEN
-    WRITE(*,'(2A,I2,A,2ES11.3)')oft_indent,'X-point packing: ',nxb,' bump(s), amp, width = ',amp,wid
+  IF(tmode>=1)THEN
+    tmode=1
+    ALLOCATE(th(ntheta-1))
+    CALL ifile_theta_nodes(ntheta-1,nxb,thx(1:nxb),amp,wid,th)
+    IF(oft_debug_print(1))THEN
+      WRITE(*,'(2A,I2,A,2ES11.3)')oft_indent,'X-point packing: ',nxb,' bump(s), amp, width = ',amp,wid
+    END IF
   END IF
 END IF
 !---Find Rmax along Zaxis

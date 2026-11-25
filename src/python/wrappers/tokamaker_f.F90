@@ -2345,7 +2345,8 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Save single precision file?
 LOGICAL(c_bool), VALUE, INTENT(in) :: profile_derivs !< Append F*F' and P' records?
 LOGICAL(c_bool), VALUE, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record?
 REAL(c_double), VALUE, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (0: none)
-INTEGER(c_int), VALUE, INTENT(in) :: theta_mode !< Poloidal sampling: 0 uniform polar angle, 1 packed toward the X-point(s)
+INTEGER(c_int), VALUE, INTENT(in) :: theta_mode !< Poloidal sampling: 0 uniform polar angle, 1 packed toward the X-point(s),
+!< 2 packed if diverted, uniform if limited
 REAL(c_double), VALUE, INTENT(in) :: xpt_amp !< X-point packing amplitude
 REAL(c_double), VALUE, INTENT(in) :: xpt_width !< X-point packing width [rad]
 INTEGER(c_int), VALUE, INTENT(in) :: npsi_nodes !< Number of explicit flux points (0: use npsi, psi_pad, pack_lcfs, axis_pack)
