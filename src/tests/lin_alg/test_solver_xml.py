@@ -248,7 +248,7 @@ def test_gmres_schwarz_mpi2(schwarz_type):
         </pre>
     </solver>
     """.format(schwarz_type)
-    iteration_count = {"restricted": 0, "additive": 0, "weighted": 0}[schwarz_type]
+    iteration_count = {"restricted": 30, "additive": 42, "weighted": 31}[schwarz_type]
     converged_error = 0.6394036978170452
     assert xml_setup(xml_file,petsc=False,nprocs=2)
     assert validate_result(iteration_count,converged_error)
@@ -273,7 +273,7 @@ def test_gmres_schwarz_cell(schwarz_type):
         </pre>
     </solver>
     """.format(schwarz_type)
-    iteration_count = {"restricted": 58, "additive": 100, "weighted": 0}[schwarz_type]
+    iteration_count = {"restricted": 58, "additive": 100, "weighted": 60}[schwarz_type]
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False,cell_parts=4)
     assert validate_result(iteration_count,converged_error)
