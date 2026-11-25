@@ -21,12 +21,13 @@ oft_in_template = """
  meshname='cube'
  cad_type=92
  nlevels={0}
- nbase=3
+ nbase={7}
  grid_order=1
 /
 
 &cube_options
  mesh_type=1
+{5}
 /
 
 &test_bj_options
@@ -34,18 +35,29 @@ oft_in_template = """
  sol_type={2}
  use_ilu={3}
  dist_lu={4}
+ grnd_dir={6}
 /
 """
 
 # Common setup function and process handling
-def native_bjacobi_setup(nprocs=1, nlocal=1, sol_type=1, use_ilu='F', dist_lu='F'):
-    nlevels = 3
+def native_bjacobi_setup(nprocs=1, nlocal=1, sol_type=1, use_ilu='F', dist_lu='F', ref_per='F,F,F'):
+    nbase = 3
+    # For periodic grids center the cube and place the grounding point on a (non-periodic) z-face,
+    # using a coarser grid to limit the cost of the repeated factorizations
+    if ref_per == 'F,F,F':
+        per_lines = ''
+        grnd_dir = 0
+    else:
+        per_lines = ' ref_per={0}\n shift=-0.5,-0.5,-0.5'.format(ref_per)
+        grnd_dir = 3
+        nbase = 2
+    nlevels = nbase
     if nprocs > 1:
-        nlevels = 4
+        nlevels = nbase+1
     #
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(nlevels, nlocal, sol_type, use_ilu, dist_lu))
+        fid.write(oft_in_template.format(nlevels, nlocal, sol_type, use_ilu, dist_lu, per_lines, grnd_dir, nbase))
     return run_OFT("./test_native_bjacobi", nprocs, 20)
 
 def validate_result(iteration_count,converged_error):
@@ -68,8 +80,8 @@ def validate_result(iteration_count,converged_error):
 
 #============================================================================
 #
-def check_solver(nprocs,nlocal,sol_type,iteration_count,converged_error,use_ilu='F',dist_lu='F'):
-    assert native_bjacobi_setup(nprocs,nlocal,sol_type,use_ilu=use_ilu,dist_lu=dist_lu)
+def check_solver(nprocs,nlocal,sol_type,iteration_count,converged_error,use_ilu='F',dist_lu='F',ref_per='F,F,F'):
+    assert native_bjacobi_setup(nprocs,nlocal,sol_type,use_ilu=use_ilu,dist_lu=dist_lu,ref_per=ref_per)
     assert validate_result(iteration_count,converged_error)
 
 # Test runner for base test case
@@ -138,6 +150,22 @@ def test_LU_dist(solver_type,nprocs):
     iteration_count = 1
     converged_error = 1.4688646289584524
     check_solver(nprocs, 1, solver_type, iteration_count, converged_error, dist_lu='T')
+
+# Periodic grid (x and y): block-Jacobi with nlocal=1 factors the locally-owned submatrix,
+# which excludes the redundant rows of periodic images
+@pytest.mark.parametrize("solver_type", LU_solvers)
+def test_LU_periodic_bjacobi(solver_type):
+    iteration_count = 1
+    converged_error = 3.7946416900090698
+    check_solver(1, 1, solver_type, iteration_count, converged_error, ref_per='T,T,F')
+# Periodic grid (x and y) using the LU solver directly as the preconditioner (serial local
+# factorization, including refactorization checks), which must give the same solution
+@pytest.mark.coverage
+@pytest.mark.parametrize("solver_type", LU_solvers)
+def test_LU_periodic(solver_type):
+    iteration_count = 1
+    converged_error = 3.7946416900090698
+    check_solver(1, 1, solver_type, iteration_count, converged_error, dist_lu='T', ref_per='T,T,F')
 
 
 # Test runner for base test case

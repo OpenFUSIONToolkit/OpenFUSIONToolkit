@@ -13,6 +13,9 @@
 !! - Solve the same system with a direct solve of the full distributed system (`dist_lu`),
 !!   then check refactorization against a fresh factorization after small and large changes
 !!   in matrix values (same pattern) and, for distributed runs, after changing the sparsity pattern
+!! - Serial runs of the above on a grid with periodic directions (set by `ref_per` in
+!!   `cube_options`), where the local matrix contains redundant rows for periodic images.
+!!   This requires `grnd_dir` to place the grounding point on a non-periodic face.
 !!
 !! @authors Chris Hansen
 !! @date May 2014
@@ -37,6 +40,7 @@ USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 INTEGER(i4), PARAMETER :: order=3
+REAL(r8) :: grnd_pt(3)
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
@@ -44,7 +48,8 @@ INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1
 LOGICAL :: use_ilu = .FALSE.
 LOGICAL :: dist_lu = .FALSE.
-NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu
+INTEGER(i4) :: grnd_dir = 0 ! Direction of grounding reference point (0 -> mesh default)
+NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu,grnd_dir
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -98,7 +103,13 @@ IF((sol_type==6).AND.dist_lu.AND.(oft_env%nprocs>1))THEN
 END IF
 #endif
 !---Setup grid
-CALL multigrid_construct(mg_mesh)
+IF(grnd_dir>0)THEN
+  grnd_pt=0.d0
+  grnd_pt(grnd_dir)=2.d0
+  CALL multigrid_construct(mg_mesh,grnd_pt)
+ELSE
+  CALL multigrid_construct(mg_mesh)
+END IF
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)

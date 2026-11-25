@@ -28,7 +28,7 @@ USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_la, ONLY: oft_native_matrix, native_matrix_cast
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_submatrix, native_matrix_cast
 IMPLICIT NONE
 #include "local.h"
 #ifdef HAVE_MUMPS
@@ -204,6 +204,9 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   TYPE(DMUMPS_STRUC) :: mumps_struct !< MUMPS solver information
 #endif
   TYPE(lu_dist_struc) :: dist !< Distributed matrix information
+  !> Submatrix of locally-owned rows/columns, factored in place of the full local matrix
+  !! when it contains redundant rows from periodicity (see @ref lu_use_slice)
+  TYPE(oft_native_submatrix), POINTER :: A_slice => NULL()
 CONTAINS
   !> Solve linear system
   PROCEDURE :: apply => lusolver_apply
@@ -570,6 +573,31 @@ IF(self%dist%active)THEN
   DEBUG_STACK_POP
   RETURN
 END IF
+!---Factor only locally-owned rows/columns if the matrix contains redundant rows (periodicity).
+!---Matrix values may have been modified directly (without resetting `full_current`), so the
+!---stitched matrix is always recomputed before (re)building the submatrix for a factorization.
+IF(.NOT.self%initialized)THEN
+  IF(lu_use_slice(A_native,g))THEN
+    ALLOCATE(self%A_slice)
+    A_native%full_current=.FALSE.
+    CALL self%A_slice%setup(A_native,u)
+  END IF
+ELSE IF(ASSOCIATED(self%A_slice))THEN
+  IF(.NOT.ASSOCIATED(self%A_slice%parent,A_native))THEN
+    !---Matrix has been replaced, rebuild submatrix
+    CALL self%A_slice%delete
+    A_native%full_current=.FALSE.
+    CALL self%A_slice%setup(A_native,u)
+  ELSE IF(self%refactor)THEN
+    A_native%full_current=.FALSE.
+    CALL self%A_slice%update_slice
+  END IF
+END IF
+IF(ASSOCIATED(self%A_slice))THEN
+  IF(self%nrhs>1)CALL oft_abort('Multiple RHS not supported with redundant (periodic) rows', &
+    'lusolver_apply',__FILE__)
+  A_native=>self%A_slice
+END IF
 IF(ASSOCIATED(A_native%Mfull))THEN
   mat_vals=>A_native%Mfull
 ELSE
@@ -655,10 +683,14 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---Call factorization
-ALLOCATE(vals(u%n,self%nrhs))
+ALLOCATE(vals(A_native%nr,self%nrhs))
 nrhs=1
 vtmp=>vals(:,1)
-CALL g%get_local(vtmp)
+IF(ASSOCIATED(self%A_slice))THEN
+  CALL g%get_slice(vtmp)
+ELSE
+  CALL g%get_local(vtmp)
+END IF
 IF(self%nrhs>1)THEN
   nrhs=self%nrhs
   DO i=2,self%nrhs
@@ -866,7 +898,11 @@ CASE("superd")
   CASE DEFAULT
     CALL oft_abort('Unknown factorization package','lusolver_apply',__FILE__)
 END SELECT
-CALL u%restore_local(vals(:,1))
+IF(ASSOCIATED(self%A_slice))THEN
+  CALL u%restore_slice(vals(:,1))
+ELSE
+  CALL u%restore_local(vals(:,1))
+END IF
 IF(self%nrhs>1)THEN
   DO i=2,self%nrhs
     self%sec_rhs(:,i-1) = vals(:,i)
@@ -1143,9 +1179,35 @@ SELECT CASE(TRIM(self%package))
 END SELECT
 DEALLOCATE(ivals,rvals)
 IF(ASSOCIATED(self%sec_rhs))DEALLOCATE(self%sec_rhs)
+IF(ASSOCIATED(self%A_slice))THEN
+  CALL self%A_slice%delete
+  DEALLOCATE(self%A_slice)
+END IF
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine lusolver_delete
+!------------------------------------------------------------------------------
+!> Check if a local (non-distributed) factorization should use only the locally-owned
+!! rows/columns of the matrix
+!!
+!! On periodic grids the local matrix contains redundant rows/columns for periodic
+!! images of owned entries, which make the full local matrix singular. In this case the
+!! locally-owned submatrix of the stitched matrix is factored instead, matching
+!! @ref oft_native_solvers::oft_bjprecond with `nlocal=1`.
+!------------------------------------------------------------------------------
+FUNCTION lu_use_slice(A,g) RESULT(use_slice)
+CLASS(oft_native_matrix), INTENT(in) :: A !< Native matrix to factor
+CLASS(oft_vector), INTENT(in) :: g !< Vector in the row space of `A`
+LOGICAL :: use_slice
+INTEGER(i4) :: i
+use_slice=.FALSE.
+IF(.NOT.ASSOCIATED(g%stitch_info))RETURN
+IF(g%stitch_info%skip)RETURN
+IF(.NOT.ASSOCIATED(A%i_map))RETURN
+DO i=1,A%ni
+  IF(A%i_map(i)%per)use_slice=.TRUE.
+END DO
+END FUNCTION lu_use_slice
 !------------------------------------------------------------------------------
 !> Solve the full distributed linear system using a parallel direct solver
 !!
