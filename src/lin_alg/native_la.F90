@@ -963,7 +963,7 @@ end function vec_dot_cvec
 !> Dot products with an array of vectors
 !!
 !! All products are computed in a single pass over row blocks (see
-!! @ref oft_native_kernels::nk_owned_mdot "nk_owned_mdot"), so each block of `self` is
+!! @ref oft_native_kernels_prod_rr::k_owned_mdot "nk_owned_mdot"), so each block of `self` is
 !! loaded once for all `n` products. Values shared with other processes are counted
 !! only on their owner and the results are combined with a single MPI reduction,
 !! which is skipped when the local mesh is complete (`stitch_info%full`). Non-native
@@ -1226,7 +1226,7 @@ end subroutine vec_copy
 !! self = self + \f$ \sum_k \alpha_k a_k \f$
 !!
 !! All vectors are processed in a single pass over row blocks (see
-!! @ref oft_native_kernels::nk_maxpy "nk_maxpy"), so each block of `self` is loaded
+!! @ref oft_native_kernels_vec_r8::k_maxpy "nk_maxpy"), so each block of `self` is loaded
 !! once for all `n` updates. Terms are added in order of increasing `k`, as with `n`
 !! successive calls to `add`; results agree to rounding, but need not be bitwise equal
 !! (the compiler may contract the multiply-adds differently).

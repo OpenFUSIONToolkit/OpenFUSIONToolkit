@@ -57,7 +57,7 @@ CONTAINS
 !! released or another operation is started on the plan.
 !---------------------------------------------------------------------------------
 SUBROUTINE s_begin(plan,x,reverse,mask,nolocal)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 ST, INTENT(in) :: x(:) !< Source values
 LOGICAL, OPTIONAL, INTENT(in) :: reverse !< Reverse direction? (default forward)
 LOGICAL, OPTIONAL, INTENT(in) :: mask(:) !< Packed entries to send (zero otherwise) [nsend+nloc] or [nrecv+nloc] (optional)
@@ -118,7 +118,7 @@ END SUBROUTINE s_begin
 !! @ref oft_scatter_base::oft_scatter_plan "oft_scatter_plan").
 !---------------------------------------------------------------------------------
 SUBROUTINE s_wait_recv(plan,x)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 ST, INTENT(in) :: x(:) !< Any array of the value type of the operation (selects the type, not accessed)
 INTEGER(i4) :: ierr
 IF(plan%inflight==0)CALL oft_abort('No operation in flight','scatter_wait_recv',__FILE__)
@@ -141,7 +141,7 @@ END SUBROUTINE s_wait_recv
 !! follow @ref s_wait_recv "scatter_wait_recv".
 !---------------------------------------------------------------------------------
 SUBROUTINE s_unpack(plan,y,mode,nolocal)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 ST, INTENT(inout) :: y(:) !< Destination values
 INTEGER(i4), INTENT(in) :: mode !< @ref oft_scatter_base::oft_scatter_insert "OFT_SCATTER_INSERT" or `OFT_SCATTER_ADD`
 LOGICAL, OPTIONAL, INTENT(in) :: nolocal !< Skip local part? (must match `scatter_begin`)
@@ -172,7 +172,7 @@ END SUBROUTINE s_unpack
 !> Wait for all sends of the operation in flight on a plan and mark it complete
 !---------------------------------------------------------------------------------
 SUBROUTINE s_wait_send(plan,x)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 ST, INTENT(in) :: x(:) !< Any array of the value type of the operation (selects the type, not accessed)
 INTEGER(i4) :: ierr
 #ifdef HAVE_MPI
@@ -189,7 +189,7 @@ END SUBROUTINE s_wait_send
 !! See @ref s_unpack "scatter_unpack" for the destination entries.
 !---------------------------------------------------------------------------------
 SUBROUTINE s_end(plan,y,mode,nolocal)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 ST, INTENT(inout) :: y(:) !< Destination values
 INTEGER(i4), INTENT(in) :: mode !< @ref oft_scatter_base::oft_scatter_insert "OFT_SCATTER_INSERT" or `OFT_SCATTER_ADD`
 LOGICAL, OPTIONAL, INTENT(in) :: nolocal !< Skip local part? (must match `scatter_begin`)
@@ -206,7 +206,7 @@ END SUBROUTINE s_end
 !! unique.
 !---------------------------------------------------------------------------------
 SUBROUTINE s_local(plan,x,y,mode,reverse)
-TYPE(oft_scatter_plan), INTENT(in) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(in) :: plan !< Scatter plan
 ST, INTENT(in) :: x(:) !< Source values
 ST, INTENT(inout) :: y(:) !< Destination values
 INTEGER(i4), INTENT(in) :: mode !< @ref oft_scatter_base::oft_scatter_insert "OFT_SCATTER_INSERT" or `OFT_SCATTER_ADD`
@@ -341,7 +341,7 @@ END SUBROUTINE unpack_vals
 !> Post a receive from neighbour `jn` of a plan into `buf(js:js+n-1)`
 !---------------------------------------------------------------------------------
 SUBROUTINE post_recv(plan,jn,js,n,buf)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 INTEGER(i4), INTENT(in) :: jn !< Neighbour
 INTEGER(i4), INTENT(in) :: js !< First buffer entry
 INTEGER(i4), INTENT(in) :: n !< Number of entries
@@ -358,7 +358,7 @@ END SUBROUTINE post_recv
 !> Post a send of `buf(js:js+n-1)` to neighbour `jn` of a plan
 !---------------------------------------------------------------------------------
 SUBROUTINE post_send(plan,jn,js,n,buf)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 INTEGER(i4), INTENT(in) :: jn !< Neighbour
 INTEGER(i4), INTENT(in) :: js !< First buffer entry
 INTEGER(i4), INTENT(in) :: n !< Number of entries
