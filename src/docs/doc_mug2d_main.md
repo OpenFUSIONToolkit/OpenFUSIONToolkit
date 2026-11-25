@@ -17,9 +17,11 @@ For 3D simulations see \ref doc_mhd_main "MUG".
 The following examples illustrate how to use MUG 2D.
 
  - \subpage doc_mug2d_harris_ex
+ - \subpage doc_mug2d_rt_ex
 
 Additional verification cases are in the regression tests in `src/tests/physics/MUG/`: `test_alfven_2d.F90`
-(Alfven wave), `test_sound_2d.F90` (sound wave) and `test_taylor_green_2d.F90` (incompressible Taylor-Green vortex).
+(Alfven wave), `test_sound_2d.F90` (sound wave), `test_taylor_green_2d.F90` (incompressible Taylor-Green vortex) and
+`test_rt_2d.F90` (gravity and Rayleigh-Taylor growth rates).
 `test_jacobian_2d.F90` checks that the approximate Jacobian matches the nonlinear residual.
 
 \section doc_mug2d_main_eqns MHD System
@@ -56,6 +58,7 @@ not greater than 1.
 | `lin_tol`, `nl_tol` | \f$ 10^{-8} \f$, \f$ 10^{-5} \f$ | Absolute linear and nonlinear tolerances |
 | `B_0(3)` | 0 | Background field [T] (only `B_0(3)` if `cyl_flag=T`). Equivalent to `psi_vac` and the initial \f$ B_y \f$ on a non-periodic domain, see \ref doc_mug_xmhd_2d_eqns_conv |
 | `den_scale` | \f$ 10^{19} \f$ | Density normalization |
+| `g_accel` | 0 | Gravitational acceleration along \f$ -z \f$ (the second mesh coordinate) [m/s\f$^2\f$] |
 | `nu(nreg)` | -1 | Kinematic viscosity \f$ \nu \f$ [m\f$^2\f$/s] |
 | `chi(nreg)` | -1 | Thermal diffusivity \f$ \chi \f$ [m\f$^2\f$/s] |
 | `D_diff(nreg)` | -1 | Particle diffusivity \f$ D \f$ [m\f$^2\f$/s] |
