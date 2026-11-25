@@ -235,10 +235,17 @@ IF(rev)THEN
       END DO
     END IF
   ELSE
-    !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.send_par)
-    DO k=1,n
-      y(plan%lsrc(k))=x(plan%ldst(k))
-    END DO
+    IF(send_par)THEN
+      !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+      DO k=1,n
+        y(plan%lsrc(k))=x(plan%ldst(k))
+      END DO
+    ELSE
+      ! Repeated destinations: in order, the last entry wins
+      DO k=1,n
+        y(plan%lsrc(k))=x(plan%ldst(k))
+      END DO
+    END IF
   END IF
 ELSE
   IF(mode==OFT_SCATTER_ADD)THEN
@@ -253,10 +260,17 @@ ELSE
       END DO
     END IF
   ELSE
-    !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.recv_par)
-    DO k=1,n
-      y(plan%ldst(k))=x(plan%lsrc(k))
-    END DO
+    IF(recv_par)THEN
+      !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+      DO k=1,n
+        y(plan%ldst(k))=x(plan%lsrc(k))
+      END DO
+    ELSE
+      ! Repeated destinations: in order, the last entry wins
+      DO k=1,n
+        y(plan%ldst(k))=x(plan%lsrc(k))
+      END DO
+    END IF
   END IF
 END IF
 END SUBROUTINE s_local
@@ -382,10 +396,17 @@ IF(mode==OFT_SCATTER_ADD)THEN
     END DO
   END IF
 ELSE
-  !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.par)
-  DO k=1,n
-    IF(wt(k)/=0.d0)y(idx(k))=wt(k)*buf(k)
-  END DO
+  IF(par)THEN
+    !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+    DO k=1,n
+      IF(wt(k)/=0.d0)y(idx(k))=wt(k)*buf(k)
+    END DO
+  ELSE
+    ! Repeated destinations: in order, the last entry wins
+    DO k=1,n
+      IF(wt(k)/=0.d0)y(idx(k))=wt(k)*buf(k)
+    END DO
+  END IF
 END IF
 END SUBROUTINE apply_weighted
 !---------------------------------------------------------------------------------
@@ -413,9 +434,16 @@ IF(mode==OFT_SCATTER_ADD)THEN
     END DO
   END IF
 ELSE
-  !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.par)
-  DO k=1,n
-    IF(wt(k)/=0.d0)y(idst(k))=wt(k)*x(isrc(k))
-  END DO
+  IF(par)THEN
+    !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+    DO k=1,n
+      IF(wt(k)/=0.d0)y(idst(k))=wt(k)*x(isrc(k))
+    END DO
+  ELSE
+    ! Repeated destinations: in order, the last entry wins
+    DO k=1,n
+      IF(wt(k)/=0.d0)y(idst(k))=wt(k)*x(isrc(k))
+    END DO
+  END IF
 END IF
 END SUBROUTINE apply_weighted_gather
