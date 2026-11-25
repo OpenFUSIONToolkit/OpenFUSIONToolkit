@@ -27,7 +27,7 @@ oft_in_template = """
 /
 """
 
-def run_schwarz(nprocs, ref_per='F,F,F'):
+def run_schwarz(nprocs, ref_per='F,F,F', timeout=240):
     # Distributed runs decompose the base mesh and refine once more
     nlevels = 3
     if nprocs > 1:
@@ -35,7 +35,7 @@ def run_schwarz(nprocs, ref_per='F,F,F'):
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nlevels, ref_per))
-    if not run_OFT("./test_native_schwarz", nprocs, 240):
+    if not run_OFT("./test_native_schwarz", nprocs, timeout):
         return None
     with open('schwarz.results', 'r') as fid:
         nfail = int(fid.readline())
@@ -89,12 +89,14 @@ def test_schwarz_mpi4():
     check_overlap_iterations(its)
     assert its[1] < its[0]
 
+# The 4 process periodic case needs about twice as many GMRES iterations as the non-periodic one and
+# takes about 2.5 minutes with 2 threads per process on 4 cores
 @pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi),
-                                    pytest.param(4, id='mpi4', marks=pytest.mark.mpi)])
+                                    pytest.param(4, id='mpi4', marks=[pytest.mark.mpi, pytest.mark.slow])])
 def test_schwarz_periodic(nprocs):
     '''Overlapping Schwarz on a partially periodic cube (periodic images of seam DOFs on one process):
     the same checks as on the plain cube, with subdomains grown across periodic seams and processes.'''
-    its = run_schwarz(nprocs, 'T,F,F')
+    its = run_schwarz(nprocs, 'T,F,F', timeout=600)
     assert its is not None
     check_overlap_iterations(its)
     if nprocs > 1:
