@@ -20,22 +20,34 @@ from oft_testing import run_OFT
 from OpenFUSIONToolkit.util import mu0
 from OpenFUSIONToolkit.io import write_oft_xml
 from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil, ThinCurr_XML
+from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop, Mirnov
 
 # Tight HODLR tolerances and small leaves (several leaf blocks per process)
 hodlr_opts = {'target_size': 200, 'L_svd_tol': 1.E-10, 'B_svd_tol': 1.E-10}
 
 
 def write_cyl_xml():
-    '''Resistivity and coils for the high-resolution cylinder (one I-coil and one V-coil)'''
+    '''Resistivity, coils, and sensors for the high-resolution cylinder
+
+    One circular and one polygon I-coil, one circular V-coil, two flux loops and a point Mirnov probe, covering the
+    ring and polygon paths of the coil and sensor coupling matrices.
+    '''
     xml = ThinCurr_XML()
     xml.set_eta([10.0*mu0])
     icoil = ThinCurr_Icoil(name="IC")
     icoil.add_circular_subcoil([1.1, 0.25])
     xml.add_Icoil(icoil)
+    phi = np.linspace(0.0, 2.0*np.pi, 91)
+    icoil = ThinCurr_Icoil(name="IC_POLY")
+    icoil.add_subcoil(pts=np.c_[1.2*np.cos(phi), 1.2*np.sin(phi), 0.0*phi+0.4])
+    xml.add_Icoil(icoil)
     vcoil = ThinCurr_Vcoil(name="VC", resistivity_per_length=1.256637E-5, radius=1.E-2)
     vcoil.add_circular_subcoil([1.1, -0.25])
     xml.add_Vcoil(vcoil)
     write_oft_xml([xml], "oft_in_mpi.xml")
+    sensors = [circular_flux_loop(0.9, 0.5, 'FLOOP_0', npts=180), circular_flux_loop(0.9, 0.0, 'FLOOP_1', npts=180),
+               Mirnov([0.9, 0.0, 0.2], [0.0, 0.0, 1.0], 'MIRNOV_0', dx=None)]
+    save_sensors(sensors, 'floops_mpi.loc')
 
 
 def write_junction_mesh():
@@ -78,7 +90,7 @@ def compare(ref, out, rtol=1.E-6):
     operators at the level of the HODLR tolerance and round-off in the reductions change the solver iterations.
     '''
     assert out['nprocs'] > 1
-    for key in ('Lx', 'eig_vals', 'eig_vec0', 'fr', 'td_U', 'B'):
+    for key in ('Mc', 'Ms', 'Msc', 'Lx', 'eig_vals', 'eig_vec0', 'fr', 'td_U', 'B'):
         if key not in ref:
             continue
         scale = np.max(np.abs(ref[key]))
@@ -92,7 +104,7 @@ def compare(ref, out, rtol=1.E-6):
 
 
 cases = {
-    'cyl': {'mesh': 'tw_test-cyl_hr.h5', 'xml': 'oft_in_mpi.xml', 'jumper_start': 2,
+    'cyl': {'mesh': 'tw_test-cyl_hr.h5', 'xml': 'oft_in_mpi.xml', 'jumper_start': 2, 'sensors': 'floops_mpi.loc',
             'hodlr': dict(hodlr_opts)},
     'cyl_coarse': {'mesh': 'tw_test-cyl_hr.h5', 'xml': 'oft_in_mpi.xml', 'jumper_start': 2,
                    'hodlr': dict(hodlr_opts, pre_coarse=True, pre_neigs=4), 'compute_B': False},

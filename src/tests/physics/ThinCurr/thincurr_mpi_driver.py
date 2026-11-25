@@ -36,10 +36,18 @@ def main(case):
     tw.setup_model(mesh_file=case['mesh'], xml_filename=case.get('xml'), jumper_start=case.get('jumper_start', 0))
     tw.setup_io(basepath=case['basepath'], legacy_hdf5=True)
     tw.set_hodlr_options(**case['hodlr'])
-    tw.compute_Mcoil()
+    results = {'nprocs': myOFT.nprocs}
+    #---Coil and sensor coupling matrices (computed in parallel, replicated on all processes)
+    Mc = tw.compute_Mcoil()
+    if tw.n_icoils > 0:
+        results['Mc'] = Mc.copy()
+    if case.get('sensors') is not None:
+        Ms, Msc, _ = tw.compute_Msensor(case['sensors'])
+        results['Ms'] = Ms.copy()
+        if tw.n_icoils > 0:
+            results['Msc'] = Msc.copy()
     tw.compute_Lmat(use_hodlr=True, cache_file=case.get('cache'))
     tw.compute_Rmat()
-    results = {'nprocs': myOFT.nprocs}
     rng = np.random.default_rng(42)
     x = rng.standard_normal(tw.nelems)
     #---Matrix-vector products

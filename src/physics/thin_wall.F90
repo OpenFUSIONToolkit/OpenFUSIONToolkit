@@ -1336,6 +1336,41 @@ gptr(1:ngroup)=gs(1:nout); gptr(ngroup+1)=n+1
 DEALLOCATE(stack,gs,idx,vals)
 END SUBROUTINE tw_cluster_points
 !---------------------------------------------------------------------------------
+!> Split weighted work items over processors in contiguous ranges of approximately equal total weight
+!!
+!! Used to distribute the computation of the (replicated) coil and sensor coupling matrices, whose
+!! contributions are then summed over processors with @ref tw_mpi_sum_2d.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_mpi_split(w,owner)
+REAL(r8), INTENT(in) :: w(:) !< Weight of each item
+INTEGER(i4), INTENT(out) :: owner(:) !< Processor (0-based rank) computing each item
+INTEGER(i4) :: i,n
+REAL(r8) :: total,cum
+n=SIZE(w)
+total=SUM(w)
+cum=0.d0
+DO i=1,n
+  IF(total>0.d0)THEN
+    owner(i)=INT((cum+w(i)/2.d0)/total*REAL(oft_env%nprocs,8),i4)
+  ELSE
+    owner(i)=INT(REAL(i-1,8)/REAL(n,8)*REAL(oft_env%nprocs,8),i4)
+  END IF
+  owner(i)=MIN(MAX(owner(i),0),oft_env%nprocs-1)
+  cum=cum+w(i)
+END DO
+END SUBROUTINE tw_mpi_split
+!---------------------------------------------------------------------------------
+!> Sum a matrix over all processors (in place)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_mpi_sum_2d(A)
+REAL(r8), CONTIGUOUS, TARGET, INTENT(inout) :: A(:,:) !< Matrix to sum
+REAL(r8), CONTIGUOUS, POINTER :: Aflat(:)
+IF(oft_env%nprocs==1)RETURN
+IF(SIZE(A)==0)RETURN
+Aflat(1:SIZE(A))=>A
+Aflat=oft_mpi_sum(Aflat,SIZE(Aflat))
+END SUBROUTINE tw_mpi_sum_2d
+!---------------------------------------------------------------------------------
 !> Couplings of the elements to coil filaments given as points, added to the element-coil matrix
 !!
 !! For each cell group the cell sums \f$ V_c = \sum_k s_k \sum_{seg} K(c,seg)\,\hat{u}_{seg} \f$ over the filaments
@@ -1344,7 +1379,7 @@ END SUBROUTINE tw_cluster_points
 !! group and a chunk that are well separated use an ACA approximation of K; the others, and blocks where ACA does
 !! not converge at low rank, are summed directly with @ref tw_cell_seg_kernel.
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_coil_poly_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,pidx,npset,cent,glist,gptr,ngroup,A,nrad_cross)
+SUBROUTINE tw_coil_poly_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,pidx,npset,cent,glist,gptr,ngroup,gown,A,nrad_cross)
 TYPE(tw_type), INTENT(in) :: tw_obj !< Thin-wall model object
 TYPE(tw_coil_set), INTENT(in) :: coils_tot(:) !< All coil sets
 INTEGER(i4), INTENT(in) :: ncoils_tot !< Number of coil sets
@@ -1355,6 +1390,7 @@ REAL(r8), INTENT(in) :: cent(:,:) !< Cell centroids [3,nc]
 INTEGER(i4), INTENT(in) :: glist(:) !< Cells ordered by group (@ref tw_cluster_points)
 INTEGER(i4), INTENT(in) :: gptr(:) !< Start of each group in glist
 INTEGER(i4), INTENT(in) :: ngroup !< Number of cell groups
+LOGICAL, INTENT(in) :: gown(:) !< Groups computed by this processor [ngroup]
 REAL(r8), INTENT(inout) :: A(:,:) !< Element-coil coupling [nelems_exp,ncoils_tot]
 INTEGER(i4), INTENT(inout) :: nrad_cross(:) !< Count of cells closer to a filament than its wire radius
 INTEGER(i4) :: i,j,k,c,g,nch,s,m,nseg,ic,ng
@@ -1407,6 +1443,7 @@ nch=c
 ALLOCATE(Vg(3,MAXVAL(gptr(2:ngroup+1)-gptr(1:ngroup)),npset))
 !$omp do schedule(dynamic,1)
 DO g=1,ngroup
+  IF(.NOT.gown(g))CYCLE
   ng=gptr(g+1)-gptr(g)
   Vg(:,1:ng,:)=0.d0
   DO c=1,nch
@@ -1600,7 +1637,7 @@ END FUNCTION tw_cell_ring_kernel
 !! ring cluster that are well separated in (R,Z) uses an ACA approximation \f$ U W \f$ of the cell-basis by ring
 !! kernel, summed per coil set as \f$ U (W S) \f$ with S the filament scales; the others are evaluated directly.
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_coil_ring_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,ring_rz,cent,glist,gptr,ngroup,A,nrad_cross)
+SUBROUTINE tw_coil_ring_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,ring_rz,cent,glist,gptr,ngroup,gown,A,nrad_cross)
 TYPE(tw_type), INTENT(in) :: tw_obj !< Thin-wall model object
 TYPE(tw_coil_set), INTENT(in) :: coils_tot(:) !< All coil sets
 INTEGER(i4), INTENT(in) :: ncoils_tot !< Number of coil sets
@@ -1610,6 +1647,7 @@ REAL(r8), INTENT(in) :: cent(:,:) !< Cell centroids [3,nc]
 INTEGER(i4), INTENT(in) :: glist(:) !< Cells ordered by group (@ref tw_cluster_points)
 INTEGER(i4), INTENT(in) :: gptr(:) !< Start of each group in glist
 INTEGER(i4), INTENT(in) :: ngroup !< Number of cell groups
+LOGICAL, INTENT(in) :: gown(:) !< Groups computed by this processor [ngroup]
 REAL(r8), INTENT(inout) :: A(:,:) !< Element-coil coupling [nelems_exp,ncoils_tot]
 INTEGER(i4), INTENT(inout) :: nrad_cross(:) !< Count of cells closer to a filament than its wire radius
 INTEGER(i4) :: i,j,k,g,c,p,ii,nring,nchunk
@@ -1665,6 +1703,7 @@ END DO
 DO p=1,nchunk*ngroup
   c=(p-1)/ngroup+1
   g=MOD(p-1,ngroup)+1
+  IF(.NOT.gown(g))CYCLE
   CALL ring_block(c,g)
 END DO
 DEALLOCATE(grz,gext,rset,rfil,rcen,rlist,rptr,crz,cext)
@@ -1789,9 +1828,10 @@ INTEGER(4) :: i,j,k,ncoils_tot,file_counts(4),ierr,io_unit
 INTEGER(i4), ALLOCATABLE :: nrad_cross(:)
 REAL(8) :: elapsed_time
 INTEGER(4) :: npset,ngroup
-INTEGER(4), ALLOCATABLE :: pidx(:),glist(:),gptr(:)
-REAL(8), allocatable :: Ael2coil_tmp(:,:),ring_rz(:,:,:),cent(:,:)
-LOGICAL, ALLOCATABLE :: ring_ok(:,:)
+INTEGER(4), ALLOCATABLE :: pidx(:),glist(:),gptr(:),gowner(:)
+REAL(8), allocatable, TARGET :: Ael2coil_tmp(:,:)
+REAL(8), allocatable :: ring_rz(:,:,:),cent(:,:)
+LOGICAL, ALLOCATABLE :: ring_ok(:,:),gown(:)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 type(oft_timer) :: mytimer
@@ -1898,12 +1938,18 @@ DO i=1,bmesh%nc
   cent(:,i)=SUM(bmesh%r(:,bmesh%lc(:,i)),DIM=2)/3.d0
 END DO
 CALL tw_cluster_points(cent,tw_coil_group_size,glist,gptr,ngroup)
+!---Cell groups are split over processors (balanced by number of cells), contributions summed below
+ALLOCATE(gowner(ngroup),gown(ngroup))
+CALL tw_mpi_split(REAL(gptr(2:ngroup+1)-gptr(1:ngroup),8),gowner)
+gown=(gowner==oft_env%rank)
 Ael2coil_tmp=0.d0
-IF(npset>0)CALL tw_coil_poly_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,pidx,npset,cent,glist,gptr,ngroup, &
+IF(npset>0)CALL tw_coil_poly_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,pidx,npset,cent,glist,gptr,ngroup,gown, &
   Ael2coil_tmp,nrad_cross)
-IF(ANY(ring_ok))CALL tw_coil_ring_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,ring_rz,cent,glist,gptr,ngroup, &
+IF(ANY(ring_ok))CALL tw_coil_ring_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,ring_rz,cent,glist,gptr,ngroup,gown, &
   Ael2coil_tmp,nrad_cross)
-DEALLOCATE(cent,glist,gptr)
+DEALLOCATE(cent,glist,gptr,gowner,gown)
+CALL tw_mpi_sum_2d(Ael2coil_tmp)
+IF(oft_env%nprocs>1)nrad_cross=oft_mpi_sum(nrad_cross,ncoils_tot)
 IF(ANY(nrad_cross(1:tw_obj%n_vcoils)>0))THEN
   CALL oft_warn("One or more elements intersect a Vcoil within its radius, which may lead to invalid inductance values.")
   DO j=1,tw_obj%n_vcoils
@@ -1959,7 +2005,8 @@ INTEGER(4) :: i,ii,j,jj,k,kk,l
 REAL(8) :: tmp
 REAL(8) :: coil_thickness,sqrt_e
 REAL(8) :: elapsed_time
-REAL(8), allocatable :: atmp(:,:),Acoil2coil_tmp(:,:),ring_rz(:,:,:)
+REAL(8), allocatable :: atmp(:,:),ring_rz(:,:,:)
+REAL(8), allocatable, TARGET :: Acoil2coil_tmp(:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 INTEGER(4), ALLOCATABLE :: fil(:,:)
 INTEGER(4) :: nfil,f
@@ -2020,6 +2067,7 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   atmp=0.d0
   !$omp do schedule(dynamic,1)
   DO f=1,nfil
+    IF(MOD(f-1,oft_env%nprocs)/=oft_env%rank)CYCLE ! Filaments are split over processors, summed below
     l=fil(1,f); i=fil(2,f)
     DO j=1,ncoils_tot
       DO k=1,coils_tot(j)%ncoils
@@ -2066,6 +2114,7 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   !$omp end critical
   DEALLOCATE(atmp)
   !$omp end parallel
+  CALL tw_mpi_sum_2d(Acoil2coil_tmp)
   elapsed_time=mytimer%tock()
   IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 END IF
@@ -2657,7 +2706,9 @@ INTEGER(4) :: i,ii,j,jj,k,kk,ik,file_counts(5),ierr,io_unit,sens_hash,npoint
 REAL(8) :: tmp,dl,pt_i(3),evec_i(3,3),pts_i(3,3),bpt(3,3)
 REAL(8) :: rvec_j(3),cvec(3),elapsed_time
 REAL(8) :: norm_i(3),area_i,f(3),dl_min
-REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:)
+REAL(8), allocatable :: atmp(:,:)
+REAL(8), allocatable, TARGET :: Acoil2sen_tmp(:,:)
+INTEGER(4), ALLOCATABLE :: cowner(:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
@@ -2730,11 +2781,15 @@ ALLOCATE(tw_obj%Ael2sen(nsensors,tw_nelems_exp(tw_obj)))
 tw_obj%Ael2sen=0.d0
 IF(nsensors>0)THEN
   CALL mytimer%tick()
+  !---Cells are split over processors, contributions summed below
+  ALLOCATE(cowner(bmesh%nc))
+  CALL tw_mpi_split([(1.d0,i=1,bmesh%nc)],cowner)
   !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,evec_i,rvec_j, &
   !$omp atmp,i,area_i,norm_i,dl_min,bpt,dl)
   ALLOCATE(atmp(3,nsensors))
   !$omp do
   DO i=1,bmesh%nc
+    IF(cowner(i)/=oft_env%rank)CYCLE
     IF(tw_obj%sens_mask(bmesh%reg(i)))CYCLE
     ! CALL bmesh%norm(i,f,norm_i)
     area_i=bmesh%ca(i)
@@ -2783,6 +2838,8 @@ IF(nsensors>0)THEN
   END DO
   DEALLOCATE(atmp)
   !$omp end parallel
+  DEALLOCATE(cowner)
+  CALL tw_mpi_sum_2d(tw_obj%Ael2sen)
   DO j=1,nsensors
     tw_obj%Ael2sen(j,:)=tw_obj%Ael2sen(j,:)*sensors(j)%scale_fac
   END DO
@@ -2808,10 +2865,12 @@ IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building coil->sensor inductance
 CALL oft_increase_indent
 IF(nsensors>0.AND.ncoils_tot>0)THEN
   CALL mytimer%tick()
+  !---Sensors are split over processors, contributions summed below
   !$omp parallel private(ii,j,k,kk,tmp,pt_i,atmp,cvec)
   ALLOCATE(atmp(ncoils_tot,1))
   !$omp do
   DO i=1,nsensors
+    IF(MOD(i-1,oft_env%nprocs)/=oft_env%rank)CYCLE
     atmp=0.d0
     IF(sensors(i)%point)THEN ! Field along the probe normal
       pt_i=sensors(i)%r(:,1)
@@ -2854,6 +2913,7 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
   END DO
   DEALLOCATE(atmp)
   !$omp end parallel
+  CALL tw_mpi_sum_2d(Acoil2sen_tmp)
   DO j=1,nsensors
     Acoil2sen_tmp(j,:)=Acoil2sen_tmp(j,:)*sensors(j)%scale_fac
   END DO

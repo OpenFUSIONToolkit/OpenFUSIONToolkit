@@ -358,6 +358,9 @@ preconditioners, and the linear solvers are distributed:
    see \ref oft_stitching::seam_setup_replicated). Matrix-vector products sum the contributions from each process on
    the owner, which then shares the result with all processes, so values are identical on all processes. Dot products
    sum owned values only, and eigenvalue problems use parallel ARPACK on the owned values.
+ - The coil and sensor coupling matrices (element to coil, coil to coil, element to sensor, and coil to sensor) are
+   computed in parallel, by splitting groups of cells, coil filaments, or sensors over processes, and the result is
+   then summed so that each process holds the full matrices.
 
 The use of MPI is otherwise transparent, with results returned in full to every process. However, the following should
 be noted:
