@@ -42,6 +42,7 @@ USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvecto
   native_pattern_live
 USE oft_la_base, ONLY: oft_cmatrix, oft_graph_ptr
 USE oft_la_utils, ONLY: create_matrix
+USE oft_stitching, ONLY: oft_seam, oft_global_stitch, seam_free_plan
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
@@ -65,6 +66,7 @@ CALL test_access()
 CALL test_multi()
 CALL test_bc()
 CALL test_stitch()
+CALL test_stitch_owner()
 CALL test_accumulate()
 CALL test_pattern()
 CALL test_zero()
@@ -150,6 +152,13 @@ d=maxdiff(x,y)
 CALL y%delete
 DEALLOCATE(y)
 END FUNCTION inconsistency
+! Maximum absolute value of a (possibly empty) array
+PURE FUNCTION maxabs(d) RESULT(m)
+REAL(r8), INTENT(in) :: d(:)
+REAL(r8) :: m
+m=0.d0
+IF(SIZE(d)>0)m=MAXVAL(ABS(d))
+END FUNCTION maxabs
 ! Reproducible value for a global index
 PURE FUNCTION gval(ig,a,b) RESULT(v)
 INTEGER(i8), INTENT(in) :: ig
@@ -645,6 +654,57 @@ CALL x%delete
 CALL ones%delete
 DEALLOCATE(x,ones)
 END SUBROUTINE test_stitch
+! Synchronization by ownership uses the ownership current at the time of the stitch, also
+! when the stitching plan was built before ownership was set or changed
+SUBROUTINE test_stitch_owner()
+INTEGER(i4) :: i
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: raw,ref,a
+LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: leo_orig,leo_tmp
+TYPE(oft_seam) :: sc
+CLASS(oft_vector), POINTER :: x
+CALL ML_oft_lagrange%vec_create(x)
+SELECT TYPE(x)
+TYPE IS(oft_native_vector)
+  ALLOCATE(raw(x%n),ref(x%n),a(x%n))
+  DO i=1,x%n
+    raw(i)=gval(INT(i+1000*oft_env%rank,i8),0.37d0,0.2d0)
+  END DO
+  !---Reference: synchronization with the vector's own seam
+  ref=raw
+  CALL oft_global_stitch(x%stitch_info,ref,0)
+  !---Copy of the seam (shares linkage) whose ownership is changed below
+  sc=x%stitch_info
+  CALL seam_free_plan(sc)
+  leo_orig=>x%stitch_info%leo
+  !---Plan built by summation before ownership is set
+  NULLIFY(sc%leo)
+  a=raw
+  CALL oft_global_stitch(sc,a,1)
+  sc%leo=>leo_orig
+  a=raw
+  CALL oft_global_stitch(sc,a,0)
+  CALL check_exact('Stitch(0) after ownership set',oft_mpi_max(maxabs(a-ref)),0.d0)
+  !---Ownership changed in place after the plan was built
+  IF(ASSOCIATED(leo_orig))THEN
+    ALLOCATE(leo_tmp(SIZE(leo_orig)))
+    leo_tmp=.TRUE.
+    sc%leo=>leo_tmp
+    a=raw
+    CALL oft_global_stitch(sc,a,0)
+    leo_tmp=leo_orig
+    a=raw
+    CALL oft_global_stitch(sc,a,0)
+    CALL check_exact('Stitch(0) after ownership changed in place',oft_mpi_max(maxabs(a-ref)),0.d0)
+    DEALLOCATE(leo_tmp)
+  END IF
+  CALL seam_free_plan(sc)
+  DEALLOCATE(raw,ref,a)
+CLASS DEFAULT
+  CALL oft_abort('Native vector expected','test_stitch_owner',__FILE__)
+END SELECT
+CALL x%delete
+DEALLOCATE(x)
+END SUBROUTINE test_stitch_owner
 ! Distinct values on every copy of an entry (local index and rank dependent)
 SUBROUTINE cfill_raw(c)
 CLASS(oft_cvector), INTENT(inout) :: c
