@@ -87,6 +87,8 @@ TYPE, PUBLIC :: oft_map
   !> Local scatter plan gathering the owned entries (`slice`) of this block (built on
   !! first use by native vectors, see `get_slice`)
   TYPE(oft_scatter_plan) :: slice_plan
+  !> `slice_plan` is fully built (written and read with OpenMP atomics, see `native_slice_plan`)
+  LOGICAL :: slice_plan_ready = .FALSE.
 END TYPE oft_map
 !---------------------------------------------------------------------------------
 !> Block mapping pointer

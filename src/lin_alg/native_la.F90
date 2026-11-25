@@ -610,14 +610,27 @@ END SUBROUTINE native_lc_small_build
 !> Build the owned-entry (slice) scatter plan of a vector block, if not already built
 !!
 !! The plan gathers `slice(j)` of the block into entry `j` of the slice. Maps are shared
-!! by all vectors of a space, so the plan is built once; the build is serialized for
-!! callers in parallel regions.
+!! by all vectors of a space, so the plan is built once, on first use. The build is safe
+!! when called concurrently from several threads (double-checked initialization): the
+!! `slice_plan_ready` flag is read with a sequentially consistent atomic read, the plan
+!! is built inside a named critical section after checking the flag again, and the flag
+!! is set with a sequentially consistent atomic write only after the plan is complete,
+!! so a thread that sees the flag set also sees the complete plan.
 !---------------------------------------------------------------------------------
 SUBROUTINE native_slice_plan(mp)
 TYPE(oft_map), INTENT(inout) :: mp !< Block mapping
-IF(mp%slice_plan%setup)RETURN
+LOGICAL :: ready
+!$omp atomic read seq_cst
+ready=mp%slice_plan_ready
+IF(ready)RETURN
 !$omp critical (native_slice_plan_build)
-IF(.NOT.mp%slice_plan%setup)CALL scatter_plan_setup_local(mp%slice_plan,mp%nslice,mp%slice)
+!$omp atomic read seq_cst
+ready=mp%slice_plan_ready
+IF(.NOT.ready)THEN
+  CALL scatter_plan_setup_local(mp%slice_plan,mp%nslice,mp%slice)
+  !$omp atomic write seq_cst
+  mp%slice_plan_ready=.TRUE.
+END IF
 !$omp end critical (native_slice_plan_build)
 END SUBROUTINE native_slice_plan
 !---------------------------------------------------------------------------------
