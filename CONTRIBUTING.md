@@ -88,6 +88,7 @@ Francois Logak\
 Oak Nelson (@nelsonand)\
 Matthew Parsons\
 Matthew Pharr (@matt-pharr)\
+Kevin Rajan (@kvnloo)\
 Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\
 Thomas Wang (@ThomasWangAPAM)\

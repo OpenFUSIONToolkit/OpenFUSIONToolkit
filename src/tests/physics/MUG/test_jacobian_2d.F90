@@ -62,6 +62,7 @@ mhd_sim%eta(:,1)=50.d0
 mhd_sim%eta(:,2)=80.d0
 mhd_sim%den_scale=1.d19
 mhd_sim%B_0=b0
+mhd_sim%g_accel=1.d8 ! Constant source: must not change the Jacobian
 mhd_sim%dt=dt
 !---------------------------------------------------------------------------
 ! Pseudo-random state (n, V, T or p, psi, B_y) and vacuum flux

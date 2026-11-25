@@ -50,7 +50,7 @@ with `build_libs.py`), in which case the STRUMPACK options below also apply.
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack}, PETSc {petsc, super, superd, umfpack, mumps} | str | No |
+| `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack}, PETSc {petsc, super, superd, umfpack, mumps}. Native default: first available of mkl, strumpack, umfpack, mumps, super, superd | str | No |
 
 Native only options
 
