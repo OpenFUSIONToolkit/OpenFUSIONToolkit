@@ -63,7 +63,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: reverse !< Reverse direction? (default forward)
 LOGICAL, OPTIONAL, INTENT(in) :: mask(:) !< Packed entries to send (zero otherwise) [nsend+nloc] or [nrecv+nloc] (optional)
 LOGICAL, OPTIONAL, INTENT(in) :: nolocal !< Skip local part? (optional)
 LOGICAL :: rev,doloc
-INTEGER(i4) :: i,j,ierr,nout,nin
+INTEGER(i4) :: j,nout,nin
 rev=.FALSE.
 IF(PRESENT(reverse))rev=reverse
 doloc=.TRUE.
@@ -86,83 +86,29 @@ END IF
 #ifdef HAVE_MPI
 DO j=1,plan%nnbr
   IF(rev)THEN
-    CALL post_recv(j,plan%ksend(j),plan%ksend(j+1)-plan%ksend(j),plan%SSBUF)
+    CALL post_recv(plan,j,plan%ksend(j),plan%ksend(j+1)-plan%ksend(j),plan%SSBUF)
   ELSE
-    CALL post_recv(j,plan%krecv(j),plan%krecv(j+1)-plan%krecv(j),plan%SRBUF)
+    CALL post_recv(plan,j,plan%krecv(j),plan%krecv(j+1)-plan%krecv(j),plan%SRBUF)
   END IF
 END DO
 #endif
 !---Pack values
 IF(rev)THEN
-  CALL pack_vals(nout,plan%lrecv,plan%SRBUF)
-  IF(doloc)CALL pack_vals(plan%nloc,plan%ldst,plan%SSBUF(plan%nsend+1:),nout)
+  CALL pack_vals(nout,plan%lrecv,x,plan%SRBUF,0,mask)
+  IF(doloc)CALL pack_vals(plan%nloc,plan%ldst,x,plan%SSBUF(plan%nsend+1:),nout,mask)
 ELSE
-  CALL pack_vals(nout,plan%lsend,plan%SSBUF)
-  IF(doloc)CALL pack_vals(plan%nloc,plan%lsrc,plan%SRBUF(plan%nrecv+1:),nout)
+  CALL pack_vals(nout,plan%lsend,x,plan%SSBUF,0,mask)
+  IF(doloc)CALL pack_vals(plan%nloc,plan%lsrc,x,plan%SRBUF(plan%nrecv+1:),nout,mask)
 END IF
 !---Post sends from the calling thread, outside of threaded loops (see MPI rules in oft_scatter)
 #ifdef HAVE_MPI
 DO j=1,plan%nnbr
   IF(rev)THEN
-    CALL post_send(j,plan%krecv(j),plan%krecv(j+1)-plan%krecv(j),plan%SRBUF)
+    CALL post_send(plan,j,plan%krecv(j),plan%krecv(j+1)-plan%krecv(j),plan%SRBUF)
   ELSE
-    CALL post_send(j,plan%ksend(j),plan%ksend(j+1)-plan%ksend(j),plan%SSBUF)
+    CALL post_send(plan,j,plan%ksend(j),plan%ksend(j+1)-plan%ksend(j),plan%SSBUF)
   END IF
 END DO
-#endif
-CONTAINS
-!> Pack values into a buffer, applying the mask (offset `moff` into `mask`)
-SUBROUTINE pack_vals(n,idx,buf,moff)
-INTEGER(i4), INTENT(in) :: n !< Number of entries
-INTEGER(i4), INTENT(in) :: idx(:) !< Source index of each entry
-ST, INTENT(inout) :: buf(:) !< Buffer
-INTEGER(i4), OPTIONAL, INTENT(in) :: moff !< Offset of these entries in `mask`
-INTEGER(i4) :: k,mo
-mo=0
-IF(PRESENT(moff))mo=moff
-IF(PRESENT(mask))THEN
-  !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
-  DO k=1,n
-    IF(mask(mo+k))THEN
-      buf(k)=x(idx(k))
-    ELSE
-      buf(k)=SZERO
-    END IF
-  END DO
-ELSE
-  !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
-  DO k=1,n
-    buf(k)=x(idx(k))
-  END DO
-END IF
-END SUBROUTINE pack_vals
-#ifdef HAVE_MPI
-!> Post a receive from neighbour `jn` into `buf(js:js+n-1)`
-SUBROUTINE post_recv(jn,js,n,buf)
-INTEGER(i4), INTENT(in) :: jn !< Neighbour
-INTEGER(i4), INTENT(in) :: js !< First buffer entry
-INTEGER(i4), INTENT(in) :: n !< Number of entries
-ST, INTENT(inout) :: buf(:) !< Buffer
-IF(n==0)THEN
-  plan%rreq(jn)=MPI_REQUEST_NULL
-  RETURN
-END IF
-CALL MPI_IRECV(buf(js:js+n-1),n,SMPI,plan%nbr(jn),plan%tag,oft_env%comm,plan%rreq(jn),ierr)
-IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','scatter_begin',__FILE__)
-END SUBROUTINE post_recv
-!> Post a send of `buf(js:js+n-1)` to neighbour `jn`
-SUBROUTINE post_send(jn,js,n,buf)
-INTEGER(i4), INTENT(in) :: jn !< Neighbour
-INTEGER(i4), INTENT(in) :: js !< First buffer entry
-INTEGER(i4), INTENT(in) :: n !< Number of entries
-ST, INTENT(inout) :: buf(:) !< Buffer
-IF(n==0)THEN
-  plan%sreq(jn)=MPI_REQUEST_NULL
-  RETURN
-END IF
-CALL MPI_ISEND(buf(js:js+n-1),n,SMPI,plan%nbr(jn),plan%tag,oft_env%comm,plan%sreq(jn),ierr)
-IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','scatter_begin',__FILE__)
-END SUBROUTINE post_send
 #endif
 END SUBROUTINE s_begin
 !---------------------------------------------------------------------------------
@@ -206,49 +152,21 @@ IF(plan%inflight_kind/=SKIND)CALL oft_abort('Value type differs from operation i
   'scatter_unpack',__FILE__)
 IF(plan%inflight==1)THEN
   par=plan%recv_unique
-  CALL unpack_vals(plan%nrecv,plan%lrecv,plan%SRBUF,.FALSE.)
-  IF(doloc)CALL unpack_vals(plan%nloc,plan%ldst,plan%SRBUF(plan%nrecv+1:),.FALSE.)
+  CALL unpack_vals(plan%nrecv,plan%lrecv,plan%SRBUF,y,mode,par)
+  IF(doloc)CALL unpack_vals(plan%nloc,plan%ldst,plan%SRBUF(plan%nrecv+1:),y,mode,par)
 ELSE IF(plan%inflight==-1)THEN
   par=plan%send_unique
-  CALL unpack_vals(plan%nsend,plan%lsend,plan%SSBUF,.FALSE.)
-  IF(doloc)CALL unpack_vals(plan%nloc,plan%lsrc,plan%SSBUF(plan%nsend+1:),.TRUE.)
+  CALL unpack_vals(plan%nsend,plan%lsend,plan%SSBUF,y,mode,par)
+  IF(doloc)THEN
+    IF(ALLOCATED(plan%wt))THEN
+      CALL apply_weighted(plan%nloc,plan%lsrc,plan%wt,plan%SSBUF(plan%nsend+1:),y,mode,par)
+    ELSE
+      CALL unpack_vals(plan%nloc,plan%lsrc,plan%SSBUF(plan%nsend+1:),y,mode,par)
+    END IF
+  END IF
 ELSE
   CALL oft_abort('No operation in flight','scatter_unpack',__FILE__)
 END IF
-CONTAINS
-!> Unpack buffer entries into `y`, with weights for local entries
-SUBROUTINE unpack_vals(n,idx,buf,weighted)
-INTEGER(i4), INTENT(in) :: n !< Number of entries
-INTEGER(i4), INTENT(in) :: idx(:) !< Destination index of each entry
-ST, INTENT(in) :: buf(:) !< Buffer
-LOGICAL, INTENT(in) :: weighted !< Apply local weights (if allocated)?
-INTEGER(i4) :: k
-IF(weighted.AND.ALLOCATED(plan%wt))THEN
-  CALL apply_weighted(n,idx,plan%wt,buf,y,mode,par)
-ELSE IF(mode==OFT_SCATTER_ADD)THEN
-  IF(par)THEN
-    !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
-    DO k=1,n
-      y(idx(k))=y(idx(k))+buf(k)
-    END DO
-  ELSE
-    DO k=1,n
-      y(idx(k))=y(idx(k))+buf(k)
-    END DO
-  END IF
-ELSE
-  IF(par)THEN
-    !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
-    DO k=1,n
-      y(idx(k))=buf(k)
-    END DO
-  ELSE
-    DO k=1,n
-      y(idx(k))=buf(k)
-    END DO
-  END IF
-END IF
-END SUBROUTINE unpack_vals
 END SUBROUTINE s_unpack
 !---------------------------------------------------------------------------------
 !> Wait for all sends of the operation in flight on a plan and mark it complete
@@ -293,18 +211,20 @@ ST, INTENT(in) :: x(:) !< Source values
 ST, INTENT(inout) :: y(:) !< Destination values
 INTEGER(i4), INTENT(in) :: mode !< @ref oft_scatter_base::oft_scatter_insert "OFT_SCATTER_INSERT" or `OFT_SCATTER_ADD`
 LOGICAL, OPTIONAL, INTENT(in) :: reverse !< Reverse direction? (default forward)
-LOGICAL :: rev
+LOGICAL :: rev,send_par,recv_par
 INTEGER(i4) :: k,n
 rev=.FALSE.
 IF(PRESENT(reverse))rev=reverse
 n=plan%nloc
+send_par=plan%send_unique
+recv_par=plan%recv_unique
 IF(rev.AND.ALLOCATED(plan%wt))THEN
-  CALL apply_weighted_gather(n,plan%ldst,plan%lsrc,plan%wt,x,y,mode,plan%send_unique)
+  CALL apply_weighted_gather(n,plan%ldst,plan%lsrc,plan%wt,x,y,mode,send_par)
   RETURN
 END IF
 IF(rev)THEN
   IF(mode==OFT_SCATTER_ADD)THEN
-    IF(plan%send_unique)THEN
+    IF(send_par)THEN
       !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
       DO k=1,n
         y(plan%lsrc(k))=y(plan%lsrc(k))+x(plan%ldst(k))
@@ -315,14 +235,14 @@ IF(rev)THEN
       END DO
     END IF
   ELSE
-    !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.plan%send_unique)
+    !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.send_par)
     DO k=1,n
       y(plan%lsrc(k))=x(plan%ldst(k))
     END DO
   END IF
 ELSE
   IF(mode==OFT_SCATTER_ADD)THEN
-    IF(plan%recv_unique)THEN
+    IF(recv_par)THEN
       !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
       DO k=1,n
         y(plan%ldst(k))=y(plan%ldst(k))+x(plan%lsrc(k))
@@ -333,13 +253,111 @@ ELSE
       END DO
     END IF
   ELSE
-    !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.plan%recv_unique)
+    !$omp parallel do simd if(n>OFT_OMP_VTHRESH.AND.recv_par)
     DO k=1,n
       y(plan%ldst(k))=x(plan%lsrc(k))
     END DO
   END IF
 END IF
 END SUBROUTINE s_local
+!---------------------------------------------------------------------------------
+!> Pack `x(idx(k))` into `buf(k)`, sending zero where `mask(moff+k)` is false
+!---------------------------------------------------------------------------------
+SUBROUTINE pack_vals(n,idx,x,buf,moff,mask)
+INTEGER(i4), INTENT(in) :: n !< Number of entries
+INTEGER(i4), INTENT(in) :: idx(:) !< Source index of each entry [n]
+ST, INTENT(in) :: x(:) !< Source values
+ST, INTENT(inout) :: buf(:) !< Buffer [n]
+INTEGER(i4), INTENT(in) :: moff !< Offset of these entries in `mask`
+LOGICAL, OPTIONAL, INTENT(in) :: mask(:) !< Entries to send (zero otherwise) (optional)
+INTEGER(i4) :: k
+IF(PRESENT(mask))THEN
+  !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+  DO k=1,n
+    IF(mask(moff+k))THEN
+      buf(k)=x(idx(k))
+    ELSE
+      buf(k)=SZERO
+    END IF
+  END DO
+ELSE
+  !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+  DO k=1,n
+    buf(k)=x(idx(k))
+  END DO
+END IF
+END SUBROUTINE pack_vals
+!---------------------------------------------------------------------------------
+!> Unpack buffer entries, \f$ y_{idx(k)} \leftarrow b_k \f$ (insert or add)
+!---------------------------------------------------------------------------------
+SUBROUTINE unpack_vals(n,idx,buf,y,mode,par)
+INTEGER(i4), INTENT(in) :: n !< Number of entries
+INTEGER(i4), INTENT(in) :: idx(:) !< Destination index of each entry [n]
+ST, INTENT(in) :: buf(:) !< Values [n]
+ST, INTENT(inout) :: y(:) !< Destination values
+INTEGER(i4), INTENT(in) :: mode !< Insert or add
+LOGICAL, INTENT(in) :: par !< Destination indices are unique (thread)?
+INTEGER(i4) :: k
+IF(mode==OFT_SCATTER_ADD)THEN
+  IF(par)THEN
+    !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+    DO k=1,n
+      y(idx(k))=y(idx(k))+buf(k)
+    END DO
+  ELSE
+    DO k=1,n
+      y(idx(k))=y(idx(k))+buf(k)
+    END DO
+  END IF
+ELSE
+  IF(par)THEN
+    !$omp parallel do simd if(n>OFT_OMP_VTHRESH)
+    DO k=1,n
+      y(idx(k))=buf(k)
+    END DO
+  ELSE
+    DO k=1,n
+      y(idx(k))=buf(k)
+    END DO
+  END IF
+END IF
+END SUBROUTINE unpack_vals
+#ifdef HAVE_MPI
+!---------------------------------------------------------------------------------
+!> Post a receive from neighbour `jn` of a plan into `buf(js:js+n-1)`
+!---------------------------------------------------------------------------------
+SUBROUTINE post_recv(plan,jn,js,n,buf)
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+INTEGER(i4), INTENT(in) :: jn !< Neighbour
+INTEGER(i4), INTENT(in) :: js !< First buffer entry
+INTEGER(i4), INTENT(in) :: n !< Number of entries
+ST, INTENT(inout) :: buf(:) !< Buffer
+INTEGER(i4) :: ierr
+IF(n==0)THEN
+  plan%rreq(jn)=MPI_REQUEST_NULL
+  RETURN
+END IF
+CALL MPI_IRECV(buf(js:js+n-1),n,SMPI,plan%nbr(jn),plan%tag,oft_env%comm,plan%rreq(jn),ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','scatter_begin',__FILE__)
+END SUBROUTINE post_recv
+!---------------------------------------------------------------------------------
+!> Post a send of `buf(js:js+n-1)` to neighbour `jn` of a plan
+!---------------------------------------------------------------------------------
+SUBROUTINE post_send(plan,jn,js,n,buf)
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+INTEGER(i4), INTENT(in) :: jn !< Neighbour
+INTEGER(i4), INTENT(in) :: js !< First buffer entry
+INTEGER(i4), INTENT(in) :: n !< Number of entries
+ST, INTENT(inout) :: buf(:) !< Buffer
+INTEGER(i4) :: ierr
+IF(n==0)THEN
+  plan%sreq(jn)=MPI_REQUEST_NULL
+  RETURN
+END IF
+CALL MPI_ISEND(buf(js:js+n-1),n,SMPI,plan%nbr(jn),plan%tag,oft_env%comm,plan%sreq(jn),ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','scatter_begin',__FILE__)
+END SUBROUTINE post_send
+#endif
 !---------------------------------------------------------------------------------
 !> Weighted unpack of buffer entries, \f$ y_{idx(k)} \leftarrow w_k b_k \f$ (zero weights skipped)
 !---------------------------------------------------------------------------------

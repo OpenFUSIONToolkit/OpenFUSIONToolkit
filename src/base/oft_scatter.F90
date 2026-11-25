@@ -183,8 +183,10 @@ END IF
 plan%recv_unique=lists_unique(plan%lrecv,plan%ldst)
 plan%send_unique=lists_unique(plan%lsend,plan%lsrc)
 plan%setup=.TRUE.
-CONTAINS
+END SUBROUTINE scatter_plan_setup
+!---------------------------------------------------------------------------------
 !> Check whether the entries of two index lists are unique (combined)
+!---------------------------------------------------------------------------------
 FUNCTION lists_unique(la,lb) RESULT(unique)
 INTEGER(i4), INTENT(in) :: la(:) !< First list
 INTEGER(i4), INTENT(in) :: lb(:) !< Second list
@@ -208,7 +210,6 @@ DO j=1,SIZE(lb)
 END DO
 DEALLOCATE(seen)
 END FUNCTION lists_unique
-END SUBROUTINE scatter_plan_setup
 !---------------------------------------------------------------------------------
 !> Set up a purely local scatter plan (gather/scatter of a subset with optional weights)
 !!
