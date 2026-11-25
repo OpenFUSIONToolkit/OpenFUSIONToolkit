@@ -1250,8 +1250,9 @@ end subroutine vec_copy
 !!
 !! All vectors are processed in a single pass over row blocks (see
 !! @ref oft_native_kernels::nk_maxpy "nk_maxpy"), so each block of `self` is loaded
-!! once for all `n` updates. Terms are added in order of increasing `k`, giving the
-!! same result as `n` successive calls to `add`.
+!! once for all `n` updates. Terms are added in order of increasing `k`, as with `n`
+!! successive calls to `add`; results agree to rounding, but need not be bitwise equal
+!! (the compiler may contract the multiply-adds differently).
 !---------------------------------------------------------------------------------
 subroutine vec_maxpy(self,alpha,a,n)
 class(oft_native_vector), intent(inout) :: self !< Vector object

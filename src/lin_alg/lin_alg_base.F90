@@ -1140,9 +1140,10 @@ end subroutine vector_copy
 !!
 !! self = self + \f$ \sum_k \alpha_k a_k \f$
 !!
-!! Each entry is updated by adding the terms in order of increasing `k`, so the result
-!! is the same as `n` successive calls to `add`. This default implementation does
-!! exactly that.
+!! Each entry is updated by adding the terms in order of increasing `k`, as with `n`
+!! successive calls to `add`; this default implementation makes those calls.
+!! Implementations that fuse the updates add the terms in the same order, but may round
+!! differently (eg. with contracted multiply-adds), so results can differ in the last bits.
 !---------------------------------------------------------------------------------
 subroutine vector_maxpy(self,alpha,a,n)
 class(oft_vector), intent(inout) :: self !< Vector object

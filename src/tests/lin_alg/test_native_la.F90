@@ -98,6 +98,18 @@ ELSE
   IF(oft_env%head_proc)WRITE(*,'(3A,ES25.16)')'PASSED: ',name,' ',val
 END IF
 END SUBROUTINE check_exact
+! Check that a difference is within a few ulp of a scale (results whose rounding depends on
+! how the compiler contracts or vectorizes the arithmetic, eg. FMA)
+SUBROUTINE check_ulp(name,diff,scale)
+CHARACTER(LEN=*), INTENT(in) :: name
+REAL(r8), INTENT(in) :: diff,scale
+IF(.NOT.(diff<=8.d0*EPSILON(1.d0)*scale))THEN
+  nfail=nfail+1
+  IF(oft_env%head_proc)WRITE(*,'(3A,2ES25.16)')'FAILED: ',name,' ',diff,scale
+ELSE
+  IF(oft_env%head_proc)WRITE(*,'(3A,ES25.16)')'PASSED: ',name,' ',diff
+END IF
+END SUBROUTINE check_ulp
 ! Global maximum of |x_i - y_i| over all local entries (including shared entries)
 FUNCTION maxdiff(x,y) RESULT(d)
 CLASS(oft_vector), INTENT(inout) :: x,y
@@ -416,13 +428,14 @@ bvals=ieee_value(1.d0,ieee_quiet_nan)
 CALL y%release_local(bvals,OFT_ACCESS_WRITE,.FALSE.)
 CALL y%add(0.d0,1.d0,x)
 CALL check_exact('Add with gamma=0',maxdiff(x,y),0.d0)
-!---maxpy is bitwise identical to successive add calls
+!---maxpy matches successive add calls to within rounding (same order of operations, but
+!---compilers may contract the multiply-adds differently)
 CALL y%copy(x)
 CALL y%maxpy(alpha,vs,nv)
 DO k=1,nv
   CALL x%add(1.d0,alpha(k),vs(k)%f)
 END DO
-CALL check_exact('maxpy = successive add',maxdiff(x,y),0.d0)
+CALL check_ulp('maxpy = successive add',maxdiff(x,y),x%norm(3))
 !---mdot against individual dot products (self included in the list)
 CALL fill(x,0.29d0,-0.05d0)
 ws(1:nv-1)=vs(1:nv-1)
@@ -450,7 +463,7 @@ CALL cy%maxpy(calpha,cvs,nv)
 DO k=1,nv
   CALL cx%add((1.d0,0.d0),calpha(k),cvs(k)%f)
 END DO
-CALL check_exact('Complex maxpy = successive add',cmaxdiff(cx,cy),0.d0)
+CALL check_ulp('Complex maxpy = successive add',cmaxdiff(cx,cy),cx%norm(3))
 !---Complex mdot (conjugates self) against individual dot products
 cdots=cx%mdot(cvs,nv)
 DO k=1,nv
@@ -599,9 +612,14 @@ DO m=0,2
           CALL cy%add((0.d0,0.d0),(1.d0,0.d0),cx)
           CALL cy%stitch(0)
           CALL check_exact('Complex summation stitch consistent',cmaxdiff(cx,cy),0.d0)
+        ELSE IF(m==2)THEN
+          ! Sums of remote contributions, which the compiler may vectorize differently for
+          ! real and complex values
+          d=MAXVAL(ABS(cx%v-CMPLX(x%v,y%v,c8)))
+          CALL check_ulp('Complex stitch(2) matches real/imaginary parts',oft_mpi_max(d),cx%norm(3))
         ELSE
           d=MAXVAL(ABS(cx%v-CMPLX(x%v,y%v,c8)))
-          CALL check_exact('Complex stitch('//CHAR(48+m)//') matches real/imaginary parts',oft_mpi_max(d),0.d0)
+          CALL check_exact('Complex stitch(0) matches real/imaginary parts',oft_mpi_max(d),0.d0)
         END IF
       END SELECT
     END SELECT

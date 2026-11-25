@@ -494,7 +494,6 @@ ELSE
   CALL scatter_begin(self%plan,a,nolocal=(up_method==2))
 END IF
 CALL scatter_wait_recv(self%plan,a)
-ASSOCIATE(buf=>self%plan%rrbuf)
 SELECT CASE(up_method)
 CASE(0)
   !$omp parallel do private(k,tmp) if(self%nbe>OFT_OMP_VTHRESH)
@@ -502,14 +501,14 @@ CASE(0)
     IF(self%leo(e))CYCLE
     tmp=0.d0
     DO k=self%kcon(e),self%kcon(e+1)-1
-      tmp=tmp+buf(self%icon(k))
+      tmp=tmp+self%plan%rrbuf(self%icon(k))
     END DO
     a(self%lbe(e))=tmp
   END DO
 CASE(1)
   !$omp parallel do simd if(self%nsingle>OFT_OMP_VTHRESH)
   DO i=1,self%nsingle
-    a(self%lsingle(i))=a(self%lsingle(i))+buf(self%isingle(i))
+    a(self%lsingle(i))=a(self%lsingle(i))+self%plan%rrbuf(self%isingle(i))
   END DO
   !---Elements with three or more values: sum in ascending order
   IF(self%nmulti>0)THEN
@@ -520,7 +519,7 @@ CASE(1)
       self%rscratch(1)=a(self%lbe(e))
       DO k=self%kcon(e),self%kcon(e+1)-1
         n=n+1
-        self%rscratch(n)=buf(self%icon(k))
+        self%rscratch(n)=self%plan%rrbuf(self%icon(k))
       END DO
       !---Insertion sort (lists are short)
       DO k=2,n
@@ -543,12 +542,11 @@ CASE(2)
   DO e=1,self%nbe
     tmp=0.d0
     DO k=self%kcon(e),self%kloc(e)-1
-      tmp=tmp+buf(self%icon(k))
+      tmp=tmp+self%plan%rrbuf(self%icon(k))
     END DO
     a(self%lbe(e))=tmp
   END DO
 END SELECT
-END ASSOCIATE
 CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
 end subroutine global_stitch_r8
@@ -575,7 +573,6 @@ ELSE
   CALL scatter_begin(self%plan,a,nolocal=(up_method==2))
 END IF
 CALL scatter_wait_recv(self%plan,a)
-ASSOCIATE(buf=>self%plan%crbuf)
 SELECT CASE(up_method)
 CASE(0)
   !$omp parallel do private(k,tmp) if(self%nbe>OFT_OMP_VTHRESH)
@@ -583,14 +580,14 @@ CASE(0)
     IF(self%leo(e))CYCLE
     tmp=(0.d0,0.d0)
     DO k=self%kcon(e),self%kcon(e+1)-1
-      tmp=tmp+buf(self%icon(k))
+      tmp=tmp+self%plan%crbuf(self%icon(k))
     END DO
     a(self%lbe(e))=tmp
   END DO
 CASE(1)
   !$omp parallel do simd if(self%nsingle>OFT_OMP_VTHRESH)
   DO i=1,self%nsingle
-    a(self%lsingle(i))=a(self%lsingle(i))+buf(self%isingle(i))
+    a(self%lsingle(i))=a(self%lsingle(i))+self%plan%crbuf(self%isingle(i))
   END DO
   !---Elements with three or more values: sum in ascending order
   IF(self%nmulti>0)THEN
@@ -601,7 +598,7 @@ CASE(1)
       self%cscratch(1)=a(self%lbe(e))
       DO k=self%kcon(e),self%kcon(e+1)-1
         n=n+1
-        self%cscratch(n)=buf(self%icon(k))
+        self%cscratch(n)=self%plan%crbuf(self%icon(k))
       END DO
       !---Insertion sort (lists are short)
       DO k=2,n
@@ -625,12 +622,11 @@ CASE(2)
   DO e=1,self%nbe
     tmp=(0.d0,0.d0)
     DO k=self%kcon(e),self%kloc(e)-1
-      tmp=tmp+buf(self%icon(k))
+      tmp=tmp+self%plan%crbuf(self%icon(k))
     END DO
     a(self%lbe(e))=tmp
   END DO
 END SELECT
-END ASSOCIATE
 CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
 end subroutine global_stitch_c8
