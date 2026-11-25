@@ -1,3 +1,11 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Regression tests for the cell-adjacency overlap builder (test_cell_overlap.F90),
+# checked against brute-force cell layering serially and on several processes
+#------------------------------------------------------------------------------
 import os
 import sys
 import pytest

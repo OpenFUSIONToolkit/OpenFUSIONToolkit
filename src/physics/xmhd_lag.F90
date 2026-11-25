@@ -2513,7 +2513,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 allocate(ml_J(xmhd_ML_lagrange%nlevels-xmhd_minlev+1),ml_int(xmhd_ML_lagrange%nlevels-xmhd_minlev))
 allocate(oft_xmhd_ops_ML(xmhd_ML_lagrange%nlevels))
-allocate(xmhd_cell_ovl(xmhd_ML_lagrange%nlevels))
+ALLOCATE(xmhd_cell_ovl(xmhd_ML_lagrange%nlevels))
 xmhd_blevel=xmhd_ML_lagrange%blevel
 xmhd_nlevels=xmhd_ML_lagrange%nlevels
 xmhd_level=xmhd_ML_lagrange%level

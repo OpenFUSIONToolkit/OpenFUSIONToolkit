@@ -1,3 +1,12 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Regression tests for the native Schwarz preconditioner in cell mode
+# (test_cell_schwarz.F90), run serially and on 2 and 4 processes, on plain and
+# x-periodic cubes
+#------------------------------------------------------------------------------
 import os
 import sys
 import pytest

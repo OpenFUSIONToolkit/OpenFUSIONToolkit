@@ -983,7 +983,7 @@ ABSTRACT INTERFACE
   END SUBROUTINE oft_veccreate_proto
 END INTERFACE
 !---Declare public entities
-public vector_extrapolate, overlap_dofs_delete
+PUBLIC vector_extrapolate, overlap_dofs_delete
 contains
 !---------------------------------------------------------------------------------
 !> Release resources of a cell overlap builder (default: nothing to do)

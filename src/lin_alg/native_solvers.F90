@@ -2640,6 +2640,11 @@ end subroutine bjprecond_delete
 !! `overlap` layers, across processes) is solved with the sub-solver and combined
 !! restricted (owned rows taken from the local subdomain, then synchronized) or
 !! additively (sum over subdomains).
+!!
+!! The subdomains are set up on the first application and refreshed after an update,
+!! here, without a thread-safe lazy-initialization guard: setup and application both
+!! exchange data between processes, so this must be called by all processes from
+!! serial code (never inside an OpenMP parallel region).
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE schwarz_apply(self,u,g)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
@@ -2843,6 +2848,9 @@ END SUBROUTINE schwarz_cell_setup
 !!   synchronized from their owners.
 !! - additive: block solutions are summed on the subdomain (serially, in block order,
 !!   as blocks overlap), then summed over subdomains of all processes.
+!!
+!! As for @ref schwarz_apply, setup and update are collective and not guarded for
+!! concurrent callers: call from serial code on all processes.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE schwarz_cell_apply(self,A_native,u,g)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
@@ -2950,7 +2958,7 @@ END SUBROUTINE schwarz_update
 !! (`point`, default, `edge` or `face`) and `base_layers` (default -1, builder
 !! default). `overlap` and `base_layers` take one value or one per level.
 !------------------------------------------------------------------------------
-subroutine schwarz_setup_xml(self,solver_node,level)
+SUBROUTINE schwarz_setup_xml(self,solver_node,level)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
@@ -3059,13 +3067,13 @@ IF(oft_debug_print(1))THEN
   END IF
 END IF
 DEBUG_STACK_POP
-end subroutine schwarz_setup_xml
+END SUBROUTINE schwarz_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy Schwarz preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine schwarz_delete(self,propogate)
-class(oft_schwarz_precond), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+SUBROUTINE schwarz_delete(self,propogate)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Update matrix non-zero pattern? (optional)
 DEBUG_STACK_PUSH
 !---Cell mode: blocks (submatrices of the subdomain matrix) before the subdomain
 IF(ASSOCIATED(self%cdofs))THEN
@@ -3095,7 +3103,7 @@ END IF
 CALL bjprecond_delete(self,propogate)
 self%overlap_levels=-1
 DEBUG_STACK_POP
-end subroutine schwarz_delete
+END SUBROUTINE schwarz_delete
 !------------------------------------------------------------------------------
 !> Setup Block-Jacobi preconditioner for a native dense complex matrix
 !!
