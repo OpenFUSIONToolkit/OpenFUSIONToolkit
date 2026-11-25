@@ -19,8 +19,9 @@
 !!   DOFs) matches the assembled matrix, global indices map back to subdomain indices,
 !!   and submatrices of the subdomain matrix follow its values through updates
 !! - Updating the preconditioner after the operator values change
-!! - GMRES iteration counts with restricted and additive Schwarz for 0, 1 and 2
-!!   overlap layers (written to `schwarz.results` for checking by the driver)
+!! - GMRES iteration counts with restricted, additive and weighted (partition of
+!!   unity) additive Schwarz for 0, 1 and 2 overlap layers (written to
+!!   `schwarz.results` for checking by the driver)
 !!
 !! All cases also run on partially periodic meshes, where a process holds several images
 !! of the DOFs on periodic seams. On fully periodic meshes the Laplacian is singular
@@ -46,7 +47,7 @@ USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
-INTEGER(i4) :: io_unit,nfail,its(8)
+INTEGER(i4) :: io_unit,nfail,its(11)
 INTEGER(i4), PARAMETER :: order=3
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
@@ -118,19 +119,22 @@ its(2)=solve(1,1,.FALSE.,.TRUE.,v)
 its(3)=solve(1,2,.FALSE.,.TRUE.,v)
 its(4)=solve(1,1,.TRUE.,.TRUE.,v)
 its(5)=solve(1,2,.TRUE.,.TRUE.,v)
+its(9)=solve(1,1,.TRUE.,.TRUE.,v,weighted=.TRUE.)
+its(10)=solve(1,2,.TRUE.,.TRUE.,v,weighted=.TRUE.)
 !---Numeric update of the subdomain matrices after the operator values change
 CALL check_update()
 !---Several blocks per process: no overlap, additive and restricted with overlap 1
 its(6)=solve(4,0,.TRUE.,.TRUE.,v)
 its(7)=solve(4,1,.TRUE.,.TRUE.,v)
 its(8)=solve(4,1,.FALSE.,.TRUE.,v)
+its(11)=solve(4,1,.TRUE.,.TRUE.,v,weighted=.TRUE.)
 CALL write_results()
 CALL oft_finalize
 CONTAINS
 ! Write the number of failed checks and the iteration counts for the driver
 SUBROUTINE write_results()
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,8I6)')'Iterations: ',its
+  WRITE(*,'(A,11I6)')'Iterations: ',its
   OPEN(NEWUNIT=io_unit,FILE='schwarz.results')
   WRITE(io_unit,*)nfail
   WRITE(io_unit,*)its
@@ -138,11 +142,13 @@ IF(oft_env%head_proc)THEN
 END IF
 END SUBROUTINE write_results
 ! Solve the Laplace problem with GMRES preconditioned by block-Jacobi (schwarz=.FALSE.,
-! with loverlap if overlap>0) or Schwarz, returning the iteration count
-FUNCTION solve(nlocal,overlap,additive,schwarz,x) RESULT(nits)
+! with loverlap if overlap>0) or Schwarz (weighted: partition of unity additive),
+! returning the iteration count
+FUNCTION solve(nlocal,overlap,additive,schwarz,x,weighted) RESULT(nits)
 INTEGER(i4), INTENT(in) :: nlocal,overlap
 LOGICAL, INTENT(in) :: additive,schwarz
 CLASS(oft_vector), INTENT(inout) :: x
+LOGICAL, OPTIONAL, INTENT(in) :: weighted
 INTEGER(i4) :: nits
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_bjprecond), TARGET :: bj
@@ -161,6 +167,7 @@ IF(schwarz)THEN
   sw%nlocal=nlocal
   sw%overlap=overlap
   sw%additive=additive
+  IF(PRESENT(weighted))sw%weighted=weighted
   sw%pre=>sub
   linv%pre=>sw
 ELSE

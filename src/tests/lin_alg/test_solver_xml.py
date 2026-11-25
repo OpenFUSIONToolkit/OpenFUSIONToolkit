@@ -209,8 +209,9 @@ def test_gmres_petsc_gasm_node_mpi(nlocal, overlap, iteration_count):
 
 #============================================================================
 # Native overlapping Schwarz selected from XML: blocks within the process grown by one layer
-# (plain additive combination counts overlap rows twice, hence more iterations)
-@pytest.mark.parametrize("schwarz_type", ("restricted", "additive"))
+# (plain additive combination counts overlap rows twice, hence more iterations; partition of
+# unity weights avoid this)
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
 def test_gmres_schwarz(schwarz_type):
     xml_file = """
     <solver type="gmres">
@@ -224,16 +225,39 @@ def test_gmres_schwarz(schwarz_type):
         </pre>
     </solver>
     """.format(schwarz_type)
-    iteration_count = {"restricted": 58, "additive": 102}[schwarz_type]
+    iteration_count = {"restricted": 58, "additive": 102, "weighted": 59}[schwarz_type]
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native overlapping Schwarz selected from XML: one subdomain per process grown by one layer
+# across processes
+@pytest.mark.mpi
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
+def test_gmres_schwarz_mpi2(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>1</nlocal>
+            <overlap>1</overlap>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 0, "additive": 0, "weighted": 0}[schwarz_type]
+    converged_error = 0.6394036978170452
+    assert xml_setup(xml_file,petsc=False,nprocs=2)
     assert validate_result(iteration_count,converged_error)
 
 #============================================================================
 # Native Schwarz in cell mode selected from XML: 4 blocks (from the cell overlap builder
 # attached to the matrix) grown by one layer of face-adjacent cells (with ILU sub-solves the
 # counts are close to graph mode; the overlap trends are checked in test_cell_schwarz)
-@pytest.mark.parametrize("schwarz_type", ("restricted", "additive"))
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
 def test_gmres_schwarz_cell(schwarz_type):
     xml_file = """
     <solver type="gmres">
@@ -249,7 +273,7 @@ def test_gmres_schwarz_cell(schwarz_type):
         </pre>
     </solver>
     """.format(schwarz_type)
-    iteration_count = {"restricted": 58, "additive": 100}[schwarz_type]
+    iteration_count = {"restricted": 58, "additive": 100, "weighted": 0}[schwarz_type]
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False,cell_parts=4)
     assert validate_result(iteration_count,converged_error)

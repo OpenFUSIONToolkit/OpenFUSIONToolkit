@@ -12,11 +12,14 @@
 !! The current test cases are:
 !! - Exactness: with enough layers for every block to cover the whole mesh, restricted
 !!   Schwarz with direct sub-solves converges in one GMRES iteration to the reference
-!!   solution; additive Schwarz converges. With one block per process the same holds in
-!!   graph mode with enough graph layers for every subdomain to cover the mesh
+!!   solution, and so does weighted (partition of unity) additive Schwarz; additive
+!!   Schwarz converges. With one block per process the same holds in graph mode with
+!!   enough graph layers for every subdomain to cover the mesh
 !! - GMRES iteration counts for 0, 1 and 2 layers with point, edge and face adjacency,
 !!   next to graph overlap 0, 1 and 2 (written to `cell_schwarz.results` for checking
 !!   by the driver)
+!! - GMRES iteration count of weighted additive Schwarz with one layer of point
+!!   adjacent cells
 !! - Numeric update after the operator values change matches a fresh setup
 !! - Delete and re-setup (and an update with a new pattern) reproduce the first solve
 !!
@@ -42,7 +45,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
 IMPLICIT NONE
-INTEGER(i4), PARAMETER :: nres=19
+INTEGER(i4), PARAMETER :: nres=21
 INTEGER(i4) :: io_unit,ierr,nfail,ip,order=3
 INTEGER(i4) :: its(nres,2)
 INTEGER(i4), PARAMETER :: nparts_list(2)=[1,3]
@@ -89,7 +92,7 @@ IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='cell_schwarz.results')
   WRITE(io_unit,*)nfail
   DO ip=1,2
-    WRITE(*,'(A,I2,A,19I5)')'nparts=',nparts_list(ip),' results: ',its(:,ip)
+    WRITE(*,'(A,I2,A,21I5)')'nparts=',nparts_list(ip),' results: ',its(:,ip)
     WRITE(io_unit,*)its(:,ip)
   END DO
   CLOSE(io_unit)
@@ -100,7 +103,9 @@ CONTAINS
 ! 1: layers covering the mesh, 2-3: restricted/additive iterations with those layers,
 ! 4-12: cell mode iterations for (point, edge, face) x layers 0-2,
 ! 13-15: graph overlap 0-2, 16: iterations before update, 17: after update,
-! 18: after delete and re-setup, 19: after update with new pattern
+! 18: after delete and re-setup, 19: after update with new pattern,
+! 20: weighted additive iterations with covering layers, 21: weighted additive with
+! one layer of point adjacent cells
 SUBROUTINE run_cases(nparts,res)
 INTEGER(i4), INTENT(in) :: nparts
 INTEGER(i4), INTENT(out) :: res(nres)
@@ -135,6 +140,9 @@ CALL check_tol('Exact blocks, restricted: solution'//tag,maxdiff(v,x)/maxabs(x),
 res(3)=solve(nparts,kfull,.TRUE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm)
 CALL check_tol('Exact blocks, additive: converged'//tag,rnorm,1.d-9)
 CALL check_tol('Exact blocks, additive: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-6)
+res(20)=solve(nparts,kfull,.TRUE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm,weighted=.TRUE.)
+CALL check_exact('Exact blocks, weighted: 1 iteration'//tag,REAL(res(20),r8),1.d0)
+CALL check_tol('Exact blocks, weighted: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-8)
 !---Graph mode exactness (one subdomain per process: graph growth crosses processes)
 IF(nparts==1)THEN
   kfull=graph_cover()
@@ -155,6 +163,9 @@ DO ia=1,3
     CALL check_tol('Cell mode solution'//tag,maxdiff(v,x)/maxabs(x),1.d-5)
   END DO
 END DO
+res(21)=solve(nparts,1,.TRUE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm,weighted=.TRUE.)
+CALL check_tol('Cell mode weighted converged'//tag,rnorm,1.d-9)
+CALL check_tol('Cell mode weighted solution'//tag,maxdiff(v,x)/maxabs(x),1.d-5)
 CALL timing('Cell mode counts',tag,t0)
 DO k=0,2
   res(13+k)=solve(nparts,k,.FALSE.,OFT_CELL_ADJ_POINT,.FALSE.,v,rnorm)
@@ -196,12 +207,14 @@ t0=omp_get_wtime()
 END SUBROUTINE timing
 ! Solve the Laplace problem with GMRES preconditioned by Schwarz (cell or graph mode)
 ! with direct sub-solves, returning the iteration count and relative residual
-FUNCTION solve(nlocal,overlap,cell,adj,additive,y,rnorm,rtol) RESULT(nits)
+! (weighted: partition of unity additive)
+FUNCTION solve(nlocal,overlap,cell,adj,additive,y,rnorm,rtol,weighted) RESULT(nits)
 INTEGER(i4), INTENT(in) :: nlocal,overlap,adj
 LOGICAL, INTENT(in) :: cell,additive
 CLASS(oft_vector), INTENT(inout) :: y
 REAL(r8), INTENT(out) :: rnorm
 REAL(r8), OPTIONAL, INTENT(in) :: rtol
+LOGICAL, OPTIONAL, INTENT(in) :: weighted
 INTEGER(i4) :: nits
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_schwarz_precond), TARGET :: sw
@@ -214,6 +227,7 @@ sub%package='native'
 #endif
 CALL gmres_init(linv,sw,sub,nlocal,overlap,cell,adj,additive)
 IF(PRESENT(rtol))linv%rtol=rtol
+IF(PRESENT(weighted))sw%weighted=weighted
 CALL y%set(0.d0)
 CALL g%copy(g0)
 CALL linv%apply(y,g)

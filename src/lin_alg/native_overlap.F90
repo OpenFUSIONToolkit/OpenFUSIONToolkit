@@ -18,7 +18,7 @@
 !!   exchange.
 !!
 !! Both share the remaining steps: completion of the owned rows, numbering, subdomain
-!! matrix (`amat`, R A Rᵀ of the complete rows) and vector plans. The subdomain matrix
+!! matrix (`amat`, R A R^T of the complete rows) and vector plans. The subdomain matrix
 !! also holds a current full local matrix (`Mfull`, skip linkage), so it can be the
 !! parent of @ref oft_native_la::oft_native_submatrix "oft_native_submatrix" blocks;
 !! global indices are mapped to subdomain indices with @ref native_overlap_index.
@@ -97,6 +97,10 @@ TYPE, PUBLIC :: oft_native_overlap
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: gperm !< Subdomain index of each entry of `gsorted` [n]
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: cvals !< Complete owned rows, then rows received from owners
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: acc !< Accumulation storage for additive write-back [nr]
+  !> Partition of unity weight of each local row: one over the number of subdomain
+  !! contributions to its DOF (weighted additive write-back, see
+  !! @ref native_overlap_pu_setup) [nr]
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: wpu
   TYPE(oft_scatter_plan) :: plan_rows !< Local `Mfull` values to complete owned rows (`cvals(1:ncr)`)
   TYPE(oft_scatter_plan) :: plan_ghost !< Complete owned rows to rows of non-owned subdomain DOFs
   TYPE(oft_scatter_plan) :: plan_vals !< Row values (`cvals`) to subdomain matrix values
@@ -107,7 +111,7 @@ TYPE, PUBLIC :: oft_native_overlap
   TYPE(oft_seam), POINTER :: seam => NULL() !< Seam of the parent row space
 END TYPE oft_native_overlap
 PUBLIC native_overlap_setup, native_overlap_setup_dofs, native_overlap_update, native_overlap_gather
-PUBLIC native_overlap_scatter, native_overlap_index, native_overlap_delete
+PUBLIC native_overlap_scatter, native_overlap_pu_setup, native_overlap_index, native_overlap_delete
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up an overlapping subdomain of a distributed native matrix (collective)
@@ -1048,17 +1052,28 @@ END SUBROUTINE native_overlap_gather
 !!   local entries are left unchanged and must be synchronized by the caller
 !!   (`stitch(0)`).
 !! - `additive=.TRUE.`: `x` is set to the sum over all subdomains containing each DOF
-!!   (contributions of ghosts are added on their owner, local contributions are
-!!   summed across copies with `stitch(1)`), consistent on all copies.
+!!   (contributions of ghosts are added on their owner, local contributions to the
+!!   representative row, then summed across copies and periodic images with
+!!   `stitch(1)`), consistent on all copies.
+!! - `additive=.TRUE.` and `weighted=.TRUE.`: as for `additive`, with each contribution
+!!   to a DOF scaled by its partition of unity weight (`wpu`, built with one
+!!   contribution per subdomain by @ref native_overlap_pu_setup if not set up before).
+!!   The weight of a DOF is the same in every contribution, so it is applied once to
+!!   the summed value.
 !---------------------------------------------------------------------------------
-SUBROUTINE native_overlap_scatter(self,xs,x,additive)
+SUBROUTINE native_overlap_scatter(self,xs,x,additive,weighted)
 TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
 REAL(r8), INTENT(in) :: xs(:) !< Subdomain values [n]
 REAL(r8), INTENT(inout) :: x(:) !< Local values of the distributed vector [nr]
 LOGICAL, INTENT(in) :: additive !< Sum contributions of all subdomains?
+LOGICAL, OPTIONAL, INTENT(in) :: weighted !< Weight additive contributions by a partition of unity? (default: no)
 INTEGER(i4) :: i
+LOGICAL :: pu
 DEBUG_STACK_PUSH
+pu=.FALSE.
+IF(PRESENT(weighted))pu=weighted
 IF(additive)THEN
+  IF(pu.AND.(.NOT.ALLOCATED(self%wpu)))CALL native_overlap_pu_setup(self)
   !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
   DO i=1,self%nr
     self%acc(i)=0.d0
@@ -1066,15 +1081,51 @@ IF(additive)THEN
   CALL scatter_begin(self%plan_vec,xs,reverse=.TRUE.)
   CALL scatter_end(self%plan_vec,self%acc,OFT_SCATTER_ADD)
   CALL oft_global_stitch(self%seam,self%acc,1)
-  !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
-  DO i=1,self%nr
-    x(i)=self%acc(i)
-  END DO
+  IF(pu)THEN
+    !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
+    DO i=1,self%nr
+      x(i)=self%wpu(i)*self%acc(i)
+    END DO
+  ELSE
+    !$omp parallel do simd if(self%nr>OFT_OMP_VTHRESH)
+    DO i=1,self%nr
+      x(i)=self%acc(i)
+    END DO
+  END IF
 ELSE
   CALL scatter_local(self%plan_own,xs,x,OFT_SCATTER_INSERT,reverse=.TRUE.)
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE native_overlap_scatter
+!---------------------------------------------------------------------------------
+!> Build the partition of unity weights of the local rows (collective)
+!!
+!! Counts the contributions to each DOF over all subdomains, summed like an additive
+!! write-back (@ref native_overlap_scatter), and stores the inverse counts in `wpu`.
+!! Each subdomain DOF contributes `mult` (eg. the number of blocks of the subdomain
+!! containing it), or one if `mult` is not given.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_overlap_pu_setup(self,mult)
+TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
+REAL(r8), OPTIONAL, INTENT(in) :: mult(:) !< Contributions of each subdomain DOF [n] (default: 1)
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: cnt
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+ALLOCATE(cnt(MAX(1,self%n)))
+cnt=1.d0
+IF(PRESENT(mult).AND.(self%n>0))cnt(1:self%n)=mult(1:self%n)
+IF(.NOT.ALLOCATED(self%wpu))ALLOCATE(self%wpu(self%nr))
+self%wpu=0.d0
+CALL scatter_begin(self%plan_vec,cnt,reverse=.TRUE.)
+CALL scatter_end(self%plan_vec,self%wpu,OFT_SCATTER_ADD)
+CALL oft_global_stitch(self%seam,self%wpu,1)
+DO i=1,self%nr
+  IF(self%wpu(i)<0.5d0)CALL oft_abort('Row outside all subdomains','native_overlap_pu_setup',__FILE__)
+  self%wpu(i)=1.d0/self%wpu(i)
+END DO
+DEALLOCATE(cnt)
+DEBUG_STACK_POP
+END SUBROUTINE native_overlap_pu_setup
 !---------------------------------------------------------------------------------
 !> Release all storage of an overlap object
 !---------------------------------------------------------------------------------
@@ -1087,6 +1138,7 @@ IF(ALLOCATED(self%gsorted))DEALLOCATE(self%gsorted)
 IF(ALLOCATED(self%gperm))DEALLOCATE(self%gperm)
 IF(ALLOCATED(self%cvals))DEALLOCATE(self%cvals)
 IF(ALLOCATED(self%acc))DEALLOCATE(self%acc)
+IF(ALLOCATED(self%wpu))DEALLOCATE(self%wpu)
 CALL scatter_plan_delete(self%plan_rows)
 CALL scatter_plan_delete(self%plan_ghost)
 CALL scatter_plan_delete(self%plan_vals)

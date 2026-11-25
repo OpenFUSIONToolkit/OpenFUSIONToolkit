@@ -35,7 +35,8 @@ oft_in_template = """
 #  0: layers for every block to cover the mesh, 1-2: restricted/additive iterations with them,
 #  3-11: cell mode iterations for (point, edge, face) x layers 0-2,
 #  12-14: graph overlap 0-2, 15: before update, 16: after update, 17: after delete and
-#  re-setup, 18: after update with a new pattern
+#  re-setup, 18: after update with a new pattern, 19: weighted additive iterations with the
+#  covering layers, 20: weighted additive with one layer of point adjacent cells
 def run_cell_schwarz(nprocs, nlevels, order, timeout=600, ref_per='F,F,F'):
     os.chdir(test_dir)
     if os.path.isfile('cell_schwarz.results'):
@@ -69,6 +70,10 @@ def check_counts(its, expected):
         assert row[4] <= row[13]
         # Update matches a fresh setup (checked in the test), re-setup and rebuild reproduce
         assert row[17] == row[15] and row[18] == row[15]
+        # Weighted additive: exact with covering blocks (checked in the test), and one layer
+        # within 5% of the expected count
+        assert row[19] == 1
+        assert abs(row[20]-ref[20]) <= max(1, 0.05*ref[20])
 
 # Expected values (OMP_NUM_THREADS=2; counts may differ by one with the thread count, as the
 # reductions and so the final residuals differ in round-off): (nprocs, nlevels, order) -> rows

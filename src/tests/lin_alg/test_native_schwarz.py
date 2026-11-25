@@ -46,17 +46,21 @@ def run_schwarz(nprocs, ref_per='F,F,F'):
     return its
 
 def check_overlap_iterations(its):
-    # One subdomain per process: restricted (its[0:3]) and additive (its[0], its[3:5]) counts
-    # must not increase with overlap; four blocks per process: restricted overlap 1 (its[7])
-    # against no overlap (its[5]). Plain additive combination of overlapping blocks within a
-    # process (its[6]) counts overlap rows twice and need not improve on block-Jacobi, so it is
-    # only required to converge.
+    # One subdomain per process: restricted (its[0:3]), additive (its[0], its[3:5]) and
+    # weighted additive (its[0], its[8:10]) counts must not increase with overlap; four blocks
+    # per process: restricted (its[7]) and weighted additive (its[10]) overlap 1 against no
+    # overlap (its[5]). Plain additive combination of overlapping blocks within a process
+    # (its[6]) counts overlap rows twice and need not improve on block-Jacobi, so it is only
+    # required to converge.
     print("Iterations: ", its)
     assert its[1] <= its[0]
     assert its[2] <= its[1]
     assert its[3] <= its[0]
     assert its[4] <= its[3]
     assert its[7] <= its[5]
+    assert its[8] <= its[0]
+    assert its[9] <= its[8]
+    assert its[10] <= its[5]
 
 @pytest.mark.coverage
 def test_schwarz():
