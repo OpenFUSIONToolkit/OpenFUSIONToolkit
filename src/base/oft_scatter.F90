@@ -62,7 +62,13 @@
 !!
 !! An index set (@ref oft_scatter_base::oft_index_set "oft_index_set") is a sorted list
 !! of unique local indices, with growth along the edges of a graph for overlapping
-!! subdomains.
+!! subdomains (no MPI).
+!!
+!! Setup of plans whose index lists are computed from data on other processes (eg.
+!! overlapping subdomains) exchanges index data with the collective
+!! @ref oft_scatter_base::oft_exchange_i8 "oft_exchange_i8". Like the communicating
+!! plan operations it must be called from serial code (not inside a parallel region),
+!! by all processes in the same order.
 !!
 !! @authors Chris Hansen
 !! @date November 2026
@@ -86,8 +92,6 @@ INTEGER(i4), PUBLIC, PARAMETER :: OFT_SCATTER_ADD = 1
 INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_STITCH = 101
 !> Default MPI tag for general scatter plans
 INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_SCATTER = 102
-!> MPI tag for setup-time exchanges of index and matrix data between processes
-INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_SETUP = 103
 !> Number of values sent to other processes by @ref oft_exchange_i8 on this process
 !! (cumulative; setup diagnostics, see @ref oft_exchange_report)
 INTEGER(i8), PUBLIC :: oft_exchange_nsent = 0
@@ -143,7 +147,7 @@ TYPE, PUBLIC :: oft_scatter_plan
 #endif
 END TYPE oft_scatter_plan
 PUBLIC scatter_plan_setup, scatter_plan_setup_local, scatter_plan_delete, scatter_plan_check, scatter_plan_inflight
-PUBLIC index_set_create, index_set_delete, index_set_grow, index_set_map, index_set_contains
+PUBLIC index_set_create, index_set_delete, index_set_grow
 PUBLIC oft_exchange_i8, oft_exchange_report
 CONTAINS
 !---------------------------------------------------------------------------------
@@ -425,48 +429,12 @@ END DO
 DEALLOCATE(inset)
 END SUBROUTINE index_set_grow
 !---------------------------------------------------------------------------------
-!> Position of each index in an index set (inverse map)
-!!
-!! `map(i)` is the position of `i` in `set%ind`, or 0 if `i` is not in the set.
-!---------------------------------------------------------------------------------
-SUBROUTINE index_set_map(set,n,map)
-TYPE(oft_index_set), INTENT(in) :: set !< Index set
-INTEGER(i4), INTENT(in) :: n !< Size of index range
-INTEGER(i4), INTENT(out) :: map(n) !< Position in set (0 if absent) [n]
-INTEGER(i4) :: i
-map=0
-DO i=1,set%n
-  map(set%ind(i))=i
-END DO
-END SUBROUTINE index_set_map
-!---------------------------------------------------------------------------------
-!> Check whether an index is in an index set (binary search)
-!---------------------------------------------------------------------------------
-PURE FUNCTION index_set_contains(set,i) RESULT(pos)
-TYPE(oft_index_set), INTENT(in) :: set !< Index set
-INTEGER(i4), INTENT(in) :: i !< Index to look for
-INTEGER(i4) :: pos !< Position in set (0 if absent)
-INTEGER(i4) :: ilow,ihigh,imid
-pos=0
-ilow=1
-ihigh=set%n
-DO WHILE(ilow<=ihigh)
-  imid=(ilow+ihigh)/2
-  IF(set%ind(imid)==i)THEN
-    pos=imid
-    RETURN
-  ELSE IF(set%ind(imid)<i)THEN
-    ilow=imid+1
-  ELSE
-    ihigh=imid-1
-  END IF
-END DO
-END FUNCTION index_set_contains
-!---------------------------------------------------------------------------------
 !> Exchange int8 data grouped by process with every other process (collective)
 !!
 !! `scnt(q)` values of `sbuf` (grouped by process in increasing rank order) go to
 !! process `q`; `rbuf` receives the values sent to this process, grouped likewise.
+!! Uses `MPI_ALLTOALL`/`MPI_ALLTOALLV`, so it must be called from serial code by all
+!! processes (see the MPI rules in @ref oft_scatter.F90).
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_exchange_i8(scnt,sbuf,rcnt,rbuf)
 INTEGER(i4), INTENT(in) :: scnt(0:) !< Number of values sent to each process
@@ -504,7 +472,7 @@ END SUBROUTINE oft_exchange_i8
 !! process, the maximum over processes of the time since the last `tick`/`tock` of
 !! `timer`, and the total and maximum over processes of the number of int8 values sent
 !! to other processes by @ref oft_exchange_i8 since `nsent0` (a previous value of
-!! @ref oft_exchange_nsent). Must be called by all processes.
+!! @ref oft_exchange_nsent). Must be called by all processes, from serial code.
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_exchange_report(label,timer,nsent0)
 CHARACTER(LEN=*), INTENT(in) :: label !< Name of the phase
