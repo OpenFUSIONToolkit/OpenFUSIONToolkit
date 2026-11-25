@@ -122,7 +122,7 @@ class Expander:
         if line.lstrip().startswith('!'):
             # An apostrophe in a comment is taken as an unterminated character literal by
             # Doxygen's preprocessor, which then drops the following directives and code
-            return substitute(line, self.macros).replace("'", '’')
+            return substitute(line, self.macros).replace("'", '\u2019')
         return substitute(line, self.macros)
 
 
