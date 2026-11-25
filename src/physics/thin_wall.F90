@@ -155,9 +155,18 @@ TYPE :: tw_type
   REAL(r8), POINTER, DIMENSION(:) :: Eta_vol => NULL() !< Resistivity values for each region, divided by mu0 [nreg].
   REAL(r8), POINTER, DIMENSION(:) :: Thickness => NULL() !< Thickness values for each region [nreg]. Units: meters
   REAL(r8), POINTER, DIMENSION(:) :: Eta_surf => NULL() !< Surface resistivity (eta/thickness) values for each region, divided by mu0 [nreg].
+  LOGICAL :: cm_dist = .FALSE. !< Are the element coupling matrices (Ael2coil, Ael2dr, Ael2sen) distributed over processors?
+  INTEGER(i4) :: cm_nexp = -1 !< Number of (expanded) element rows of the coupling matrices stored on this processor
+  INTEGER(i4) :: cm_nred = -1 !< Number of model unknowns owned by this processor for the coupling matrices
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cm_exp => NULL() !< Expanded elements stored on this processor [cm_nexp]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cm_red => NULL() !< Model unknowns owned by this processor [cm_nred]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cm_expmap => NULL() !< Local index of each expanded element (0: not stored) [nelems_exp]
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_primary => NULL() !< Is this processor the primary owner of each stored element? [cm_nexp]
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_cell => NULL() !< Cells contributing to the stored elements [mesh%nc]
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_cell_primary => NULL() !< Cells counted on this processor for diagnostics [mesh%nc]
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2dr => NULL() !< Element to driver (icoils) coupling matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix (rows: cm_exp)
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix (columns: cm_exp, or cm_red once reduced)
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
@@ -212,6 +221,7 @@ TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules o
 LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
 integer(i4), public, parameter :: tw_cache_ver=4 !< Version of cached matrix files (increment when a change invalidates existing caches)
+integer(i4), parameter :: tw_cm_cache_fmt=2 !< Format of coil and sensor coupling cache files (distributed element blocks)
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 !------------------------------------------------------------------------------
 !> Rows and columns of a matrix block for ACA+ (@ref tw_aca_plus)
@@ -360,8 +370,8 @@ INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
 TYPE(xml_node) :: coil_element
 !---
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
 CALL tw_quads_setup
 CALL mesh_global_resolution(self%mesh)
@@ -379,10 +389,10 @@ IF(coils_xml)THEN
   !---Read V(t) driver coils from XML file
   CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
   IF(error_flag==0)THEN
-    WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils from XML file'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils from XML file'
     CALL tw_load_coils_xml(coil_element,0,self%n_vcoils,self%vcoils)
   ELSE
-    WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
   END IF
   DO i=1,self%n_vcoils
     IF(ANY(self%vcoils(i)%res_per_len<0.d0))CALL oft_abort("Invalid resistivity for passive coil", &
@@ -393,10 +403,10 @@ IF(coils_xml)THEN
   !---Read I(t) driver coils from XML file
   CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
   IF(error_flag==0)THEN
-    WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils from XML file'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils from XML file'
     CALL tw_load_coils_xml(coil_element,self%n_vcoils,self%n_icoils,self%icoils)
   ELSE
-    WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
   END IF
   DO i=1,self%n_icoils
     DO j=1,self%icoils(i)%ncoils
@@ -437,15 +447,15 @@ njholes=0
 IF(ASSOCIATED(self%junc))njholes=self%junc%nholes
 self%nholes=njholes
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)+njholes
-WRITE(*,'(2A)')oft_indent,'Creating hole elements'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Creating hole elements'
 ALLOCATE(self%hmesh(self%nholes))
 ALLOCATE(self%kfh(self%mesh%nc+1))
 self%kfh=0
 IF(self%nholes>0)THEN
   DO i=1,self%nholes-njholes
     IF(oft_debug_print(1))THEN
-      WRITE(*,'(2A,I12)')oft_indent,'  Hole: ',i
-      WRITE(*,'(2A,I12)')oft_indent,'    Nset size = ',hole_ns(i)%n
+      IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'  Hole: ',i
+      IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'    Nset size = ',hole_ns(i)%n
     END IF
     IF(hole_ns(i)%n==1)THEN
       self%hmesh(i)%i0 = hole_ns(i)%v(1)
@@ -457,14 +467,14 @@ IF(self%nholes>0)THEN
     END IF
     CALL tw_setup_hole(self%mesh, self%hmesh(i))
     IF(oft_debug_print(1))THEN
-      WRITE(*,'(2A,I12)')oft_indent,'    np        = ',self%hmesh(i)%n
-      WRITE(*,'(2A,3ES12.4)')oft_indent,'    center    = ',self%hmesh(i)%ptcc
+      IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'    np        = ',self%hmesh(i)%n
+      IF(oft_env%head_proc)WRITE(*,'(2A,3ES12.4)')oft_indent,'    center    = ',self%hmesh(i)%ptcc
     END IF
     IF(oft_debug_print(3))THEN
-      WRITE(*,'(2A)')oft_indent,'    points:'
+      IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'    points:'
       CALL oft_increase_indent
       DO j=1,self%hmesh(i)%n
-        WRITE(*,'(A,3ES12.4)')oft_indent,self%mesh%r(:,self%hmesh(i)%lp(j))
+        IF(oft_env%head_proc)WRITE(*,'(A,3ES12.4)')oft_indent,self%mesh%r(:,self%hmesh(i)%lp(j))
       END DO
       CALL oft_decrease_indent
     END IF
@@ -509,7 +519,7 @@ IF(self%nholes>0)THEN
     DO j=1,self%nholes-njholes
       IF(i==j.OR.self%hmesh(i)%n/=self%hmesh(j)%n)CYCLE
       IF(ALL(self%hmesh(i)%lp_sorted==self%hmesh(j)%lp_sorted))THEN
-        WRITE(*,*)"Duplicate hole detected: ",i,j
+        IF(oft_env%head_proc)WRITE(*,*)"Duplicate hole detected: ",i,j
         CALL oft_abort("Duplicate hole detected","tw_setup",__FILE__)
       END IF
     END DO
@@ -630,23 +640,23 @@ SELECT TYPE(this=>self%Uloc_pts)
     CALL oft_abort('Failed to allocate "Uloc_pts" vector','tw_setup',__FILE__)
 END SELECT
 !---Print summary
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Setup complete:'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Setup complete:'
 CALL oft_increase_indent
-WRITE(*,'(2A,I12)')oft_indent,'# of points    = ',self%mesh%np
-WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
-WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
-WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
-WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',nclosure_save
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of points    = ',self%mesh%np
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',nclosure_save
 IF(oft_debug_print(1))THEN
   CALL oft_increase_indent
   DO i=1,self%nclosures
-    WRITE(*,'(A,I8,3ES14.5)')oft_indent,self%closures(i),self%mesh%r(:,self%closures(i))
+    IF(oft_env%head_proc)WRITE(*,'(A,I8,3ES14.5)')oft_indent,self%closures(i),self%mesh%r(:,self%closures(i))
   END DO
   CALL oft_decrease_indent
 END IF
-WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
-WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
+IF(oft_env%head_proc)WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
 CALL oft_decrease_indent
 CALL oft_decrease_indent
 CONTAINS
@@ -1336,6 +1346,314 @@ gptr(1:ngroup)=gs(1:nout); gptr(ngroup+1)=n+1
 DEALLOCATE(stack,gs,idx,vals)
 END SUBROUTINE tw_cluster_points
 !---------------------------------------------------------------------------------
+!> Setup the distribution of the element coupling matrices (coils and sensors) over processors
+!!
+!! With MPI, each processor stores only the rows (columns for sensors) of the element coupling matrices
+!! (`Ael2coil`, `Ael2dr`, `Ael2sen`) for the model unknowns it owns. Ownership is a recursive coordinate
+!! bisection of the model unknowns (by vertex position) into one part per processor, with holes and V-coils
+!! owned by processor 0. It is independent of the HODLR ownership, as vectors are stored in full on all
+!! processors and the products are reduced over processors (see @ref tw_cm_dr_apply and @ref tw_cm_sen_apply).
+!!
+!! For meshes with junctions, the expanded elements stored on a processor are all those contributing to its
+!! model unknowns (so the reduction is local); a "primary" owner is defined for each expanded element.
+!!
+!! In serial runs every element is stored and the matrices have their usual (full) layout.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_setup(self)
+TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
+INTEGER(i4) :: i,j,k,e,a,nexp,ncand,ik,first_row
+INTEGER(i4), ALLOCATABLE :: red_owner(:),exp_owner(:),cand(:),pt_kr(:),pt_lc(:)
+REAL(r8), ALLOCATABLE :: pt_val(:),xc(:,:)
+LOGICAL, ALLOCATABLE :: need(:)
+IF(ASSOCIATED(self%cm_exp))RETURN
+nexp=tw_nelems_exp(self)
+self%cm_dist=(oft_env%nprocs>1)
+ALLOCATE(red_owner(self%nelems),exp_owner(nexp),need(nexp))
+red_owner=0
+exp_owner=0
+IF(ASSOCIATED(self%junc))CALL tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
+IF(self%cm_dist)THEN
+  !---Spatial partition of the model unknowns located at vertices (first expanded vertex for junction meshes)
+  ALLOCATE(cand(self%nelems),xc(3,self%nelems))
+  ncand=0
+  DO a=1,self%nelems
+    IF(ASSOCIATED(self%junc))THEN
+      IF(pt_kr(a+1)<=pt_kr(a))CYCLE
+      e=pt_lc(pt_kr(a))
+    ELSE
+      e=a
+    END IF
+    IF(e>self%np_active)CYCLE
+    ncand=ncand+1
+    cand(ncand)=a
+    xc(:,ncand)=self%mesh%r(:,self%lpmap_inv(self%kpmap_inv(e)))
+  END DO
+  CALL rcb_partition(ncand)
+  DEALLOCATE(cand,xc)
+END IF
+!---Primary owner of each expanded element and the elements needed on this processor
+IF(ASSOCIATED(self%junc))THEN
+  need=.FALSE.
+  DO e=1,nexp
+    IF(self%junc%p_kr(e+1)>self%junc%p_kr(e))exp_owner(e)=red_owner(self%junc%p_lc(self%junc%p_kr(e)))
+    DO k=self%junc%p_kr(e),self%junc%p_kr(e+1)-1
+      IF(red_owner(self%junc%p_lc(k))==oft_env%rank)need(e)=.TRUE.
+    END DO
+  END DO
+  DEALLOCATE(pt_kr,pt_lc,pt_val)
+ELSE
+  exp_owner=red_owner
+  need=(exp_owner==oft_env%rank)
+END IF
+self%cm_nexp=COUNT(need)
+self%cm_nred=COUNT(red_owner==oft_env%rank)
+ALLOCATE(self%cm_exp(self%cm_nexp),self%cm_red(self%cm_nred),self%cm_expmap(nexp),self%cm_primary(self%cm_nexp))
+self%cm_expmap=0
+j=0
+DO e=1,nexp
+  IF(.NOT.need(e))CYCLE
+  j=j+1
+  self%cm_exp(j)=e
+  self%cm_expmap(e)=j
+  self%cm_primary(j)=(exp_owner(e)==oft_env%rank)
+END DO
+j=0
+DO a=1,self%nelems
+  IF(red_owner(a)/=oft_env%rank)CYCLE
+  j=j+1
+  self%cm_red(j)=a
+END DO
+!---Cells contributing to the stored elements, and the primary processor of each cell (for diagnostics)
+ALLOCATE(self%cm_cell(self%mesh%nc),self%cm_cell_primary(self%mesh%nc))
+DO i=1,self%mesh%nc
+  self%cm_cell(i)=.FALSE.
+  first_row=0
+  DO k=1,3
+    ik=self%pmap(self%mesh%lc(k,i))
+    IF(ik==0)CYCLE
+    IF(first_row==0)first_row=ik
+    IF(need(ik))self%cm_cell(i)=.TRUE.
+  END DO
+  DO k=self%kfh(i),self%kfh(i+1)-1
+    ik=ABS(self%lfh(1,k))+self%np_active
+    IF(first_row==0)first_row=ik
+    IF(need(ik))self%cm_cell(i)=.TRUE.
+  END DO
+  IF(first_row==0)THEN
+    self%cm_cell_primary(i)=(oft_env%rank==0)
+  ELSE
+    self%cm_cell_primary(i)=(exp_owner(first_row)==oft_env%rank)
+  END IF
+END DO
+DEALLOCATE(red_owner,exp_owner,need)
+CONTAINS
+!> Recursive coordinate bisection of the candidate unknowns into one part per processor
+SUBROUTINE rcb_partition(n)
+INTEGER(i4), INTENT(in) :: n
+INTEGER(i4) :: nstack,s0,e0,p0,np,cnt,ax,nleft,split,ii
+INTEGER(i4), ALLOCATABLE :: stack(:,:),perm(:),idx(:)
+REAL(r8), ALLOCATABLE :: vals(:)
+IF(n==0)RETURN
+ALLOCATE(stack(4,2*oft_env%nprocs+2),perm(n),idx(n),vals(n))
+perm=[(ii,ii=1,n)]
+nstack=1; stack(:,1)=[1,n,0,oft_env%nprocs]
+DO WHILE(nstack>0)
+  s0=stack(1,nstack); e0=stack(2,nstack); p0=stack(3,nstack); np=stack(4,nstack)
+  nstack=nstack-1
+  cnt=e0-s0+1
+  IF((np==1).OR.(cnt<=1))THEN
+    DO ii=s0,e0
+      red_owner(cand(perm(ii)))=p0
+    END DO
+    CYCLE
+  END IF
+  !---Split along the direction of largest extent, in proportion to the processors on each side
+  ax=MAXLOC(MAXVAL(xc(:,perm(s0:e0)),DIM=2)-MINVAL(xc(:,perm(s0:e0)),DIM=2),DIM=1)
+  vals(1:cnt)=xc(ax,perm(s0:e0)); idx(1:cnt)=perm(s0:e0)
+  CALL sort_array(vals(1:cnt),idx(1:cnt),cnt)
+  perm(s0:e0)=idx(1:cnt)
+  nleft=np/2
+  split=s0+INT(REAL(cnt,8)*REAL(nleft,8)/REAL(np,8),4)-1
+  split=MIN(MAX(split,s0-1),e0)
+  nstack=nstack+1; stack(:,nstack)=[s0,split,p0,nleft]
+  nstack=nstack+1; stack(:,nstack)=[split+1,e0,p0+nleft,np-nleft]
+END DO
+DEALLOCATE(stack,perm,idx,vals)
+END SUBROUTINE rcb_partition
+END SUBROUTINE tw_cm_setup
+!---------------------------------------------------------------------------------
+!> Reset the distribution of the element coupling matrices (eg. when the number of elements changes)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_reset(self)
+TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
+IF(ASSOCIATED(self%cm_exp))DEALLOCATE(self%cm_exp)
+IF(ASSOCIATED(self%cm_red))DEALLOCATE(self%cm_red)
+IF(ASSOCIATED(self%cm_expmap))DEALLOCATE(self%cm_expmap)
+IF(ASSOCIATED(self%cm_primary))DEALLOCATE(self%cm_primary)
+IF(ASSOCIATED(self%cm_cell))DEALLOCATE(self%cm_cell)
+IF(ASSOCIATED(self%cm_cell_primary))DEALLOCATE(self%cm_cell_primary)
+self%cm_nexp=-1
+self%cm_nred=-1
+self%cm_dist=.FALSE.
+END SUBROUTINE tw_cm_reset
+!---------------------------------------------------------------------------------
+!> Reduce the stored rows of a coupling matrix over expanded elements to the owned model unknowns,
+!! A = P^T A_exp (distributed version of @ref tw_junction_reduce_rows; A_exp is replaced)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_reduce_rows(self,A)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(r8), CONTIGUOUS, POINTER, INTENT(inout) :: A(:,:) !< Matrix [cm_nexp,m] -> [cm_nred,m]
+INTEGER(i4) :: a_loc,ia,k,e
+INTEGER(i4), ALLOCATABLE :: pt_kr(:),pt_lc(:)
+REAL(r8), ALLOCATABLE :: pt_val(:)
+REAL(r8), CONTIGUOUS, POINTER :: Ared(:,:)
+CALL tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
+ALLOCATE(Ared(self%cm_nred,SIZE(A,DIM=2)))
+Ared=0.d0
+DO a_loc=1,self%cm_nred
+  ia=self%cm_red(a_loc)
+  DO k=pt_kr(ia),pt_kr(ia+1)-1
+    e=self%cm_expmap(pt_lc(k))
+    IF(e==0)CALL oft_abort('Missing expanded element','tw_cm_reduce_rows',__FILE__)
+    Ared(a_loc,:)=Ared(a_loc,:)+pt_val(k)*A(e,:)
+  END DO
+END DO
+DEALLOCATE(A,pt_kr,pt_lc,pt_val)
+A=>Ared
+END SUBROUTINE tw_cm_reduce_rows
+!---------------------------------------------------------------------------------
+!> Reduce the stored columns of a coupling matrix over expanded elements to the owned model unknowns,
+!! A = A_exp P (distributed version of @ref tw_junction_reduce_cols; A_exp is replaced)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_reduce_cols(self,A)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(r8), CONTIGUOUS, POINTER, INTENT(inout) :: A(:,:) !< Matrix [m,cm_nexp] -> [m,cm_nred]
+INTEGER(i4) :: a_loc,ia,k,e
+INTEGER(i4), ALLOCATABLE :: pt_kr(:),pt_lc(:)
+REAL(r8), ALLOCATABLE :: pt_val(:)
+REAL(r8), CONTIGUOUS, POINTER :: Ared(:,:)
+CALL tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
+ALLOCATE(Ared(SIZE(A,DIM=1),self%cm_nred))
+Ared=0.d0
+DO a_loc=1,self%cm_nred
+  ia=self%cm_red(a_loc)
+  DO k=pt_kr(ia),pt_kr(ia+1)-1
+    e=self%cm_expmap(pt_lc(k))
+    IF(e==0)CALL oft_abort('Missing expanded element','tw_cm_reduce_cols',__FILE__)
+    Ared(:,a_loc)=Ared(:,a_loc)+pt_val(k)*A(:,e)
+  END DO
+END DO
+DEALLOCATE(A,pt_kr,pt_lc,pt_val)
+A=>Ared
+END SUBROUTINE tw_cm_reduce_cols
+!---------------------------------------------------------------------------------
+!> Driver coupling product, y = y + alpha * Ael2dr x, for full vectors over the model unknowns
+!!
+!! With distributed coupling matrices the local rows are computed and the result is summed over processors.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_dr_apply(self,x,alpha,y)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(r8), INTENT(in) :: x(:) !< Driver (I-coil) values [n_icoils]
+REAL(r8), INTENT(in) :: alpha !< Scale factor
+REAL(r8), INTENT(inout) :: y(:) !< Vector over the model unknowns [nelems]
+REAL(r8), ALLOCATABLE :: yloc(:),ytmp(:)
+IF(self%n_icoils==0)RETURN
+IF(.NOT.self%cm_dist)THEN
+  CALL dgemv('N',self%nelems,self%n_icoils,alpha,self%Ael2dr,self%nelems,x,1,1.d0,y,1)
+  RETURN
+END IF
+ALLOCATE(yloc(MAX(1,self%cm_nred)),ytmp(self%nelems))
+IF(self%cm_nred>0)CALL dgemv('N',self%cm_nred,self%n_icoils,alpha,self%Ael2dr,self%cm_nred,x,1,0.d0,yloc,1)
+ytmp=0.d0
+IF(self%cm_nred>0)ytmp(self%cm_red)=yloc(1:self%cm_nred)
+y=y+oft_mpi_sum(ytmp,self%nelems)
+DEALLOCATE(yloc,ytmp)
+END SUBROUTINE tw_cm_dr_apply
+!---------------------------------------------------------------------------------
+!> Projection onto the driver coupling, Y = X^T Ael2dr, for full vectors X over the model unknowns
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_dr_project(self,X,Y)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(r8), CONTIGUOUS, INTENT(in) :: X(:,:) !< Vectors over the model unknowns [nelems,ncol]
+REAL(r8), CONTIGUOUS, TARGET, INTENT(out) :: Y(:,:) !< Result [ncol,n_icoils]
+INTEGER(i4) :: ncol
+REAL(r8), ALLOCATABLE :: Xloc(:,:)
+ncol=SIZE(X,DIM=2)
+IF(.NOT.self%cm_dist)THEN
+  CALL dgemm('T','N',ncol,self%n_icoils,self%nelems,1.d0,X,self%nelems,self%Ael2dr,self%nelems,0.d0,Y,ncol)
+  RETURN
+END IF
+Y=0.d0
+IF(self%cm_nred>0)THEN
+  ALLOCATE(Xloc(self%cm_nred,ncol))
+  Xloc=X(self%cm_red,:)
+  CALL dgemm('T','N',ncol,self%n_icoils,self%cm_nred,1.d0,Xloc,self%cm_nred,self%Ael2dr,self%cm_nred,0.d0,Y,ncol)
+  DEALLOCATE(Xloc)
+END IF
+CALL tw_mpi_sum_2d(Y)
+END SUBROUTINE tw_cm_dr_project
+!---------------------------------------------------------------------------------
+!> Sensor signals from a single vector, y = Ael2sen x, for a full vector x over the model unknowns
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_sen_vec(self,nsensors,x,y)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+INTEGER(i4), INTENT(in) :: nsensors !< Number of sensors
+REAL(r8), INTENT(in) :: x(:) !< Vector over the model unknowns [nelems]
+REAL(r8), INTENT(out) :: y(:) !< Sensor signals [nsensors]
+REAL(r8), ALLOCATABLE :: xloc(:)
+IF(nsensors==0)RETURN
+IF(.NOT.self%cm_dist)THEN
+  CALL dgemv('N',nsensors,self%nelems,1.d0,self%Ael2sen,nsensors,x,1,0.d0,y,1)
+  RETURN
+END IF
+y(1:nsensors)=0.d0
+IF(self%cm_nred>0)THEN
+  ALLOCATE(xloc(self%cm_nred))
+  xloc=x(self%cm_red)
+  CALL dgemv('N',nsensors,self%cm_nred,1.d0,self%Ael2sen,nsensors,xloc,1,0.d0,y,1)
+  DEALLOCATE(xloc)
+END IF
+y(1:nsensors)=oft_mpi_sum(y(1:nsensors),nsensors)
+END SUBROUTINE tw_cm_sen_vec
+!---------------------------------------------------------------------------------
+!> Sensor coupling product, Y = Ael2sen X, for full vectors X over the model unknowns
+!!
+!! With distributed coupling matrices the local columns are used and the result is summed over processors.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_sen_apply(self,nsensors,X,Y)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+INTEGER(i4), INTENT(in) :: nsensors !< Number of sensors
+REAL(r8), CONTIGUOUS, INTENT(in) :: X(:,:) !< Vectors over the model unknowns [nelems,ncol]
+REAL(r8), CONTIGUOUS, TARGET, INTENT(out) :: Y(:,:) !< Result [nsensors,ncol]
+INTEGER(i4) :: ncol
+REAL(r8), ALLOCATABLE :: Xloc(:,:)
+ncol=SIZE(X,DIM=2)
+IF(nsensors==0)RETURN
+IF(.NOT.self%cm_dist)THEN
+  CALL dgemm('N','N',nsensors,ncol,self%nelems,1.d0,self%Ael2sen,nsensors,X,self%nelems,0.d0,Y,nsensors)
+  RETURN
+END IF
+Y=0.d0
+IF(self%cm_nred>0)THEN
+  ALLOCATE(Xloc(self%cm_nred,ncol))
+  Xloc=X(self%cm_red,:)
+  CALL dgemm('N','N',nsensors,ncol,self%cm_nred,1.d0,self%Ael2sen,nsensors,Xloc,self%cm_nred,0.d0,Y,nsensors)
+  DEALLOCATE(Xloc)
+END IF
+CALL tw_mpi_sum_2d(Y)
+END SUBROUTINE tw_cm_sen_apply
+!---------------------------------------------------------------------------------
+!> Sum a matrix over all processors (in place)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_mpi_sum_2d(A)
+REAL(r8), CONTIGUOUS, TARGET, INTENT(inout) :: A(:,:) !< Matrix to sum
+REAL(r8), CONTIGUOUS, POINTER :: Aflat(:)
+IF(oft_env%nprocs==1)RETURN
+IF(SIZE(A)==0)RETURN
+Aflat(1:SIZE(A))=>A
+Aflat=oft_mpi_sum(Aflat,SIZE(Aflat))
+END SUBROUTINE tw_mpi_sum_2d
+!---------------------------------------------------------------------------------
 !> Couplings of the elements to coil filaments given as points, added to the element-coil matrix
 !!
 !! For each cell group the cell sums \f$ V_c = \sum_k s_k \sum_{seg} K(c,seg)\,\hat{u}_{seg} \f$ over the filaments
@@ -1355,7 +1673,7 @@ REAL(r8), INTENT(in) :: cent(:,:) !< Cell centroids [3,nc]
 INTEGER(i4), INTENT(in) :: glist(:) !< Cells ordered by group (@ref tw_cluster_points)
 INTEGER(i4), INTENT(in) :: gptr(:) !< Start of each group in glist
 INTEGER(i4), INTENT(in) :: ngroup !< Number of cell groups
-REAL(r8), INTENT(inout) :: A(:,:) !< Element-coil coupling [nelems_exp,ncoils_tot]
+REAL(r8), INTENT(inout) :: A(:,:) !< Element-coil coupling for the stored elements [cm_nexp,ncoils_tot]
 INTEGER(i4), INTENT(inout) :: nrad_cross(:) !< Count of cells closer to a filament than its wire radius
 INTEGER(i4) :: i,j,k,c,g,nch,s,m,nseg,ic,ng
 INTEGER(i4), ALLOCATABLE :: ch(:,:)
@@ -1422,7 +1740,7 @@ DO g=1,ngroup
         IF(SUM(u**2)<=0.d0)CYCLE
         pts_c(:,1)=mesh%r(:,mesh%lc(1,i)); pts_c(:,2)=mesh%r(:,mesh%lc(2,i)); pts_c(:,3)=mesh%r(:,mesh%lc(3,i))
         val=tw_cell_seg_kernel(pts_c,mesh%ca(i),coils_tot(j)%coils(k)%pts(:,s),coils_tot(j)%coils(k)%pts(:,s+1),dl_min)
-        IF(dl_min<coils_tot(j)%radius(k))THEN
+        IF((dl_min<coils_tot(j)%radius(k)).AND.tw_obj%cm_cell_primary(i))THEN
           !$omp atomic
           nrad_cross(j)=nrad_cross(j)+1
         END IF
@@ -1450,12 +1768,15 @@ DO ii=1,nn
     DO jj=1,3
       ik=tw_obj%pmap(mesh%lc(jj,ci))
       IF(ik==0)CYCLE
+      ik=tw_obj%cm_expmap(ik) ! Stored (local) row
+      IF(ik==0)CYCLE
       t=DOT_PRODUCT(tw_obj%qbasis(:,jj,ci),Vgg(:,ii,pidx(jset)))
       !$omp atomic
       A(ik,jset)=A(ik,jset)+t
     END DO
     DO ih=tw_obj%kfh(ci),tw_obj%kfh(ci+1)-1
-      ik=ABS(tw_obj%lfh(1,ih))+tw_obj%np_active
+      ik=tw_obj%cm_expmap(ABS(tw_obj%lfh(1,ih))+tw_obj%np_active) ! Stored (local) row
+      IF(ik==0)CYCLE
       t=SIGN(1,tw_obj%lfh(1,ih))*DOT_PRODUCT(tw_obj%qbasis(:,tw_obj%lfh(2,ih),ci),Vgg(:,ii,pidx(jset)))
       !$omp atomic
       A(ik,jset)=A(ik,jset)+t
@@ -1610,7 +1931,7 @@ REAL(r8), INTENT(in) :: cent(:,:) !< Cell centroids [3,nc]
 INTEGER(i4), INTENT(in) :: glist(:) !< Cells ordered by group (@ref tw_cluster_points)
 INTEGER(i4), INTENT(in) :: gptr(:) !< Start of each group in glist
 INTEGER(i4), INTENT(in) :: ngroup !< Number of cell groups
-REAL(r8), INTENT(inout) :: A(:,:) !< Element-coil coupling [nelems_exp,ncoils_tot]
+REAL(r8), INTENT(inout) :: A(:,:) !< Element-coil coupling for the stored elements [cm_nexp,ncoils_tot]
 INTEGER(i4), INTENT(inout) :: nrad_cross(:) !< Count of cells closer to a filament than its wire radius
 INTEGER(i4) :: i,j,k,g,c,p,ii,nring,nchunk
 INTEGER(i4), ALLOCATABLE :: rlist(:),rptr(:),rset(:),rfil(:)
@@ -1714,7 +2035,7 @@ IF(.NOT.done)THEN
   DO ic=1,m
     DO ir=1,n
       t3=kern3(gptr(gg)+ic-1,rptr(cc)+ir-1,crossed)
-      IF(crossed)THEN
+      IF(crossed.AND.tw_obj%cm_cell_primary(glist(gptr(gg)+ic-1)))THEN
         !$omp atomic
         nrad_cross(sglob(lset(ir)))=nrad_cross(sglob(lset(ir)))+1
       END IF
@@ -1728,13 +2049,16 @@ DO ic=1,m
   DO jj=1,3
     ik=tw_obj%pmap(mesh%lc(jj,ci))
     IF(ik==0)CYCLE
+    ik=tw_obj%cm_expmap(ik) ! Stored (local) row
+    IF(ik==0)CYCLE
     DO ir=1,nsl
       !$omp atomic
       A(ik,sglob(ir))=A(ik,sglob(ir))+B(3*(ic-1)+jj,ir)
     END DO
   END DO
   DO ii2=tw_obj%kfh(ci),tw_obj%kfh(ci+1)-1
-    ik=ABS(tw_obj%lfh(1,ii2))+tw_obj%np_active
+    ik=tw_obj%cm_expmap(ABS(tw_obj%lfh(1,ii2))+tw_obj%np_active) ! Stored (local) row
+    IF(ik==0)CYCLE
     DO ir=1,nsl
       t3(1)=SIGN(1,tw_obj%lfh(1,ii2))*B(3*(ic-1)+tw_obj%lfh(2,ii2),ir)
       !$omp atomic
@@ -1785,61 +2109,62 @@ SUBROUTINE tw_compute_Ael2dr_exp(tw_obj,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,j,k,ncoils_tot,file_counts(4),ierr,io_unit
+INTEGER(4) :: i,j,k,ncoils_tot,file_counts(5),ierr,io_unit,nmine
 INTEGER(i4), ALLOCATABLE :: nrad_cross(:)
 REAL(8) :: elapsed_time
 INTEGER(4) :: npset,ngroup
-INTEGER(4), ALLOCATABLE :: pidx(:),glist(:),gptr(:)
+INTEGER(4), ALLOCATABLE :: pidx(:),glist(:),gptr(:),mycells(:)
 REAL(8), allocatable :: Ael2coil_tmp(:,:),ring_rz(:,:,:),cent(:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
+!---Distribution of the element coupling matrices (all elements stored in serial runs)
+CALL tw_cm_setup(tw_obj)
 !
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
     IF(exists)THEN
-      WRITE(*,'(2A)')oft_indent,'Reading coil mutual matrices'
+      IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Reading coil mutual matrices'
       CALL oft_increase_indent
-      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED',STATUS='OLD')
       READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr/=0).OR.ANY(file_counts/=[tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)]))THEN
+      IF((ierr/=0).OR.ANY(file_counts/=[tw_cm_cache_fmt,tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils, &
+        tw_model_hash(tw_obj)]))THEN
         exists=.FALSE.
-        WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model, coils or cache version do not match'
+        IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model, coils or cache version do not match'
       END IF
       IF(exists)THEN
-        ALLOCATE(tw_obj%Ael2coil(tw_nelems_exp(tw_obj),tw_obj%n_vcoils))
-        READ(io_unit, IOSTAT=ierr)tw_obj%Ael2coil
+        ALLOCATE(tw_obj%Ael2coil(tw_obj%cm_nexp,tw_obj%n_vcoils))
+        CALL tw_cm_cache_read(tw_obj,io_unit,tw_obj%Ael2coil,.FALSE.,ierr)
         IF(ierr/=0)THEN
-          WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
-          DEALLOCATE(tw_obj%Ael2coil)
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
           exists=.FALSE.
         END IF
       END IF
       IF(exists)THEN
-        ALLOCATE(tw_obj%Ael2dr(tw_nelems_exp(tw_obj),tw_obj%n_icoils))
-        READ(io_unit, IOSTAT=ierr)tw_obj%Ael2dr
+        ALLOCATE(tw_obj%Ael2dr(tw_obj%cm_nexp,tw_obj%n_icoils))
+        CALL tw_cm_cache_read(tw_obj,io_unit,tw_obj%Ael2dr,.FALSE.,ierr)
         IF(ierr/=0)THEN
-          WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
-          DEALLOCATE(tw_obj%Ael2coil,tw_obj%Ael2dr)
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
           exists=.FALSE.
         END IF
       END IF
-      !---Coil<->coil mutuals.  Without these the cache is unusable for a model with Vcoils:
+      !---Coil<->coil mutuals (replicated)
       IF(exists.AND.(tw_obj%n_vcoils>0))THEN
         IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
         ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
         READ(io_unit, IOSTAT=ierr)tw_obj%Acoil2coil
         IF(ierr/=0)THEN
-          WRITE(*,'(2A)')oft_indent,'Stored matrix predates coil<->coil caching, rebuilding'
-          DEALLOCATE(tw_obj%Ael2coil,tw_obj%Ael2dr,tw_obj%Acoil2coil)
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
+          DEALLOCATE(tw_obj%Acoil2coil)
           exists=.FALSE.
         ELSE
           DO i=1,tw_obj%n_vcoils
             tw_obj%vcoils(i)%Lself=tw_obj%Acoil2coil(i,i)
-            WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": L [H] = ", &
+            IF(oft_env%head_proc)WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": L [H] = ", &
               tw_obj%vcoils(i)%Lself*1.d-7
           END DO
         END IF
@@ -1847,10 +2172,14 @@ IF(PRESENT(save_file))THEN
       CLOSE(io_unit)
       CALL oft_decrease_indent
     END IF
+    !---All processors must agree before using the cached matrices
+    exists=oft_mpi_and(exists)
     IF(exists)THEN
       DEBUG_STACK_POP
       RETURN
     END IF
+    IF(ASSOCIATED(tw_obj%Ael2coil))DEALLOCATE(tw_obj%Ael2coil)
+    IF(ASSOCIATED(tw_obj%Ael2dr))DEALLOCATE(tw_obj%Ael2dr)
   END IF
 END IF
 !---Setup quadrature
@@ -1865,10 +2194,10 @@ DO i=1,tw_obj%n_icoils
 END DO
 !
 bmesh=>tw_obj%mesh
-WRITE(*,'(2A)')oft_indent,'Building coil<->element inductance matrices'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building coil<->element inductance matrices'
 CALL oft_increase_indent
 CALL mytimer%tick
-ALLOCATE(Ael2coil_tmp(tw_nelems_exp(tw_obj),ncoils_tot),nrad_cross(ncoils_tot))
+ALLOCATE(Ael2coil_tmp(tw_obj%cm_nexp,ncoils_tot),nrad_cross(ncoils_tot))
 nrad_cross=0
 !---Circular coils (rings about the Z axis): radius, height and orientation
 k=0
@@ -1892,54 +2221,189 @@ DO j=1,ncoils_tot
     pidx(j)=npset
   END IF
 END DO
-!---Cell groups, shared by the polygon and circular coil sums
-ALLOCATE(cent(3,bmesh%nc),glist(bmesh%nc))
+!---Cell groups (of the cells contributing to the stored elements), shared by the polygon and circular coil sums
+ALLOCATE(cent(3,bmesh%nc))
 DO i=1,bmesh%nc
   cent(:,i)=SUM(bmesh%r(:,bmesh%lc(:,i)),DIM=2)/3.d0
 END DO
-CALL tw_cluster_points(cent,tw_coil_group_size,glist,gptr,ngroup)
+nmine=COUNT(tw_obj%cm_cell)
+ALLOCATE(mycells(nmine),glist(nmine))
+j=0
+DO i=1,bmesh%nc
+  IF(.NOT.tw_obj%cm_cell(i))CYCLE
+  j=j+1
+  mycells(j)=i
+END DO
 Ael2coil_tmp=0.d0
-IF(npset>0)CALL tw_coil_poly_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,pidx,npset,cent,glist,gptr,ngroup, &
-  Ael2coil_tmp,nrad_cross)
-IF(ANY(ring_ok))CALL tw_coil_ring_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,ring_rz,cent,glist,gptr,ngroup, &
-  Ael2coil_tmp,nrad_cross)
-DEALLOCATE(cent,glist,gptr)
+IF(nmine>0)THEN
+  CALL tw_cluster_points(cent(:,mycells),tw_coil_group_size,glist,gptr,ngroup)
+  glist=mycells(glist)
+  IF(npset>0)CALL tw_coil_poly_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,pidx,npset,cent,glist,gptr,ngroup, &
+    Ael2coil_tmp,nrad_cross)
+  IF(ANY(ring_ok))CALL tw_coil_ring_sum(tw_obj,coils_tot,ncoils_tot,ring_ok,ring_rz,cent,glist,gptr,ngroup, &
+    Ael2coil_tmp,nrad_cross)
+  DEALLOCATE(gptr)
+END IF
+DEALLOCATE(cent,glist,mycells)
+IF(oft_env%nprocs>1)nrad_cross=oft_mpi_sum(nrad_cross,ncoils_tot)
 IF(ANY(nrad_cross(1:tw_obj%n_vcoils)>0))THEN
   CALL oft_warn("One or more elements intersect a Vcoil within its radius, which may lead to invalid inductance values.")
   DO j=1,tw_obj%n_vcoils
-    IF(nrad_cross(j)>0)WRITE(*,'(A,I8,A,I6)')'  ',nrad_cross(j),' intersecting elements for coil ',j
+    IF((nrad_cross(j)>0).AND.oft_env%head_proc)WRITE(*,'(A,I8,A,I6)')'  ',nrad_cross(j),' intersecting elements for coil ',j
   END DO
 END IF
 DEALLOCATE(nrad_cross)
-!---Unpack passive and driver coils
-ALLOCATE(tw_obj%Ael2coil(tw_nelems_exp(tw_obj),tw_obj%n_vcoils))
+!---Unpack passive and driver coils (stored element rows)
+ALLOCATE(tw_obj%Ael2coil(tw_obj%cm_nexp,tw_obj%n_vcoils))
 DO i=1,tw_obj%n_vcoils
   tw_obj%Ael2coil(:,i)=Ael2coil_tmp(:,i)
 END DO
-ALLOCATE(tw_obj%Ael2dr(tw_nelems_exp(tw_obj),tw_obj%n_icoils))
+ALLOCATE(tw_obj%Ael2dr(tw_obj%cm_nexp,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Ael2dr(:,i)=Ael2coil_tmp(:,i+tw_obj%n_vcoils)
 END DO
 !---Cleanup temporaries
 DEALLOCATE(Ael2coil_tmp,coils_tot,ring_ok,ring_rz,pidx)
 elapsed_time=mytimer%tock()
-WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 CALL oft_decrease_indent
 !
 CALL tw_compute_Lmat_coils(tw_obj)
 !
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
-    OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)
-    WRITE(io_unit)tw_obj%Ael2coil
-    WRITE(io_unit)tw_obj%Ael2dr
-    IF(tw_obj%n_vcoils>0)WRITE(io_unit)tw_obj%Acoil2coil
-    CLOSE(io_unit)
+    IF(oft_env%head_proc)THEN
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED',STATUS='REPLACE')
+      WRITE(io_unit)tw_cm_cache_fmt,tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)
+      CLOSE(io_unit)
+    END IF
+    CALL tw_cm_cache_write(tw_obj,TRIM(save_file),tw_obj%Ael2coil,.FALSE.)
+    CALL tw_cm_cache_write(tw_obj,TRIM(save_file),tw_obj%Ael2dr,.FALSE.)
+    IF(oft_env%head_proc.AND.(tw_obj%n_vcoils>0))THEN
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED',STATUS='OLD',POSITION='APPEND')
+      WRITE(io_unit)tw_obj%Acoil2coil
+      CLOSE(io_unit)
+    END IF
   END IF
 END IF
+CALL oft_mpi_barrier(ierr) ! Wait for cache file to be written
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Ael2dr_exp
+!---------------------------------------------------------------------------------
+!> Append the stored element rows (or columns) of a distributed coupling matrix to a cache file
+!!
+!! Each element is written once, by its primary processor, in blocks of rows with their global element indices;
+!! processors write in turn, and the head processor ends the matrix with an empty block. Files can be read with
+!! any number of processors (@ref tw_cm_cache_read).
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_cache_write(self,filename,A,cols)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+CHARACTER(LEN=*), INTENT(in) :: filename !< Cache file (must exist)
+REAL(r8), CONTIGUOUS, INTENT(in) :: A(:,:) !< Matrix [cm_nexp,m] (or [m,cm_nexp] if `cols`)
+LOGICAL, INTENT(in) :: cols !< Elements are the columns of `A`?
+INTEGER(i4), PARAMETER :: chunk=4096
+INTEGER(i4) :: irank,io_unit,ierr,i,n,m,k
+INTEGER(i4), ALLOCATABLE :: idx(:),loc(:)
+REAL(r8), ALLOCATABLE :: buf(:,:)
+IF(cols)THEN
+  m=SIZE(A,DIM=1)
+ELSE
+  m=SIZE(A,DIM=2)
+END IF
+ALLOCATE(idx(chunk),loc(chunk))
+DO irank=0,oft_env%nprocs-1
+  CALL oft_mpi_barrier(ierr)
+  IF(irank/=oft_env%rank)CYCLE
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(filename),FORM='UNFORMATTED',STATUS='OLD',POSITION='APPEND')
+  n=0
+  DO i=1,self%cm_nexp
+    IF(.NOT.self%cm_primary(i))CYCLE
+    n=n+1
+    idx(n)=self%cm_exp(i); loc(n)=i
+    IF(n==chunk)CALL write_block()
+  END DO
+  CALL write_block()
+  CLOSE(io_unit)
+END DO
+CALL oft_mpi_barrier(ierr)
+!---End of matrix
+IF(oft_env%head_proc)THEN
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(filename),FORM='UNFORMATTED',STATUS='OLD',POSITION='APPEND')
+  WRITE(io_unit)0,m
+  CLOSE(io_unit)
+END IF
+CALL oft_mpi_barrier(ierr)
+DEALLOCATE(idx,loc)
+CONTAINS
+SUBROUTINE write_block()
+IF(n==0)RETURN
+WRITE(io_unit)n,m
+WRITE(io_unit)idx(1:n)
+IF(cols)THEN
+  ALLOCATE(buf(m,n))
+  DO k=1,n
+    buf(:,k)=A(:,loc(k))
+  END DO
+ELSE
+  ALLOCATE(buf(n,m))
+  DO k=1,n
+    buf(k,:)=A(loc(k),:)
+  END DO
+END IF
+WRITE(io_unit)buf
+DEALLOCATE(buf)
+n=0
+END SUBROUTINE write_block
+END SUBROUTINE tw_cm_cache_write
+!---------------------------------------------------------------------------------
+!> Read the stored element rows (or columns) of a distributed coupling matrix from a cache file
+!! (see @ref tw_cm_cache_write), keeping only the elements stored on this processor
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_cm_cache_read(self,io_unit,A,cols,ierr)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+INTEGER(i4), INTENT(in) :: io_unit !< Open cache file, positioned at the start of the matrix
+REAL(r8), CONTIGUOUS, INTENT(inout) :: A(:,:) !< Matrix [cm_nexp,m] (or [m,cm_nexp] if `cols`)
+LOGICAL, INTENT(in) :: cols !< Elements are the columns of `A`?
+INTEGER(i4), INTENT(out) :: ierr !< Error flag (0: success)
+INTEGER(i4) :: n,m,k,l,nfound
+INTEGER(i4), ALLOCATABLE :: idx(:)
+REAL(r8), ALLOCATABLE :: buf(:,:)
+nfound=0
+DO
+  READ(io_unit,IOSTAT=ierr)n,m
+  IF(ierr/=0)RETURN
+  IF(n==0)EXIT
+  IF(m/=MERGE(SIZE(A,DIM=1),SIZE(A,DIM=2),cols))THEN
+    ierr=-1
+    RETURN
+  END IF
+  ALLOCATE(idx(n))
+  READ(io_unit,IOSTAT=ierr)idx
+  IF(cols)THEN
+    ALLOCATE(buf(m,n))
+  ELSE
+    ALLOCATE(buf(n,m))
+  END IF
+  IF(ierr==0)READ(io_unit,IOSTAT=ierr)buf
+  IF(ierr/=0)THEN
+    DEALLOCATE(idx,buf)
+    RETURN
+  END IF
+  DO k=1,n
+    IF((idx(k)<1).OR.(idx(k)>SIZE(self%cm_expmap)))CYCLE
+    l=self%cm_expmap(idx(k))
+    IF(l==0)CYCLE
+    nfound=nfound+1
+    IF(cols)THEN
+      A(:,l)=buf(:,k)
+    ELSE
+      A(l,:)=buf(k,:)
+    END IF
+  END DO
+  DEALLOCATE(idx,buf)
+END DO
+IF(nfound/=self%cm_nexp)ierr=-2
+END SUBROUTINE tw_cm_cache_read
 !---------------------------------------------------------------------------------
 !> Compute the mutual inductances between coils (`Acoil2coil` for V-coils, and the V-coil to I-coil couplings)
 !!
@@ -1958,7 +2422,8 @@ INTEGER(4) :: i,ii,j,jj,k,kk,l
 REAL(8) :: tmp
 REAL(8) :: coil_thickness,sqrt_e
 REAL(8) :: elapsed_time
-REAL(8), allocatable :: atmp(:,:),Acoil2coil_tmp(:,:),ring_rz(:,:,:)
+REAL(8), allocatable :: atmp(:,:),ring_rz(:,:,:)
+REAL(8), allocatable, TARGET :: Acoil2coil_tmp(:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 INTEGER(4), ALLOCATABLE :: fil(:,:)
 INTEGER(4) :: nfil,f
@@ -1998,7 +2463,7 @@ END DO
 ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
 Acoil2coil_tmp=0.d0
 IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
-  WRITE(*,'(2A)')oft_indent,'Building coil<->coil inductance matrix'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building coil<->coil inductance matrix'
   CALL oft_increase_indent
   CALL mytimer%tick()
   sqrt_e=SQRT(EXP(1.d0))
@@ -2019,6 +2484,7 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   atmp=0.d0
   !$omp do schedule(dynamic,1)
   DO f=1,nfil
+    IF(MOD(f-1,oft_env%nprocs)/=oft_env%rank)CYCLE ! Filaments are split over processors, summed below
     l=fil(1,f); i=fil(2,f)
     DO j=1,ncoils_tot
       DO k=1,coils_tot(j)%ncoils
@@ -2065,8 +2531,9 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   !$omp end critical
   DEALLOCATE(atmp)
   !$omp end parallel
+  CALL tw_mpi_sum_2d(Acoil2coil_tmp)
   elapsed_time=mytimer%tock()
-  WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+  IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 END IF
 DEALLOCATE(coils_tot,ring_ok,ring_rz)
 IF(ALLOCATED(fil))DEALLOCATE(fil)
@@ -2076,16 +2543,18 @@ ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
 DO i=1,tw_obj%n_vcoils
   tw_obj%Acoil2coil(:,i)=Acoil2coil_tmp(:,i)
   tw_obj%vcoils(i)%Lself=Acoil2coil_tmp(i,i)
-  WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
+  IF(oft_env%head_proc)WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
 END DO
 !---Compute coupling between elements and drivers
 IF(ASSOCIATED(tw_obj%Ael2dr))THEN
   ! WRITE(*,*)'Building driver->element inductance matrices'
   IF(tw_obj%n_vcoils>0)THEN
-    !$omp parallel do private(jj)
+    !$omp parallel do private(jj,k)
     DO i=1,tw_obj%n_vcoils
+      k=tw_obj%cm_expmap(tw_obj%np_active+tw_obj%nholes+i) ! Stored (local) row of the V-coil
+      IF(k==0)CYCLE
       DO jj=1,tw_obj%n_icoils
-        tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+        tw_obj%Ael2dr(k,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
       END DO
     END DO
   END IF
@@ -2169,7 +2638,7 @@ IF(PRESENT(save_file))THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
     IF(exists)THEN
       IF(Lself)THEN
-        WRITE(*,'(2A)')oft_indent,'Reading element<->element self inductance matrix'
+        IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Reading element<->element self inductance matrix'
         CALL oft_increase_indent
         OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
         READ(io_unit, IOSTAT=ierr)file_counts(1:nhash)
@@ -2177,7 +2646,7 @@ IF(PRESENT(save_file))THEN
           DO i=1,row_obj%nelems
             READ(io_unit, IOSTAT=ierr)Lmat(i,i:row_obj%nelems)
             IF(ierr/=0)THEN
-              WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
+              IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
               exists=.FALSE.
               EXIT
             END IF
@@ -2191,13 +2660,13 @@ IF(PRESENT(save_file))THEN
             END DO
           END IF
         ELSE
-          WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
           CLOSE(io_unit)
           exists=.FALSE.
         END IF
         CALL oft_decrease_indent
       ELSE
-        WRITE(*,'(2A)')oft_indent,'Reading element<->element mutual inductance matrix'
+        IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Reading element<->element mutual inductance matrix'
         CALL oft_increase_indent
         OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
         READ(io_unit, IOSTAT=ierr)file_counts(1:nhash)
@@ -2205,14 +2674,14 @@ IF(PRESENT(save_file))THEN
           DO i=1,row_obj%nelems
             READ(io_unit, IOSTAT=ierr)Lmat(:,i)
             IF(ierr/=0)THEN
-              WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
+              IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
               exists=.FALSE.
               EXIT
             END IF
           END DO
           CLOSE(io_unit)
         ELSE
-          WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
           CLOSE(io_unit)
           exists=.FALSE.
         END IF
@@ -2248,9 +2717,9 @@ IF(Lself.AND.row_obj%n_vcoils>0)THEN
 END IF
 !
 IF(Lself)THEN
-  WRITE(*,'(2A)')oft_indent,'Building element<->element self inductance matrix'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building element<->element self inductance matrix'
 ELSE
-  WRITE(*,'(2A)')oft_indent,'Building element<->element mutual inductance matrix'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building element<->element mutual inductance matrix'
 END IF
 CALL oft_increase_indent
 Lmat=0.d0
@@ -2389,11 +2858,11 @@ END IF
 !$omp end parallel
 Lmat = Lmat/(4.d0*pi)
 elapsed_time=mytimer%tock()
-WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 IF(jscatter)DEALLOCATE(rkr,rlc,rval,ckr,clc,cval)
 IF(Lself.AND.row_obj%n_vcoils>0.AND.ASSOCIATED(row_obj%junc))DEALLOCATE(Ael2coil)
 IF(PRESENT(save_file))THEN
-  IF(TRIM(save_file)/='none')THEN
+  IF((TRIM(save_file)/='none').AND.oft_env%head_proc)THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
     WRITE(io_unit)hash_tmp(1:nhash)
     IF(Lself)THEN
@@ -2408,6 +2877,7 @@ IF(PRESENT(save_file))THEN
     CLOSE(io_unit)
   END IF
 END IF
+CALL oft_mpi_barrier(ierr) ! Wait for cache file to be written
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_LmatDirect
@@ -2438,7 +2908,7 @@ CALL set_quad_2d(quad2,quad_orders(3))
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
 !---
-WRITE(*,'(2A)')oft_indent,'Applying MF element<->element inductance matrix'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Applying MF element<->element inductance matrix'
 CALL oft_increase_indent
 b=0.d0
 counts=0
@@ -2635,7 +3105,7 @@ b = b/(4.d0*pi)
 CALL quad%delete()
 CALL quad2%delete()
 elapsed_time=mytimer%tock()
-WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_MF_exp
@@ -2651,11 +3121,12 @@ INTEGER(4), INTENT(in) :: nsensors !< Number of sensors
 TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:) !< List of sensors (flux loops and point probes)
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,ii,j,jj,k,kk,ik,file_counts(5),ierr,io_unit,sens_hash,npoint
+INTEGER(4) :: i,ii,j,jj,k,kk,ik,file_counts(6),ierr,io_unit,sens_hash,npoint
 REAL(8) :: tmp,dl,pt_i(3),evec_i(3,3),pts_i(3,3),bpt(3,3)
 REAL(8) :: rvec_j(3),cvec(3),elapsed_time
 REAL(8) :: norm_i(3),area_i,f(3),dl_min
-REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:)
+REAL(8), allocatable :: atmp(:,:)
+REAL(8), allocatable, TARGET :: Acoil2sen_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
@@ -2668,24 +3139,27 @@ DO i=1,nsensors
   sens_hash=oft_simple_hash(C_LOC(sensors(i)%r),INT(8*3*sensors(i)%np,8),starting_value=sens_hash)
   IF(sensors(i)%point)sens_hash=oft_simple_hash(C_LOC(sensors(i)%norm),INT(8*3,8),starting_value=sens_hash)
 END DO
+!---Distribution of the element coupling matrices (all elements stored in serial runs)
+CALL tw_cm_setup(tw_obj)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
     IF(exists)THEN
-      WRITE(*,'(2A)')oft_indent,'Reading sensor mutual matrices'
+      IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Reading sensor mutual matrices'
       CALL oft_increase_indent
-      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED',STATUS='OLD')
       READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr/=0).OR.ANY(file_counts/=[tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash]))THEN
+      IF((ierr/=0).OR.ANY(file_counts/=[tw_cm_cache_fmt,tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils, &
+        nsensors,sens_hash]))THEN
         exists=.FALSE.
-        WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
+        IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
       END IF
       IF(exists)THEN
-        ALLOCATE(tw_obj%Ael2sen(nsensors,tw_nelems_exp(tw_obj)))
-        READ(io_unit, IOSTAT=ierr)tw_obj%Ael2sen
+        IF(ASSOCIATED(tw_obj%Ael2sen))DEALLOCATE(tw_obj%Ael2sen)
+        ALLOCATE(tw_obj%Ael2sen(nsensors,tw_obj%cm_nexp))
+        CALL tw_cm_cache_read(tw_obj,io_unit,tw_obj%Ael2sen,.TRUE.,ierr)
         IF(ierr/=0)THEN
-          WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
-          DEALLOCATE(tw_obj%Ael2sen)
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
           exists=.FALSE.
         END IF
       END IF
@@ -2699,17 +3173,19 @@ IF(PRESENT(save_file))THEN
       !   END IF
       ! END IF
       IF(exists)THEN
+        IF(ASSOCIATED(tw_obj%Adr2sen))DEALLOCATE(tw_obj%Adr2sen)
         ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
         READ(io_unit, IOSTAT=ierr)tw_obj%Adr2sen
         IF(ierr/=0)THEN
-          WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
-          DEALLOCATE(tw_obj%Ael2sen,tw_obj%Adr2sen)
+          IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
           exists=.FALSE.
         END IF
       END IF
       CLOSE(io_unit)
       CALL oft_decrease_indent
     END IF
+    !---All processors must agree before using the cached matrices
+    exists=oft_mpi_and(exists)
     IF(exists)THEN
       DEBUG_STACK_POP
       RETURN
@@ -2721,18 +3197,20 @@ bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
 npoint=COUNT([(sensors(j)%point,j=1,nsensors)])
-WRITE(*,'(2A)')oft_indent,'Building element->sensor inductance matrix'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building element->sensor inductance matrix'
 CALL oft_increase_indent
 IF(ASSOCIATED(tw_obj%Ael2sen))DEALLOCATE(tw_obj%Ael2sen)
-ALLOCATE(tw_obj%Ael2sen(nsensors,tw_nelems_exp(tw_obj)))
+ALLOCATE(tw_obj%Ael2sen(nsensors,tw_obj%cm_nexp))
 tw_obj%Ael2sen=0.d0
 IF(nsensors>0)THEN
   CALL mytimer%tick()
+  !---Only cells contributing to the elements stored on this processor
   !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,evec_i,rvec_j, &
   !$omp atmp,i,area_i,norm_i,dl_min,bpt,dl)
   ALLOCATE(atmp(3,nsensors))
   !$omp do
   DO i=1,bmesh%nc
+    IF(.NOT.tw_obj%cm_cell(i))CYCLE
     IF(tw_obj%sens_mask(bmesh%reg(i)))CYCLE
     ! CALL bmesh%norm(i,f,norm_i)
     area_i=bmesh%ca(i)
@@ -2765,13 +3243,16 @@ IF(nsensors>0)THEN
     DO ii=1,3
       ik=tw_obj%pmap(bmesh%lc(ii,i))
       IF(ik==0)CYCLE
+      ik=tw_obj%cm_expmap(ik) ! Stored (local) column
+      IF(ik==0)CYCLE
       DO j=1,nsensors
         !$omp atomic
         tw_obj%Ael2sen(j,ik)=tw_obj%Ael2sen(j,ik)+atmp(ii,j)
       END DO
     END DO
     DO ii=tw_obj%kfh(i),tw_obj%kfh(i+1)-1
-      ik=ABS(tw_obj%lfh(1,ii))+tw_obj%np_active
+      ik=tw_obj%cm_expmap(ABS(tw_obj%lfh(1,ii))+tw_obj%np_active) ! Stored (local) column
+      IF(ik==0)CYCLE
       DO j=1,nsensors
         tmp=SIGN(1,tw_obj%lfh(1,ii))*atmp(tw_obj%lfh(2,ii),j)
         !$omp atomic
@@ -2785,9 +3266,9 @@ IF(nsensors>0)THEN
     tw_obj%Ael2sen(j,:)=tw_obj%Ael2sen(j,:)*sensors(j)%scale_fac
   END DO
   elapsed_time=mytimer%tock()
-  WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+  IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 ELSE
-  WRITE(*,'(2A)')oft_indent,'No magnetic sensors, skipping...'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No magnetic sensors, skipping...'
 END IF
 CALL oft_decrease_indent
 !---Build temporary coil set from all filaments in model
@@ -2802,14 +3283,16 @@ END DO
 !---Compute coupling between coils and sensors
 ALLOCATE(Acoil2sen_tmp(nsensors,ncoils_tot))
 Acoil2sen_tmp=0.d0
-WRITE(*,'(2A)')oft_indent,'Building coil->sensor inductance matrix'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building coil->sensor inductance matrix'
 CALL oft_increase_indent
 IF(nsensors>0.AND.ncoils_tot>0)THEN
   CALL mytimer%tick()
+  !---Sensors are split over processors, contributions summed below
   !$omp parallel private(ii,j,k,kk,tmp,pt_i,atmp,cvec)
   ALLOCATE(atmp(ncoils_tot,1))
   !$omp do
   DO i=1,nsensors
+    IF(MOD(i-1,oft_env%nprocs)/=oft_env%rank)CYCLE
     atmp=0.d0
     IF(sensors(i)%point)THEN ! Field along the probe normal
       pt_i=sensors(i)%r(:,1)
@@ -2852,13 +3335,14 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
   END DO
   DEALLOCATE(atmp)
   !$omp end parallel
+  CALL tw_mpi_sum_2d(Acoil2sen_tmp)
   DO j=1,nsensors
     Acoil2sen_tmp(j,:)=Acoil2sen_tmp(j,:)*sensors(j)%scale_fac
   END DO
   elapsed_time=mytimer%tock()
-  WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+  IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 ELSE
-  WRITE(*,'(2A)')oft_indent,'No magnetic sensors or coils, skipping...'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No magnetic sensors or coils, skipping...'
 END IF
 DEALLOCATE(coils_tot)
 CALL oft_decrease_indent
@@ -2876,12 +3360,13 @@ END DO
 tw_obj%Adr2sen=tw_obj%Adr2sen*mu0/(4.d0*pi)
 !---Copy coupling between passive coils and sensors
 IF(nsensors>0)THEN
-  !$omp parallel private(jj)
+  !$omp parallel private(jj,k)
   !$omp do
   DO i=1,tw_obj%n_vcoils
-    ! Sensors
+    k=tw_obj%cm_expmap(tw_obj%np_active+tw_obj%nholes+i) ! Stored (local) column of the V-coil
+    IF(k==0)CYCLE
     DO jj=1,nsensors
-      tw_obj%Ael2sen(jj,tw_obj%np_active+tw_obj%nholes+i)=Acoil2sen_tmp(jj,i)! tw_obj%Acoil2sen(jj,i)
+      tw_obj%Ael2sen(jj,k)=Acoil2sen_tmp(jj,i)
     END DO
   END DO
   !$omp end parallel
@@ -2892,14 +3377,20 @@ DEALLOCATE(Acoil2sen_tmp)
 !---
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
-    OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash
-    WRITE(io_unit)tw_obj%Ael2sen
-    ! WRITE(io_unit)tw_obj%Acoil2sen
-    WRITE(io_unit)tw_obj%Adr2sen
-    CLOSE(io_unit)
+    IF(oft_env%head_proc)THEN
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED',STATUS='REPLACE')
+      WRITE(io_unit)tw_cm_cache_fmt,tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash
+      CLOSE(io_unit)
+    END IF
+    CALL tw_cm_cache_write(tw_obj,TRIM(save_file),tw_obj%Ael2sen,.TRUE.)
+    IF(oft_env%head_proc)THEN
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED',STATUS='OLD',POSITION='APPEND')
+      WRITE(io_unit)tw_obj%Adr2sen
+      CLOSE(io_unit)
+    END IF
   END IF
 END IF
+CALL oft_mpi_barrier(ierr) ! Wait for cache file to be written
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_mutuals_exp
 !---------------------------------------------------------------------------------
@@ -2917,7 +3408,7 @@ CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_native_matrix), POINTER :: Rmat
 DEBUG_STACK_PUSH
 bmesh=>tw_obj%mesh
-WRITE(*,'(2A)')oft_indent,'Building resistivity matrix'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building resistivity matrix'
 CALL oft_increase_indent
 IF(ALL(tw_obj%Eta_surf<0.d0))THEN
   CALL oft_warn('Resistivity not set, using "eta=mu0" for all regions')
@@ -2925,6 +3416,7 @@ IF(ALL(tw_obj%Eta_surf<0.d0))THEN
 END IF
 ALLOCATE(tw_obj%Rmat)
 Rmat=>tw_obj%Rmat
+Rmat%force_local=.TRUE. ! Full rows are stored on every processor (replicated vectors under MPI)
 Rmat%nr=tw_nelems_exp(tw_obj); Rmat%nrg=tw_nelems_exp(tw_obj)
 Rmat%nc=tw_nelems_exp(tw_obj); Rmat%ncg=tw_nelems_exp(tw_obj)
 !---Build face element lists
@@ -3124,7 +3616,7 @@ DO i=1,tw_obj%n_vcoils
     END IF
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
-  WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
+  IF(oft_env%head_proc)WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
   tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself/mu0 ! Convert to magnetic units
   !
   eta_add=tw_obj%vcoils(i)%Rself
@@ -3632,7 +4124,7 @@ CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,k,kk,nsurf
+INTEGER(4) :: i,ii,j,jj,ik,k,kk,nsurf,ierr
 LOGICAL :: load_success
 CLASS(oft_bmesh), POINTER :: bmesh
 IF(PRESENT(save_file))THEN
@@ -3644,7 +4136,7 @@ bmesh=>self%mesh
 ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
 f=1.d0/3.d0
-WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
 !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
 !$omp atmp,i,area_i,norm_j,diffvec)
 ALLOCATE(atmp(3,3,bmesh%np))
@@ -3678,7 +4170,7 @@ END DO
 DEALLOCATE(atmp)
 !$omp end parallel
 !
-WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
 nsurf=self%nelems-self%n_vcoils ! V-coil rows of the junction map are the identity
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
 DO i=1,bmesh%np
@@ -3706,7 +4198,7 @@ DO i=1,bmesh%np
 END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
-WRITE(*,'(2A)')oft_indent,'Building icoil->element magnetic reconstruction operator'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building icoil->element magnetic reconstruction operator'
 ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
@@ -3736,7 +4228,10 @@ END DO
 self%Bdr=self%Bdr*mu0/(4.d0*pi)
 !
 CALL oft_increase_indent
-IF(PRESENT(save_file))CALL save_to_file()
+IF(PRESENT(save_file))THEN
+  IF(oft_env%head_proc)CALL save_to_file()
+  CALL oft_mpi_barrier(ierr) ! Wait for cache file to be written
+END IF
 CALL oft_decrease_indent
 CONTAINS
 !> Add the field of one basis function of a cell to the operator of an element, scattered through the junction
@@ -3779,7 +4274,7 @@ IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
   IF(exists)THEN
     CALL cache_key(hash_tmp)
-    WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
+    IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
     IF(exists)exists=ALL(file_counts==hash_tmp)
     IF(exists.AND.ASSOCIATED(self%junc))THEN
@@ -3812,7 +4307,7 @@ SUBROUTINE save_to_file()
 INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
   CALL cache_key(hash_tmp)
-  WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
   IF(ASSOCIATED(self%junc))CALL hdf5_write([tw_junction_hash(self)],TRIM(save_file),'JUNCTION_hash')
@@ -3982,7 +4477,7 @@ nmasked=0
 CALL oft_increase_indent
 !---Count coil sets
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
-  WRITE(*,'(2A)')oft_indent,'Loading driver coils from mesh file'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading driver coils from mesh file'
   CALL hdf5_read(ncoil_sets,TRIM(filepath),'thincurr/coils/NCOILSETS',success=success)
   self%n_coils=ncoil_sets
   ALLOCATE(self%coils(self%n_coils))
@@ -4008,7 +4503,7 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
       CALL hdf5_read(str_tmp,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/NAME',success)
       IF(.NOT.success)CALL oft_abort('Failed to read name for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
       IF(LEN(str_tmp)>LEN(coil_tmp%name))THEN
-        WRITE(*,'(3A)')oft_indent,'Coil set name "',str_tmp,'" too long for coil set truncating'
+        IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Coil set name "',str_tmp,'" too long for coil set truncating'
         coil_tmp%name=str_tmp(1:LEN(coil_tmp%name))
       ELSE
         coil_tmp%name=str_tmp
@@ -4091,31 +4586,31 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
   END DO
 END IF
 !---
-IF(nmasked>0)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
+IF((nmasked>0).AND.oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
 IF(oft_debug_print(1))THEN
   IF(self%n_vcoils>0)THEN
-    WRITE(*,*)
-    WRITE(*,'(2A)')oft_indent,'V-Coils set definitions'
-    WRITE(*,'(2A)')oft_indent,'========================='
-    WRITE(*,'(2A,I6,A)')oft_indent,'Found ',self%n_vcoils,' coil sets'
+    IF(oft_env%head_proc)WRITE(*,*)
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'V-Coils set definitions'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'========================='
+    IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Found ',self%n_vcoils,' coil sets'
     DO i=1,self%n_vcoils
-      WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
-      WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',self%vcoils(i)%ncoils
+      IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
+      IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',self%vcoils(i)%ncoils
     END DO
-    WRITE(*,'(2A)')oft_indent,'========================='
-    WRITE(*,*)
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'========================='
+    IF(oft_env%head_proc)WRITE(*,*)
   END IF
   IF(self%n_icoils>0)THEN
-    WRITE(*,*)
-    WRITE(*,'(2A)')oft_indent,'I-Coils set definitions'
-    WRITE(*,'(2A)')oft_indent,'========================='
-    WRITE(*,'(2A,I6,A)')oft_indent,'Found ',self%n_icoils,' coil sets'
+    IF(oft_env%head_proc)WRITE(*,*)
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'I-Coils set definitions'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'========================='
+    IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Found ',self%n_icoils,' coil sets'
     DO i=1,self%n_icoils
-      WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
-      WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',self%icoils(i)%ncoils
+      IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
+      IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',self%icoils(i)%ncoils
     END DO
-    WRITE(*,'(2A)')oft_indent,'========================='
-    WRITE(*,*)
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'========================='
+    IF(oft_env%head_proc)WRITE(*,*)
   END IF
 END IF
 CALL oft_decrease_indent
@@ -4371,7 +4866,7 @@ DO i=1,ncoils
       CALL oft_xml_abort('Error reading "name" for coil set '//coil_ind,'tw_load_coils_xml',__FILE__)
     END IF
     IF(LEN(str_tmp)>LEN(coil_tmp%name))THEN
-      WRITE(*,'(2A,I6,A)')oft_indent,'Coil set name too long for coil set ',i,', truncating'
+      IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Coil set name too long for coil set ',i,', truncating'
       coil_tmp%name=str_tmp(1:LEN(coil_tmp%name))
     ELSE
       coil_tmp%name=str_tmp
@@ -4504,18 +4999,18 @@ DO i=1,ncoils
 END DO
 IF(ASSOCIATED(coil_sets%nodes))DEALLOCATE(coil_sets%nodes)
 !---
-IF(nmasked>0)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
+IF((nmasked>0).AND.oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'Coils set definitions'
-  WRITE(*,'(2A)')oft_indent,'========================='
-  WRITE(*,'(2A,I6,A)')oft_indent,'Found ',ncoils,' coil sets'
+  IF(oft_env%head_proc)WRITE(*,*)
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Coils set definitions'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'========================='
+  IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Found ',ncoils,' coil sets'
   DO i=1,ncoils
-    WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
-    WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',coils(i)%ncoils
+    IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
+    IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',coils(i)%ncoils
   END DO
-  WRITE(*,'(2A)')oft_indent,'========================='
-  WRITE(*,*)
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'========================='
+  IF(oft_env%head_proc)WRITE(*,*)
 END IF
 CALL oft_decrease_indent
 end subroutine tw_load_coils_xml
@@ -4548,18 +5043,18 @@ INTEGER(4) :: i,j,k,io_unit,ierr,id,vert,cell,p1,p2
 REAL(8) :: norm(3),ed_norm(3),cell_norm(3),f(3)
 REAL(8), ALLOCATABLE :: hole_facs(:)
 LOGICAL :: exists
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading sensor information'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading sensor information'
 CALL oft_increase_indent
 !---Load flux loops
 sensors%nfloops=0
 INQUIRE(FILE=TRIM(filename), EXIST=exists)
 IF(exists)THEN
-  WRITE(*,'(2A)')oft_indent,'Loading flux loops from file: '//TRIM(filename)
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading flux loops from file: '//TRIM(filename)
   OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
   ierr=skip_comment_lines(io_unit)
   READ(io_unit,*)sensors%nfloops
-  WRITE(*,'(2A,I6)')oft_indent,'  # of floops =',sensors%nfloops
+  IF(oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'  # of floops =',sensors%nfloops
   ALLOCATE(sensors%floops(sensors%nfloops))
   DO i=1,sensors%nfloops
     READ(io_unit,*)
@@ -4584,8 +5079,9 @@ END IF
 !---Load jumpers
 sensors%njumpers=0
 IF(ASSOCIATED(self%jumper_nsets))THEN
-  WRITE(*,'(2A)')oft_indent,'Setting up jumpers'
-  OPEN(NEWUNIT=io_unit, FILE='jumpers_orient.dat')
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Setting up jumpers'
+  !---Orientation diagnostic file (written by the head processor only)
+  OPEN(NEWUNIT=io_unit, FILE=TRIM(MERGE('jumpers_orient.dat','/dev/null         ',oft_env%head_proc)))
   sensors%njumpers=SIZE(self%jumper_nsets)
   ALLOCATE(sensors%jumpers(sensors%njumpers))
   ALLOCATE(hole_facs(self%nholes))
@@ -4607,7 +5103,7 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
       IF(sensors%jumpers(i)%points(j)==0.OR.sensors%jumpers(i)%points(j+1)==0)CYCLE
       id=mesh_local_findedge(self%mesh,[sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1)])
       IF(id==0)THEN
-        WRITE(*,*)"No Edge matching points: ",sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1),' on jumper ',i
+        IF(oft_env%head_proc)WRITE(*,*)"No Edge matching points: ",sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1),' on jumper ',i
         CALL oft_abort("No matching edge for jumper points","tw_load_sensors",__FILE__)
       END IF
       cell=self%mesh%lec(self%mesh%kec(ABS(id)))
@@ -4743,10 +5239,10 @@ ELSE
   flag_list(i0)=1 ! Ok to not be a full loop
 END IF
 IF(ANY(flag_list==0))THEN
-  WRITE(*,'(2A)')oft_indent,"No matching edges for following points:"
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,"No matching edges for following points:"
   CALL oft_increase_indent
   DO jj=1,n
-    IF(flag_list(jj)==0)WRITE(*,'(A,I8,3ES14.5)')oft_indent,lloop_tmp(jj),self%mesh%r(:,lloop_tmp(jj))
+    IF((flag_list(jj)==0).AND.oft_env%head_proc)WRITE(*,'(A,I8,3ES14.5)')oft_indent,lloop_tmp(jj),self%mesh%r(:,lloop_tmp(jj))
   END DO
   CALL oft_decrease_indent
   CALL oft_abort('Error building jumper mesh, unmatched points exist', &
@@ -4825,14 +5321,14 @@ END IF
 ! Read surface resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 IF(ierr==0)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
+  IF(oft_env%head_proc)WRITE(*,*)
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
   CALL xml_read_content(eta_group,eta_tmp,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort('Error reading eta values','tw_load_eta',__FILE__)
   IF(SIZE(eta_tmp)/=SIZE(self%Eta_surf))CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
   IF(ANY(eta_tmp<=0.d0))CALL oft_abort('All "eta" values must be > 0','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_tmp(i)
+    IF(oft_env%head_proc)WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_tmp(i)
     self%Eta_surf(i)=eta_tmp(i)/mu0 ! Convert to magnetic units
   END DO
   DEALLOCATE(eta_tmp)
@@ -4840,14 +5336,14 @@ IF(ierr==0)THEN
 ELSE
   CALL xml_get_element(self%xml,"eta_surf",eta_surf_group,ierr)
   IF(ierr==0)THEN
-    WRITE(*,*)
-    WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
+    IF(oft_env%head_proc)WRITE(*,*)
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
     CALL xml_read_content(eta_surf_group,eta_tmp,iostat=ierr)
     IF(ierr/=0)CALL oft_abort('Error reading eta values','tw_load_eta',__FILE__)
     IF(SIZE(eta_tmp)/=SIZE(self%Eta_surf))CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
     IF(ANY(eta_tmp<=0.d0))CALL oft_abort('All "eta" values must be > 0','tw_load_eta',__FILE__)
     DO i=1,nreg_mesh
-      WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_tmp(i)
+      IF(oft_env%head_proc)WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_tmp(i)
       self%Eta_surf(i)=eta_tmp(i)/mu0 ! Convert to magnetic units
     END DO
     DEALLOCATE(eta_tmp)
@@ -4857,14 +5353,14 @@ END IF
 ! Read volumetric resistivity values
 CALL xml_get_element(self%xml,"eta_vol",eta_vol_group,ierr)
 IF(ierr==0)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'Loading region volumetric resistivity:'
+  IF(oft_env%head_proc)WRITE(*,*)
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading region volumetric resistivity:'
   CALL xml_read_content(eta_vol_group,eta_vol_tmp,iostat=ierr)
   IF(ierr/=0)CALL oft_abort('Error reading eta_vol values','tw_load_eta',__FILE__)
   IF(SIZE(eta_vol_tmp)/=SIZE(self%Eta_vol))CALL oft_abort('Eta_vol size mismatch','tw_load_eta',__FILE__)
   IF(ANY(eta_vol_tmp<=0.d0))CALL oft_abort('All "eta_vol" values must be > 0','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_vol_tmp(i)
+    IF(oft_env%head_proc)WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_vol_tmp(i)
     self%Eta_vol(i)=eta_vol_tmp(i)/mu0 ! Convert to magnetic units
   END DO
   DEALLOCATE(eta_vol_tmp)
@@ -4873,13 +5369,13 @@ END IF
 ! Read thickness values
 CALL xml_get_element(self%xml,"thickness",thickness_group,ierr)
 IF(ierr==0)THEN
-  WRITE(*,'(2A)')oft_indent,'Loading region thickness:'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading region thickness:'
   CALL xml_read_content(thickness_group,thickness_tmp,iostat=ierr)
   IF(ierr/=0)CALL oft_abort('Error reading thickness values','tw_load_eta',__FILE__)
   IF(SIZE(thickness_tmp)/=SIZE(self%Thickness))CALL oft_abort('Thickness size mismatch','tw_load_eta',__FILE__)
   IF(ANY(thickness_tmp<=0.d0))CALL oft_abort('All "thickness" values must be > 0','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,thickness_tmp(i)
+    IF(oft_env%head_proc)WRITE(*,'(A,I4,ES12.4)')oft_indent,i,thickness_tmp(i)
     self%Thickness(i)=thickness_tmp(i)
   END DO
   DEALLOCATE(thickness_tmp)
@@ -4902,12 +5398,12 @@ END IF
 ! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
 IF(ierr==0)THEN
-  WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
   CALL xml_read_content(sens_node,sens_mask_tmp,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort('Error reading sensor mask values','tw_load_eta',__FILE__)
   IF(SIZE(sens_mask_tmp)/=SIZE(self%sens_mask))CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,L1)')oft_indent,i,sens_mask_tmp(i)
+    IF(oft_env%head_proc)WRITE(*,'(A,I4,L1)')oft_indent,i,sens_mask_tmp(i)
     self%sens_mask(i)=sens_mask_tmp(i)
   END DO
   DEALLOCATE(sens_mask_tmp)
@@ -5071,7 +5567,7 @@ DO i=1,u%n
 END DO
 CALL native_vector_slice_push(outvec,global_le,rst_info)
 CALL hdf5_write(rst_info,filename,path)
-IF(self%n_vcoils>0)THEN
+IF((self%n_vcoils>0).AND.oft_env%head_proc)THEN
   allocate(pcoil_vals(self%n_vcoils))
   pcoil_vals=outvec%v(self%nelems-self%n_vcoils+1:self%nelems)
   CALL hdf5_write(pcoil_vals,filename,path//"_Vcoils")
@@ -5167,7 +5663,7 @@ SUBROUTINE tw_setup_junctions(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 INTEGER(4) :: i,j,s
 IF(SIZE(self%junc%p_kr)-1/=self%np_active+self%nholes)THEN
-  WRITE(*,*)SIZE(self%junc%p_kr)-1,self%np_active,self%nholes
+  IF(oft_env%head_proc)WRITE(*,*)SIZE(self%junc%p_kr)-1,self%np_active,self%nholes
   CALL oft_abort("Junction map does not match the active vertices and holes","tw_setup_junctions",__FILE__)
 END IF
 DO i=1,SIZE(self%junc%table,DIM=2)
@@ -5180,7 +5676,7 @@ DO i=1,SIZE(self%junc%table,DIM=2)
     "tw_setup_junctions",__FILE__)
 END DO
 CALL tw_junction_vcoil_rows(self)
-WRITE(*,'(2A,I8,A,I8)')oft_indent,'Junctions: unknowns reduced from ',self%junc%nelems_exp,' to ',self%nelems
+IF(oft_env%head_proc)WRITE(*,'(2A,I8,A,I8)')oft_indent,'Junctions: unknowns reduced from ',self%junc%nelems_exp,' to ',self%nelems
 END SUBROUTINE tw_setup_junctions
 !---------------------------------------------------------------------------------
 !> Set the V-coil rows of the junction map (identity) for the current V-coils, so that P covers all expanded
@@ -5407,6 +5903,7 @@ DO a=1,nr
   END DO
 END DO
 ALLOCATE(Rred)
+Rred%force_local=.TRUE. ! Full rows are stored on every processor (replicated vectors under MPI)
 Rred%nr=nr; Rred%nrg=nr
 Rred%nc=nr; Rred%ncg=nr
 Rred%nnz=nnz
@@ -5486,7 +5983,13 @@ SUBROUTINE tw_compute_Ael2dr(tw_obj,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 CALL tw_compute_Ael2dr_exp(tw_obj,save_file)
-IF(ASSOCIATED(tw_obj%junc).AND.ASSOCIATED(tw_obj%Ael2dr))CALL tw_junction_reduce_rows(tw_obj,tw_obj%Ael2dr)
+IF(ASSOCIATED(tw_obj%junc).AND.ASSOCIATED(tw_obj%Ael2dr))THEN
+  IF(tw_obj%cm_dist)THEN
+    CALL tw_cm_reduce_rows(tw_obj,tw_obj%Ael2dr)
+  ELSE
+    CALL tw_junction_reduce_rows(tw_obj,tw_obj%Ael2dr)
+  END IF
+END IF
 END SUBROUTINE tw_compute_Ael2dr
 !---------------------------------------------------------------------------------
 !> Compute the element to sensor coupling (reduced to the junction unknowns if present)
@@ -5498,7 +6001,11 @@ TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:) !< Sensors
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 CALL tw_compute_mutuals_exp(tw_obj,nsensors,sensors,save_file)
 IF(.NOT.ASSOCIATED(tw_obj%junc))RETURN
-CALL tw_junction_reduce_cols(tw_obj,tw_obj%Ael2sen)
+IF(tw_obj%cm_dist)THEN
+  CALL tw_cm_reduce_cols(tw_obj,tw_obj%Ael2sen)
+ELSE
+  CALL tw_junction_reduce_cols(tw_obj,tw_obj%Ael2sen)
+END IF
 END SUBROUTINE tw_compute_mutuals
 !---------------------------------------------------------------------------------
 !> Current through a jumper (expanding junction unknowns if present)

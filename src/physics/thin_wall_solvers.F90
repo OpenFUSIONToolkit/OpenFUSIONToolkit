@@ -74,8 +74,8 @@ N = self%nelems
 LDA = N
 LDVL = N
 LDVR = N
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (direct)'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (direct)'
 CALL oft_increase_indent
 CALL loctimer%tick
 ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
@@ -88,7 +88,7 @@ ALLOCATE(work(lwork))
 CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
 DEALLOCATE(VL,WORK,Acomp)
 elapsed_time=loctimer%tock()
-WRITE(*,'(2A,ES12.4,I4)')oft_indent,'Time = ',elapsed_time,INFO
+IF(oft_env%head_proc)WRITE(*,'(2A,ES12.4,I4)')oft_indent,'Time = ',elapsed_time,INFO
 !---Sort eigenvalues
 ALLOCATE(sort_tmp(N))
 sort_tmp=[(N+1-i,i=1,N)]
@@ -105,10 +105,10 @@ DO i=1,neigs
    eig_vec(:,i)=REAL(VR(:,j),8)
 END DO
 DEALLOCATE(WR,WI,VR,sort_tmp)
-WRITE(*,'(2A)')oft_indent,'Eigenvalues'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Eigenvalues'
 CALL oft_increase_indent
 DO i=1,MIN(neigs,5)
-  WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
+  IF(oft_env%head_proc)WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
 END DO
 CALL oft_decrease_indent
 CALL oft_decrease_indent
@@ -131,6 +131,7 @@ INTEGER(4), ALLOCATABLE, DIMENSION(:) :: sort_tmp
 REAL(8) :: lam0,elapsed_time
 REAL(8), ALLOCATABLE, DIMENSION(:) :: W_tmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mmat
+REAL(8), POINTER, DIMENSION(:) :: vslice,vfull
 LOGICAL :: pm_save
 CLASS(oft_vector), POINTER :: uloc
 TYPE(oft_native_dense_matrix), TARGET :: fmat,bmat
@@ -138,8 +139,8 @@ CLASS(oft_solver), POINTER :: linv
 TYPE(oft_irlm_eigsolver) :: arsolver
 TYPE(oft_timer) :: loctimer
 DEBUG_STACK_PUSH
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (ARPACK)'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (ARPACK)'
 CALL oft_increase_indent
 !---Setup local vectors
 CALL self%Uloc%new(uloc)
@@ -151,7 +152,7 @@ CALL create_native_solver(linv,'lu')
 SELECT TYPE(this=>linv)
 CLASS IS(oft_lusolver)
   IF(this%package(1:4)=='none')THEN
-    WRITE(*,'(2A)')oft_indent,'Note: LU solver not available, falling back to CG'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Note: LU solver not available, falling back to CG'
     CALL linv%delete
     DEALLOCATE(linv)
   END IF
@@ -186,7 +187,7 @@ pm_save=oft_env%pm; oft_env%pm=.false.
 CALL arsolver%apply(uloc,lam0)
 oft_env%pm=pm_save
 elapsed_time=loctimer%tock()
-WRITE(*,'(2A,ES12.4)')oft_indent,'Time = ',elapsed_time
+IF(oft_env%head_proc)WRITE(*,'(2A,ES12.4)')oft_indent,'Time = ',elapsed_time
 IF(arsolver%info>=0)THEN
   !---Sort eigenvalues
   ALLOCATE(sort_tmp(arsolver%nev),W_tmp(arsolver%nev))
@@ -194,22 +195,31 @@ IF(arsolver%info>=0)THEN
   sort_tmp=[(i,i=1,arsolver%nev)]
   CALL sort_array(W_tmp,sort_tmp,arsolver%nev)
   DEALLOCATE(W_tmp)
-  !---Copy output
+  !---Copy output (eigenvectors are owned slices with parallel ARPACK, gathered to full vectors)
+  NULLIFY(vslice,vfull)
   DO i=1,neigs
     j = sort_tmp(arsolver%nev+1-i)
     eig_rval(i)=arsolver%eig_val(1,j)
     IF(PRESENT(eig_ival))eig_ival(i)=arsolver%eig_val(2,j)
-    eig_vec(:,i)=arsolver%eig_vec(:,j)
+    IF(uloc%nslice==uloc%n)THEN
+      eig_vec(:,i)=arsolver%eig_vec(:,j)
+    ELSE
+      vslice=>arsolver%eig_vec(:,j)
+      CALL uloc%restore_slice(vslice)
+      CALL uloc%get_local(vfull)
+      eig_vec(:,i)=vfull
+    END IF
   END DO
+  IF(ASSOCIATED(vfull))DEALLOCATE(vfull)
   DEALLOCATE(sort_tmp)
   ! !---Handle closures
   ! DO i=1,self%nclosures
   !   eig_vec(self%closures(i),1:neigs)=0.d0
   ! END DO
-  WRITE(*,'(2A)')oft_indent,'Eigenvalues'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Eigenvalues'
   CALL oft_increase_indent
   DO i=1,MIN(neigs,5)
-    WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
+    IF(oft_env%head_proc)WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
   END DO
   CALL oft_decrease_indent
 END IF
@@ -249,7 +259,7 @@ IF(neigs>50)CALL oft_warn('Large "pre_neigs": the eigenmode solve and coarse spa
 rhash=oft_simple_hash(C_LOC(self%Rmat%M),INT(8*SIZE(self%Rmat%M),8),starting_value=neigs)
 IF(ASSOCIATED(hodlr_op%pre_evecs))THEN
   IF((SIZE(hodlr_op%pre_evecs,2)==neigs).AND.(hodlr_op%pre_evecs_hash==rhash))THEN
-    WRITE(*,'(2A)')oft_indent,'Reusing L/R eigenmodes for the coarse space'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Reusing L/R eigenmodes for the coarse space'
     RETURN
   END IF
   DEALLOCATE(hodlr_op%pre_evecs)
@@ -300,8 +310,8 @@ TYPE(oft_tw_hodlr_bjpre), TARGET :: frinv_pre
 TYPE(oft_native_dense_cbjprecond), TARGET :: frinv_dense_pre
 TYPE(oft_diag_cscale), TARGET :: frinv_diag_pre
 !---
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting frequency-domain run'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Starting frequency-domain run'
 CALL oft_increase_indent
 !---Setup matrix
 ALLOCATE(b(self%nelems))
@@ -309,19 +319,19 @@ b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
+    IF(oft_env%head_proc)WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
     aca_Fmat%alam=(1.d0,0.d0)
   CASE(1)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)
     aca_Fmat%alam=(0.d0,0.d0)
   CASE(2)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
     aca_Fmat%rJ=>self%Rmat
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,0.d0)
@@ -335,7 +345,7 @@ ELSE
   ALLOCATE(dense_Fmat%M(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
+    IF(oft_env%head_proc)WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
     dense_Fmat%M=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -343,10 +353,10 @@ ELSE
       END DO
     END DO
   CASE(1)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
     dense_Fmat%M=(0.d0,1.d0)*self%Lmat
   CASE(2)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
     dense_Fmat%M=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -444,7 +454,7 @@ REAL(8), POINTER, INTENT(in) :: volt_waveform(:,:)
 REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
-INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
+INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2),ierr
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist,proj_c
@@ -467,10 +477,10 @@ integer(i4) :: nproj,maxproj,iproj
 real(r8), pointer, dimension(:) :: pvals
 real(r8), allocatable, target, dimension(:,:) :: proj_x,proj_ax,proj_q,proj_aq
 CLASS(oft_vector), POINTER :: vtmp,vtmp2
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
-WRITE(*,'(2A)')oft_indent,'timestep    time           sol_norm     nits    solver time'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'timestep    time           sol_norm     nits    solver time'
 !---Setup coil waveform
 IF(ASSOCIATED(curr_waveform))THEN
   ncols=SIZE(curr_waveform,DIM=2)
@@ -587,7 +597,7 @@ ELSE
       Minv%M(i,self%Rmat%lc(j))=Minv%M(i,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
     END DO
   END DO
-  WRITE(*,'(2A)')oft_indent,'Starting factorization'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Starting factorization'
   pm_save=oft_env%pm; oft_env%pm=.TRUE.
   ! CALL lapack_matinv(Minv%nr,Minv%M,info)
   CALL lapack_cholesky(Minv%nr,Minv%M,info)
@@ -607,8 +617,8 @@ END IF
 WRITE(pltnum,'(I4.4)')0
 rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
 CALL tw_rst_save(self,u,TRIM(rst_file),'U')
-CALL hdf5_write(t,TRIM(rst_file),'time')
-CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
+IF(oft_env%head_proc)CALL hdf5_write(t,TRIM(rst_file),'time')
+IF(oft_env%head_proc)CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
 !---Save sensor data for t=0
 CALL u%get_local(vals)
 IF(sensors%nfloops>0)THEN
@@ -636,7 +646,7 @@ IF(sensors%nfloops>0)THEN
     CALL floop_hist%write_header
     CALL floop_hist%open
     senout(1)=t
-    CALL floop_hist%write(data_r8=senout)
+    IF(oft_env%head_proc)CALL floop_hist%write(data_r8=senout)
   END IF
 END IF
 IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
@@ -665,7 +675,7 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     CALL jumper_hist%write_header
     CALL jumper_hist%open
     jumpout(1)=t
-    CALL jumper_hist%write(data_r8=jumpout)
+    IF(oft_env%head_proc)CALL jumper_hist%write(data_r8=jumpout)
   END IF
 END IF
 !---Advance system in time
@@ -678,7 +688,7 @@ DO i=1,nsteps
   dt = times(i+1)-times(i)
   !---Update matrices if timestep has changed
   IF(ABS((dt_old-dt)/dt_old)>1.d-6)THEN
-    WRITE(*,'(2X,A,1ES10.2)')'Updating matrices with new timestep = ',dt
+    IF(oft_env%head_proc)WRITE(*,'(2X,A,1ES10.2)')'Updating matrices with new timestep = ',dt
     IF(use_cn)THEN
       bmat%alam = -dt/2.d0  ! Update backward matrix timestep
       dt_op = dt/2.d0
@@ -693,7 +703,7 @@ DO i=1,nsteps
           Minv%M(k,self%Rmat%lc(j))=Minv%M(k,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
         END DO
       END DO
-      WRITE(*,'(2A)')oft_indent,'Starting factorization'
+      IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Starting factorization'
       pm_save=oft_env%pm; oft_env%pm=.TRUE.
       ! CALL lapack_matinv(Minv%nr,Minv%M,info)
       CALL lapack_cholesky(Minv%nr,Minv%M,info)
@@ -774,8 +784,7 @@ DO i=1,nsteps
   END IF
   CALL g%get_local(vals)
   IF(maxproj>0)proj_ax(:,iproj)=dt*proj_ax(:,iproj)+vals
-  IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
-    self%nelems,icoil_dcurr,1,1.d0,vals,1)
+  IF(ntimes_curr>0)CALL tw_cm_dr_apply(self,icoil_dcurr,-1.d0,vals)
   IF(volt_full)THEN
     vals=vals+pcoil_volt
   ELSE
@@ -815,14 +824,14 @@ DO i=1,nsteps
   IF(MOD(i,nstatus)==0)THEN
     nits=INT(SUM(its_hist)/REAL(nstatus,8),4)
     elapsed_time=SUM(time_hist)/REAL(nstatus,8)
-    WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+    IF(oft_env%head_proc)WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
   END IF
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
     rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
     CALL tw_rst_save(self,u,TRIM(rst_file),'U')
-    CALL hdf5_write(t,TRIM(rst_file),'time')
-    CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
+    IF(oft_env%head_proc)CALL hdf5_write(t,TRIM(rst_file),'time')
+    IF(oft_env%head_proc)CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
   END IF
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
@@ -831,8 +840,7 @@ DO i=1,nsteps
   END IF
   CALL u%get_local(vals)
   IF(sensors%nfloops>0)THEN
-    CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen,sensors%nfloops, &
-      vals,1,0.d0,senout(2),1)
+    CALL tw_cm_sen_vec(self,sensors%nfloops,vals,senout(2:))
     IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
       sensors%nfloops,icoil_curr,1,1.d0,senout(2),1)
     IF((ntimes_volt>0).AND.ASSOCIATED(sensor_vals))THEN
@@ -843,7 +851,7 @@ DO i=1,nsteps
       END DO
     END IF
     senout(1)=t
-    CALL floop_hist%write(data_r8=senout)
+    IF(oft_env%head_proc)CALL floop_hist%write(data_r8=senout)
   END IF
   IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     DO j=1,sensors%njumpers
@@ -853,7 +861,7 @@ DO i=1,nsteps
       jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
     END DO
     jumpout(1)=t
-    CALL jumper_hist%write(data_r8=jumpout)
+    IF(oft_env%head_proc)CALL jumper_hist%write(data_r8=jumpout)
   END IF
 END DO
 !---Copy solution to input
@@ -861,11 +869,11 @@ CALL u%get_local(vals)
 vec=vals
 !---Cleanup
 IF(sensors%nfloops>0)THEN
-  CALL floop_hist%close
+  IF(oft_env%head_proc)CALL floop_hist%close
   DEALLOCATE(senout)
 END IF
 IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
-  CALL jumper_hist%close
+  IF(oft_env%head_proc)CALL jumper_hist%close
   DEALLOCATE(jumpout)
 END IF
 CALL u%delete()
@@ -886,6 +894,7 @@ ELSE
   DEALLOCATE(linv)
 END IF
 CALL oft_decrease_indent
+CALL oft_mpi_barrier(ierr) ! Wait for output files to be written by the head processor
 END SUBROUTINE run_td_sim
 !------------------------------------------------------------------------------
 !> Basis for the least-squares initial guess from a set of vectors
@@ -942,7 +951,7 @@ LOGICAL, INTENT(in) :: rebuild_sensors !< Needs Docs
 REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
-INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2,int_inds(2)
+INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2,int_inds(2),ierr
 REAL(8) :: uu,t,tmp,area,tmp2,val_prev,int_facs(2)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec,senout,jumpout
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
@@ -952,8 +961,8 @@ TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Post-processing time-domain simulation'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Post-processing time-domain simulation'
 CALL oft_increase_indent
 ALLOCATE(coil_vec(MAX(1,self%n_icoils)))
 CALL self%Uloc%new(u)
@@ -1011,7 +1020,7 @@ IF(compute_B)THEN
   END IF
 END IF
 !
-CALL self%xdmf%clear_timesteps()
+IF(oft_env%head_proc)CALL self%xdmf%clear_timesteps()
 DO i=0,nsteps
   IF(MOD(i,nplot)/=0)CYCLE
   !
@@ -1021,9 +1030,9 @@ DO i=0,nsteps
   CALL hdf5_read(t,TRIM(rst_file),'time')
   IF(self%n_icoils>0)CALL hdf5_read(coil_vec,TRIM(rst_file),'coil_currents')
   !
-  CALL self%xdmf%add_timestep(t)
+  IF(oft_env%head_proc)CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)
-  CALL tw_save_pfield(self,vals,'J')
+  IF(oft_env%head_proc)CALL tw_save_pfield(self,vals,'J')
   !
   IF(compute_B)THEN
     IF(PRESENT(hodlr_op))THEN
@@ -1055,13 +1064,12 @@ DO i=0,nsteps
         END DO
       END DO
     END IF
-    CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
+    IF(oft_env%head_proc)CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
   IF(rebuild_sensors)THEN
     !
     IF(sensors%nfloops>0)THEN
-      CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen, &
-        sensors%nfloops,vals,1,0.d0,senout(2),1)
+      CALL tw_cm_sen_vec(self,sensors%nfloops,vals,senout(2:))
       IF(self%n_icoils>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen,sensors%nfloops, &
         coil_vec,1,1.d0,senout(2),1)
       IF(ASSOCIATED(sensor_vals))THEN
@@ -1072,7 +1080,7 @@ DO i=0,nsteps
         END DO
       END IF
       senout(1)=t
-      CALL floop_hist%write(data_r8=senout)
+      IF(oft_env%head_proc)CALL floop_hist%write(data_r8=senout)
     END IF
     IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
       DO j=1,sensors%njumpers
@@ -1082,18 +1090,18 @@ DO i=0,nsteps
         jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
       END DO
       jumpout(1)=t
-      CALL jumper_hist%write(data_r8=jumpout)
+      IF(oft_env%head_proc)CALL jumper_hist%write(data_r8=jumpout)
     END IF
   END IF
 END DO
 !---Cleanup
 IF(rebuild_sensors)THEN
 IF(sensors%nfloops>0)THEN
-  CALL floop_hist%close()
+  IF(oft_env%head_proc)CALL floop_hist%close()
   DEALLOCATE(senout)
 END IF
 IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
-  CALL jumper_hist%close()
+  IF(oft_env%head_proc)CALL jumper_hist%close()
   DEALLOCATE(jumpout)
 END IF
 END IF
@@ -1108,6 +1116,7 @@ IF(compute_B.AND.PRESENT(hodlr_op))THEN
 END IF
 IF(self%n_icoils>0)DEALLOCATE(coil_vec)
 CALL oft_decrease_indent
+CALL oft_mpi_barrier(ierr) ! Wait for output files to be written by the head processor
 END SUBROUTINE plot_td_sim
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -1121,14 +1130,14 @@ CHARACTER(LEN=*), INTENT(in) :: filename !< Needs docs
 LOGICAL, INTENT(in) :: compute_B !< Needs docs
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
-INTEGER(4) :: i,j
+INTEGER(4) :: i,j,ierr
 REAL(8), POINTER :: vals(:),pvals(:)
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red,Bxtmp,Bytmp,Bztmp
 CHARACTER(LEN=4) :: sub_coil_id
 CLASS(oft_vector), POINTER :: atmp,btmp,Bx,By,Bz
 character(LEN=80), dimension(1) :: description
-CALL hdf5_create_file(TRIM(filename))
-CALL hdf5_write(tw_idx_ver,TRIM(filename),tw_idx_path)
+IF(oft_env%head_proc)CALL hdf5_create_file(TRIM(filename))
+IF(oft_env%head_proc)CALL hdf5_write(tw_idx_ver,TRIM(filename),tw_idx_path)
 !---Setup temporaries
 NULLIFY(vals)
 CALL self%Uloc%new(atmp)
@@ -1136,9 +1145,9 @@ CALL self%Uloc%new(btmp)
 CALL atmp%get_local(vals)
 ALLOCATE(Mat_red(neigs,neigs),Mattmp(self%nelems,neigs))
 !---Save reduction vectors
-CALL hdf5_write(eig_vec,TRIM(filename),'Basis')
+IF(oft_env%head_proc)CALL hdf5_write(eig_vec,TRIM(filename),'Basis')
 description=["Basis set used for model reduction"]
-CALL hdf5_add_string_attribute(TRIM(filename),'Basis','description',description)
+IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Basis','description',description)
 !---Reduce L matrix
 IF(PRESENT(hodlr_op))THEN
   DO i=1,neigs
@@ -1155,9 +1164,9 @@ ELSE
 END IF
 CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0,eig_vec, &
   self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
-CALL hdf5_write(Mat_red,TRIM(filename),'L')
+IF(oft_env%head_proc)CALL hdf5_write(Mat_red,TRIM(filename),'L')
 description=["Self-inductance matrix for reduced model"]
-CALL hdf5_add_string_attribute(TRIM(filename),'L','description',description)
+IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'L','description',description)
 !---Reduce R matrix
 DO i=1,neigs
   vals=eig_vec(:,i)
@@ -1169,67 +1178,65 @@ DO i=1,neigs
 END DO
 CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0, &
   eig_vec,self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
-CALL hdf5_write(Mat_red,TRIM(filename),'R')
+IF(oft_env%head_proc)CALL hdf5_write(Mat_red,TRIM(filename),'R')
 description=["Resistance matrix for reduced model"]
-CALL hdf5_add_string_attribute(TRIM(filename),'R','description',description)
+IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'R','description',description)
 CALL btmp%delete()
 DEALLOCATE(Mat_red,Mattmp,btmp)
 !---Reduce sensor coupling matrix
 IF(sensors%nfloops>0)THEN
   ! Save sensor names and indexes
-  CALL hdf5_create_group(TRIM(filename),'SENSORS')
+  IF(oft_env%head_proc)CALL hdf5_create_group(TRIM(filename),'SENSORS')
   DO i=1,sensors%nfloops
-    CALL hdf5_create_group(TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_create_group(TRIM(filename), &
       'SENSORS/'//TRIM(sensors%floops(i)%name))
-    CALL hdf5_write(i,TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_write(i,TRIM(filename), &
       'SENSORS/'//TRIM(sensors%floops(i)%name)//'/index')
-    CALL hdf5_write(sensors%floops(i)%scale_fac,TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_write(sensors%floops(i)%scale_fac,TRIM(filename), &
       'SENSORS/'//TRIM(sensors%floops(i)%name)//'/scale')
-    CALL hdf5_write(sensors%floops(i)%r,TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_write(sensors%floops(i)%r,TRIM(filename), &
       'SENSORS/'//TRIM(sensors%floops(i)%name)//'/pts')
   END DO
   ! Save mutual coupling matrix
   ALLOCATE(Mat_red(sensors%nfloops,neigs))
-  CALL dgemm('N','N',sensors%nfloops,neigs,self%nelems,1.d0, &
-    self%Ael2sen,sensors%nfloops,eig_vec,self%nelems,0.d0,Mat_red,sensors%nfloops)
-  CALL hdf5_write(Mat_red,TRIM(filename),'Ms')
+  CALL tw_cm_sen_apply(self,sensors%nfloops,eig_vec,Mat_red)
+  IF(oft_env%head_proc)CALL hdf5_write(Mat_red,TRIM(filename),'Ms')
   description=["Model to sensor mutual inductance matrix"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'Ms','description',description)
+  IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Ms','description',description)
   DEALLOCATE(Mat_red)
 END IF
 !---Reduce coil coupling matrix
 IF(self%n_icoils>0)THEN
   ! Save coil names and indexes
-  CALL hdf5_create_group(TRIM(filename),'COILS')
+  IF(oft_env%head_proc)CALL hdf5_create_group(TRIM(filename),'COILS')
   DO i=1,self%n_icoils
-    CALL hdf5_create_group(TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_create_group(TRIM(filename), &
       'COILS/'//TRIM(self%icoils(i)%name))
-    CALL hdf5_write(i,TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_write(i,TRIM(filename), &
       'COILS/'//TRIM(self%icoils(i)%name)//'/index')
-    CALL hdf5_create_group(TRIM(filename), &
+    IF(oft_env%head_proc)CALL hdf5_create_group(TRIM(filename), &
       'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS')
     DO j=1,self%icoils(i)%ncoils
       WRITE(sub_coil_id,'(I4.4)')j
-      CALL hdf5_create_group(TRIM(filename), &
+      IF(oft_env%head_proc)CALL hdf5_create_group(TRIM(filename), &
         'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id)
-      CALL hdf5_write(self%icoils(i)%scales(j),TRIM(filename), &
+      IF(oft_env%head_proc)CALL hdf5_write(self%icoils(i)%scales(j),TRIM(filename), &
         'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/scale')
-      CALL hdf5_write(self%icoils(i)%coils(j)%pts,TRIM(filename), &
+      IF(oft_env%head_proc)CALL hdf5_write(self%icoils(i)%coils(j)%pts,TRIM(filename), &
         'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/pts')
     END DO
   END DO
   ! Save mutual coupling matrix
   ALLOCATE(Mat_red(neigs,self%n_icoils))
-  CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
-    eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
-  CALL hdf5_write(Mat_red,TRIM(filename),'Mc')
+  CALL tw_cm_dr_project(self,eig_vec,Mat_red)
+  IF(oft_env%head_proc)CALL hdf5_write(Mat_red,TRIM(filename),'Mc')
   description=["Model to coil mutual inductance matrix"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'Mc','description',description)
+  IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Mc','description',description)
   DEALLOCATE(Mat_red)
   IF(sensors%nfloops>0)THEN
-    CALL hdf5_write(self%Adr2sen,TRIM(filename),'Msc')
+    IF(oft_env%head_proc)CALL hdf5_write(self%Adr2sen,TRIM(filename),'Msc')
     description=["Coil to sensor mutual inductance matrix"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'Msc','description',description)
+    IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Msc','description',description)
   END IF
 END IF
 !---Reduce B matrix
@@ -1263,33 +1270,34 @@ IF(compute_B)THEN
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
       self%Bel(:,:,3),self%mesh%np,eig_vec,self%nelems,0.d0,Bztmp,self%mesh%np)
   END IF
-  CALL hdf5_write(Bxtmp,TRIM(filename),'Bx')
+  IF(oft_env%head_proc)CALL hdf5_write(Bxtmp,TRIM(filename),'Bx')
   description=["X-component of B reconstruction matrix for model"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'Bx','description',description)
-  CALL hdf5_write(Bytmp,TRIM(filename),'By')
+  IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Bx','description',description)
+  IF(oft_env%head_proc)CALL hdf5_write(Bytmp,TRIM(filename),'By')
   description=["Y-component of B reconstruction matrix for model"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'By','description',description)
-  CALL hdf5_write(Bztmp,TRIM(filename),'Bz')
+  IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'By','description',description)
+  IF(oft_env%head_proc)CALL hdf5_write(Bztmp,TRIM(filename),'Bz')
   description=["Z-component of B reconstruction matrix for model"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'Bz','description',description)
+  IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Bz','description',description)
   DEALLOCATE(Bxtmp,Bytmp,Bztmp)
   CALL Bx%delete()
   CALL By%delete()
   CALL Bz%delete()
   DEALLOCATE(Bx,By,Bz)
   IF(self%n_icoils>0)THEN
-    CALL hdf5_write(self%Bdr(:,:,1),TRIM(filename),'Bx_c')
+    IF(oft_env%head_proc)CALL hdf5_write(self%Bdr(:,:,1),TRIM(filename),'Bx_c')
     description=["X-component of B reconstruction matrix for coils"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'Bx_c','description',description)
-    CALL hdf5_write(self%Bdr(:,:,2),TRIM(filename),'By_c')
+    IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Bx_c','description',description)
+    IF(oft_env%head_proc)CALL hdf5_write(self%Bdr(:,:,2),TRIM(filename),'By_c')
     description=["Y-component of B reconstruction matrix for coils"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'By_c','description',description)
-    CALL hdf5_write(self%Bdr(:,:,3),TRIM(filename),'Bz_c')
+    IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'By_c','description',description)
+    IF(oft_env%head_proc)CALL hdf5_write(self%Bdr(:,:,3),TRIM(filename),'Bz_c')
     description=["Z-component of B reconstruction matrix for coils"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'Bz_c','description',description)
+    IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Bz_c','description',description)
   END IF
 END IF
 CALL atmp%delete()
 DEALLOCATE(vals,atmp)
+CALL oft_mpi_barrier(ierr) ! Wait for output files to be written by the head processor
 END SUBROUTINE tw_reduce_model
 END MODULE thin_wall_solvers

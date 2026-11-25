@@ -562,7 +562,7 @@ END IF
 IF(.NOT.self%initialized)THEN
   self%dist%active=.FALSE.
   IF(self%distributed.AND.(oft_env%nprocs>1).AND.ASSOCIATED(g%stitch_info))THEN
-    self%dist%active=.NOT.(g%stitch_info%skip.OR.g%stitch_info%full)
+    self%dist%active=.NOT.(g%stitch_info%skip.OR.g%stitch_info%full.OR.g%stitch_info%replicated)
   END IF
 END IF
 IF(self%dist%active)THEN

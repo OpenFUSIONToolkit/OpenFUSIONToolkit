@@ -14,6 +14,8 @@ configure_file( test_ThinCurr_resistivity.py ${CMAKE_CURRENT_BINARY_DIR} COPYONL
 configure_file( test_ThinCurr_model.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_ThinCurr_junctions.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_ThinCurr_homology.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+configure_file( test_ThinCurr_mpi.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+configure_file( thincurr_mpi_driver.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( homology_torus.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( homology_torus_port.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( homology_plate.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )

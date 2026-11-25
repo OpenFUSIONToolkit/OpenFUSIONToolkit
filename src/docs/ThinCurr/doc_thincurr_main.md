@@ -341,3 +341,43 @@ value (`pre_neigs=N` in
 slowest \f$ \textrm{L}/\textrm{R} \f$ eigenmodes to the coarse space for time-dependent runs, which targets the slowly
 decaying current patterns that limit convergence on large models. The eigenmodes are computed with ARPACK on the first
 run and reused by later runs on the same model while the resistivity is unchanged.
+
+\subsection doc_tw_main_hodlr_mpi Running with MPI
+When OFT is built with MPI (`OFT_USE_MPI`), ThinCurr models using HODLR compression can be run on multiple processes
+to reduce the memory and run time per process for large models. The Python script is run on every process (eg.
+`mpiexec -n 4 python my_script.py`), and each process builds the full model (mesh, coils, sensors, resistance matrix,
+etc.). Only the HODLR operators (\f$ \textrm{L} \f$ and the B-field reconstruction operators), their block-Jacobi
+preconditioners, and the linear solvers are distributed:
+ - Leaf blocks of the HODLR partition are assigned to processes in contiguous ranges (in tree order) of approximately
+   equal estimated cost. Each process owns the rows (elements and vertices) of its leaf blocks, while holes and V-coils
+   are owned by the first process.
+ - Diagonal blocks (and the corresponding preconditioner blocks) are computed and stored by the owner of their leaf, and
+   off-diagonal blocks are assigned to the least loaded process owning a leaf of either of their blocks. Each process
+   uses OpenMP threading for its own blocks, as in a serial run.
+ - Vectors are stored in full on every process, with every value owned by exactly one process (a "replicated" seam,
+   see \ref oft_stitching::seam_setup_replicated). Matrix-vector products sum the contributions from each process on
+   the owner, which then shares the result with all processes, so values are identical on all processes. Dot products
+   sum owned values only, and eigenvalue problems use parallel ARPACK on the owned values.
+ - The element coupling matrices for coils and sensors are also distributed: each process computes and stores only
+   the entries for the model unknowns it owns, given by a spatial (recursive coordinate) bisection of the model with
+   holes and V-coils on the first process. Products with these matrices (eg. sensor signals and coil drive terms in
+   time-dependent runs) are summed over processes. The smaller coil to coil and coil to sensor matrices are computed in
+   parallel and stored on every process.
+ - As the element coupling matrices are distributed, \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.compute_Mcoil
+   "compute_Mcoil" and \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.compute_Msensor "compute_Msensor" return
+   `None` in place of the element coupling matrices when run with MPI.
+
+The use of MPI is otherwise transparent, with results returned in full to every process. However, the following should
+be noted:
+ - Only HODLR matrices (`compute_Lmat(use_hodlr=True)`) and iterative solves (`direct=False`) are supported, other
+   cases raise an error.
+ - All ThinCurr methods must be called in the same order on every process. Use
+   \ref OpenFUSIONToolkit._core.OFT_env.head_proc "OFT_env.head_proc" (or
+   \ref OpenFUSIONToolkit._core.OFT_env.rank "OFT_env.rank") to restrict printing and file output in scripts to a single
+   process.
+ - Output (printing, plot files, restart and history files) is written by the first process only. HODLR and coupling matrix cache files
+   written with any number of processes can be read with any other number of processes (including serial runs).
+ - Set the number of OpenMP threads per process (`nthreads` in \ref OpenFUSIONToolkit._core.OFT_env "OFT_env") so
+   that the total number of threads does not exceed the number of available cores.
+ - Each process should own several leaf blocks for good load balance; if not, reduce `target_size` in
+   \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options".

@@ -16,6 +16,7 @@
 MODULE thin_wall_hodlr
 USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_float, c_sizeof
 USE thin_wall
+USE oft_native_la, ONLY: native_vector_setup_replicated
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------------
@@ -68,8 +69,17 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(r8), POINTER, DIMENSION(:,:) :: pre_evecs => NULL() !< Slowest L/R eigenmodes for the coarse space, kept between runs [nelems,:]
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
-  INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
-  INTEGER(4), POINTER, DIMENSION(:,:) :: B_thread_ptr => NULL()
+  INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL() !< Thread blocking of local interaction lists (L) [2,nthreads+1]
+  INTEGER(4), POINTER, DIMENSION(:,:) :: B_thread_ptr => NULL() !< Thread blocking of local interaction lists (B-field) [2,nthreads+1]
+  INTEGER(4) :: ndense_loc = 0 !< Number of diagonal interactions owned by this processor
+  INTEGER(4) :: nsparse_loc = 0 !< Number of off-diagonal interactions owned by this processor
+  INTEGER(4), POINTER, DIMENSION(:) :: dense_loc => NULL() !< Diagonal interactions owned by this processor [ndense_loc]
+  INTEGER(4), POINTER, DIMENSION(:) :: sparse_loc => NULL() !< Off-diagonal interactions owned by this processor [nsparse_loc]
+  INTEGER(4), POINTER, DIMENSION(:) :: dense_owner => NULL() !< Owning processor of each diagonal interaction [ndense]
+  INTEGER(4), POINTER, DIMENSION(:) :: sparse_owner => NULL() !< Owning processor of each off-diagonal interaction [nsparse]
+  INTEGER(4), POINTER, DIMENSION(:) :: leaf_owner => NULL() !< Owning processor of each leaf block [nblocks]
+  INTEGER(4), POINTER, DIMENSION(:) :: elem_owner => NULL() !< Owning processor of each (expanded) element [nelems_exp]
+  INTEGER(4), POINTER, DIMENSION(:) :: pt_owner => NULL() !< Owning processor of each mesh vertex [np]
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_U_mats => NULL() !< U matrices for compressed off-diagonal interactions (L)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_V_mats => NULL() !< V matrices for compressed off-diagonal interactions (L)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_dense => NULL() !< Fallback dense matrices for compressed off-diagonal interactions (L)
@@ -222,7 +232,8 @@ CONTAINS
 SUBROUTINE tw_hodlr_LmatHole(self,Lmat)
 CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Hole and V-coil columns [nelems_exp,nholes+n_vcoils]
-INTEGER(4) :: i,ii,j,jj,h,ib,ig,nleaf,ngroup,ncell,nstrip,jk
+INTEGER(4) :: i,ii,j,jj,h,ib,ig,nleaf,ngroup,ncell,nstrip,jk,group_rank
+REAL(8), CONTIGUOUS, POINTER :: Lflat(:)
 INTEGER(4), ALLOCATABLE :: cell_owner(:),vert_leaf(:),kgroup(:),lgroup(:),kstrip(:),lstrip(:),cnt(:)
 REAL(8), ALLOCATABLE :: cstrip(:,:),gcen(:,:),gext(:),scen(:,:),sext(:),V(:,:)
 TYPE(tw_type), POINTER :: tw
@@ -310,10 +321,15 @@ ALLOCATE(V(3,mesh%nc))
 DO h=1,tw%nholes
   nstrip=cnt(h)
   IF(nstrip==0)CYCLE
-  !$omp parallel do schedule(dynamic,1) private(ncell)
+  V=0.d0
+  !$omp parallel do schedule(dynamic,1) private(ncell,group_rank)
   DO ig=1,ngroup
     ncell=kgroup(ig+1)-kgroup(ig)
     IF(ncell==0)CYCLE
+    !---Groups are computed by the owner of their leaf (processor 0 for cells outside all leaves)
+    group_rank=0
+    IF(ig<=nleaf)group_rank=self%leaf_owner(ig)
+    IF(group_rank/=oft_env%rank)CYCLE
     IF((ig<=nleaf).AND.(MIN(ncell,nstrip)/3>=tw_hole_aca_rmin).AND. &
       (magnitude(gcen(:,ig)-scen(:,h))/(gext(ig)+sext(h))>tw_hole_aca_sep))THEN
       IF(group_aca(lgroup(kgroup(ig):kgroup(ig+1)-1),lstrip(kstrip(h):kstrip(h)+nstrip-1), &
@@ -335,24 +351,36 @@ DO h=1,tw%nholes
     END DO
   END DO
 END DO
-!---Passive coils
-DO i=1,tw%np_active+tw%nholes
-  DO j=1,tw%n_vcoils
-    Lmat(i,tw%nholes+j)=tw%Ael2coil(i,j)
-  END DO
+!---Passive coils: element couplings from the stored rows (each added once, by its primary processor) and the
+!   coil-coil couplings (replicated, added on processor 0)
+DO ii=1,tw%cm_nexp
+  IF(.NOT.tw%cm_primary(ii))CYCLE
+  i=tw%cm_exp(ii)
+  IF(i<=tw%np_active+tw%nholes)THEN
+    DO j=1,tw%n_vcoils
+      Lmat(i,tw%nholes+j)=tw%Ael2coil(ii,j)
+    END DO
+  END IF
+  IF((i>tw%np_active).AND.(i<=tw%np_active+tw%nholes))THEN
+    DO j=1,tw%n_vcoils
+      Lmat(tw%np_active+tw%nholes+j,i-tw%np_active)=tw%Ael2coil(ii,j)
+    END DO
+  END IF
 END DO
-DO i=1,tw%nholes
-  DO j=1,tw%n_vcoils
-    Lmat(tw%np_active+tw%nholes+j,i)=tw%Ael2coil(tw%np_active+i,j)
+IF(oft_env%rank==0)THEN
+  DO i=1,tw%n_vcoils
+    DO j=1,tw%n_vcoils
+      Lmat(tw%np_active+tw%nholes+j,tw%nholes+i)=tw%Acoil2coil(i,j)
+    END DO
   END DO
-END DO
-DO i=1,tw%n_vcoils
-  DO j=1,tw%n_vcoils
-    Lmat(tw%np_active+tw%nholes+j,tw%nholes+i)=tw%Acoil2coil(i,j)
-  END DO
-END DO
+END IF
 DEALLOCATE(cell_owner,kgroup,lgroup,cnt,gcen,gext,kstrip,lstrip,cstrip,scen,sext,V)
 Lmat=Lmat/(4.d0*pi)
+!---Sum contributions from all processors
+IF(oft_env%nprocs>1)THEN
+  Lflat(1:SIZE(Lmat))=>Lmat
+  Lflat=oft_mpi_sum(Lflat,SIZE(Lflat))
+END IF
 CONTAINS
 !---Center and extent of a set of cells
 SUBROUTINE cell_cluster(cells,c,e)
@@ -676,7 +704,7 @@ NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,
   L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
-  WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
+  IF(oft_env%head_proc)WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
   CALL oft_abort( &
     "HODLR not supported with periodic grids","tw_hodlr_setup",__FILE__)
 END IF
@@ -689,7 +717,7 @@ if(ierr<0)THEN
     CALL oft_abort('No "thincurr_hodlr_options" found in input file.', &
       'tw_hodlr_setup',__FILE__)
   ELSE
-    WRITE(*,'(2A)')oft_indent,'No "thincurr_hodlr_options" found in input file, using full representation'
+    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No "thincurr_hodlr_options" found in input file, using full representation'
     RETURN
   END IF
 END IF
@@ -725,8 +753,8 @@ END IF
 self%B_svd_tol=B_svd_tol
 self%B_aca_tol=B_aca_rel_tol*self%B_svd_tol
 !---Partition mesh
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Partitioning grid for block low rank compressed operators'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Partitioning grid for block low rank compressed operators'
 CALL oft_increase_indent
 CALL tw_part_mesh(self%tw_obj,self%leaf_target,self%nlevels,self%levels)
 sparse_count=0
@@ -797,7 +825,7 @@ END DO
 ! CALL oft_abort("","",__FILE__)
 self%nblocks=self%levels(self%nlevels)%nblocks
 self%blocks=>self%levels(self%nlevels)%blocks
-WRITE(*,'(2A,I6)')oft_indent,'nBlocks =        ',self%nblocks
+IF(oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'nBlocks =        ',self%nblocks
 ALLOCATE(point_block(self%tw_obj%mesh%np))
 point_block=0.d0
 avg_size=0.d0
@@ -810,14 +838,14 @@ DO i=1,self%nblocks
     point_block(self%blocks(i)%ipts)=i*1.d0
   END DO
 END DO
-WRITE(*,'(2A,I6)')oft_indent,'Avg block size = ',INT(avg_size/REAL(self%nblocks,8),4)
+IF(oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'Avg block size = ',INT(avg_size/REAL(self%nblocks,8),4)
 IF(self%L_aca_tol<=0.d0)THEN
   sparse_count=[0,sparse_count(1)+sparse_count(2)]
 END IF
-WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
-WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
-IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
-IF(self%pre_coarse)WRITE(*,'(2A)')oft_indent,'Using two-level block preconditioners'
+IF(oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
+IF(oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
+IF((self%pre_single).AND.oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
+IF((self%pre_coarse).AND.oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Using two-level block preconditioners'
 !---Diagnostic block field (only when plot output has been set up)
 IF(self%tw_obj%xdmf%n_grids>0)CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
@@ -852,8 +880,268 @@ DO j=1,self%nlevels
   END DO
 END DO
 DEALLOCATE(cell_mark)
+!---Distribute interactions and rows over processors
+CALL tw_hodlr_partition(self)
 CALL oft_decrease_indent
 END SUBROUTINE tw_hodlr_setup
+!---------------------------------------------------------------------------------
+!> Distribute HODLR interactions and matrix rows over processors
+!!
+!! Every processor holds the full model and block hierarchy; only the block interactions (and the rows
+!! of the operators) are distributed:
+!! - Each interaction is given a weight proportional to the number of kernel evaluations needed to build
+!!   it (\f$ n_j n_k \f$ for diagonal and directly computed blocks, \f$ r (n_j + n_k) \f$ for ACA+ blocks).
+!!   The weight is spread over the leaves of its row block.
+!! - Leaf blocks are assigned to processors in contiguous ranges (in tree order) with approximately equal
+!!   total weight. Rows (elements and vertices) are owned by the processor owning their leaf, with holes
+!!   and V-coils owned by processor 0.
+!! - Diagonal interactions are owned by the owner of their leaf. Off-diagonal interactions are assigned,
+!!   largest first, to the least loaded processor owning a leaf of either of their blocks.
+!!
+!! For `nprocs>1` the model's vectors (`Uloc`, `Uloc_pts`) are replaced with replicated vectors using this
+!! row ownership (see \ref oft_native_la::native_vector_setup_replicated).
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_partition(self)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
+TYPE :: leaf_range
+  INTEGER(4), ALLOCATABLE :: first(:) !< First leaf of each block
+  INTEGER(4), ALLOCATABLE :: last(:) !< Last leaf of each block
+END TYPE leaf_range
+INTEGER(4) :: i,j,k,l,lev,nleaf,anc,r,rbest,nj,nk,nempty
+INTEGER(4), ALLOCATABLE :: order(:),red_owner(:),pt_kr(:),pt_lc(:),nleaf_rank(:)
+REAL(8) :: w,total,cum
+REAL(8), ALLOCATABLE :: leaf_w(:),dense_w(:),sparse_w(:),load(:),pt_val(:)
+TYPE(leaf_range), ALLOCATABLE :: ranges(:)
+CHARACTER(LEN=120) :: msg
+TYPE(tw_type), POINTER :: tw
+tw=>self%tw_obj
+nleaf=self%levels(self%nlevels)%nblocks
+!---Range of leaves below each block (contiguous by construction in tw_part_mesh)
+ALLOCATE(ranges(self%nlevels))
+DO lev=1,self%nlevels
+  ALLOCATE(ranges(lev)%first(self%levels(lev)%nblocks),ranges(lev)%last(self%levels(lev)%nblocks))
+  ranges(lev)%first=nleaf+1
+  ranges(lev)%last=0
+END DO
+DO l=1,nleaf
+  anc=l
+  DO lev=self%nlevels,1,-1
+    ranges(lev)%first(anc)=MIN(ranges(lev)%first(anc),l)
+    ranges(lev)%last(anc)=MAX(ranges(lev)%last(anc),l)
+    IF(lev>1)anc=self%levels(lev)%blocks(anc)%parent
+  END DO
+END DO
+DO lev=1,self%nlevels
+  DO i=1,self%levels(lev)%nblocks
+    IF(ranges(lev)%first(i)>ranges(lev)%last(i))CALL oft_abort('Block with no leaves','tw_hodlr_partition',__FILE__)
+  END DO
+END DO
+!---Interaction weights, spread over the leaves of the row block
+ALLOCATE(leaf_w(nleaf),dense_w(self%ndense),sparse_w(self%nsparse))
+leaf_w=0.d0
+DO i=1,self%ndense
+  j=self%dense_blocks(2,i)
+  nj=self%levels(self%nlevels)%blocks(j)%nelems
+  dense_w(i)=REAL(nj,8)**2
+  leaf_w(j)=leaf_w(j)+dense_w(i)
+END DO
+DO i=1,self%nsparse
+  lev=self%sparse_blocks(1,i)
+  j=self%sparse_blocks(2,i)
+  k=self%sparse_blocks(3,i)
+  nj=self%levels(lev)%blocks(j)%nelems
+  nk=self%levels(lev)%blocks(k)%nelems
+  IF((self%L_aca_tol>0.d0).AND.(self%levels(lev)%mat_mask(j,k)==2))THEN
+    sparse_w(i)=REAL(2*self%min_rank,8)*REAL(nj+nk,8)
+  ELSE
+    sparse_w(i)=REAL(nj,8)*REAL(nk,8)
+  END IF
+  IF(nj==0)CYCLE
+  DO l=ranges(lev)%first(j),ranges(lev)%last(j)
+    leaf_w(l)=leaf_w(l)+sparse_w(i)*REAL(self%levels(self%nlevels)%blocks(l)%nelems,8)/REAL(nj,8)
+  END DO
+END DO
+!---Leaves to processors (contiguous ranges of approximately equal weight)
+ALLOCATE(self%leaf_owner(nleaf))
+total=SUM(leaf_w)
+IF(total<=0.d0)THEN
+  leaf_w=1.d0
+  total=REAL(nleaf,8)
+END IF
+cum=0.d0
+DO l=1,nleaf
+  r=INT((cum+leaf_w(l)/2.d0)/total*REAL(oft_env%nprocs,8),4)
+  self%leaf_owner(l)=MIN(MAX(r,0),oft_env%nprocs-1)
+  IF(l>1)self%leaf_owner(l)=MAX(self%leaf_owner(l),self%leaf_owner(l-1))
+  cum=cum+leaf_w(l)
+END DO
+!---Interactions to processors
+ALLOCATE(self%dense_owner(self%ndense),self%sparse_owner(self%nsparse),load(0:oft_env%nprocs-1))
+load=0.d0
+DO i=1,self%ndense
+  self%dense_owner(i)=self%leaf_owner(self%dense_blocks(2,i))
+  load(self%dense_owner(i))=load(self%dense_owner(i))+dense_w(i)
+END DO
+IF(self%nsparse>0)THEN
+  ALLOCATE(order(self%nsparse))
+  order=[(i,i=1,self%nsparse)]
+  CALL sort_array(sparse_w,order,self%nsparse) ! Ascending weight (sparse_w is reordered)
+  DO l=self%nsparse,1,-1
+    i=order(l)
+    lev=self%sparse_blocks(1,i)
+    j=self%sparse_blocks(2,i)
+    k=self%sparse_blocks(3,i)
+    rbest=-1
+    DO r=self%leaf_owner(ranges(lev)%first(j)),self%leaf_owner(ranges(lev)%last(j))
+      IF(rbest<0)THEN
+        rbest=r
+      ELSE IF((load(r)<load(rbest)).OR.((load(r)==load(rbest)).AND.(r<rbest)))THEN
+        rbest=r
+      END IF
+    END DO
+    DO r=self%leaf_owner(ranges(lev)%first(k)),self%leaf_owner(ranges(lev)%last(k))
+      IF((load(r)<load(rbest)).OR.((load(r)==load(rbest)).AND.(r<rbest)))rbest=r
+    END DO
+    self%sparse_owner(i)=rbest
+    load(rbest)=load(rbest)+sparse_w(l)
+  END DO
+  DEALLOCATE(order)
+END IF
+!---Local interaction lists (in global order)
+self%ndense_loc=COUNT(self%dense_owner==oft_env%rank)
+self%nsparse_loc=COUNT(self%sparse_owner==oft_env%rank)
+ALLOCATE(self%dense_loc(self%ndense_loc),self%sparse_loc(self%nsparse_loc))
+j=0
+DO i=1,self%ndense
+  IF(self%dense_owner(i)/=oft_env%rank)CYCLE
+  j=j+1
+  self%dense_loc(j)=i
+END DO
+j=0
+DO i=1,self%nsparse
+  IF(self%sparse_owner(i)/=oft_env%rank)CYCLE
+  j=j+1
+  self%sparse_loc(j)=i
+END DO
+!---Row ownership (holes and V-coils on processor 0)
+ALLOCATE(self%elem_owner(tw_nelems_exp(tw)),self%pt_owner(tw%mesh%np))
+self%elem_owner=0
+self%pt_owner=0
+DO l=1,nleaf
+  DO j=1,self%levels(self%nlevels)%blocks(l)%nelems
+    self%elem_owner(self%levels(self%nlevels)%blocks(l)%ielem(j))=self%leaf_owner(l)
+  END DO
+  DO j=1,self%levels(self%nlevels)%blocks(l)%np
+    self%pt_owner(self%levels(self%nlevels)%blocks(l)%ipts(j))=self%leaf_owner(l)
+  END DO
+END DO
+!---Summary
+ALLOCATE(nleaf_rank(0:oft_env%nprocs-1))
+nleaf_rank=0
+DO l=1,nleaf
+  nleaf_rank(self%leaf_owner(l))=nleaf_rank(self%leaf_owner(l))+1
+END DO
+nempty=COUNT(nleaf_rank==0)
+IF(oft_env%nprocs>1)THEN
+  IF(oft_env%head_proc)THEN
+    IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Distributed over ',oft_env%nprocs,' processors'
+    IF(oft_env%head_proc)WRITE(*,'(2A,F8.3)')oft_indent,'Est. imbalance = ',MAXVAL(load)/MAX(SUM(load)/REAL(oft_env%nprocs,8),1.d-30)
+  END IF
+  IF(nempty>0)THEN
+    WRITE(msg,'(I6,A)')nempty,' processor(s) own no HODLR leaf blocks, consider reducing "target_size"'
+    CALL oft_warn(msg)
+  END IF
+END IF
+DEALLOCATE(nleaf_rank)
+!---Replicated vectors for the model
+IF(oft_env%nprocs>1)THEN
+  ALLOCATE(red_owner(tw%nelems))
+  IF(ASSOCIATED(tw%junc))THEN
+    !---Each model unknown is owned by the owner of its first expanded element
+    CALL tw_junction_transpose(tw,pt_kr,pt_lc,pt_val)
+    red_owner=0
+    DO i=1,tw%nelems
+      IF(pt_kr(i+1)>pt_kr(i))red_owner(i)=self%elem_owner(pt_lc(pt_kr(i)))
+    END DO
+    DEALLOCATE(pt_kr,pt_lc,pt_val)
+  ELSE
+    red_owner=self%elem_owner
+  END IF
+  CALL replace_vector(tw%Uloc,red_owner)
+  CALL replace_vector(tw%Uloc_pts,self%pt_owner)
+  DEALLOCATE(red_owner)
+END IF
+DO lev=1,self%nlevels
+  DEALLOCATE(ranges(lev)%first,ranges(lev)%last)
+END DO
+DEALLOCATE(ranges,leaf_w,dense_w,sparse_w,load)
+CONTAINS
+!> Replace a model vector with a replicated vector
+SUBROUTINE replace_vector(vec,owner)
+CLASS(oft_vector), POINTER, INTENT(inout) :: vec
+INTEGER(4), CONTIGUOUS, TARGET, INTENT(in) :: owner(:)
+IF(ASSOCIATED(vec))THEN
+  CALL vec%delete()
+  DEALLOCATE(vec)
+END IF
+ALLOCATE(oft_native_vector::vec)
+SELECT TYPE(this=>vec)
+CLASS IS(oft_native_vector)
+  CALL native_vector_setup_replicated(this,owner)
+CLASS DEFAULT
+  CALL oft_abort('Failed to allocate replicated vector','tw_hodlr_partition',__FILE__)
+END SELECT
+END SUBROUTINE replace_vector
+END SUBROUTINE tw_hodlr_partition
+!---------------------------------------------------------------------------------
+!> Build thread blocking for the local interaction lists, splitting each list into contiguous
+!! chunks of approximately equal size
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_thread_blocks(self,sparse_sizes,dense_sizes,thread_ptr)
+CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator
+INTEGER(8), INTENT(in) :: sparse_sizes(:) !< Size of each off-diagonal interaction [nsparse]
+INTEGER(8), INTENT(in) :: dense_sizes(:) !< Size of each diagonal interaction [ndense]
+INTEGER(4), POINTER, INTENT(inout) :: thread_ptr(:,:) !< Thread blocking (positions in local lists) [2,nthreads+1]
+INTEGER(4) :: i,j
+REAL(8) :: target_size,curr_size
+IF(ASSOCIATED(thread_ptr))DEALLOCATE(thread_ptr)
+ALLOCATE(thread_ptr(2,oft_env%nthreads+1))
+thread_ptr=0
+thread_ptr(:,1)=1
+target_size=0.d0
+DO j=1,self%nsparse_loc
+  target_size=target_size+REAL(sparse_sizes(self%sparse_loc(j)),8)
+END DO
+target_size=target_size/REAL(oft_env%nthreads,8)
+curr_size=0.d0
+i=1
+DO j=1,self%nsparse_loc
+  curr_size=curr_size+REAL(sparse_sizes(self%sparse_loc(j)),8)
+  IF((curr_size>REAL(i,8)*target_size).AND.(i<oft_env%nthreads))THEN
+    thread_ptr(1,i+1)=j+1
+    i=i+1
+  END IF
+END DO
+target_size=0.d0
+DO j=1,self%ndense_loc
+  target_size=target_size+REAL(dense_sizes(self%dense_loc(j)),8)
+END DO
+target_size=target_size/REAL(oft_env%nthreads,8)
+curr_size=0.d0
+i=1
+DO j=1,self%ndense_loc
+  curr_size=curr_size+REAL(dense_sizes(self%dense_loc(j)),8)
+  IF((curr_size>REAL(i,8)*target_size).AND.(i<oft_env%nthreads))THEN
+    thread_ptr(2,i+1)=j+1
+    i=i+1
+  END IF
+END DO
+DO j=1,oft_env%nthreads
+  IF(thread_ptr(1,j+1)==0)thread_ptr(1,j+1)=self%nsparse_loc+1
+  IF(thread_ptr(2,j+1)==0)thread_ptr(2,j+1)=self%ndense_loc+1
+END DO
+thread_ptr(:,oft_env%nthreads+1)=[self%nsparse_loc,self%ndense_loc]+1
+END SUBROUTINE tw_hodlr_thread_blocks
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -861,10 +1149,10 @@ SUBROUTINE tw_hodlr_Lcompute(self,save_file)
 class(oft_tw_hodlr_op), target, intent(inout) :: self
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 INTEGER(4) :: i,j,k,l,nlast,branch_count,pind_i,pind_j,max_pts,top_level,level
-INTEGER(4) :: nblocks_progress(9),nblocks_complete,counts(4),iblock,jblock
+INTEGER(4) :: nblocks_progress(9),nblocks_complete,counts(4),iblock,jblock,iloc
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kc_tmp,kr_tmp
 INTEGER(4), ALLOCATABLE, DIMENSION(:,:) :: block_interaction,row_count
-INTEGER(8) :: mat_size(3),compressed_size,size_out
+INTEGER(8) :: mat_size(3),compressed_size,size_out,size_range(2)
 INTEGER(8), ALLOCATABLE, DIMENSION(:) :: dense_sizes,sparse_sizes
 LOGICAL :: is_masked,is_neighbor,mat_updated
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
@@ -873,11 +1161,11 @@ REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size,curr_size
 REAL(8), ALLOCATABLE, DIMENSION(:) :: point_block
 TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Building block low rank inductance operator'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building block low rank inductance operator'
 CALL oft_increase_indent
-WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%L_svd_tol
-WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%L_aca_tol
+IF(oft_env%head_proc)WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%L_svd_tol
+IF(oft_env%head_proc)WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%L_aca_tol
 IF(self%L_svd_tol<0.d0)CALL oft_abort('"L_svd_tol" must be > 0','tw_Lmat_MF_Lcompute',__FILE__)
 !---Build matrix with ACA+ or SVD compression of off-diagonal blocks
 CALL mytimer%tick()
@@ -885,7 +1173,7 @@ ALLOCATE(self%dense_mats(self%ndense))
 ALLOCATE(self%aca_U_mats(self%nsparse))
 ALLOCATE(self%aca_V_mats(self%nsparse))
 ALLOCATE(self%aca_dense(self%nsparse))
-WRITE(*,'(2A)')oft_indent,'Building hole and Vcoil columns'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building hole and Vcoil columns'
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
   ALLOCATE(self%hole_Vcoil_mat%M(tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils))
   CALL tw_hodlr_LmatHole(self,self%hole_Vcoil_mat%M)
@@ -893,18 +1181,19 @@ END IF
 IF(PRESENT(save_file))CALL load_from_file()
 compressed_size=0
 mat_updated=.FALSE.
-WRITE(*,'(2A)')oft_indent,'Building diagonal blocks'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building diagonal blocks'
 ALLOCATE(dense_sizes(self%ndense),sparse_sizes(self%nsparse))
 dense_sizes=0
 sparse_sizes=0
-!$omp parallel private(i,level,j,k,size_out,avg_size) reduction(+:compressed_size) &
+!$omp parallel private(i,iloc,level,j,k,size_out,avg_size) reduction(+:compressed_size) &
 !$omp reduction(.OR.:mat_updated)
 !$omp single
-nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_progress = INT(self%ndense_loc*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
-DO i=1,self%ndense
+DO iloc=1,self%ndense_loc
+  i = self%dense_loc(iloc)
   level = self%dense_blocks(1,i)
   j = self%dense_blocks(2,i)
   k = self%dense_blocks(3,i)
@@ -920,21 +1209,22 @@ DO i=1,self%ndense
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
+    IF((nblocks_complete==nblocks_progress(k)).AND.oft_env%head_proc)WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp single
 IF(self%L_aca_tol>0.d0)THEN
-  WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks using ACA+ and SVD compression'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks using ACA+ and SVD compression'
 ELSE
-  WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks with SVD compression'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks with SVD compression'
 END IF
-nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_progress = INT(self%nsparse_loc*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
-DO i=1,self%nsparse
+DO iloc=1,self%nsparse_loc
+  i = self%sparse_loc(iloc)
   level = self%sparse_blocks(1,i)
   j = self%sparse_blocks(2,i)
   k = self%sparse_blocks(3,i)
@@ -950,7 +1240,7 @@ DO i=1,self%nsparse
       CALL aca_approx(i,self%L_aca_tol,size_out)
       IF(size_out>0)CALL tw_lowrank_recompress(self%aca_U_mats(i),self%aca_V_mats(i),self%L_svd_tol,self%min_rank, &
         self%aca_min_its,size_out)
-      IF(size_out==-1)WRITE(*,'(2A,2I6)')oft_indent,'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
+      IF((size_out==-1).AND.oft_env%head_proc)WRITE(*,'(2A,2I6)')oft_indent,'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
         self%levels(level)%blocks(k)%nelems
     END IF
     !---IF ACA+ failed or diagonal compute dense matrix
@@ -966,51 +1256,33 @@ DO i=1,self%nsparse
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
+    IF((nblocks_complete==nblocks_progress(k)).AND.oft_env%head_proc)WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp end parallel
+!---Global statistics
+mat_updated=.NOT.oft_mpi_and(.NOT.mat_updated)
+size_range=[compressed_size,-compressed_size]
+IF(oft_env%nprocs>1)THEN
+  size_range=oft_mpi_max(size_range,2)
+  size_range(2)=-size_range(2)
+  compressed_size=oft_mpi_sum(compressed_size)
+END IF
 elapsed_time=mytimer%tock()
-WRITE(*,'(2A,F6.1,A,ES9.2,A,ES9.2,A)')oft_indent,'Compressed size:',compressed_size*1.d2/(REAL(self%tw_obj%np_active,8)**2), &
+IF(oft_env%head_proc)WRITE(*,'(2A,F6.1,A,ES9.2,A,ES9.2,A)')oft_indent,'Compressed size:',compressed_size*1.d2/(REAL(self%tw_obj%np_active,8)**2), &
     "%  (",REAL(compressed_size,8),"/",REAL(self%tw_obj%np_active,8)**2,")"
-WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
-!---Building thread blocking
-ALLOCATE(self%L_thread_ptr(2,oft_env%nthreads+1))
-self%L_thread_ptr=0
-self%L_thread_ptr(:,1)=1
-target_size=SUM(sparse_sizes)/REAL(oft_env%nthreads,8)
-curr_size=0.d0
-i=1
-DO j=1,self%nsparse
-  curr_size=curr_size+sparse_sizes(j)
-  IF(curr_size>REAL(i,8)*target_size)THEN
-    self%L_thread_ptr(1,i+1)=j+1
-    i=i+1
-  END IF
-END DO
-target_size=SUM(dense_sizes)/REAL(oft_env%nthreads,8)
-curr_size=0.d0
-i=1
-DO j=1,self%ndense
-  curr_size=curr_size+dense_sizes(j)
-  IF(curr_size>REAL(i,8)*target_size)THEN
-    self%L_thread_ptr(2,i+1)=j+1
-    i=i+1
-  END IF
-END DO
-DO j=1,oft_env%nthreads
-  IF(self%L_thread_ptr(1,j+1)==0)self%L_thread_ptr(1,j+1)=self%nsparse+1
-  IF(self%L_thread_ptr(2,j+1)==0)self%L_thread_ptr(2,j+1)=self%ndense+1
-END DO
-self%L_thread_ptr(:,oft_env%nthreads+1)=[self%nsparse,self%ndense]+1
+IF((oft_env%nprocs>1).AND.oft_env%head_proc)WRITE(*,'(2A,2ES9.2)')oft_indent,'Size per proc:  ',REAL(size_range(2),8),REAL(size_range(1),8)
+IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+!---Building thread blocking (local interactions)
+CALL tw_hodlr_thread_blocks(self,sparse_sizes,dense_sizes,self%L_thread_ptr)
 DEALLOCATE(sparse_sizes,dense_sizes)
 !---Save to file if requested
 IF(mat_updated.AND.PRESENT(save_file))CALL save_to_file()
 CALL oft_decrease_indent
 CONTAINS
 SUBROUTINE save_to_file()
-INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6),il,irank
 CHARACTER(LEN=5) :: matrix_id
 TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Save computed matrix to file
@@ -1027,12 +1299,18 @@ IF(TRIM(save_file)/='none')THEN
   END DO
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-  WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix to file: ',TRIM(save_file)
-  CALL hdf5_create_file(TRIM(save_file))
-  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
-  !
+  IF(oft_env%head_proc)THEN
+    IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix to file: ',TRIM(save_file)
+    CALL hdf5_create_file(TRIM(save_file))
+    CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  END IF
+  !---Each processor writes its blocks in turn
+  DO irank=0,oft_env%nprocs-1
+  CALL oft_mpi_barrier(ierr)
+  IF(irank/=oft_env%rank)CYCLE
   hash_tmp(6)=0
-  DO i=1,self%ndense
+  DO il=1,self%ndense_loc
+    i = self%dense_loc(il)
     level = self%dense_blocks(1,i)
     j = self%dense_blocks(2,i)
     k = self%dense_blocks(3,i)
@@ -1044,7 +1322,8 @@ IF(TRIM(save_file)/='none')THEN
     CALL hdf5_write(self%dense_mats(i)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id)))
   END DO
   !
-  DO i=1,self%nsparse
+  DO il=1,self%nsparse_loc
+    i = self%sparse_loc(il)
     level = self%sparse_blocks(1,i)
     j = self%sparse_blocks(2,i)
     k = self%sparse_blocks(3,i)
@@ -1063,6 +1342,8 @@ IF(TRIM(save_file)/='none')THEN
       CALL hdf5_write(self%aca_V_mats(i)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)))
     END IF
   END DO
+  END DO
+  CALL oft_mpi_barrier(ierr)
   ! TODO: Save create appropriate hash to enable saving Vcoil matrix
   ! WRITE(io_unit)hash_tmp
   ! WRITE(io_unit)self%hole_Vcoil_mat%M
@@ -1072,7 +1353,7 @@ END SUBROUTINE save_to_file
 !
 SUBROUTINE load_from_file()
 LOGICAL :: exists
-INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6),il
 CHARACTER(LEN=5) :: matrix_id
 TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Try to load from file
@@ -1091,12 +1372,14 @@ IF(TRIM(save_file)/='none')THEN
     END DO
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-    WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
+    IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
     CALL oft_increase_indent
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
     IF(exists.AND.ALL(file_counts==hash_tmp))THEN
       hash_tmp(6)=0
-      DO i=1,self%ndense
+      !---Only blocks owned by this processor
+      DO il=1,self%ndense_loc
+        i = self%dense_loc(il)
         level = self%dense_blocks(1,i)
         j = self%dense_blocks(2,i)
         k = self%dense_blocks(3,i)
@@ -1112,7 +1395,8 @@ IF(TRIM(save_file)/='none')THEN
         END IF
       END DO
       !
-      DO i=1,self%nsparse
+      DO il=1,self%nsparse_loc
+        i = self%sparse_loc(il)
         level = self%sparse_blocks(1,i)
         j = self%sparse_blocks(2,i)
         k = self%sparse_blocks(3,i)
@@ -1140,10 +1424,10 @@ IF(TRIM(save_file)/='none')THEN
         END IF
       END DO
     ELSE
-      WRITE(*,'(3A)')oft_indent,'Ignoring stored matrix, Model hashes do not match'
+      IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Ignoring stored matrix, Model hashes do not match'
       IF(oft_debug_print(1))THEN
-        WRITE(*,*)'File: ',file_counts
-        WRITE(*,*)'Model:',hash_tmp
+        IF(oft_env%head_proc)WRITE(*,*)'File: ',file_counts
+        IF(oft_env%head_proc)WRITE(*,*)'Model:',hash_tmp
       END IF
     END IF
     CALL oft_decrease_indent
@@ -1223,11 +1507,11 @@ END SUBROUTINE tw_hodlr_Lcompute
 SUBROUTINE tw_hodlr_Bcompute(self,save_file)
 class(oft_tw_hodlr_op), target, intent(inout) :: self
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-INTEGER(4) :: i,ii,j,k,l,nlast,branch_count,pind_i,pind_j,max_pts,top_level,level,dim,flip
+INTEGER(4) :: i,ii,iloc,j,k,l,nlast,branch_count,pind_i,pind_j,max_pts,top_level,level,dim,flip
 INTEGER(4) :: nblocks_progress(9),nblocks_complete,counts(4),iblock,jblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kc_tmp,kr_tmp
 INTEGER(4), ALLOCATABLE, DIMENSION(:,:) :: block_interaction,row_count
-INTEGER(8) :: mat_size(3),compressed_size,size_out
+INTEGER(8) :: mat_size(3),compressed_size,size_out,size_range(2)
 INTEGER(8), ALLOCATABLE, DIMENSION(:) :: dense_sizes,sparse_sizes
 LOGICAL :: is_masked,is_neighbor,mat_updated
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
@@ -1237,11 +1521,11 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: point_block
 REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: Btmp
 TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Building block low rank magnetic field operator'
+IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building block low rank magnetic field operator'
 CALL oft_increase_indent
-WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%B_svd_tol
-WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%B_aca_tol
+IF(oft_env%head_proc)WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%B_svd_tol
+IF(oft_env%head_proc)WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%B_aca_tol
 IF(self%B_svd_tol<0.d0)CALL oft_abort('"B_svd_tol" must be > 0','tw_Lmat_MF_Bcompute',__FILE__)
 !---Build matrix with SVD compression of off-diagonal blocks
 ! approximation with ACA+ planned
@@ -1251,7 +1535,7 @@ ALLOCATE(self%aca_BU_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_BV_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_B_dense(2*self%nsparse,3))
 !
-WRITE(*,'(2A)')oft_indent,'Building hole, Vcoil and Icoil columns'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building hole, Vcoil and Icoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
   ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
@@ -1260,20 +1544,21 @@ IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
 END IF
 !
 IF(PRESENT(save_file))CALL read_from_file()
-WRITE(*,'(2A)')oft_indent,'Building diagonal blocks'
+IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building diagonal blocks'
 compressed_size=0
 mat_updated=.FALSE.
 ALLOCATE(dense_sizes(self%ndense),sparse_sizes(self%nsparse))
 dense_sizes=0
 sparse_sizes=0
-!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip,Btmp) reduction(+:compressed_size) &
+!$omp parallel private(i,ii,iloc,level,j,k,size_out,avg_size,dim,flip,Btmp) reduction(+:compressed_size) &
 !$omp reduction(.OR.:mat_updated)
 !$omp single
-nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_progress = INT(self%ndense_loc*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
-DO i=1,self%ndense
+DO iloc=1,self%ndense_loc
+  i = self%dense_loc(iloc)
   level = self%dense_blocks(1,i)
   j = self%dense_blocks(2,i)
   k = self%dense_blocks(3,i)
@@ -1297,21 +1582,22 @@ DO i=1,self%ndense
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
+    IF((nblocks_complete==nblocks_progress(k)).AND.oft_env%head_proc)WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp single
 IF(self%B_aca_tol>0.d0)THEN
-  WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks using ACA+ and SVD compression'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks using ACA+ and SVD compression'
 ELSE
-  WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks with SVD compression'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Building off-diagonal blocks with SVD compression'
 END IF
-nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_progress = INT(self%nsparse_loc*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
-DO i=1,self%nsparse
+DO iloc=1,self%nsparse_loc
+  i = self%sparse_loc(iloc)
   level = self%sparse_blocks(1,i)
   j = self%sparse_blocks(2,i)
   k = self%sparse_blocks(3,i)
@@ -1342,7 +1628,7 @@ DO i=1,self%nsparse
       size_out=-1
       IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
         CALL aca_approx3(ii,level,j,k,self%B_aca_tol,size_out)
-        IF(size_out==-1)WRITE(*,'(2A,2I4)')oft_indent,'ACA+ failure',self%levels(level)%blocks(j)%np, &
+        IF((size_out==-1).AND.oft_env%head_proc)WRITE(*,'(2A,2I4)')oft_indent,'ACA+ failure',self%levels(level)%blocks(j)%np, &
           self%levels(level)%blocks(k)%nelems
       END IF
       IF(size_out>0)THEN
@@ -1370,52 +1656,34 @@ DO i=1,self%nsparse
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
+    IF((nblocks_complete==nblocks_progress(k)).AND.oft_env%head_proc)WRITE(*,'(A,2X,I2,A1)')oft_indent,k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp end parallel
+!---Global statistics
+mat_updated=.NOT.oft_mpi_and(.NOT.mat_updated)
+size_range=[compressed_size,-compressed_size]
+IF(oft_env%nprocs>1)THEN
+  size_range=oft_mpi_max(size_range,2)
+  size_range(2)=-size_range(2)
+  compressed_size=oft_mpi_sum(compressed_size)
+END IF
 elapsed_time=mytimer%tock()
-WRITE(*,'(2A,F6.1,A,ES9.2,A,ES9.2,A)')oft_indent,'Compressed size:', &
+IF(oft_env%head_proc)WRITE(*,'(2A,F6.1,A,ES9.2,A,ES9.2,A)')oft_indent,'Compressed size:', &
   compressed_size*1.d2/(3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8)), &
   "%  (",REAL(compressed_size,8),"/",3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8),")"
-WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
-!---Building thread blocking
-ALLOCATE(self%B_thread_ptr(2,oft_env%nthreads+1))
-self%B_thread_ptr=0
-self%B_thread_ptr(:,1)=1
-target_size=SUM(sparse_sizes)/REAL(oft_env%nthreads,8)
-curr_size=0.d0
-i=1
-DO j=1,self%nsparse
-  curr_size=curr_size+sparse_sizes(j)
-  IF(curr_size>REAL(i,8)*target_size)THEN
-    self%B_thread_ptr(1,i+1)=j+1
-    i=i+1
-  END IF
-END DO
-target_size=SUM(dense_sizes)/REAL(oft_env%nthreads,8)
-curr_size=0.d0
-i=1
-DO j=1,self%ndense
-  curr_size=curr_size+dense_sizes(j)
-  IF(curr_size>REAL(i,8)*target_size)THEN
-    self%B_thread_ptr(2,i+1)=j+1
-    i=i+1
-  END IF
-END DO
-DO j=1,oft_env%nthreads
-  IF(self%B_thread_ptr(1,j+1)==0)self%B_thread_ptr(1,j+1)=self%nsparse+1
-  IF(self%B_thread_ptr(2,j+1)==0)self%B_thread_ptr(2,j+1)=self%ndense+1
-END DO
-self%B_thread_ptr(:,oft_env%nthreads+1)=[self%nsparse,self%ndense]+1
+IF((oft_env%nprocs>1).AND.oft_env%head_proc)WRITE(*,'(2A,2ES9.2)')oft_indent,'Size per proc:  ',REAL(size_range(2),8),REAL(size_range(1),8)
+IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+!---Building thread blocking (local interactions)
+CALL tw_hodlr_thread_blocks(self,sparse_sizes,dense_sizes,self%B_thread_ptr)
 DEALLOCATE(sparse_sizes,dense_sizes)
 !
 IF(mat_updated.AND.PRESENT(save_file))CALL save_to_file()
 CALL oft_decrease_indent
 CONTAINS
 SUBROUTINE save_to_file()
-INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6),il,irank
 CHARACTER(LEN=1) :: dim_id
 CHARACTER(LEN=5) :: matrix_id
 TYPE(HODLR_hash), TARGET :: sparse_hash
@@ -1433,12 +1701,18 @@ IF(TRIM(save_file)/='none')THEN
   END DO
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-  WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix from file: ',TRIM(save_file)
-  CALL hdf5_create_file(TRIM(save_file))
-  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
-  !
+  IF(oft_env%head_proc)THEN
+    IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix to file: ',TRIM(save_file)
+    CALL hdf5_create_file(TRIM(save_file))
+    CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  END IF
+  !---Each processor writes its blocks in turn
+  DO irank=0,oft_env%nprocs-1
+  CALL oft_mpi_barrier(ierr)
+  IF(irank/=oft_env%rank)CYCLE
   hash_tmp(6)=0
-  DO i=1,self%ndense
+  DO il=1,self%ndense_loc
+    i = self%dense_loc(il)
     level = self%dense_blocks(1,i)
     j = self%dense_blocks(2,i)
     k = self%dense_blocks(3,i)
@@ -1453,7 +1727,8 @@ IF(TRIM(save_file)/='none')THEN
     END DO
   END DO
   !
-  DO i=1,self%nsparse
+  DO il=1,self%nsparse_loc
+    i = self%sparse_loc(il)
     level = self%sparse_blocks(1,i)
     j = self%sparse_blocks(2,i)
     k = self%sparse_blocks(3,i)
@@ -1482,6 +1757,8 @@ IF(TRIM(save_file)/='none')THEN
       END DO
     END DO
   END DO
+  END DO
+  CALL oft_mpi_barrier(ierr)
   ! TODO: Save create appropriate hash to enable saving coil matrices
   ! WRITE(io_unit)hash_tmp
   ! WRITE(io_unit)self%hole_Vcoil_mat%M
@@ -1489,7 +1766,7 @@ IF(TRIM(save_file)/='none')THEN
 END IF
 END SUBROUTINE save_to_file
 SUBROUTINE read_from_file()
-INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6),il
 LOGICAL :: exists
 CHARACTER(LEN=1) :: dim_id
 CHARACTER(LEN=5) :: matrix_id
@@ -1510,14 +1787,16 @@ IF(TRIM(save_file)/='none')THEN
     END DO
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-    WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
+    IF(oft_env%head_proc)WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
     CALL oft_increase_indent
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
     ! OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
     ! READ(io_unit, IOSTAT=ierr)file_counts
     IF(exists.AND.ALL(file_counts==hash_tmp))THEN
       hash_tmp(6)=0
-      DO i=1,self%ndense
+      !---Only blocks owned by this processor
+      DO il=1,self%ndense_loc
+        i = self%dense_loc(il)
         level = self%dense_blocks(1,i)
         j = self%dense_blocks(2,i)
         k = self%dense_blocks(3,i)
@@ -1538,7 +1817,8 @@ IF(TRIM(save_file)/='none')THEN
         END IF
       END DO
       !
-      DO i=1,self%nsparse
+      DO il=1,self%nsparse_loc
+        i = self%sparse_loc(il)
         level = self%sparse_blocks(1,i)
         j = self%sparse_blocks(2,i)
         k = self%sparse_blocks(3,i)
@@ -1581,10 +1861,10 @@ IF(TRIM(save_file)/='none')THEN
       END DO
       ! CLOSE(io_unit)
     ELSE
-      WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
+      IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
       IF(oft_debug_print(1))THEN
-        WRITE(*,*)'File: ',file_counts
-        WRITE(*,*)'Model:',hash_tmp
+        IF(oft_env%head_proc)WRITE(*,*)'File: ',file_counts
+        IF(oft_env%head_proc)WRITE(*,*)'Model:',hash_tmp
       END IF
       ! CLOSE(io_unit)
     END IF
@@ -1672,7 +1952,7 @@ subroutine tw_hodlr_Lapply(self,a,b)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: b
-integer(4) :: i,j,k,iblock,jblock,level
+integer(4) :: i,j,jl,k,iblock,jblock,level
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:)
 REAL(8), POINTER :: avals(:),bvals(:),ared(:),bred(:)
 NULLIFY(avals,bvals,ared,bred)
@@ -1688,12 +1968,13 @@ ELSE
   avals=>ared
   bvals=>bred
 END IF
-!$omp parallel private(j,k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+!$omp parallel private(j,jl,k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%np_active))
 ALLOCATE(int_tmp1(self%tw_obj%np_active),int_tmp2(self%tw_obj%np_active))
 int_tmp2=0.d0
 ! !$omp do schedule(dynamic,4)
-DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
+DO jl=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
+  j = self%sparse_loc(jl)
   level = self%sparse_blocks(1,j)
   iblock = self%sparse_blocks(2,j)
   jblock = self%sparse_blocks(3,j)
@@ -1752,7 +2033,8 @@ DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
 END DO
 !!$omp end do nowait
 ! !$omp do schedule(dynamic,1)
-DO j=self%L_thread_ptr(2,oft_tid+1),self%L_thread_ptr(2,oft_tid+2)-1
+DO jl=self%L_thread_ptr(2,oft_tid+1),self%L_thread_ptr(2,oft_tid+2)-1
+  j = self%dense_loc(jl)
   level = self%dense_blocks(1,j)
   iblock = self%dense_blocks(2,j)
   jblock = self%dense_blocks(3,j)
@@ -1773,7 +2055,8 @@ bvals(1:self%tw_obj%np_active)=bvals(1:self%tw_obj%np_active)+int_tmp2
 !$omp end critical
 DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
 !$omp end parallel
-IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
+!---Hole and V-coil terms (owned by processor 0)
+IF((self%tw_obj%nholes+self%tw_obj%n_vcoils>0).AND.(oft_env%rank==0))THEN
   CALL dgemv('N',tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
     tw_nelems_exp(self%tw_obj),avals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj)),1,1.d0,bvals,1)
   avals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj))=0.d0 ! Prevent double diagonal contributions
@@ -1785,7 +2068,8 @@ IF(ASSOCIATED(self%tw_obj%junc))THEN
   DEALLOCATE(bvals)
   bvals=>bred
 END IF
-CALL b%restore_local(bvals)
+!---Sum contributions from all processors (b is zero)
+CALL b%restore_local(bvals,add=.TRUE.)
 DEALLOCATE(avals,bvals)
 end subroutine tw_hodlr_Lapply
 !---------------------------------------------------------------------------------
@@ -1795,7 +2079,7 @@ subroutine tw_hodlr_Bapply(self,a,bx,by,bz)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: bx,by,bz
-integer(4) :: i,j,jj,k,dim,iblock,jblock,level,flip
+integer(4) :: i,j,jl,jj,k,dim,iblock,jblock,level,flip
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:,:)
 REAL(8), POINTER :: avals(:),bvals(:,:),btmp(:),ared(:)
 NULLIFY(avals,bvals,ared)
@@ -1817,12 +2101,13 @@ btmp=>bvals(:,2)
 CALL by%get_local(btmp)
 btmp=>bvals(:,3)
 CALL bz%get_local(btmp)
-!$omp parallel private(j,k,dim,jj,flip,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+!$omp parallel private(j,jl,k,dim,jj,flip,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%mesh%np))
 ALLOCATE(int_tmp1(self%tw_obj%mesh%np),int_tmp2(self%tw_obj%mesh%np,3))
 int_tmp2=0.d0
 !!$omp do schedule(dynamic,1)
-DO j=self%B_thread_ptr(1,oft_tid+1),self%B_thread_ptr(1,oft_tid+2)-1
+DO jl=self%B_thread_ptr(1,oft_tid+1),self%B_thread_ptr(1,oft_tid+2)-1
+  j = self%sparse_loc(jl)
   level = self%sparse_blocks(1,j)
   iblock = self%sparse_blocks(2,j)
   jblock = self%sparse_blocks(3,j)
@@ -1864,7 +2149,8 @@ DO j=self%B_thread_ptr(1,oft_tid+1),self%B_thread_ptr(1,oft_tid+2)-1
 END DO
 ! !$omp end do nowait
 !!$omp do schedule(static)
-DO j=self%B_thread_ptr(2,oft_tid+1),self%B_thread_ptr(2,oft_tid+2)-1
+DO jl=self%B_thread_ptr(2,oft_tid+1),self%B_thread_ptr(2,oft_tid+2)-1
+  j = self%dense_loc(jl)
   level = self%dense_blocks(1,j)
   iblock = self%dense_blocks(2,j)
   jblock = self%dense_blocks(3,j)
@@ -1888,15 +2174,17 @@ END DO
 !$omp end critical
 DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
 !$omp end parallel
-IF((self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
+!---Hole and V-coil terms (added on processor 0)
+IF(((self%tw_obj%nholes+self%tw_obj%n_vcoils)>0).AND.(oft_env%rank==0))THEN
   DO dim=1,3
     CALL dgemv('N',self%tw_obj%mesh%np,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_Bmat(:,:,dim), &
       self%tw_obj%mesh%np,avals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj)),1,1.d0,bvals(:,dim),1)
   END DO
 END IF
-CALL bx%restore_local(bvals(:,1))
-CALL by%restore_local(bvals(:,2))
-CALL bz%restore_local(bvals(:,3))
+!---Sum contributions from all processors (bx, by, bz are zero)
+CALL bx%restore_local(bvals(:,1),add=.TRUE.)
+CALL by%restore_local(bvals(:,2),add=.TRUE.)
+CALL bz%restore_local(bvals(:,3),add=.TRUE.)
 DEALLOCATE(avals,bvals)
 end subroutine tw_hodlr_Bapply
 !---------------------------------------------------------------------------------
@@ -1905,7 +2193,7 @@ end subroutine tw_hodlr_Bapply
 subroutine tw_hodlr_Lassemble(self,diag)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), optional, target, intent(inout) :: diag
-integer(4) :: i,j,level,iblock
+integer(4) :: i,il,j,level,iblock
 REAL(8), POINTER, DIMENSION(:) :: vals,vred
 IF(present(diag))THEN
   IF(associated(self%D))CALL self%D%delete
@@ -1917,13 +2205,15 @@ IF(present(diag))THEN
     ALLOCATE(vals(tw_nelems_exp(self%tw_obj)))
     vals=0.d0
   END IF
-  !---Get hole diagonal values
-  IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
+  vals=0.d0
+  !---Get hole diagonal values (owned by processor 0)
+  IF((self%tw_obj%nholes+self%tw_obj%n_vcoils>0).AND.(oft_env%rank==0))THEN
     DO i=1,self%tw_obj%nholes+self%tw_obj%n_vcoils
       vals(i+self%tw_obj%np_active)=self%hole_Vcoil_mat%M(i+self%tw_obj%np_active,i)
     END DO
   END IF
-  DO i=1,self%ndense
+  DO il=1,self%ndense_loc
+    i=self%dense_loc(il)
     level=self%dense_blocks(1,i)
     iblock=self%dense_blocks(2,i)
     DO j=1,self%levels(level)%blocks(iblock)%nelems
@@ -1936,7 +2226,9 @@ IF(present(diag))THEN
     DEALLOCATE(vals)
     vals=>vred
   END IF
-  CALL self%D%restore_local(vals)
+  !---Sum contributions from all processors (D is zero)
+  CALL self%D%set(0.d0)
+  CALL self%D%restore_local(vals,add=.TRUE.)
   DEALLOCATE(vals)
   CALL diag%add(0.d0,1.d0,self%D)
 END IF
@@ -2002,11 +2294,13 @@ INTEGER(4), INTENT(in) :: e !< Row
 INTEGER(4), INTENT(in) :: f !< Column
 REAL(8) :: val
 INTEGER(4) :: lev,ib,jb,isp,r,c
+!---Hole and V-coil entries are counted on processor 0, block entries on the owner of the block
+val=0.d0
 IF(f>np)THEN
-  val=self%hole_Vcoil_mat%M(e,f-np)
+  IF(oft_env%rank==0)val=self%hole_Vcoil_mat%M(e,f-np)
   RETURN
 ELSE IF(e>np)THEN
-  val=self%hole_Vcoil_mat%M(f,e-np)
+  IF(oft_env%rank==0)val=self%hole_Vcoil_mat%M(f,e-np)
   RETURN
 END IF
 DO lev=1,self%nlevels
@@ -2015,6 +2309,7 @@ DO lev=1,self%nlevels
   IF(ib==jb)CYCLE
   isp=MAX(sparse_ind(lev)%ind(ib,jb),sparse_ind(lev)%ind(jb,ib))
   IF(isp==0)CYCLE
+  IF(self%sparse_owner(isp)/=oft_env%rank)RETURN
   !---Stored as rows of the second block, columns of the first
   IF(blk(lev,e)==self%sparse_blocks(3,isp))THEN
     r=pos(lev,e); c=pos(lev,f)
@@ -2028,6 +2323,7 @@ DO lev=1,self%nlevels
   END IF
   RETURN
 END DO
+IF(self%dense_owner(dense_ind(blk(self%nlevels,e)))/=oft_env%rank)RETURN
 val=self%dense_mats(dense_ind(blk(self%nlevels,e)))%M(pos(self%nlevels,e),pos(self%nlevels,f))
 END FUNCTION entry
 END SUBROUTINE tw_hodlr_junction_cross_diag
@@ -2694,7 +2990,7 @@ DO i=K,1,-1
   IF(SQRT(frob_K)>tol)EXIT
 END DO
 i=MAX(MIN(min_rank,K),i)
-IF((i==K).AND.(K>warn_rank))WRITE(*,'(2A,3ES14.6)')oft_indent,'SVD recompression failed',S(1),S(K),tol
+IF(((i==K).AND.(K>warn_rank)).AND.oft_env%head_proc)WRITE(*,'(2A,3ES14.6)')oft_indent,'SVD recompression failed',S(1),S(K),tol
 !---Replace U and V: U = Q_U U_r S_r, V = VT_r Q_V^T
 DEALLOCATE(Umat%M,Vmat%M)
 ALLOCATE(Umat%M(M,i),Vmat%M(i,N))
@@ -2718,7 +3014,7 @@ CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
+INTEGER(4) :: i,il,j,k,l,n,level,iblock,max_size
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
 COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
 COMPLEX(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
@@ -2727,10 +3023,12 @@ DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
 IF(self%refactor)THEN
   max_size = 0
-  !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
+  !$omp parallel private(imap,i,il,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
+  !---Diagonal blocks owned by this processor
   !$omp do schedule(static)
-  DO i=1,self%mf_obj%ndense
+  DO il=1,self%mf_obj%ndense_loc
+    i=self%mf_obj%dense_loc(il)
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
@@ -2762,10 +3060,10 @@ IF(self%refactor)THEN
   DEALLOCATE(imap)
   !$omp end parallel
   self%max_block_size = max_size
-  !---Get holes
+  !---Get holes (owned by processor 0)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-  IF(n>0)THEN
+  IF((n>0).AND.(oft_env%rank==0))THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
     IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
@@ -2809,13 +3107,14 @@ ALLOCATE(hole_inds(n))
 DO j=1,n
   hole_inds(j)=self%mf_obj%tw_obj%np_active+j
 END DO
-!$omp parallel private(vloc,vloc4,i,level,iblock,n)
+!$omp parallel private(vloc,vloc4,i,il,level,iblock,n)
 IF(self%mf_obj%pre_single)THEN
   ALLOCATE(vloc4(self%max_block_size,2))
 ELSE
   ALLOCATE(vloc(self%max_block_size,2))
 END IF
-DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
+DO il=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
+  i=self%mf_obj%dense_loc(il)
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
   n = self%mf_obj%levels(level)%blocks(iblock)%nelems
@@ -2823,7 +3122,7 @@ DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)
 END DO
 !$omp single
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-IF(n>0)CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
+IF((n>0).AND.(oft_env%rank==0))CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
 !$omp end single
 IF(self%mf_obj%pre_single)THEN
   DEALLOCATE(vloc4)
@@ -2835,7 +3134,9 @@ IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   CALL tw_junction_reduce_vec_c(self%mf_obj%tw_obj,ue,utmp)
   DEALLOCATE(ue,ge)
 END IF
-CALL u%restore_local(utmp)
+!---Sum contributions from all processors (each row is set by its owner only)
+CALL u%set((0.d0,0.d0))
+CALL u%restore_local(utmp,add=.TRUE.)
 CALL g%set((0.d0,0.d0))
 DEALLOCATE(utmp,gtmp,hole_inds)
 DEBUG_STACK_POP
@@ -2935,19 +3236,22 @@ CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock,max_size,info
+INTEGER(4) :: i,il,j,k,l,n,level,iblock,max_size,info
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
 REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
+REAL(8), ALLOCATABLE, DIMENSION(:) :: ctmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 REAL(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
 IF(self%refactor)THEN
   max_size = 0
-  !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
+  !$omp parallel private(imap,i,il,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
+  !---Diagonal blocks owned by this processor
   !$omp do schedule(static)
-  DO i=1,self%mf_obj%ndense
+  DO il=1,self%mf_obj%ndense_loc
+    i=self%mf_obj%dense_loc(il)
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
@@ -2979,10 +3283,10 @@ IF(self%refactor)THEN
   DEALLOCATE(imap)
   !$omp end parallel
   self%max_block_size = max_size
-  !---Get holes
+  !---Get holes (owned by processor 0)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-  IF(n>0)THEN
+  IF((n>0).AND.(oft_env%rank==0))THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
     IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
@@ -3036,13 +3340,14 @@ ALLOCATE(hole_inds(n))
 DO j=1,n
   hole_inds(j)=self%mf_obj%tw_obj%np_active+j
 END DO
-!$omp parallel private(vloc,vloc4,i,level,iblock,n)
+!$omp parallel private(vloc,vloc4,i,il,level,iblock,n)
 IF(self%mf_obj%pre_single)THEN
   ALLOCATE(vloc4(self%max_block_size,2))
 ELSE
   ALLOCATE(vloc(self%max_block_size,2))
 END IF
-DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
+DO il=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
+  i=self%mf_obj%dense_loc(il)
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
   n = self%mf_obj%levels(level)%blocks(iblock)%nelems
@@ -3050,7 +3355,7 @@ DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)
 END DO
 !$omp single
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-IF(n>0)CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
+IF((n>0).AND.(oft_env%rank==0))CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
 !$omp end single
 IF(self%mf_obj%pre_single)THEN
   DEALLOCATE(vloc4)
@@ -3059,12 +3364,27 @@ ELSE
 END IF
 !$omp end parallel
 !---Coarse correction on the expanded residual/solution (same as gtmp/utmp without junctions)
-IF(self%mf_obj%pre_coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,ge,ue)
+IF(self%mf_obj%pre_coarse.AND.(self%nz>0))THEN
+  IF(oft_env%nprocs>1)THEN
+    !---The coarse correction is replicated, so it is added to owned rows only
+    ALLOCATE(ctmp(SIZE(ue)))
+    ctmp=0.d0
+    CALL rbjprecond_coarse_apply(self,ge,ctmp)
+    DO j=1,SIZE(ue)
+      IF(self%mf_obj%elem_owner(j)==oft_env%rank)ue(j)=ue(j)+ctmp(j)
+    END DO
+    DEALLOCATE(ctmp)
+  ELSE
+    CALL rbjprecond_coarse_apply(self,ge,ue)
+  END IF
+END IF
 IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   CALL tw_junction_reduce_vec(self%mf_obj%tw_obj,ue,utmp)
   DEALLOCATE(ue,ge)
 END IF
-CALL u%restore_local(utmp)
+!---Sum contributions from all processors (each row is set by its owner only)
+CALL u%set(0.d0)
+CALL u%restore_local(utmp,add=.TRUE.)
 CALL g%set(0.d0)
 DEALLOCATE(utmp,gtmp,hole_inds)
 DEBUG_STACK_POP
@@ -3272,7 +3592,7 @@ DEALLOCATE(vals,wvals)
 IF(ASSOCIATED(tw%junc))DEALLOCATE(rvals,wexp)
 CALL zvec%delete(); CALL azvec%delete()
 DEALLOCATE(zvec,azvec)
-WRITE(*,'(2A,I6,A)')oft_indent,'Two-level preconditioner: ',self%nz,' coarse vectors'
+IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Two-level preconditioner: ',self%nz,' coarse vectors'
 CONTAINS
 !> Z^T w for a product w of the model operator (expanded first for junction meshes)
 SUBROUTINE coarse_project(zw)

@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 import os
+import atexit
 import platform
 import shutil
 import tempfile
@@ -139,6 +140,17 @@ class OFT_env():
             oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,oft_python_abort)
         else:
             oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
+        # Get MPI information (one process per rank when run with `mpiexec`)
+        mpi_info = numpy.zeros((2,), dtype=numpy.int32)
+        oftpy_get_mpi_info(mpi_info)
+        ## Number of MPI processes (each runs a copy of the Python script)
+        self.nprocs = int(mpi_info[0])
+        ## MPI rank of this process
+        self.rank = int(mpi_info[1])
+        ## Is this the head (rank 0) process? Use to restrict file output and printing in scripts run with MPI
+        self.head_proc = (self.rank == 0)
+        # Finalize MPI at exit (required for a clean exit under `mpirun`/`mpiexec`)
+        atexit.register(oftpy_finalize_mpi)
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
 

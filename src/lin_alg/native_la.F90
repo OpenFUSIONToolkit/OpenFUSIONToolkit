@@ -30,7 +30,7 @@ USE oft_local
 USE oft_base
 USE oft_sort, ONLY: search_array, sort_array
 USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
-  oft_global_reduction, oft_stitch_check
+  oft_global_reduction, oft_stitch_check, seam_setup_replicated
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph
@@ -285,6 +285,7 @@ INTEGER(i4), PARAMETER :: lc_offset = HUGE(INT(1,2))
 public native_vector_cast, native_cvector_cast, native_matrix_cast, native_cmatrix_cast
 public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
+public native_vector_setup_replicated
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -307,6 +308,54 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_vector_cast
+!---------------------------------------------------------------------------------
+!> Setup a native vector with replicated storage, where every processor stores all `n`
+!! entries and each entry is owned by exactly one processor
+!!
+!! Allocates values (if needed), a single-block map whose slice is the owned entries, and a new
+!! replicated seam (see \ref oft_stitching::seam_setup_replicated). Existing map and seam
+!! structures are left untouched (they may be shared with other vectors), so vectors that should use
+!! the new layout must be created from this one (`%new`) after this call.
+!---------------------------------------------------------------------------------
+subroutine native_vector_setup_replicated(self,owner)
+class(oft_native_vector), intent(inout) :: self !< Vector object
+integer(i4), contiguous, target, intent(in) :: owner(:) !< Owning processor (0-based rank) of each entry [n]
+integer(i4) :: i,j,n
+DEBUG_STACK_PUSH
+n=SIZE(owner)
+IF(ASSOCIATED(self%v))THEN
+  IF(SIZE(self%v)/=n)DEALLOCATE(self%v)
+END IF
+IF(.NOT.ASSOCIATED(self%v))THEN
+  ALLOCATE(self%v(n))
+  self%v=0.d0
+END IF
+self%n=n
+self%ng=n
+self%nblocks=1
+self%nslice=COUNT(owner==oft_env%rank)
+!---Map with owned entries as the slice
+ALLOCATE(self%map(1))
+self%map(1)%n=n
+self%map(1)%ng=n
+self%map(1)%nslice=self%nslice
+self%map(1)%offset=0
+self%map(1)%soffset=0
+self%map(1)%offsetg=0
+ALLOCATE(self%map(1)%slice(self%nslice),self%map(1)%lge(n))
+j=0
+DO i=1,n
+  self%map(1)%lge(i)=INT(i,i8)
+  IF(owner(i)==oft_env%rank)THEN
+    j=j+1
+    self%map(1)%slice(j)=i
+  END IF
+END DO
+!---Replicated seam
+ALLOCATE(self%stitch_info)
+CALL seam_setup_replicated(self%stitch_info,n,owner)
+DEBUG_STACK_POP
+end subroutine native_vector_setup_replicated
 !---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
 !---------------------------------------------------------------------------------
@@ -849,7 +898,7 @@ type(mpi_request) :: requests(4)
 integer(i4) :: requests(4)
 #endif
 DEBUG_STACK_PUSH
-if(self%stitch_info%full)then
+if(self%stitch_info%full.OR.self%stitch_info%replicated)then ! Replicated vectors hold all values locally
   rst_info%offset=0
   rst_info%count=INT(self%ng,4)
   rst_info%dim=self%ng
@@ -996,7 +1045,7 @@ type(mpi_request) :: requests(4)
 integer(i4) :: requests(4)
 #endif
 DEBUG_STACK_PUSH
-if(self%stitch_info%full)then
+if(self%stitch_info%full.OR.self%stitch_info%replicated)then ! Replicated vectors hold all values locally
   do i=1,self%n
     self%v(i)=rst_info%data(ABS(ig(i)))
   end do
@@ -1587,7 +1636,7 @@ DO i=1,n
   end select
 END DO
 DEALLOCATE(atmp)
-dots=oft_mpi_sum(dots,n)
+IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function cvec_mdot_vec
 !---------------------------------------------------------------------------------
@@ -1609,7 +1658,7 @@ DO i=1,n
     CALL oft_abort('"a" is not a native complex vector.','cvec_mdot_cvec',__FILE__)
   end select
 END DO
-dots=oft_mpi_sum(dots,n)
+IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function cvec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -2142,7 +2191,7 @@ if(present(diag))then
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','mat_assemble',__FILE__)
   END SELECT
-  call self%D%stitch(1)
+  IF(.NOT.self%force_local)call self%D%stitch(1)
   call diag%add(0.d0,1.d0,self%D)
 end if
 !---Common assembly tasks
@@ -2367,6 +2416,8 @@ CLASS IS(oft_native_vector)
 CLASS DEFAULT
   CALL oft_abort('"u" is not a vector object.','native_matrix_setup_full',__FILE__)
 END SELECT
+IF(uv%stitch_info%replicated)CALL oft_abort('Matrix linkage not supported for replicated vectors', &
+  'native_matrix_setup_full',__FILE__)
 IF(uv%stitch_info%skip)THEN
   ALLOCATE(self%linkage)
   self%linkage%full=.TRUE.
@@ -3411,7 +3462,7 @@ if(present(diag))then
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a vector object.','cmat_assemble',__FILE__)
   END SELECT
-  call self%D%stitch(1)
+  IF(.NOT.self%force_local)call self%D%stitch(1)
   call diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
 end if
 !---Common assembly tasks
@@ -3833,7 +3884,7 @@ if(present(diag))then
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a native vector.','dense_mat_assemble',__FILE__)
   END SELECT
-  call self%D%stitch(1)
+  IF(.NOT.self%force_local)call self%D%stitch(1)
   call diag%add(0.d0,1.d0,self%D)
 end if
 DEBUG_STACK_POP
@@ -4208,7 +4259,7 @@ if(present(diag))then
   CLASS DEFAULT
     CALL oft_abort('"diag" is not a native vector.','dense_cmat_assemble',__FILE__)
   END SELECT
-  call self%D%stitch(1)
+  IF(.NOT.self%force_local)call self%D%stitch(1)
   call diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
 end if
 DEBUG_STACK_POP
