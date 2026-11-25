@@ -135,7 +135,8 @@ Subdomain solutions are combined (`type`, native only):
   the overlap are not over-weighted.
 
 Periodic meshes are supported in both modes: the periodic images of a DoF held by one process form
-a single subdomain DoF, and blocks grow across periodic seams.
+a single subdomain DoF, and blocks grow across periodic seams. Revolved periodic domains have not
+been tested with this preconditioner.
 
 **XML Spec:** `<pre type="add_schwarz">`
 

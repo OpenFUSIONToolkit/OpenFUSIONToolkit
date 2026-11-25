@@ -92,6 +92,9 @@ expected = {
 }
 
 # Cube periodic in x (`ref_per=T,F,F`): blocks and graph subdomains grow across the periodic seam
+# (only x: with `ref_per=T,T,F` this coarse cube aborts in the mesh setup, in
+# mesh_global_igrnd, before any Schwarz code runs; full periodicity is covered by
+# test_native_schwarz.py and physics/MUG/test_MUG_schwarz.py)
 expected_periodic = {
     (1, 3, 3): [[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
                 [4, 1, 1, 35, 14, 11, 35, 16, 11, 35, 19, 16, 64, 21, 12, 14, 14, 14, 14, 1, 18]],
