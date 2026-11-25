@@ -239,6 +239,7 @@ def create_spline_flux_fun(npts,x,y,axis_bc=(1,0.0),edge_bc=(1,0.0),normalize=Tr
     @param y Value of flux function at spline "knots"
     @param axis_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on axis (\f$ \hat{\psi} = 0 \f$)
     @param edge_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on LCFS (\f$ \hat{\psi} = 1 \f$)
+    @param normalize Scale the profile to 1 on axis (skipped if the profile is zero on axis)
     @result Flux function definition dictionary
     '''
     from scipy.interpolate import CubicSpline
@@ -249,7 +250,7 @@ def create_spline_flux_fun(npts,x,y,axis_bc=(1,0.0),edge_bc=(1,0.0),normalize=Tr
         'x': x_sample,
         'y': prof(x_sample)
     }
-    if normalize:
+    if normalize and prof['y'][0] != 0.0:
         prof['y'] /= prof['y'][0]
     return prof
 

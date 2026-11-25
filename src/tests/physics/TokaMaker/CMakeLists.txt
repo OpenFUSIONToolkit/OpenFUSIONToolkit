@@ -18,6 +18,7 @@ configure_file( test_TokaMaker_reconstruction_io.py ${CMAKE_CURRENT_BINARY_DIR} 
 configure_file( test_TokaMaker_mirnov.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_pulse_design.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( test_TokaMaker_meshing.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+configure_file( test_TokaMaker_profiles.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( ITER_geom.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( ITER_test.eqdsk ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 configure_file( ITER_test.ifile ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
