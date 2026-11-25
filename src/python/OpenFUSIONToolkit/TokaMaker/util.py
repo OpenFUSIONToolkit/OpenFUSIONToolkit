@@ -12,6 +12,7 @@
 import struct
 import numpy
 from collections import OrderedDict
+from warnings import warn
 from .._interface import *
 from ..util import read_fortran_namelist
 
@@ -239,7 +240,7 @@ def create_spline_flux_fun(npts,x,y,axis_bc=(1,0.0),edge_bc=(1,0.0),normalize=Tr
     @param y Value of flux function at spline "knots"
     @param axis_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on axis (\f$ \hat{\psi} = 0 \f$)
     @param edge_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on LCFS (\f$ \hat{\psi} = 1 \f$)
-    @param normalize Scale the profile to 1 on axis (skipped if the profile is zero on axis)
+    @param normalize Scale the profile to 1 on axis (to a maximum absolute value of 1 if the profile is zero on axis)
     @result Flux function definition dictionary
     '''
     from scipy.interpolate import CubicSpline
@@ -250,8 +251,15 @@ def create_spline_flux_fun(npts,x,y,axis_bc=(1,0.0),edge_bc=(1,0.0),normalize=Tr
         'x': x_sample,
         'y': prof(x_sample)
     }
-    if normalize and prof['y'][0] != 0.0:
-        prof['y'] /= prof['y'][0]
+    if normalize:
+        if prof['y'][0] != 0.0:
+            prof['y'] /= prof['y'][0]
+        else:
+            y_max = numpy.max(numpy.abs(prof['y']))
+            if y_max > 0.0:
+                prof['y'] /= y_max
+            else:
+                warn("Spline flux function is zero everywhere, profile was not normalized", RuntimeWarning, stacklevel=2)
     return prof
 
 

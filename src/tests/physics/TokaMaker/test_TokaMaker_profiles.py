@@ -26,13 +26,25 @@ def test_spline_flux_fun_normalized_to_axis():
     assert np.allclose(prof['y'], expected/2.0)
 
 
-def test_spline_flux_fun_zero_axis():
-    '''A spline profile that is zero on axis keeps its finite sampled shape instead of dividing by zero'''
+@pytest.mark.parametrize('peak', [3.0, -2.0])
+def test_spline_flux_fun_zero_axis(peak):
+    '''A spline profile that is zero on axis is scaled by its maximum absolute value instead of dividing by zero'''
     x = np.array([0.0, 0.5, 1.0])
-    y = np.array([0.0, 1.0, 0.0])
+    y = np.array([0.0, peak, 0.0])
     prof = create_spline_flux_fun(40, x, y)
     expected = CubicSpline(x, y, bc_type=[(1, 0.0), (1, 0.0)])(np.linspace(0.0, 1.0, 40))
     assert np.all(np.isfinite(prof['y']))
     assert np.allclose(prof['x'], np.linspace(0.0, 1.0, 40))
-    assert np.allclose(prof['y'], expected)
-    assert np.allclose(prof['y'], create_spline_flux_fun(40, x, y, normalize=False)['y'])
+    assert np.max(np.abs(prof['y'])) == pytest.approx(1.0)
+    assert np.allclose(prof['y'], expected/np.max(np.abs(expected)))
+    assert np.allclose(create_spline_flux_fun(40, x, y, normalize=False)['y'], expected)
+
+
+def test_spline_flux_fun_all_zero_warns():
+    '''A spline profile that is zero everywhere is left unnormalized with a warning'''
+    x = np.array([0.0, 0.5, 1.0])
+    y = np.zeros(3)
+    with pytest.warns(RuntimeWarning, match='not normalized'):
+        prof = create_spline_flux_fun(40, x, y)
+    assert np.all(np.isfinite(prof['y']))
+    assert np.all(prof['y'] == 0.0)
