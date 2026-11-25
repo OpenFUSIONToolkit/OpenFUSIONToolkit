@@ -37,13 +37,17 @@ def main(case):
     tw.setup_io(basepath=case['basepath'], legacy_hdf5=True)
     tw.set_hodlr_options(**case['hodlr'])
     results = {'nprocs': myOFT.nprocs}
-    #---Coil and sensor coupling matrices (computed in parallel, replicated on all processes)
-    Mc = tw.compute_Mcoil()
-    if tw.n_icoils > 0:
-        results['Mc'] = Mc.copy()
+    #---Coil and sensor coupling matrices (distributed over processes with MPI, so not returned)
+    cm_cache = case.get('cm_cache')
+    Mc = tw.compute_Mcoil(cache_file=None if cm_cache is None else cm_cache + '_coils')
+    if (myOFT.nprocs > 1) and (Mc is not None):
+        raise ValueError('Coil coupling matrix returned with MPI')
+    sensor_obj = None
     if case.get('sensors') is not None:
-        Ms, Msc, _ = tw.compute_Msensor(case['sensors'])
-        results['Ms'] = Ms.copy()
+        Ms, Msc, sensor_obj = tw.compute_Msensor(case['sensors'],
+                                                 cache_file=None if cm_cache is None else cm_cache + '_sensors')
+        if (myOFT.nprocs > 1) and (Ms is not None):
+            raise ValueError('Sensor coupling matrix returned with MPI')
         if tw.n_icoils > 0:
             results['Msc'] = Msc.copy()
     tw.compute_Lmat(use_hodlr=True, cache_file=case.get('cache'))
@@ -70,11 +74,26 @@ def main(case):
         full_volts[:, 0] = [0.0, 1.0]
         full_volts[:, 1:] = x[np.newaxis, :]
     tw.run_td(1.E-4, 10, coil_currs=coil_currs, full_volts=full_volts, lin_tol=1.E-12, lin_rtol=1.E-20,
-              status_freq=5, plot_freq=10)
+              status_freq=5, plot_freq=10, sensor_obj=sensor_obj)
     if myOFT.head_proc:
         import h5py
         with h5py.File(os.path.join(case['basepath'], 'pThinCurr_0010.rst'), 'r') as fid:
             results['td_U'] = np.array(fid['U'])
+        if sensor_obj is not None:
+            # Sensor signals (element and coil couplings) over the run
+            from OpenFUSIONToolkit.io import histfile
+            hist = histfile(os.path.join(case['basepath'], 'floops.hist'))
+            results['td_sensors'] = np.vstack([np.asarray(hist[key]) for key in hist.keys() if key != 'time'])
+    #---Reduced model from a fixed basis (projections of the coupling matrices)
+    basis = np.random.default_rng(7).standard_normal((3, tw.nelems))
+    red_file = os.path.join(case['basepath'], 'reduced.h5')
+    tw.build_reduced_model(basis, filename=red_file, sensor_obj=sensor_obj)
+    if myOFT.head_proc:
+        import h5py
+        with h5py.File(red_file, 'r') as fid:
+            for key in ('L', 'R', 'Ms', 'Mc'):
+                if key in fid:
+                    results['red_' + key] = np.array(fid[key])
     #---Magnetic field reconstruction (HODLR B-field operator)
     if case.get('compute_B', True):
         tw.compute_Bmat()

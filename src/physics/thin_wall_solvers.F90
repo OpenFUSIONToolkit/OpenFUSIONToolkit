@@ -784,8 +784,7 @@ DO i=1,nsteps
   END IF
   CALL g%get_local(vals)
   IF(maxproj>0)proj_ax(:,iproj)=dt*proj_ax(:,iproj)+vals
-  IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
-    self%nelems,icoil_dcurr,1,1.d0,vals,1)
+  IF(ntimes_curr>0)CALL tw_cm_dr_apply(self,icoil_dcurr,-1.d0,vals)
   IF(volt_full)THEN
     vals=vals+pcoil_volt
   ELSE
@@ -841,8 +840,7 @@ DO i=1,nsteps
   END IF
   CALL u%get_local(vals)
   IF(sensors%nfloops>0)THEN
-    CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen,sensors%nfloops, &
-      vals,1,0.d0,senout(2),1)
+    CALL tw_cm_sen_vec(self,sensors%nfloops,vals,senout(2:))
     IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
       sensors%nfloops,icoil_curr,1,1.d0,senout(2),1)
     IF((ntimes_volt>0).AND.ASSOCIATED(sensor_vals))THEN
@@ -1071,8 +1069,7 @@ DO i=0,nsteps
   IF(rebuild_sensors)THEN
     !
     IF(sensors%nfloops>0)THEN
-      CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen, &
-        sensors%nfloops,vals,1,0.d0,senout(2),1)
+      CALL tw_cm_sen_vec(self,sensors%nfloops,vals,senout(2:))
       IF(self%n_icoils>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen,sensors%nfloops, &
         coil_vec,1,1.d0,senout(2),1)
       IF(ASSOCIATED(sensor_vals))THEN
@@ -1202,8 +1199,7 @@ IF(sensors%nfloops>0)THEN
   END DO
   ! Save mutual coupling matrix
   ALLOCATE(Mat_red(sensors%nfloops,neigs))
-  CALL dgemm('N','N',sensors%nfloops,neigs,self%nelems,1.d0, &
-    self%Ael2sen,sensors%nfloops,eig_vec,self%nelems,0.d0,Mat_red,sensors%nfloops)
+  CALL tw_cm_sen_apply(self,sensors%nfloops,eig_vec,Mat_red)
   IF(oft_env%head_proc)CALL hdf5_write(Mat_red,TRIM(filename),'Ms')
   description=["Model to sensor mutual inductance matrix"]
   IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Ms','description',description)
@@ -1232,8 +1228,7 @@ IF(self%n_icoils>0)THEN
   END DO
   ! Save mutual coupling matrix
   ALLOCATE(Mat_red(neigs,self%n_icoils))
-  CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
-    eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
+  CALL tw_cm_dr_project(self,eig_vec,Mat_red)
   IF(oft_env%head_proc)CALL hdf5_write(Mat_red,TRIM(filename),'Mc')
   description=["Model to coil mutual inductance matrix"]
   IF(oft_env%head_proc)CALL hdf5_add_string_attribute(TRIM(filename),'Mc','description',description)

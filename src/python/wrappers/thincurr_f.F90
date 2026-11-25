@@ -27,7 +27,7 @@ USE oft_la_base, ONLY: oft_vector
 USE oft_native_la, ONLY: oft_native_vector, oft_native_dense_matrix
 !---
 USE fem_utils, ONLY: fem_interp
-USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, tw_junction_reduce_cols, &
+USE thin_wall, ONLY: tw_type, tw_cm_reset, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, tw_junction_reduce_cols, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
   tw_recon_curr, tw_compute_Bops, tw_copy_coil, tw_junction_vcoil_rows, tw_nelems_exp
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
@@ -675,7 +675,12 @@ IF(TRIM(filename)=='')THEN
 ELSE
   CALL tw_compute_Ael2dr(tw_obj,save_file=filename)
 END IF
-Mc_ptr=C_LOC(tw_obj%Ael2dr)
+!---Distributed matrices (MPI) are only used internally
+IF(tw_obj%cm_dist)THEN
+  Mc_ptr=C_NULL_PTR
+ELSE
+  Mc_ptr=C_LOC(tw_obj%Ael2dr)
+END IF
 tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Mcoil
 !---------------------------------------------------------------------------------
@@ -749,6 +754,8 @@ DO i=1,tw_obj%n_coils
     CALL tw_copy_coil(tw_obj%coils(i),tw_obj%icoils(tw_obj%n_icoils))
   END IF
 END DO
+!---Element coupling matrix distribution depends on the number of elements
+CALL tw_cm_reset(tw_obj)
 !---Recreate Uloc vector for new number of elements
 IF(ASSOCIATED(tw_obj%Uloc))THEN
   CALL tw_obj%Uloc%delete()
@@ -822,7 +829,12 @@ IF(TRIM(filename)=='')THEN
 ELSE
   CALL tw_compute_mutuals(tw_obj,sensors%nfloops,sensors%floops,save_file=filename)
 END IF
-Ms_ptr=C_LOC(tw_obj%Ael2sen)
+!---Distributed matrices (MPI) are only used internally
+IF(tw_obj%cm_dist)THEN
+  Ms_ptr=C_NULL_PTR
+ELSE
+  Ms_ptr=C_LOC(tw_obj%Ael2sen)
+END IF
 Msc_ptr=C_LOC(tw_obj%Adr2sen)
 sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops

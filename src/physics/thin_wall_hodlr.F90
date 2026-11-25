@@ -351,18 +351,23 @@ DO h=1,tw%nholes
     END DO
   END DO
 END DO
-!---Passive coils (replicated, added on processor 0 only)
+!---Passive coils: element couplings from the stored rows (each added once, by its primary processor) and the
+!   coil-coil couplings (replicated, added on processor 0)
+DO ii=1,tw%cm_nexp
+  IF(.NOT.tw%cm_primary(ii))CYCLE
+  i=tw%cm_exp(ii)
+  IF(i<=tw%np_active+tw%nholes)THEN
+    DO j=1,tw%n_vcoils
+      Lmat(i,tw%nholes+j)=tw%Ael2coil(ii,j)
+    END DO
+  END IF
+  IF((i>tw%np_active).AND.(i<=tw%np_active+tw%nholes))THEN
+    DO j=1,tw%n_vcoils
+      Lmat(tw%np_active+tw%nholes+j,i-tw%np_active)=tw%Ael2coil(ii,j)
+    END DO
+  END IF
+END DO
 IF(oft_env%rank==0)THEN
-  DO i=1,tw%np_active+tw%nholes
-    DO j=1,tw%n_vcoils
-      Lmat(i,tw%nholes+j)=tw%Ael2coil(i,j)
-    END DO
-  END DO
-  DO i=1,tw%nholes
-    DO j=1,tw%n_vcoils
-      Lmat(tw%np_active+tw%nholes+j,i)=tw%Ael2coil(tw%np_active+i,j)
-    END DO
-  END DO
   DO i=1,tw%n_vcoils
     DO j=1,tw%n_vcoils
       Lmat(tw%np_active+tw%nholes+j,tw%nholes+i)=tw%Acoil2coil(i,j)

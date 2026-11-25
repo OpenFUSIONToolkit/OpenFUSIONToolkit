@@ -358,9 +358,14 @@ preconditioners, and the linear solvers are distributed:
    see \ref oft_stitching::seam_setup_replicated). Matrix-vector products sum the contributions from each process on
    the owner, which then shares the result with all processes, so values are identical on all processes. Dot products
    sum owned values only, and eigenvalue problems use parallel ARPACK on the owned values.
- - The coil and sensor coupling matrices (element to coil, coil to coil, element to sensor, and coil to sensor) are
-   computed in parallel, by splitting groups of cells, coil filaments, or sensors over processes, and the result is
-   then summed so that each process holds the full matrices.
+ - The element coupling matrices for coils and sensors are also distributed: each process computes and stores only
+   the entries for the model unknowns it owns, given by a spatial (recursive coordinate) bisection of the model with
+   holes and V-coils on the first process. Products with these matrices (eg. sensor signals and coil drive terms in
+   time-dependent runs) are summed over processes. The smaller coil to coil and coil to sensor matrices are computed in
+   parallel and stored on every process.
+ - As the element coupling matrices are distributed, \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.compute_Mcoil
+   "compute_Mcoil" and \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.compute_Msensor "compute_Msensor" return
+   `None` in place of the element coupling matrices when run with MPI.
 
 The use of MPI is otherwise transparent, with results returned in full to every process. However, the following should
 be noted:
@@ -370,7 +375,7 @@ be noted:
    \ref OpenFUSIONToolkit._core.OFT_env.head_proc "OFT_env.head_proc" (or
    \ref OpenFUSIONToolkit._core.OFT_env.rank "OFT_env.rank") to restrict printing and file output in scripts to a single
    process.
- - Output (printing, plot files, restart and history files) is written by the first process only. HODLR cache files
+ - Output (printing, plot files, restart and history files) is written by the first process only. HODLR and coupling matrix cache files
    written with any number of processes can be read with any other number of processes (including serial runs).
  - Set the number of OpenMP threads per process (`nthreads` in \ref OpenFUSIONToolkit._core.OFT_env "OFT_env") so
    that the total number of threads does not exceed the number of available cores.

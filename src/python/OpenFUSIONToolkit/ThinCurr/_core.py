@@ -516,7 +516,8 @@ class ThinCurr():
         '''! Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
 
         @param cache_file Path to cache file to store/load matrix
-        @result Mutual inductance matrix `(:,:)`
+        @result Mutual inductance matrix `(:,:)` (`None` when run with MPI, where the matrix is distributed over
+        processes and only used internally)
         '''
         if cache_file is None:
             cache_string = self._oft_env.path2c("")
@@ -527,6 +528,9 @@ class ThinCurr():
         thincurr_Mcoil(self.tw_obj,ctypes.byref(Mc_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
+        if self._oft_env.nprocs > 1:
+            # Distributed over processes with MPI (only used internally)
+            return None
         return numpy.ctypeslib.as_array(ctypes.cast(Mc_loc, c_double_ptr),shape=(self.n_icoils,self.nelems))
 
     def compute_Msensor(self,sensor_file=None,cache_file=None):
@@ -534,7 +538,8 @@ class ThinCurr():
 
         @param sensor_file Path to file contatining flux loop definitions
         @param cache_file Path to cache file to store/load matrix
-        @result Mutual inductance matrix between model and sensors `(:,:)`
+        @result Mutual inductance matrix between model and sensors `(:,:)` (`None` when run with MPI, where the
+        matrix is distributed over processes and only used internally)
         @result Mutual inductance matrix between icoils and sensors `(:,:)`
         @result Internal ThinCurr sensor object
         '''
@@ -564,7 +569,12 @@ class ThinCurr():
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())
             sensor_names.append(sensor_name.value.decode().strip())
-        return numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value)), \
+        if self._oft_env.nprocs > 1:
+            # Distributed over processes with MPI (only used internally)
+            Ms = None
+        else:
+            Ms = numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value))
+        return Ms, \
                numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), \
                {'names': sensor_names, 'ptr': sensor_loc}
 

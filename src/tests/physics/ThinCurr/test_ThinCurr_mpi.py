@@ -45,6 +45,10 @@ def write_cyl_xml():
     vcoil.add_circular_subcoil([1.1, -0.25])
     xml.add_Vcoil(vcoil)
     write_oft_xml([xml], "oft_in_mpi.xml")
+
+
+def write_sensors():
+    '''Two flux loops and a point Mirnov probe'''
     sensors = [circular_flux_loop(0.9, 0.5, 'FLOOP_0', npts=180), circular_flux_loop(0.9, 0.0, 'FLOOP_1', npts=180),
                Mirnov([0.9, 0.0, 0.2], [0.0, 0.0, 1.0], 'MIRNOV_0', dx=None)]
     save_sensors(sensors, 'floops_mpi.loc')
@@ -59,12 +63,16 @@ def write_junction_mesh():
 
 
 def run_driver(name, nproc, case, cache=None, expect_cache_read=False):
-    '''Run the driver for `case` on `nproc` processes and return its results'''
+    '''Run the driver for `case` on `nproc` processes and return its results
+
+    With `cache`, HODLR and coil/sensor coupling matrices are cached in files with that prefix.
+    '''
     case = dict(case)
     case['out'] = '{0}_np{1}.npz'.format(name, nproc)
     case['basepath'] = '{0}_np{1}/'.format(name, nproc)
     if cache is not None:
         case['cache'] = cache
+        case['cm_cache'] = cache
     case_file = '{0}_np{1}.json'.format(name, nproc)
     with open(case_file, 'w+') as fid:
         json.dump(case, fid)
@@ -77,8 +85,10 @@ def run_driver(name, nproc, case, cache=None, expect_cache_read=False):
     assert result
     assert std_out.find('DRIVER_COMPLETE') > -1
     if expect_cache_read:
-        assert std_out.find('Reading HODLR matrix from file') > -1
+        for msg in ('Reading HODLR matrix from file', 'Reading coil mutual matrices', 'Reading sensor mutual matrices'):
+            assert std_out.find(msg) > -1, msg
         assert std_out.find('Ignoring stored matrix') < 0
+        assert std_out.find('Error reading matrix from file') < 0
     with np.load(case['out']) as data:
         return {key: data[key] for key in data.files}
 
@@ -90,7 +100,7 @@ def compare(ref, out, rtol=1.E-6):
     operators at the level of the HODLR tolerance and round-off in the reductions change the solver iterations.
     '''
     assert out['nprocs'] > 1
-    for key in ('Mc', 'Ms', 'Msc', 'Lx', 'eig_vals', 'eig_vec0', 'fr', 'td_U', 'B'):
+    for key in ('Msc', 'red_Ms', 'red_Mc', 'red_L', 'red_R', 'Lx', 'eig_vals', 'eig_vec0', 'fr', 'td_U', 'td_sensors', 'B'):
         if key not in ref:
             continue
         scale = np.max(np.abs(ref[key]))
@@ -98,7 +108,7 @@ def compare(ref, out, rtol=1.E-6):
         err = np.max(np.abs(out[key]-ref[key]))/scale
         print("{0} (nprocs = {1}): relative difference {2:.3E}".format(key, int(out['nprocs']), err))
         tol = rtol
-        if key in ('fr', 'td_U'):
+        if key in ('fr', 'td_U', 'td_sensors'):
             tol = 10.0*rtol
         assert err < tol, "{0}: relative error {1:.3E}".format(key, err)
 
@@ -108,7 +118,7 @@ cases = {
             'hodlr': dict(hodlr_opts)},
     'cyl_coarse': {'mesh': 'tw_test-cyl_hr.h5', 'xml': 'oft_in_mpi.xml', 'jumper_start': 2,
                    'hodlr': dict(hodlr_opts, pre_coarse=True, pre_neigs=4), 'compute_B': False},
-    'junction': {'mesh': None, 'hodlr': dict(hodlr_opts, target_size=100)},
+    'junction': {'mesh': None, 'sensors': 'floops_mpi.loc', 'hodlr': dict(hodlr_opts, target_size=100)},
 }
 
 
@@ -119,6 +129,7 @@ def setup_case(name):
         case['mesh'] = write_junction_mesh()
     if 'xml' in case:
         write_cyl_xml()
+    write_sensors()
     return case
 
 
@@ -136,20 +147,24 @@ def test_mpi_vs_serial(name):
 
 @pytest.mark.mpi
 def test_mpi_cache():
-    '''HODLR cache files written by any number of processes are read by any other number of processes'''
+    '''HODLR and coupling matrix cache files written by any number of processes are read by any other number of
+    processes'''
     if not oft_testing.env_flag('OFT_HAVE_MPI'):
         pytest.skip("Not compiled with MPI")
     case = setup_case('cyl')
     case['compute_B'] = False
     cache = 'mpi_hodlr_cache.h5'
-    if os.path.isfile(cache):
-        os.remove(cache)
+    cache_files = (cache, cache + '_coils', cache + '_sensors')
+    for file in cache_files:
+        if os.path.isfile(file):
+            os.remove(file)
     ref = run_driver('cache', 2, case, cache=cache) # Written by 2 processes
     compare(ref, run_driver('cache', 3, case, cache=cache, expect_cache_read=True), rtol=1.E-8)
     serial = run_driver('cache', 1, case, cache=cache, expect_cache_read=True)
     serial['nprocs'] = 2 # Compared as a parallel result
     compare(ref, serial, rtol=1.E-8)
-    os.remove(cache)
+    for file in cache_files:
+        os.remove(file)
 
 
 @pytest.mark.mpi
