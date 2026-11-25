@@ -530,7 +530,11 @@ CASE(1)
         END DO
         self%rscratch(l+1)=tmp
       END DO
+      !---Plain scalar sum in sorted order: every copy of the element must add the same values
+      !---in the same order for the result to be bitwise consistent across copies, so the loop
+      !---must not be vectorized or reassociated (NOVECTOR is ignored by compilers without it)
       tmp=0.d0
+!DIR$ NOVECTOR
       DO k=1,n
         tmp=tmp+self%rscratch(k)
       END DO
@@ -610,7 +614,11 @@ CASE(1)
         END DO
         self%cscratch(l+1)=tmp
       END DO
+      !---Plain scalar sum in sorted order: every copy of the element must add the same values
+      !---in the same order for the result to be bitwise consistent across copies, so the loop
+      !---must not be vectorized or reassociated (NOVECTOR is ignored by compilers without it)
       tmp=(0.d0,0.d0)
+!DIR$ NOVECTOR
       DO k=1,n
         tmp=tmp+self%cscratch(k)
       END DO
