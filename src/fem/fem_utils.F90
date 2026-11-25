@@ -325,13 +325,13 @@ end subroutine fem_avg_bcc
 !> Partition FE weights based on geometric connectivity
 !------------------------------------------------------------------------------
 subroutine fem_partition(self,part,nparts)
-class(oft_fem_type), intent(inout) :: self !< Finite element structure
-INTEGER(i4), intent(inout) :: part(:) !< Weight partitioning [self%ne]
+CLASS(oft_fem_type), INTENT(inout) :: self !< Finite element structure
+INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [self%ne]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 DEBUG_STACK_PUSH
 CALL fem_partition_impl(self,part,nparts)
 DEBUG_STACK_POP
-end subroutine fem_partition
+END SUBROUTINE fem_partition
 !------------------------------------------------------------------------------
 !> Partition FE weights based on geometric connectivity, also returning the
 !! partition of the mesh cells
@@ -340,21 +340,21 @@ end subroutine fem_partition
 !! @ref oft_mesh_local::mesh_local_partition "mesh_local_partition", so the part of
 !! each weight is the part of its geometric entity as voted by the cells.
 !------------------------------------------------------------------------------
-subroutine fem_partition_cells(self,part,nparts,cpart)
-class(oft_fem_type), intent(inout) :: self !< Finite element structure
-INTEGER(i4), intent(inout) :: part(:) !< Weight partitioning [self%ne]
+SUBROUTINE fem_partition_cells(self,part,nparts,cpart)
+CLASS(oft_fem_type), INTENT(inout) :: self !< Finite element structure
+INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [self%ne]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 INTEGER(i4), INTENT(out) :: cpart(:) !< Cell partitioning [self%mesh%nc]
 DEBUG_STACK_PUSH
 CALL fem_partition_impl(self,part,nparts,cpart)
 DEBUG_STACK_POP
-end subroutine fem_partition_cells
+END SUBROUTINE fem_partition_cells
 !------------------------------------------------------------------------------
 !> Implementation of @ref fem_partition and @ref fem_partition_cells
 !------------------------------------------------------------------------------
-subroutine fem_partition_impl(self,part,nparts,cpart)
-class(oft_fem_type), intent(inout) :: self !< Finite element structure
-INTEGER(i4), intent(inout) :: part(:) !< Weight partitioning [self%ne]
+SUBROUTINE fem_partition_impl(self,part,nparts,cpart)
+CLASS(oft_fem_type), INTENT(inout) :: self !< Finite element structure
+INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [self%ne]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 INTEGER(i4), OPTIONAL, INTENT(out) :: cpart(:) !< Cell partitioning [self%mesh%nc] (optional)
 INTEGER(i4) :: i,j,k,nloc,offset,mycounts(4)
@@ -409,18 +409,18 @@ DO k=1,nparts
 END DO
 DEALLOCATE(tloc_p,tloc_e,tloc_f,tloc_c)
 DEBUG_STACK_POP
-end subroutine fem_partition_impl
+END SUBROUTINE fem_partition_impl
 !------------------------------------------------------------------------------
 !> Partition FE weights based on geometric connectivity
 !------------------------------------------------------------------------------
 subroutine comp_fem_partition(self_comp,part,nparts)
-class(oft_fem_comp_type), intent(inout) :: self_comp !< Finite element structure
+CLASS(oft_fem_comp_type), INTENT(inout) :: self_comp !< Finite element structure
 INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [self%ne]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 DEBUG_STACK_PUSH
 CALL comp_fem_partition_impl(self_comp,part,nparts)
 DEBUG_STACK_POP
-end subroutine comp_fem_partition
+END SUBROUTINE comp_fem_partition
 !------------------------------------------------------------------------------
 !> Partition composite FE weights based on geometric connectivity, also returning
 !! the partition of the mesh cells
@@ -430,20 +430,20 @@ end subroutine comp_fem_partition
 !! the first field, so the part of each weight is the part of its geometric entity
 !! as voted by the cells.
 !------------------------------------------------------------------------------
-subroutine comp_fem_partition_cells(self_comp,part,nparts,cpart)
-class(oft_fem_comp_type), intent(inout) :: self_comp !< Finite element structure
+SUBROUTINE comp_fem_partition_cells(self_comp,part,nparts,cpart)
+CLASS(oft_fem_comp_type), INTENT(inout) :: self_comp !< Finite element structure
 INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [sum of field ne]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 INTEGER(i4), INTENT(out) :: cpart(:) !< Cell partitioning [mesh%nc]
 DEBUG_STACK_PUSH
 CALL comp_fem_partition_impl(self_comp,part,nparts,cpart)
 DEBUG_STACK_POP
-end subroutine comp_fem_partition_cells
+END SUBROUTINE comp_fem_partition_cells
 !------------------------------------------------------------------------------
 !> Implementation of @ref comp_fem_partition and @ref comp_fem_partition_cells
 !------------------------------------------------------------------------------
-subroutine comp_fem_partition_impl(self_comp,part,nparts,cpart)
-class(oft_fem_comp_type), intent(inout) :: self_comp !< Finite element structure
+SUBROUTINE comp_fem_partition_impl(self_comp,part,nparts,cpart)
+CLASS(oft_fem_comp_type), INTENT(inout) :: self_comp !< Finite element structure
 INTEGER(i4), INTENT(inout) :: part(:) !< Weight partitioning [sum of field ne]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 INTEGER(i4), OPTIONAL, INTENT(out) :: cpart(:) !< Cell partitioning [mesh%nc] (optional)
@@ -516,7 +516,7 @@ DO k=1,nparts
 END DO
 DEALLOCATE(tloc_p,tloc_e,tloc_f,tloc_c)
 DEBUG_STACK_POP
-end subroutine comp_fem_partition_impl
+END SUBROUTINE comp_fem_partition_impl
 !------------------------------------------------------------------------------
 !> Set diagonal elements to one on owned rows according to BC flag
 !------------------------------------------------------------------------------

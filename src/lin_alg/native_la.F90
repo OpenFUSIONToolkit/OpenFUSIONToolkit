@@ -206,7 +206,7 @@ type, public :: oft_native_pattern
   type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrices (built by @ref native_matrix_setup_full)
   type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
   type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
-  type(native_extraction), pointer :: extracts => NULL() !< Cached submatrix extractions (see @ref native_extraction_get)
+  TYPE(native_extraction), POINTER :: extracts => NULL() !< Cached submatrix extractions (see @ref native_extraction_get)
 end type oft_native_pattern
 !---------------------------------------------------------------------------------
 !> Extraction of a submatrix (row set by column set) from a native CRS pattern
@@ -219,16 +219,16 @@ end type oft_native_pattern
 !! rebuilt for new values, reuse the symbolic work; they are freed with the parent
 !! pattern.
 !---------------------------------------------------------------------------------
-type, public :: native_extraction
-  integer(i4) :: nr = 0 !< Number of rows of the submatrix
-  integer(i4) :: nc = 0 !< Number of columns of the submatrix
-  integer(i4), pointer, contiguous, dimension(:) :: rows => NULL() !< Parent row of each submatrix row [nr]
-  integer(i4), pointer, contiguous, dimension(:) :: cols => NULL() !< Parent column of each submatrix column [nc]
-  integer(i4), pointer, contiguous, dimension(:) :: lcmap => NULL() !< Parent value location of each submatrix entry [nnz]
-  type(oft_native_pattern), pointer :: pattern => NULL() !< Pattern of the submatrix (one reference held)
-  type(oft_scatter_plan) :: vplan !< Value gather plan (parent values to submatrix values)
-  type(native_extraction), pointer :: next => NULL() !< Next extraction in the parent's cache
-end type native_extraction
+TYPE, PUBLIC :: native_extraction
+  INTEGER(i4) :: nr = 0 !< Number of rows of the submatrix
+  INTEGER(i4) :: nc = 0 !< Number of columns of the submatrix
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: rows => NULL() !< Parent row of each submatrix row [nr]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cols => NULL() !< Parent column of each submatrix column [nc]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lcmap => NULL() !< Parent value location of each submatrix entry [nnz]
+  TYPE(oft_native_pattern), POINTER :: pattern => NULL() !< Pattern of the submatrix (one reference held)
+  TYPE(oft_scatter_plan) :: vplan !< Value gather plan (parent values to submatrix values)
+  TYPE(native_extraction), POINTER :: next => NULL() !< Next extraction in the parent's cache
+END TYPE native_extraction
 !---------------------------------------------------------------------------------
 !> Native CRS matrix class
 !---------------------------------------------------------------------------------
@@ -315,11 +315,11 @@ end type oft_native_cmatrix
 !---------------------------------------------------------------------------------
 type, public, extends(oft_native_matrix) :: oft_native_submatrix
   integer(i4) :: slice = -1 !< Slice of parent matrix
-  integer(i4), pointer, dimension(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz] (alias of `ext%lcmap`)
-  integer(i4), pointer, dimension(:) :: part => NULL() !< Parent rows (and columns) of the submatrix
+  INTEGER(i4), POINTER, DIMENSION(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz] (alias of `ext%lcmap`)
+  INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL() !< Parent rows (and columns) of the submatrix
   class(oft_native_matrix), pointer :: parent => NULL() !< Parent matrix
-  type(oft_native_pattern), pointer :: parent_pattern => NULL() !< Pattern of the parent (reference held, owns `ext`)
-  type(native_extraction), pointer :: ext => NULL() !< Extraction (symbolic map) used
+  TYPE(oft_native_pattern), POINTER :: parent_pattern => NULL() !< Pattern of the parent (reference held, owns `ext`)
+  TYPE(native_extraction), POINTER :: ext => NULL() !< Extraction (symbolic map) used
 contains
   !> Build submatrix
   procedure :: setup => submatrix_setup
@@ -439,7 +439,7 @@ public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
 public native_pattern_create, native_pattern_retain, native_pattern_release
 public native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
-public native_extraction_get
+PUBLIC native_extraction_get
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -3408,17 +3408,17 @@ end subroutine matrix_update_slice
 !!
 !! The symbolic extraction is cached by the parent's pattern (@ref native_extraction_get).
 !---------------------------------------------------------------------------------
-subroutine submatrix_setup(self,mat,u,slice,part,rows,cols)
+SUBROUTINE submatrix_setup(self,mat,u,slice,part,rows,cols)
 class(oft_native_submatrix), intent(inout) :: self
 class(oft_matrix), intent(inout) :: mat !< Parent matrix
 class(oft_vector), intent(inout) :: u !< Constructed vector for parent row space
 integer(i4), optional, intent(in) :: slice !< Index of field slice to use (optional)
 integer(i4), optional, target, intent(in) :: part(:) !< Array of elements to define submatrix [:] (optional)
-integer(i4), optional, intent(in) :: rows(:) !< Parent rows of the submatrix (optional)
-integer(i4), optional, intent(in) :: cols(:) !< Parent columns of the submatrix (optional, requires `rows`)
+INTEGER(i4), OPTIONAL, INTENT(in) :: rows(:) !< Parent rows of the submatrix (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: cols(:) !< Parent columns of the submatrix (optional, requires `rows`)
 class(oft_native_matrix), pointer :: parent
-integer(i4) :: i,j,nr
-integer(i4), allocatable, dimension(:) :: rlist
+INTEGER(i4) :: i,j,nr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rlist
 DEBUG_STACK_PUSH
 !---
 IF(COUNT([PRESENT(part),PRESENT(slice),PRESENT(rows)])>1)CALL oft_abort('Only one of "slice", "part" and "rows" '// &
