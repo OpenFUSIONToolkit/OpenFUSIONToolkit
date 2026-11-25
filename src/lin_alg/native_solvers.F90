@@ -2824,7 +2824,7 @@ ELSE IF(self%update_slice)THEN
   self%update_slice=.FALSE.
 END IF
 !---Block solves run concurrently only for thread safe sub-solvers outside parallel regions
-thread_safe=self%pre%check_thread().AND.(.NOT.omp_in_parallel())
+thread_safe=self%pre%check_thread()
 !---Gather subdomain values (borrowed local values, no copy for native vectors)
 NULLIFY(uvals,gvals)
 CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
@@ -2836,20 +2836,21 @@ IF(self%additive)THEN
 ELSE
   IF(self%ovl%n>0)self%usol%v=self%usub%v
 END IF
-!---Each block (and its local vectors) is only accessed by one thread; blocks only read
-!   the gathered subdomain values and write disjoint rows of `usol` (restricted)
-!$omp parallel if(thread_safe)
-!$omp do schedule(dynamic,1)
-DO i=1,self%nlocal
-  IF(self%parts(i)%n==0)CYCLE
-  CALL scatter_local(self%bplans(i),self%gsub%v,self%glocs(i)%v,OFT_SCATTER_INSERT)
-  CALL scatter_local(self%bplans(i),self%usub%v,self%ulocs(i)%v,OFT_SCATTER_INSERT)
-  self%solvers(i)%s%A=>self%alocals(i)
-  CALL self%solvers(i)%s%apply(self%ulocs(i),self%glocs(i))
-  IF(.NOT.self%additive)CALL scatter_local(self%bplans(i),self%ulocs(i)%v,self%usol%v, &
-    OFT_SCATTER_INSERT,reverse=.TRUE.)
-END DO
-!$omp end parallel
+!---Blocks only read the gathered subdomain values and write disjoint rows of `usol`
+!   (restricted), so the result does not depend on the order blocks are solved in.
+!   Only open a parallel region if the sub-solver is thread safe and we are not already
+!   in an active parallel region (see @ref bjprecond_apply). Each block (and its local
+!   vectors) is only accessed by one thread.
+IF(thread_safe.AND.(.NOT.omp_in_parallel()))THEN
+  !$omp parallel do schedule(dynamic,1)
+  DO i=1,self%nlocal
+    CALL apply_cell_block(i)
+  END DO
+ELSE
+  DO i=1,self%nlocal
+    CALL apply_cell_block(i)
+  END DO
+END IF
 !---Additive combination: sum of the block solutions (blocks in order)
 IF(self%additive)THEN
   DO i=1,self%nlocal
@@ -2862,6 +2863,20 @@ CALL native_overlap_scatter(self%ovl,self%usol%v,uvals,self%additive)
 CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=(.NOT.self%additive))
 CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Solve the local sub-system of a single cell block
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE apply_cell_block(ii)
+INTEGER(i4), INTENT(in) :: ii !< Index of block to solve
+IF(self%parts(ii)%n==0)RETURN
+CALL scatter_local(self%bplans(ii),self%gsub%v,self%glocs(ii)%v,OFT_SCATTER_INSERT)
+CALL scatter_local(self%bplans(ii),self%usub%v,self%ulocs(ii)%v,OFT_SCATTER_INSERT)
+self%solvers(ii)%s%A=>self%alocals(ii)
+CALL self%solvers(ii)%s%apply(self%ulocs(ii),self%glocs(ii))
+IF(.NOT.self%additive)CALL scatter_local(self%bplans(ii),self%ulocs(ii)%v,self%usol%v, &
+  OFT_SCATTER_INSERT,reverse=.TRUE.)
+END SUBROUTINE apply_cell_block
 END SUBROUTINE schwarz_cell_apply
 !------------------------------------------------------------------------------
 !> Update Schwarz preconditioner after changing settings/operators
