@@ -331,7 +331,7 @@ TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
 INTEGER(i4), INTENT(in) :: jn !< Neighbour
 INTEGER(i4), INTENT(in) :: js !< First buffer entry
 INTEGER(i4), INTENT(in) :: n !< Number of entries
-ST, INTENT(inout) :: buf(:) !< Buffer
+ST, CONTIGUOUS, INTENT(inout) :: buf(:) !< Buffer (contiguous: the section passed to MPI stays in place while the request is pending)
 INTEGER(i4) :: ierr
 IF(n==0)THEN
   plan%rreq(jn)=MPI_REQUEST_NULL
@@ -348,7 +348,7 @@ TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
 INTEGER(i4), INTENT(in) :: jn !< Neighbour
 INTEGER(i4), INTENT(in) :: js !< First buffer entry
 INTEGER(i4), INTENT(in) :: n !< Number of entries
-ST, INTENT(inout) :: buf(:) !< Buffer
+ST, CONTIGUOUS, INTENT(inout) :: buf(:) !< Buffer (contiguous: the section passed to MPI stays in place while the request is pending)
 INTEGER(i4) :: ierr
 IF(n==0)THEN
   plan%sreq(jn)=MPI_REQUEST_NULL
