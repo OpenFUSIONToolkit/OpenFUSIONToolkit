@@ -3403,7 +3403,7 @@ end subroutine matrix_update_slice
 !! @ref native_matrix_setup_full) in a set of rows and a set of columns, numbered in
 !! the order given:
 !! - `rows` (and optionally `cols`, default equal to `rows`): parent local indices;
-!! - `part`: rows and columns `part` (kept as a pointer, as before);
+!! - `part`: rows and columns `part` (kept as a pointer);
 !! - `slice`: owned rows and columns of one block, in slice order;
 !! - none of these: all owned rows and columns, in slice order.
 !!

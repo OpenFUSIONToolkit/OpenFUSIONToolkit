@@ -662,7 +662,7 @@ type, abstract, public :: oft_matrix
   integer(i4) :: nrslice = 0 !< Number of owned rows
   integer(i4) :: ncslice = 0 !< Number of owned columns
   integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
-  class(oft_cell_overlap_builder), pointer :: cell_ovl => NULL() !< Cell overlap builder (not owned by the matrix)
+  CLASS(oft_cell_overlap_builder), POINTER :: cell_ovl => NULL() !< Cell overlap builder (not owned by the matrix)
   type(oft_map), pointer, dimension(:) :: i_map => NULL() !< Row block mapping
   type(oft_map), pointer, dimension(:) :: j_map => NULL() !< Column block mapping
   class(oft_vector), pointer :: D => NULL() !< Diagonal entries for scaling
