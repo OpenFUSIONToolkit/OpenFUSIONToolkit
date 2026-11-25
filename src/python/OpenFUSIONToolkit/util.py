@@ -22,7 +22,7 @@ mu0 = numpy.pi*4.E-7
 eC = 1.60217663e-19
 
 
-def oft_warning(warning,details=[]):
+def oft_warning(warning,details=()):
     '''! Print warning in common format
 
     @param warning String describing warning
@@ -33,7 +33,7 @@ def oft_warning(warning,details=[]):
         print("         {0}".format(detail_line))
 
 
-def run_shell_command(command, timeout=10, env_vars={}):
+def run_shell_command(command, timeout=10, env_vars=None):
     '''! Run a shell command
 
     @param command Command and arguments to run
@@ -43,8 +43,8 @@ def run_shell_command(command, timeout=10, env_vars={}):
     '''
     # Run shell command
     my_env = os.environ.copy()
-    for key, val in env_vars.items():
-        my_env[key] = val
+    if env_vars is not None:
+        my_env.update(env_vars)
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=my_env)
     # Wait for process to complete or timeout
     try:

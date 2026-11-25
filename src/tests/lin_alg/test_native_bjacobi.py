@@ -6,6 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import run_OFT
 
 LU_solvers = (1,2,3,4,5,6)
+dist_LU_solvers = (2,3,6)
 ILU_solvers = (0,5)
 
 # Basic template for input file
@@ -32,18 +33,19 @@ oft_in_template = """
  nlocal={1}
  sol_type={2}
  use_ilu={3}
+ dist_lu={4}
 /
 """
 
 # Common setup function and process handling
-def native_bjacobi_setup(nprocs=1, nlocal=1, sol_type=1, use_ilu='F'):
+def native_bjacobi_setup(nprocs=1, nlocal=1, sol_type=1, use_ilu='F', dist_lu='F'):
     nlevels = 3
     if nprocs > 1:
         nlevels = 4
     #
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(nlevels, nlocal, sol_type, use_ilu))
+        fid.write(oft_in_template.format(nlevels, nlocal, sol_type, use_ilu, dist_lu))
     return run_OFT("./test_native_bjacobi", nprocs, 20)
 
 def validate_result(iteration_count,converged_error):
@@ -66,8 +68,8 @@ def validate_result(iteration_count,converged_error):
 
 #============================================================================
 #
-def check_solver(nprocs,nlocal,sol_type,iteration_count,converged_error,use_ilu='F'):
-    assert native_bjacobi_setup(nprocs,nlocal,sol_type,use_ilu=use_ilu)
+def check_solver(nprocs,nlocal,sol_type,iteration_count,converged_error,use_ilu='F',dist_lu='F'):
+    assert native_bjacobi_setup(nprocs,nlocal,sol_type,use_ilu=use_ilu,dist_lu=dist_lu)
     assert validate_result(iteration_count,converged_error)
 
 # Test runner for base test case
@@ -128,6 +130,14 @@ def test_LU_mpi4_nlocal2_part(solver_type):
     iteration_count = 65
     converged_error = 1.4688646289584524
     check_solver(4, -2, solver_type, iteration_count, converged_error)
+
+# Test runner for direct solve of the full distributed system (serial falls back to local)
+@pytest.mark.parametrize("nprocs", (1,2,4))
+@pytest.mark.parametrize("solver_type", dist_LU_solvers)
+def test_LU_dist(solver_type,nprocs):
+    iteration_count = 1
+    converged_error = 1.4688646289584524
+    check_solver(nprocs, 1, solver_type, iteration_count, converged_error, dist_lu='T')
 
 
 # Test runner for base test case

@@ -1,0 +1,17 @@
+<oft>
+  <xmhd>
+    <region>
+      <id>2</id>
+      <eta>1.E-2</eta>
+      <type>2</type>
+    </region>
+    <pre type="gmres">
+      <its>1</its>
+      <nrits>1</nrits>
+      <pre type="block_jacobi">
+        <nlocal>1</nlocal>
+        <solver type="lu"></solver>
+      </pre>
+    </pre>
+  </xmhd>
+</oft>

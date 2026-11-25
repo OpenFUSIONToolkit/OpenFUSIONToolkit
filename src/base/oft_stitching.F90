@@ -12,6 +12,7 @@
 !! @ingroup doxy_oft_grid
 !---------------------------------------------------------------------------------
 MODULE oft_stitching
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int8_t
 USE oft_base
 IMPLICIT NONE
 #include "local.h"
@@ -25,12 +26,14 @@ TYPE :: oft_seam
   LOGICAL :: full = .FALSE. !< Flag indicating local mesh is complete
   LOGICAL :: skip = .FALSE. !< Flag for skipping stitching operations
   INTEGER(i4) :: nbemax = 0 !< Maximum number of boundary elements
+  INTEGER(i4) :: nown = -1 !< Length of `own` (-1 if not yet built)
   INTEGER(i4) :: nbe = 0 !< Number of local boundary elements
   INTEGER(i4) :: nie = 0 !< Number of interior elements
   INTEGER(i4) :: nle = 0 !< Number of local boundary elements
   INTEGER(i4) :: nproc_con = 0 !< Number of connections to other processors
   INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: leo => NULL() !< List of boundary element ownership
+  INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: own => NULL() !< Ownership weight (1/0) for each local element (built on first reduction, which must occur outside of OpenMP parallel regions)
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: be => NULL() !< Boundary element flag
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lbe => NULL() !< List of boundary elements in full vector
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lie => NULL() !< List of interior elements in full vector
@@ -83,6 +86,98 @@ INTERFACE oft_global_stitch
 END INTERFACE oft_global_stitch
 CONTAINS
 !---------------------------------------------------------------------------------
+!> Build local ownership weights used by global reductions
+!!
+!! Reductions sum only owned entries directly, instead of summing all entries and
+!! subtracting non-owned (shared/periodic) duplicates. The latter is subject to
+!! catastrophic cancellation when duplicates dominate the sum, which can produce
+!! negative values for self dot-products. A 0/1 integer weight is used instead of a
+!! logical mask as the resulting multiply vectorizes with GCC, while a masked
+!! selection (MERGE/IF) does not.
+!!
+!! @note Weights are built lazily on the first reduction with a given seam. This is
+!! not thread safe, so it aborts if called from within an OpenMP parallel region.
+!---------------------------------------------------------------------------------
+SUBROUTINE seam_build_own(self,n)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+!---Lazy initialization is not thread safe
+IF(omp_in_parallel())CALL oft_abort('Ownership weights must be built outside of a parallel region', &
+  'seam_build_own',__FILE__)
+IF(ASSOCIATED(self%own))DEALLOCATE(self%own)
+ALLOCATE(self%own(n))
+self%own=1_c_int8_t
+DO i=1,self%nbe
+  IF(.NOT.self%leo(i))self%own(self%lbe(i))=0_c_int8_t
+END DO
+self%nown=n
+DEBUG_STACK_POP
+END SUBROUTINE seam_build_own
+!---------------------------------------------------------------------------------
+!> Local owned-only real(r8) dot product (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_dp_r8(a,b,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+REAL(r8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
+REAL(r8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+REAL(r8) :: c
+c=0.d0
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+a(i)*b(i)*REAL(w(i),r8)
+END DO
+END FUNCTION owned_dp_r8
+!---------------------------------------------------------------------------------
+!> Local owned-only complex(c8) dot product (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_dp_c8(a,b,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local arrays
+COMPLEX(c8), INTENT(in) :: a(n) !< Local vector 1 for dot_product
+COMPLEX(c8), INTENT(in) :: b(n) !< Local vector 2 for dot_product
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+COMPLEX(c8) :: c
+c=(0.d0,0.d0)
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+CONJG(a(i))*b(i)*REAL(w(i),r8)
+END DO
+END FUNCTION owned_dp_c8
+!---------------------------------------------------------------------------------
+!> Local owned-only real(r8) sum (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_sum_r8(a,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local array
+REAL(r8), INTENT(in) :: a(n) !< Local data for reduction
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+REAL(r8) :: c
+c=0.d0
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+a(i)*REAL(w(i),r8)
+END DO
+END FUNCTION owned_sum_r8
+!---------------------------------------------------------------------------------
+!> Local owned-only complex(c8) sum (explicit-shape arrays allow vectorization)
+!---------------------------------------------------------------------------------
+FUNCTION owned_sum_c8(a,w,n) RESULT(c)
+INTEGER(i4), INTENT(in) :: n !< Length of local array
+COMPLEX(c8), INTENT(in) :: a(n) !< Local data for reduction
+INTEGER(c_int8_t), INTENT(in) :: w(n) !< Ownership weights (1/0)
+INTEGER(i4) :: i
+COMPLEX(c8) :: c
+c=(0.d0,0.d0)
+!$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+DO i=1,n
+  c=c+a(i)*REAL(w(i),r8)
+END DO
+END FUNCTION owned_sum_c8
+!---------------------------------------------------------------------------------
 !> real(r8) dot_product implementation of \ref oft_stitching::oft_global_reduction
 !---------------------------------------------------------------------------------
 function global_dp_r8(self,a,b,n,no_reduce) result(c)
@@ -100,16 +195,15 @@ IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+a(i)*b(i)
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-a(self%lbe(i))*b(self%lbe(i))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_dp_r8(a,b,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+a(i)*b(i)
+    end do
+  END IF
 END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -132,16 +226,15 @@ IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+CONJG(a(i))*b(i)
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-CONJG(a(self%lbe(i)))*b(self%lbe(i))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_dp_c8(a,b,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+CONJG(a(i))*b(i)
+    end do
+  END IF
 END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -159,16 +252,15 @@ DEBUG_STACK_PUSH
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+a(i)
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-a(self%lbe(i))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_sum_r8(a,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+a(i)
+    end do
+  END IF
 END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -186,16 +278,15 @@ DEBUG_STACK_PUSH
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-  !$omp do simd
-  do i=1,n
-    c=c+a(i)
-  end do
-  !$omp do simd
-  do i=1,self%nbe
-    if(.NOT.self%leo(i))c=c-a(self%lbe(i))
-  end do
-  !$omp end parallel
+  IF(self%nbe>0)THEN
+    IF(self%nown/=n)CALL seam_build_own(self,n)
+    c=owned_sum_c8(a,self%own,n)
+  ELSE
+    !$omp parallel do simd reduction(+:c) if(n>OFT_OMP_VTHRESH)
+    do i=1,n
+      c=c+a(i)
+    end do
+  END IF
 END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -658,6 +749,8 @@ type(oft_seam), intent(inout) :: self
 integer(i4) :: i
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%leo))DEALLOCATE(self%leo)
+IF(ASSOCIATED(self%own))DEALLOCATE(self%own)
+self%nown=-1
 IF(ASSOCIATED(self%be))DEALLOCATE(self%be)
 IF(ASSOCIATED(self%lbe))DEALLOCATE(self%lbe)
 IF(ASSOCIATED(self%lie))DEALLOCATE(self%lie)

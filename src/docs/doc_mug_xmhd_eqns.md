@@ -4,7 +4,9 @@ MUG: Extended MHD equations (H(Curl) + Lagrange implementation)     {#doc_mug_xm
 [TOC]
 
 This page documents the system of equations advanced by the nonlinear time integration in the
-primary MUG implementation (\ref xmhd, driven by \ref xmhd::xmhd_run "xmhd_run"). The complete
+primary MUG implementation (\ref xmhd, driven by \ref xmhd::xmhd_run "xmhd_run"). The Lagrange-only
+variant (\ref xmhd_lag) advances the same system, with the differences listed in
+\ref doc_mug_xmhd_eqns_lag. The complete
 system is defined by the nonlinear residual function \ref xmhd::xmhd_errmatrix_apply
 "xmhd_errmatrix_apply". The Jacobian built in \ref xmhd::xmhd_build_ops "xmhd_build_ops" is used only
 for preconditioning, so it contains only an approximate subset of the terms below and is not
@@ -126,8 +128,6 @@ This is Braginskii's parallel stress, with \f$ \mu_\parallel = m_i n_0 \nu_\para
 stress rather than replacing its parallel part, so with `visc_type='iso'` the total parallel
 coefficient is \f$ \mu_\parallel + \mu_f \f$.
 
-\note In the Lagrange-only variant (\ref xmhd_lag), `nu_par` is still the isotropic fluid viscosity.
-
 **Gyroviscosity** (\f$ \Pi_{gv} \f$)
 
 If `nu_gyro>0`
@@ -194,9 +194,10 @@ In these cells only resistive diffusion of \f$ B \f$ is solved:
 \quad \eta_w = \eta_{reg} \, f_\eta(\textbf{r}) \f]
 
 Here \f$ \eta_{reg} \f$ is the absolute wall resistivity, not a scale factor on `eta`. The velocity, density,
-and temperature equations are not assembled in solid cells. Nodes in solid regions are treated as
-boundary nodes for the velocity when `vbc` is `'all'`, `'norm'`, or `'tang'`, and for density and temperature
-when `nbc='d'` and `tbc='d'`, respectively.
+and temperature equations are not assembled in solid cells. The velocity is held fixed at all nodes in solid
+regions for any `vbc`. Nodes in solid regions are treated as boundary nodes for density and temperature when
+`nbc='d'` and `tbc='d'`, respectively (\ref xmhd_lag holds them fixed for any `nbc` and `tbc`, see
+\ref doc_mug_xmhd_eqns_lag).
 
 \section doc_mug_xmhd_eqns_temp Temperature
 
@@ -358,3 +359,24 @@ Additional details:
  - Rows of the auxiliary equations (\f$ N_2 \f$, \f$ J_2 \f$) are scaled by `n2_scale` and `j2_scale`. They are
    assembled only for the implicit solve, and the right-hand side uses the auxiliary fields from the
    previous step.
+
+\section doc_mug_xmhd_eqns_lag Lagrange-only variant
+
+The Lagrange-only variant (\ref xmhd_lag) solves the system above, with the same options, time
+discretization, and boundary conditions, but represents the magnetic field using vector Lagrange
+elements (the same basis as \f$ V \f$). The differences are:
+ - As the nodal magnetic field is not divergence free by construction, a divergence cleaning term is
+   added to the induction equation (including solid regions)
+   \f[ \frac{\partial B}{\partial t} = - \nabla \times E + \kappa_{db} \nabla \nabla \cdot B \f]
+   where \f$ \kappa_{db} \f$ is set by `k_db` (m^2/s, default 1). The term is integrated by parts with the
+   boundary term dropped and is always time-centered. The periodic divergence cleaning of \ref xmhd is not
+   used (`nclean` is ignored), and the divergence error \f$ \int (\nabla \cdot B)^2 dV \f$ is always computed
+   and reported (`xmhd_monitor_div` is ignored).
+ - The magnetic field boundary condition (`bbc`) is applied to the nodal field: `bbc='bc'` holds the normal
+   component of \f$ B \f$ fixed, and `bbc='ic'` holds the tangential components fixed, on the boundary. On the
+   axis of rotationally periodic (revolved) meshes the components normal to the axis are held fixed, as for
+   \f$ V \f$.
+ - Density and temperature are held fixed at all nodes in solid regions for any `nbc` and `tbc`, as for the
+   velocity.
+ - The hyper-resistivity terms (`eta_hyper>0`), which use an auxiliary H(Curl) field \f$ J_2 \f$ with the
+   Lagrange magnetic field, have not been verified against \ref xmhd.
