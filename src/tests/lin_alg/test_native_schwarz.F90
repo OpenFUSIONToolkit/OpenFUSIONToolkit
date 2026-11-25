@@ -22,8 +22,9 @@
 !! - GMRES iteration counts with restricted and additive Schwarz for 0, 1 and 2
 !!   overlap layers (written to `schwarz.results` for checking by the driver)
 !!
-!! All cases also run on periodic meshes, where a process holds several images of the
-!! DOFs on periodic seams.
+!! All cases also run on partially periodic meshes, where a process holds several images
+!! of the DOFs on periodic seams. On fully periodic meshes the Laplacian is singular
+!! (constant null space), so only the subdomain matrices are checked.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -79,6 +80,21 @@ CALL mop%apply(u,g)
 CALL lag_zerob%apply(g)
 CALL g0%copy(g) ! Solvers overwrite the right-hand side with the residual
 nfail=0
+its=0
+SELECT TYPE(lop)
+TYPE IS(oft_native_matrix)
+  A=>lop
+CLASS DEFAULT
+  CALL oft_abort('Native matrix expected','main',__FILE__)
+END SELECT
+!---Fully periodic: singular operator, check subdomain matrices only
+IF(mg_mesh%mesh%periodic%nper==3)THEN
+  CALL assemble_global()
+  CALL check_subdomain(1)
+  CALL check_subdomain(2)
+  CALL write_results()
+  CALL oft_finalize
+END IF
 !---Overlap 0 is block-Jacobi on the owned rows
 its(1)=solve(1,0,.FALSE.,.FALSE.,v)
 its(2)=solve(1,0,.FALSE.,.TRUE.,w)
@@ -90,12 +106,6 @@ its(2)=solve(4,1,.FALSE.,.TRUE.,w)
 CALL check_exact('Local overlap 1 iterations = loverlap',REAL(its(2)-its(1),r8),0.d0)
 CALL check_exact('Local overlap 1 solution = loverlap',maxdiff(v,w),0.d0)
 !---Subdomain matrices against the assembled global matrix
-SELECT TYPE(lop)
-TYPE IS(oft_native_matrix)
-  A=>lop
-CLASS DEFAULT
-  CALL oft_abort('Native matrix expected','main',__FILE__)
-END SELECT
 CALL assemble_global()
 CALL check_subdomain(1)
 CALL check_subdomain(2)
@@ -114,6 +124,11 @@ CALL check_update()
 its(6)=solve(4,0,.TRUE.,.TRUE.,v)
 its(7)=solve(4,1,.TRUE.,.TRUE.,v)
 its(8)=solve(4,1,.FALSE.,.TRUE.,v)
+CALL write_results()
+CALL oft_finalize
+CONTAINS
+! Write the number of failed checks and the iteration counts for the driver
+SUBROUTINE write_results()
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A,8I6)')'Iterations: ',its
   OPEN(NEWUNIT=io_unit,FILE='schwarz.results')
@@ -121,8 +136,7 @@ IF(oft_env%head_proc)THEN
   WRITE(io_unit,*)its
   CLOSE(io_unit)
 END IF
-CALL oft_finalize
-CONTAINS
+END SUBROUTINE write_results
 ! Solve the Laplace problem with GMRES preconditioned by block-Jacobi (schwarz=.FALSE.,
 ! with loverlap if overlap>0) or Schwarz, returning the iteration count
 FUNCTION solve(nlocal,overlap,additive,schwarz,x) RESULT(nits)

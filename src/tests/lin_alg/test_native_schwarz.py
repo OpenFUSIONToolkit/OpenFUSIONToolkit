@@ -95,3 +95,11 @@ def test_schwarz_periodic(nprocs):
     check_overlap_iterations(its)
     if nprocs > 1:
         assert its[1] < its[0]
+
+@pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi),
+                                    pytest.param(4, id='mpi4', marks=pytest.mark.mpi)])
+def test_schwarz_fully_periodic(nprocs):
+    '''Overlapping subdomains on a fully periodic cube (images in all three directions, up to eight per
+    DOF) match the assembled global matrix. The periodic Laplacian is singular, so no solves are checked.'''
+    its = run_schwarz(nprocs, 'T,T,T')
+    assert its is not None
