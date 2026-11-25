@@ -241,6 +241,8 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 
 		/* Free un-wanted storage */
 		PStatFree(&stat);
+		/* NOTE: Freed factorization workspace can stay resident due to glibc heap fragmentation (RSS ~2x
+		   retained factors); calling malloc_trim(0) here (glibc only) returns it to the OS if needed. */
 
 	} else if ( iopt == 2 ) { /* Triangular solve */
 

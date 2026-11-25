@@ -34,6 +34,7 @@ A number of scripts are available for utility/supporting functions:
 \section doc_main_build Building OFT
 The documentation for [Building OFT](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki) on different platforms
 is maintained on GitHub along with the source code. At present, OFT is actively used both on macOS and Linux.
+Notes for specific compilers, platforms, and library configurations are collected in \subpage doc_platform_notes.
 
 \section doc_main_api Framework modules and API
 
