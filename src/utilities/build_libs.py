@@ -1385,18 +1385,19 @@ class ACCELERATE(package):
         self.config_dict = config_dict.copy()
         if self.config_dict['OS_TYPE'] != 'Darwin':
             error_exit('Accelerate BLAS/LAPACK is only available on macOS')
-        if ver_lt(self.config_dict['OS_VER'], '13.3'):
-            error_exit('Accelerate BLAS/LAPACK requires macOS >= 13.3 (found {0})'.format(self.config_dict['OS_VER']))
-        if ver_lt(self.config_dict.get('MACOSX_DEPLOYMENT_TARGET', '13.3'), '13.3'):
-            error_exit('Accelerate BLAS/LAPACK requires MACOSX_DEPLOYMENT_TARGET >= 13.3')
+        if ver_lt(self.config_dict['OS_VER'], '14.0'):
+            error_exit('Accelerate BLAS/LAPACK requires macOS >= 14.0 (found {0})'.format(self.config_dict['OS_VER']))
+        if ver_lt(self.config_dict.get('MACOSX_DEPLOYMENT_TARGET', '14.0'), '14.0'):
+            error_exit('Accelerate BLAS/LAPACK requires MACOSX_DEPLOYMENT_TARGET >= 14.0')
         if self.config_dict['TARGET_ARCH'] not in ('arm64', 'x86_64'):
             error_exit('Unsupported architecture for Accelerate BLAS/LAPACK: {0}'.format(self.config_dict['TARGET_ARCH']))
         self.setup_root_struct()
-        self.config_dict['BLAS_VENDOR'] = "Apple"
+        # BLAS_VENDOR is intentionally not set: FindBLAS's "Apple" vendor links Accelerate's legacy
+        # (f2c) interface directly, so packages must use the shim through BLAS_LIB_PATH/LAPACK_LIB_PATH
         self.config_dict['BLAS_ACCELERATE'] = True
         self.config_dict['LAPACK_LIB'] = self.config_dict['ACCELERATE_LIB']
         self.config_dict['LAPACK_LIBS'] = "-loftaccelerate"
-        self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'liboftaccelerate.dylib')
+        self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'liboftaccelerate.a')
         self.config_dict['LAPACK_LIB_PATH'] = self.config_dict['BLAS_LIB_PATH']
         # Installation check files
         self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
@@ -2271,7 +2272,7 @@ group.add_argument("--ref_blas", action="store_true", default=False, help="Use r
 group.add_argument("--blas_lapack_wrapper", action="store_true", default=False, help="BLAS/LAPACK included in compilers")
 group.add_argument("--use_mkl", action="store_true", default=False, help="Use MKL BLAS/LAPACK instead of OpenBLAS")
 group.add_argument("--mkl_root", default=None, type=str, help="MKL root directory path (required for MKL)")
-group.add_argument("--use_accelerate", action="store_true", default=False, help="Use macOS Accelerate BLAS/LAPACK instead of OpenBLAS (macOS >= 13.3)")
+group.add_argument("--use_accelerate", action="store_true", default=False, help="Use macOS Accelerate BLAS/LAPACK instead of OpenBLAS (macOS >= 14.0)")
 group.add_argument("--blas_lib_path", default=None, type=str, help="Path to pre-built BLAS library")
 group.add_argument("--lapack_lib_path", default=None, type=str, help="Path to pre-built LAPACK library")
 #

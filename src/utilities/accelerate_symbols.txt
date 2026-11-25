@@ -1,6 +1,6 @@
 # Accelerate BLAS/LAPACK routines wrapped by accelerate_shim.py ("$NEWLAPACK" interface, LP64)
 # Generated with "accelerate_shim.py --write_symbols" from MacOSX14.5.sdk
-# Only routines available on the oldest supported macOS version may be listed (this set is identical in the 13.3 and 14.5 SDKs)
+# Only routines available on the oldest supported macOS version (14.0) may be listed
 caxpby
 caxpy
 cbbcsd
