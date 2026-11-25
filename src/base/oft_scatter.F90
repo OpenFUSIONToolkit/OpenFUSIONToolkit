@@ -160,7 +160,7 @@ CONTAINS
 !! allowed and skipped by all operations.
 !---------------------------------------------------------------------------------
 SUBROUTINE scatter_plan_setup(plan,nnbr,nbr,ksend,lsend,krecv,lrecv,nloc,lsrc,ldst,wt,tag)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 INTEGER(i4), INTENT(in) :: nnbr !< Number of neighbour processes
 INTEGER(i4), INTENT(in) :: nbr(nnbr) !< Neighbour ranks [nnbr]
 INTEGER(i4), INTENT(in) :: ksend(nnbr+1) !< Pointer into `lsend` by neighbour (starting at 1) [nnbr+1]
@@ -171,7 +171,7 @@ INTEGER(i4), INTENT(in) :: nloc !< Number of local entries
 INTEGER(i4), INTENT(in) :: lsrc(:) !< Source index of each local entry [nloc]
 INTEGER(i4), OPTIONAL, INTENT(in) :: ldst(:) !< Destination index of each local entry [nloc] (default: 1..nloc)
 REAL(r8), OPTIONAL, INTENT(in) :: wt(:) !< Weight of each local entry in the reverse direction [nloc] (optional)
-INTEGER(i4), OPTIONAL, INTENT(in) :: tag !< MPI tag (default @ref OFT_TAG_SCATTER)
+INTEGER(i4), OPTIONAL, INTENT(in) :: tag !< MPI tag (default @ref oft_scatter_base::oft_tag_scatter "OFT_TAG_SCATTER")
 INTEGER(i4) :: i
 CALL scatter_plan_delete(plan)
 IF(PRESENT(tag))plan%tag=tag
@@ -240,7 +240,7 @@ END FUNCTION lists_unique
 !! plan gathers `x(lsrc(k))` into `y(k)` (and scatters back in reverse).
 !---------------------------------------------------------------------------------
 SUBROUTINE scatter_plan_setup_local(plan,nloc,lsrc,ldst,wt)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 INTEGER(i4), INTENT(in) :: nloc !< Number of local entries
 INTEGER(i4), INTENT(in) :: lsrc(:) !< Source index of each entry [nloc]
 INTEGER(i4), OPTIONAL, INTENT(in) :: ldst(:) !< Destination index of each entry [nloc] (default: 1..nloc)
@@ -255,7 +255,7 @@ END SUBROUTINE scatter_plan_setup_local
 !> Release all storage of a scatter plan
 !---------------------------------------------------------------------------------
 SUBROUTINE scatter_plan_delete(plan)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 IF(plan%inflight/=0)CALL oft_abort('Operation in flight','scatter_plan_delete',__FILE__)
 IF(ALLOCATED(plan%nbr))DEALLOCATE(plan%nbr)
 IF(ALLOCATED(plan%ksend))DEALLOCATE(plan%ksend)
@@ -285,7 +285,7 @@ END SUBROUTINE scatter_plan_delete
 !! Collective over the plan's neighbours; aborts on mismatch.
 !---------------------------------------------------------------------------------
 SUBROUTINE scatter_plan_check(plan)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 #ifdef HAVE_MPI
 INTEGER(i4) :: j,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: nout,nin
@@ -313,7 +313,7 @@ END SUBROUTINE scatter_plan_check
 !> Mark an operation as started on a plan, checking that none is in flight
 !---------------------------------------------------------------------------------
 SUBROUTINE scatter_plan_inflight(plan,direction,kind)
-TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Plan
+TYPE(oft_scatter_plan), INTENT(inout) :: plan !< Scatter plan
 INTEGER(i4), INTENT(in) :: direction !< 1 for forward, -1 for reverse, 0 to mark completion
 INTEGER(i4), INTENT(in) :: kind !< Value type (1: real, 2: complex)
 IF(direction==0)THEN

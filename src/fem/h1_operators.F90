@@ -196,7 +196,7 @@ end subroutine ginterp_apply
 subroutine zerob_apply(self,a)
 class(oft_h1_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i,j
 class(oft_afem_type), pointer :: fe_rep
 DEBUG_STACK_PUSH
@@ -229,7 +229,7 @@ end subroutine zerob_delete
 subroutine zerogrnd_apply(self,a)
 class(oft_h1_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i,j
 CLASS(oft_h1_fem), POINTER :: this
 DEBUG_STACK_PUSH
@@ -250,7 +250,7 @@ end subroutine zerogrnd_apply
 subroutine zeroi_apply(self,a)
 class(oft_h1_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Cast to vector type
@@ -524,7 +524,7 @@ class(fem_interp), intent(inout) :: field
 class(oft_vector), intent(inout) :: x
 !---
 real(r8) :: bcc(1),det,goptmp(3,4),vol
-real(r8), pointer, contiguous :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -535,7 +535,7 @@ IF(.NOT.oft_3D_h1_cast(h1_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h1
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 allocate(j(h1_rep%nce),rop(h1_rep%nce))
@@ -556,7 +556,7 @@ do i=1,h1_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_h1_project
 !------------------------------------------------------------------------------
@@ -879,7 +879,7 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
 NULLIFY(array_c,array_f)
@@ -903,8 +903,8 @@ class(oft_vector), intent(inout) :: afine !< Vector to transfer
 class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer :: lptmp(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, DIMENSION(:) :: alias
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: h1_fine => NULL()
 DEBUG_STACK_PUSH
 !---
@@ -929,9 +929,9 @@ do i=1,h1_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
-call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
-deallocate(alias)
+CALL acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+DEALLOCATE(alias)
 DEBUG_STACK_POP
 end subroutine h1_base_push
 !------------------------------------------------------------------------------

@@ -1,3 +1,11 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Regression tests for the native linear algebra backend (test_native_la.F90), run
+# serially and on 2 and 4 processes, on regular and periodic meshes
+#------------------------------------------------------------------------------
 import os
 import sys
 import pytest

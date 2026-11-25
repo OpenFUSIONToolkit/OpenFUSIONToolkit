@@ -374,12 +374,12 @@ subroutine zerob_apply(self,a)
 class(oft_blag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, contiguous, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 DEBUG_STACK_PUSH
 NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,self%ML_lag_rep%current_level%nbe
@@ -389,7 +389,7 @@ do i=1,self%ML_lag_rep%current_level%nbe
 end do
 !---
 !---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
-call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -408,12 +408,12 @@ subroutine zerogrnd_apply(self,a)
 class(oft_blag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, contiguous, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 DEBUG_STACK_PUSH
 NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 vloc(self%ML_lag_rep%current_level%lbe(1))=0.d0
 ! !---Zero boundary values
 ! !$omp parallel do
@@ -421,7 +421,7 @@ vloc(self%ML_lag_rep%current_level%lbe(1))=0.d0
 !   vloc(oft_blagrange%lbe(i))=0.d0
 ! end do
 !---Keep owner sync: the zeroed node (first local boundary node) differs between processes
-call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !------------------------------------------------------------------------------
@@ -431,13 +431,13 @@ subroutine zeroe_apply(self,a)
 class(oft_blag_zeroe), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, contiguous, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 class(oft_scalar_bfem), pointer :: this
 DEBUG_STACK_PUSH
 IF(.NOT.oft_2D_lagrange_cast(this,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zeroe_apply",__FILE__)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,this%ne
@@ -446,7 +446,7 @@ do i=1,this%ne
 end do
 !---
 !---Keep owner sync (zeroing uses parent mesh geometry flags)
-call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zeroe_apply
 !------------------------------------------------------------------------------
@@ -717,7 +717,7 @@ IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Operator integration loop
 !$omp parallel default(firstprivate) shared(field,xloc,lag_rep) private(det,xtmp)
 allocate(j(lag_rep%nce),xtmp(lag_rep%nce))
@@ -745,7 +745,7 @@ do i=1,lag_rep%mesh%nc
 end do
 deallocate(j,xtmp)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 END SUBROUTINE oft_blag_project
 !---------------------------------------------------------------------------------
@@ -771,11 +771,11 @@ IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc,yloc,zloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 call y%set(0.d0)
-call y%borrow_local(yloc,OFT_ACCESS_ACCUMULATE)
+CALL y%borrow_local(yloc,OFT_ACCESS_ACCUMULATE)
 call z%set(0.d0)
-call z%borrow_local(zloc,OFT_ACCESS_ACCUMULATE)
+CALL z%borrow_local(zloc,OFT_ACCESS_ACCUMULATE)
 !---Operator integration loop
 !$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc) private(vloc,det)
 allocate(j(lag_rep%nce),vloc(lag_rep%nce,3))
@@ -809,9 +809,9 @@ do i=1,lag_rep%mesh%nc
 end do
 deallocate(j,vloc)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
-call y%release_local(yloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
-call z%release_local(zloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL y%release_local(yloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL z%release_local(zloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 END SUBROUTINE oft_blag_vproject
 !---------------------------------------------------------------------------------
@@ -836,7 +836,7 @@ IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Operator integration loop
 !$omp parallel default(firstprivate) shared(field,xloc,vmesh) private(det)
 allocate(j(lag_rep%nce))
@@ -863,7 +863,7 @@ do i=1,lag_rep%mesh%nc
 end do
 deallocate(j)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 END SUBROUTINE oft_blag_nproject
 end module oft_blag_operators

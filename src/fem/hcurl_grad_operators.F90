@@ -474,7 +474,7 @@ end subroutine dinterp_apply
 subroutine zerob_apply(self,a)
 class(oft_hcurl_grad_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: agrad,acurl
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: agrad,acurl
 integer(i4) :: i,j
 class(oft_afem_type), pointer :: hcurl_rep,hgrad_rep
 DEBUG_STACK_PUSH
@@ -512,7 +512,7 @@ end subroutine zerob_delete
 subroutine curl_zerob_apply(self,a)
 class(oft_hcurl_grad_czerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: acurl
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: acurl
 integer(i4) :: i,j
 class(oft_afem_type), pointer :: hcurl_rep
 DEBUG_STACK_PUSH
@@ -539,7 +539,7 @@ end subroutine curl_zerob_apply
 subroutine grad_zerop_apply(self,a)
 class(oft_hcurl_grad_gzerop), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: agrad
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: agrad
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 SELECT TYPE(this=>self%ML_hcurl_grad_rep%current_level%fields(2)%fe)
@@ -564,7 +564,7 @@ end subroutine grad_zerop_apply
 subroutine zeroi_apply(self,a)
 class(oft_hcurl_grad_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: agrad,acurl
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: agrad,acurl
 integer(i4) :: i
 class(oft_afem_type), pointer :: hcurl_rep,hgrad_rep
 DEBUG_STACK_PUSH
@@ -740,7 +740,7 @@ class(oft_afem_type), intent(inout) :: h1_fe
 class(oft_vector), intent(inout) :: a !< Input field
 class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
 real(r8), pointer, dimension(:) :: agrad,acurl
-real(r8), pointer, contiguous, dimension(:) :: bloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer(i4) :: i,j,k,l
 real(r8) :: reg
@@ -878,7 +878,7 @@ class(oft_fem_comp_type), intent(inout) :: hcurl_grad_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: agrad,acurl
-real(r8), pointer, contiguous, dimension(:) :: bcurl
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bcurl
 integer(i4) :: i,jr,jc,m
 integer(i4), allocatable :: j_curl(:),j_grad(:)
 real(r8) :: goptmp(3,4),cgop(3,6)
@@ -1140,7 +1140,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto H(Curl) + Grad(H^1
 integer(i4) :: i,jc,m
 integer(i4), allocatable, dimension(:) :: j_hcurl,j_hgrad
 real(r8) :: det,vol,bcc(3),goptmp(3,4)
-real(r8), pointer, contiguous, dimension(:) :: xcurl,xgrad
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: xcurl,xgrad
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
@@ -1152,8 +1152,8 @@ IF(.NOT.oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe))CALL oft_abort("In
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
-call x%borrow_local(xcurl,OFT_ACCESS_ACCUMULATE,1)
-call x%borrow_local(xgrad,OFT_ACCESS_ACCUMULATE,2)
+CALL x%borrow_local(xcurl,OFT_ACCESS_ACCUMULATE,1)
+CALL x%borrow_local(xgrad,OFT_ACCESS_ACCUMULATE,2)
 !---Integerate over the volume
 !$omp parallel default(firstprivate) shared(xcurl,xgrad,field) private(curved,det)
 allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
@@ -1181,8 +1181,8 @@ do i=1,hgrad_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j_hcurl,j_hgrad,rop_curl,rop_grad)
 !$omp end parallel
-call x%release_local(xcurl,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
-call x%release_local(xgrad,OFT_ACCESS_ACCUMULATE,.TRUE.,2) ! Completes accumulation
+CALL x%release_local(xcurl,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL x%release_local(xgrad,OFT_ACCESS_ACCUMULATE,.TRUE.,2) ! Completes accumulation
 DEBUG_STACK_POP
 end subroutine oft_hcurl_grad_project
 !---------------------------------------------------------------------------------
@@ -1213,8 +1213,8 @@ CALL smesh%quad_rule(hcurl_rep%order*2+1,quad)
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
-call x%borrow_local(xcurl,OFT_ACCESS_ACCUMULATE,1)
-call x%borrow_local(xgrad,OFT_ACCESS_ACCUMULATE,2)
+CALL x%borrow_local(xcurl,OFT_ACCESS_ACCUMULATE,1)
+CALL x%borrow_local(xgrad,OFT_ACCESS_ACCUMULATE,2)
 !---Operator integration loop
 !$omp parallel default(firstprivate) shared(xcurl,xgrad,field) private(det)
 allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
@@ -1250,8 +1250,8 @@ do i=1,smesh%nc
 end do
 deallocate(j_hcurl,j_hgrad,rop_curl,rop_grad)
 !$omp end parallel
-call x%release_local(xcurl,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
-call x%release_local(xgrad,OFT_ACCESS_ACCUMULATE,.TRUE.,2) ! Completes accumulation
+CALL x%release_local(xcurl,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL x%release_local(xgrad,OFT_ACCESS_ACCUMULATE,.TRUE.,2) ! Completes accumulation
 CALL quad%delete
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_grad_cross_sint
@@ -1381,7 +1381,7 @@ end subroutine divout_delete
 subroutine zerograd_apply(self,a)
 class(oft_hcurl_grad_gzero), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
-real(r8), pointer, contiguous, dimension(:) :: ugrad
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: ugrad
 DEBUG_STACK_PUSH
 !---Get local field
 NULLIFY(ugrad)
@@ -1644,8 +1644,8 @@ class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 integer(i4) :: i
-real(r8), pointer, contiguous, dimension(:) :: agrad,acurl
-real(r8), allocatable, dimension(:) :: tmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: agrad,acurl
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: tmp
 class(oft_mesh), pointer :: mesh
 CLASS(oft_ml_fem_type), POINTER :: ML_curl
 DEBUG_STACK_PUSH
@@ -1704,7 +1704,7 @@ class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_ml_fem_type), POINTER :: ML_grad
 DEBUG_STACK_PUSH
 !---
@@ -1714,7 +1714,7 @@ lbege=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%nbase)%lbege
 CALL acors%borrow_local(array_c,OFT_ACCESS_READ,1)
 CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE,1)
 !$omp parallel do
-do i=1,SIZE(array_f)
+DO i=1,SIZE(array_f)
   array_f(i)=array_c(ABS(lbege(i)))
 end do
 !---Keep owner sync: base-level values are computed independently on each process
@@ -1725,7 +1725,7 @@ lptmp=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%nbase+1)%base%lp
 CALL acors%borrow_local(array_c,OFT_ACCESS_READ,2)
 CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE,2)
 !$omp parallel do
-do i=1,SIZE(array_f)
+DO i=1,SIZE(array_f)
   array_f(i)=array_c(lptmp(i))
 end do
 CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.,iblock=2)
@@ -1764,8 +1764,8 @@ class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, DIMENSION(:) :: alias
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_ml_fem_type), POINTER :: Ml_curl,ML_grad
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h1_fem), POINTER :: grad_rep
@@ -1807,9 +1807,9 @@ do i=1,grad_rep%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
-call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
-deallocate(alias)
+CALL acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+DEALLOCATE(alias)
 DEBUG_STACK_POP
 end subroutine base_push
 !------------------------------------------------------------------------------

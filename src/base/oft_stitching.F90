@@ -12,7 +12,7 @@
 !! @ingroup doxy_oft_grid
 !---------------------------------------------------------------------------------
 MODULE oft_stitching
-USE, INTRINSIC :: iso_c_binding, ONLY: c_int8_t
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int8_t, c_intptr_t, c_loc
 USE oft_base
 USE oft_scatter
 IMPLICIT NONE
@@ -58,7 +58,13 @@ TYPE :: oft_seam
   INTEGER(i4) :: plan_nbe = -1 !< Value of `nbe` when the plan was built
   INTEGER(i4) :: plan_nle = -1 !< Value of `nle` when the plan was built
   LOGICAL :: plan_full = .FALSE. !< Value of `full` when the plan was built
-  LOGICAL, ALLOCATABLE, DIMENSION(:) :: smask !< Ownership of each packed plan entry
+  !> Linkage the plan was built from: `nproc_con` and the addresses and sizes of `lbe`,
+  !! `lle`, `kle` and `proc_con` (see \ref oft_stitching::seam_check_plan "seam_check_plan")
+  INTEGER(c_intptr_t) :: plan_key(9) = -1
+  INTEGER(i8) :: plan_sum = 0 !< Checksum of the linkage contents (`OFT_DEBUG` builds only)
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pbe !< Boundary element of each packed plan entry
+  !> Send mask for synchronization by ownership, refreshed from `leo` on each `stitch(0)`
+  LOGICAL, ALLOCATABLE, DIMENSION(:) :: smask
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kcon !< Pointer to contributions of each boundary element [nbe+1]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kloc !< First local-link contribution of each boundary element [nbe]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: icon !< Position of each contribution in the plan receive buffer
@@ -331,10 +337,10 @@ end function global_reduction_c8
 !! and elements with two or more (three or more values including their own) in
 !! `lmulti`. Rebuilt automatically when `nbe`, `nle` or `full` change.
 !---------------------------------------------------------------------------------
-subroutine seam_setup_plan(self)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4) :: i,j,k,e,p,active_procs,nsend,nloc
-integer(i4), allocatable :: ksend(:),lsend(:),lsrc(:),ldst(:),bpos(:),kfill(:),kfill_loc(:),nrem(:)
+SUBROUTINE seam_setup_plan(self)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4) :: i,j,k,e,p,active_procs,nsend,nloc
+INTEGER(i4), ALLOCATABLE :: ksend(:),lsend(:),lsrc(:),ldst(:),bpos(:),kfill(:),kfill_loc(:),nrem(:)
 DEBUG_STACK_PUSH
 CALL seam_free_plan(self)
 active_procs=self%nproc_con
@@ -343,7 +349,7 @@ nsend=self%kle(active_procs+1)-self%kle(1)
 nloc=self%kle(1)-self%kle(0)
 !---Remote entries in linkage order, local links as local part
 ALLOCATE(ksend(active_procs+1),lsend(MAX(1,nsend)),lsrc(MAX(1,nloc)),ldst(MAX(1,nloc)))
-ALLOCATE(bpos(self%nle),self%smask(nsend+nloc))
+ALLOCATE(bpos(self%nle),self%smask(nsend+nloc),self%pbe(nsend+nloc))
 DO j=1,active_procs+1
   ksend(j)=self%kle(j)-self%kle(1)+1
 END DO
@@ -358,14 +364,11 @@ DO i=self%kle(0),self%kle(1)-1
   ldst(k)=self%lbe(self%lle(2,i))
   bpos(i)=nsend+k
 END DO
-!---Ownership of packed entries (synchronization by ownership sends zero for unowned)
-IF(ASSOCIATED(self%leo))THEN
-  DO i=self%kle(0),self%kle(active_procs+1)-1
-    self%smask(bpos(i))=self%leo(self%lle(1,i))
-  END DO
-ELSE
-  self%smask=.TRUE.
-END IF
+!---Boundary element of packed entries (their ownership masks synchronization by ownership)
+DO i=self%kle(0),self%kle(active_procs+1)-1
+  self%pbe(bpos(i))=self%lle(1,i)
+END DO
+self%smask=.TRUE.
 CALL scatter_plan_setup(self%plan,active_procs,self%proc_con(1:active_procs),ksend,lsend,ksend,lsend, &
   nloc,lsrc,ldst,tag=OFT_TAG_STITCH)
 !---Contributions to each boundary element (remote in neighbour order, then local links)
@@ -427,15 +430,20 @@ DEALLOCATE(ksend,lsend,lsrc,ldst,bpos,kfill,kfill_loc,nrem)
 self%plan_nbe=self%nbe
 self%plan_nle=self%nle
 self%plan_full=self%full
+self%plan_key=seam_linkage_key(self)
+#ifdef OFT_DEBUG
+self%plan_sum=seam_linkage_sum(self)
+#endif
 DEBUG_STACK_POP
-end subroutine seam_setup_plan
+END SUBROUTINE seam_setup_plan
 !---------------------------------------------------------------------------------
 !> Release the scatter plan and combination lists of a seam (rebuilt on next stitch)
 !---------------------------------------------------------------------------------
-subroutine seam_free_plan(self)
-type(oft_seam), intent(inout) :: self !< Seam structure
+SUBROUTINE seam_free_plan(self)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
 CALL scatter_plan_delete(self%plan)
 IF(ALLOCATED(self%smask))DEALLOCATE(self%smask)
+IF(ALLOCATED(self%pbe))DEALLOCATE(self%pbe)
 IF(ALLOCATED(self%kcon))DEALLOCATE(self%kcon)
 IF(ALLOCATED(self%kloc))DEALLOCATE(self%kloc)
 IF(ALLOCATED(self%icon))DEALLOCATE(self%icon)
@@ -448,15 +456,100 @@ self%nsingle=0
 self%nmulti=-1
 self%multi_max=0
 self%plan_nbe=-1
-end subroutine seam_free_plan
+self%plan_key=-1
+END SUBROUTINE seam_free_plan
 !---------------------------------------------------------------------------------
 !> Check that the stitching plan of a seam is current, building it if needed
+!!
+!! The plan depends on the linkage (`nbe`, `nle`, `full`, `nproc_con`, `lbe`, `lle`,
+!! `kle` and `proc_con`) and is rebuilt when any of the sizes or array addresses
+!! differ from those it was built from, so (re)allocating or re-pointing a linkage
+!! array invalidates it. Changing linkage values in place without reallocation requires
+!! @ref seam_free_plan; `OFT_DEBUG` builds also compare a checksum of the linkage
+!! contents and abort if it changed without that. Ownership (`leo`) is read on each
+!! stitch, so it may be set or changed at any time.
 !---------------------------------------------------------------------------------
-subroutine seam_check_plan(self)
-type(oft_seam), intent(inout) :: self !< Seam structure
+SUBROUTINE seam_check_plan(self)
+TYPE(oft_seam), INTENT(INOUT) :: self !< Seam structure
 IF((.NOT.self%plan%setup).OR.(self%plan_nbe/=self%nbe).OR.(self%plan_nle/=self%nle) &
-  .OR.(self%plan_full.NEQV.self%full))CALL seam_setup_plan(self)
-end subroutine seam_check_plan
+  .OR.(self%plan_full.NEQV.self%full))THEN
+  CALL seam_setup_plan(self)
+ELSE IF(ANY(self%plan_key/=seam_linkage_key(self)))THEN
+  CALL seam_setup_plan(self)
+END IF
+#ifdef OFT_DEBUG
+IF(self%plan_sum/=seam_linkage_sum(self))CALL oft_abort('Seam linkage changed in place since the stitching '// &
+  'plan was built (call seam_free_plan after modifying linkage)','seam_check_plan',__FILE__)
+#endif
+END SUBROUTINE seam_check_plan
+!---------------------------------------------------------------------------------
+!> Identify the linkage arrays of a seam by size and address (see @ref seam_check_plan)
+!---------------------------------------------------------------------------------
+FUNCTION seam_linkage_key(self) RESULT(key)
+TYPE(oft_seam), INTENT(IN) :: self !< Seam structure
+INTEGER(c_intptr_t) :: key(9) !< `nproc_con`, then address and size of `lbe`, `lle`, `kle` and `proc_con`
+key=0
+key(1)=INT(self%nproc_con,c_intptr_t)
+IF(ASSOCIATED(self%lbe))THEN
+  key(3)=INT(SIZE(self%lbe),c_intptr_t)
+  IF(SIZE(self%lbe)>0)key(2)=TRANSFER(C_LOC(self%lbe(1)),key(2))
+END IF
+IF(ASSOCIATED(self%lle))THEN
+  key(5)=INT(SIZE(self%lle),c_intptr_t)
+  IF(SIZE(self%lle)>0)key(4)=TRANSFER(C_LOC(self%lle(1,1)),key(4))
+END IF
+IF(ASSOCIATED(self%kle))THEN
+  key(7)=INT(SIZE(self%kle),c_intptr_t)
+  IF(SIZE(self%kle)>0)key(6)=TRANSFER(C_LOC(self%kle(LBOUND(self%kle,1))),key(6))
+END IF
+IF(ASSOCIATED(self%proc_con))THEN
+  key(9)=INT(SIZE(self%proc_con),c_intptr_t)
+  IF(SIZE(self%proc_con)>0)key(8)=TRANSFER(C_LOC(self%proc_con(1)),key(8))
+END IF
+END FUNCTION seam_linkage_key
+#ifdef OFT_DEBUG
+!---------------------------------------------------------------------------------
+!> Checksum of the linkage contents of a seam (`OFT_DEBUG` builds only)
+!---------------------------------------------------------------------------------
+FUNCTION seam_linkage_sum(self) RESULT(csum)
+TYPE(oft_seam), INTENT(IN) :: self !< Seam structure
+INTEGER(i8) :: csum !< Position-weighted sum of `lbe`, `lle`, `kle` and `proc_con`
+INTEGER(i4) :: i,j
+csum=0
+IF(ASSOCIATED(self%lbe))THEN
+  DO i=1,SIZE(self%lbe)
+    csum=csum+INT(i,i8)*INT(self%lbe(i),i8)
+  END DO
+END IF
+IF(ASSOCIATED(self%lle))THEN
+  DO j=1,SIZE(self%lle,2)
+    DO i=1,SIZE(self%lle,1)
+      csum=csum+INT(3*j+i,i8)*INT(self%lle(i,j),i8)
+    END DO
+  END DO
+END IF
+IF(ASSOCIATED(self%kle))THEN
+  DO i=LBOUND(self%kle,1),UBOUND(self%kle,1)
+    csum=csum+INT(5*i+7,i8)*INT(self%kle(i),i8)
+  END DO
+END IF
+IF(ASSOCIATED(self%proc_con))THEN
+  DO i=1,SIZE(self%proc_con)
+    csum=csum+INT(11*i,i8)*INT(self%proc_con(i),i8)
+  END DO
+END IF
+END FUNCTION seam_linkage_sum
+#endif
+!---------------------------------------------------------------------------------
+!> Refresh the send mask of synchronization by ownership from the current `leo`
+!---------------------------------------------------------------------------------
+SUBROUTINE seam_refresh_mask(self)
+TYPE(oft_seam), INTENT(INOUT) :: self !< Seam structure
+INTEGER(i4) :: k
+DO k=1,SIZE(self%pbe)
+  self%smask(k)=self%leo(self%pbe(k))
+END DO
+END SUBROUTINE seam_refresh_mask
 !---------------------------------------------------------------------------------
 !> real(r8) implementation of \ref oft_stitching::oft_global_stitch
 !!
@@ -477,18 +570,19 @@ end subroutine seam_check_plan
 !! this need not be the thread that initialized MPI, but no other thread may make
 !! MPI calls at the same time.
 !---------------------------------------------------------------------------------
-subroutine global_stitch_r8(self,a,up_method)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
-real(r8), intent(inout) :: a(:) !< Local data to be stitched
-integer(i4) :: i,k,l,m,n,e
-real(r8) :: tmp
+SUBROUTINE global_stitch_r8(self,a,up_method)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4), INTENT(in) :: up_method !< Stitching method (0, 1 or 2)
+REAL(r8), INTENT(inout) :: a(:) !< Local data to be stitched
+INTEGER(i4) :: i,k,l,m,n,e
+REAL(r8) :: tmp
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
-if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_r8',__FILE__)
+IF(up_method>2.OR.up_method<0)CALL oft_abort('Invalid stitch method','global_stitch_r8',__FILE__)
 CALL seam_check_plan(self)
 IF(up_method==0)THEN
   IF(.NOT.ASSOCIATED(self%leo))CALL oft_abort('Synchronization requires ownership','global_stitch_r8',__FILE__)
+  CALL seam_refresh_mask(self)
   CALL scatter_begin(self%plan,a,mask=self%smask)
 ELSE
   CALL scatter_begin(self%plan,a,nolocal=(up_method==2))
@@ -553,25 +647,26 @@ CASE(2)
 END SELECT
 CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
-end subroutine global_stitch_r8
+END SUBROUTINE global_stitch_r8
 !---------------------------------------------------------------------------------
 !> complex(c8) implementation of \ref oft_stitching::oft_global_stitch
 !!
 !! See @ref global_stitch_r8. Values with three or more contributions are summed in
 !! ascending order of real part, then imaginary part.
 !---------------------------------------------------------------------------------
-subroutine global_stitch_c8(self,a,up_method)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
-complex(c8), intent(inout) :: a(:) !< Local data to be stitched
-integer(i4) :: i,k,l,m,n,e
-complex(c8) :: tmp
+SUBROUTINE global_stitch_c8(self,a,up_method)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4), INTENT(in) :: up_method !< Stitching method (0, 1 or 2)
+COMPLEX(c8), INTENT(inout) :: a(:) !< Local data to be stitched
+INTEGER(i4) :: i,k,l,m,n,e
+COMPLEX(c8) :: tmp
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
-if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_c8',__FILE__)
+IF(up_method>2.OR.up_method<0)CALL oft_abort('Invalid stitch method','global_stitch_c8',__FILE__)
 CALL seam_check_plan(self)
 IF(up_method==0)THEN
   IF(.NOT.ASSOCIATED(self%leo))CALL oft_abort('Synchronization requires ownership','global_stitch_c8',__FILE__)
+  CALL seam_refresh_mask(self)
   CALL scatter_begin(self%plan,a,mask=self%smask)
 ELSE
   CALL scatter_begin(self%plan,a,nolocal=(up_method==2))
@@ -637,7 +732,7 @@ CASE(2)
 END SELECT
 CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
-end subroutine global_stitch_c8
+END SUBROUTINE global_stitch_c8
 !---------------------------------------------------------------------------------
 !> Validate stitching structure
 !---------------------------------------------------------------------------------

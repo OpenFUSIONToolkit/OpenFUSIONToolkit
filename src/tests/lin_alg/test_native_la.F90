@@ -26,9 +26,330 @@
 !!   and patterns freed with their last reference
 !! - Zeroing rows and columns of block matrices (real and complex), with and without
 !!   keeping diagonal entries, against the expected entries of the CSR structure
+!! - Synchronization by ownership after ownership is set or changed on a seam whose
+!!   stitching plan was already built
+!! - maxpy and mdot with non-native vectors in the list (copied) against native vectors
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+! Minimal non-native vector types for testing the fallbacks of native operations
+! (each procedure forwards to a wrapped native vector)
+!---------------------------------------------------------------------------------
+MODULE test_wrap_vectors
+USE oft_base
+USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_vector_ptr, oft_cvector_ptr
+IMPLICIT NONE
+PRIVATE
+!> Real vector that is not a native vector
+TYPE, PUBLIC, EXTENDS(oft_vector) :: wrap_vector
+  CLASS(oft_vector), POINTER :: inner => NULL() !< Wrapped vector
+CONTAINS
+  PROCEDURE :: new_real => wv_new_real
+  PROCEDURE :: new_complex => wv_new_complex
+  PROCEDURE :: set => wv_set
+  PROCEDURE :: get_local => wv_get_local
+  PROCEDURE :: restore_local => wv_restore_local
+  PROCEDURE :: get_slice => wv_get_slice
+  PROCEDURE :: restore_slice => wv_restore_slice
+  PROCEDURE :: add => wv_add
+  PROCEDURE :: mult => wv_mult
+  PROCEDURE :: dot_real => wv_dot_real
+  PROCEDURE :: dot_complex => wv_dot_complex
+  PROCEDURE :: mdot_real => wv_mdot_real
+  PROCEDURE :: mdot_complex => wv_mdot_complex
+  PROCEDURE :: scale => wv_scale
+  PROCEDURE :: sum => wv_sum
+  PROCEDURE :: norm => wv_norm
+  PROCEDURE :: stitch => wv_stitch
+END TYPE wrap_vector
+!> Complex vector that is not a native vector
+TYPE, PUBLIC, EXTENDS(oft_cvector) :: wrap_cvector
+  CLASS(oft_cvector), POINTER :: inner => NULL() !< Wrapped vector
+CONTAINS
+  PROCEDURE :: new_real => wc_new_real
+  PROCEDURE :: new_complex => wc_new_complex
+  PROCEDURE :: set => wc_set
+  PROCEDURE :: get_local => wc_get_local
+  PROCEDURE :: restore_local => wc_restore_local
+  PROCEDURE :: get_slice => wc_get_slice
+  PROCEDURE :: restore_slice => wc_restore_slice
+  PROCEDURE :: add_real => wc_add_real
+  PROCEDURE :: add_complex => wc_add_complex
+  PROCEDURE :: mult_real => wc_mult_real
+  PROCEDURE :: mult_complex => wc_mult_complex
+  PROCEDURE :: dot_real => wc_dot_real
+  PROCEDURE :: dot_complex => wc_dot_complex
+  PROCEDURE :: mdot_real => wc_mdot_real
+  PROCEDURE :: mdot_complex => wc_mdot_complex
+  PROCEDURE :: scale => wc_scale
+  PROCEDURE :: sum => wc_sum
+  PROCEDURE :: norm => wc_norm
+  PROCEDURE :: stitch => wc_stitch
+END TYPE wrap_cvector
+PUBLIC wrap_vector_create, wrap_cvector_create
+CONTAINS
+! Wrap a real vector (sizes and seam are taken from it)
+SUBROUTINE wrap_vector_create(inner,new)
+CLASS(oft_vector), POINTER, INTENT(in) :: inner
+CLASS(oft_vector), POINTER, INTENT(out) :: new
+ALLOCATE(wrap_vector::new)
+SELECT TYPE(new)
+TYPE IS(wrap_vector)
+  new%inner=>inner
+  new%n=inner%n
+  new%nslice=inner%nslice
+  new%nblocks=inner%nblocks
+  new%ng=inner%ng
+  new%map=>inner%map
+  new%stitch_info=>inner%stitch_info
+END SELECT
+END SUBROUTINE wrap_vector_create
+! Wrap a complex vector (sizes and seam are taken from it)
+SUBROUTINE wrap_cvector_create(inner,new)
+CLASS(oft_cvector), POINTER, INTENT(in) :: inner
+CLASS(oft_cvector), POINTER, INTENT(out) :: new
+ALLOCATE(wrap_cvector::new)
+SELECT TYPE(new)
+TYPE IS(wrap_cvector)
+  new%inner=>inner
+  new%n=inner%n
+  new%nslice=inner%nslice
+  new%nblocks=inner%nblocks
+  new%ng=inner%ng
+  new%map=>inner%map
+  new%stitch_info=>inner%stitch_info
+END SELECT
+END SUBROUTINE wrap_cvector_create
+!---Real wrapper
+SUBROUTINE wv_new_real(self,new)
+CLASS(wrap_vector), INTENT(in) :: self
+CLASS(oft_vector), POINTER, INTENT(out) :: new
+CLASS(oft_vector), POINTER :: tmp
+CALL self%inner%new(tmp)
+CALL wrap_vector_create(tmp,new)
+END SUBROUTINE wv_new_real
+SUBROUTINE wv_new_complex(self,new)
+CLASS(wrap_vector), INTENT(in) :: self
+CLASS(oft_cvector), POINTER, INTENT(out) :: new
+CALL self%inner%new(new)
+END SUBROUTINE wv_new_complex
+SUBROUTINE wv_set(self,alpha,iblock,random)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: alpha
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+LOGICAL, OPTIONAL, INTENT(in) :: random
+CALL self%inner%set(alpha,iblock,random)
+END SUBROUTINE wv_set
+SUBROUTINE wv_get_local(self,array,iblock)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), POINTER, INTENT(inout) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+CALL self%inner%get_local(array,iblock)
+END SUBROUTINE wv_get_local
+SUBROUTINE wv_restore_local(self,array,iblock,add,wait)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+LOGICAL, OPTIONAL, INTENT(in) :: add,wait
+CALL self%inner%restore_local(array,iblock,add,wait)
+END SUBROUTINE wv_restore_local
+SUBROUTINE wv_get_slice(self,array,iblock)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), POINTER, INTENT(inout) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+CALL self%inner%get_slice(array,iblock)
+END SUBROUTINE wv_get_slice
+SUBROUTINE wv_restore_slice(self,array,iblock,wait)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+LOGICAL, OPTIONAL, INTENT(in) :: wait
+CALL self%inner%restore_slice(array,iblock,wait)
+END SUBROUTINE wv_restore_slice
+SUBROUTINE wv_add(self,gamma,alpha,a,beta,b)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: gamma,alpha
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+REAL(r8), OPTIONAL, INTENT(in) :: beta
+CLASS(oft_vector), TARGET, OPTIONAL, INTENT(inout) :: b
+CALL self%inner%add(gamma,alpha,a,beta,b)
+END SUBROUTINE wv_add
+SUBROUTINE wv_mult(self,a,div_flag)
+CLASS(wrap_vector), INTENT(inout) :: self
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+LOGICAL, OPTIONAL, INTENT(in) :: div_flag
+CALL self%inner%mult(a,div_flag)
+END SUBROUTINE wv_mult
+FUNCTION wv_dot_real(self,a) RESULT(dot)
+CLASS(wrap_vector), INTENT(inout) :: self
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+REAL(r8) :: dot
+dot=self%inner%dot(a)
+END FUNCTION wv_dot_real
+FUNCTION wv_dot_complex(self,a) RESULT(dot)
+CLASS(wrap_vector), INTENT(inout) :: self
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a
+COMPLEX(c8) :: dot
+dot=self%inner%dot(a)
+END FUNCTION wv_dot_complex
+FUNCTION wv_mdot_real(self,a,n) RESULT(dots)
+CLASS(wrap_vector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: n
+TYPE(oft_vector_ptr), INTENT(inout) :: a(n)
+REAL(r8) :: dots(n)
+dots=self%inner%mdot(a,n)
+END FUNCTION wv_mdot_real
+FUNCTION wv_mdot_complex(self,a,n) RESULT(dots)
+CLASS(wrap_vector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: n
+TYPE(oft_cvector_ptr), INTENT(inout) :: a(n)
+COMPLEX(c8) :: dots(n)
+dots=self%inner%mdot(a,n)
+END FUNCTION wv_mdot_complex
+SUBROUTINE wv_scale(self,alpha)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: alpha
+CALL self%inner%scale(alpha)
+END SUBROUTINE wv_scale
+FUNCTION wv_sum(self) RESULT(sum)
+CLASS(wrap_vector), INTENT(inout) :: self
+REAL(r8) :: sum
+sum=self%inner%sum()
+END FUNCTION wv_sum
+FUNCTION wv_norm(self,itype) RESULT(norm)
+CLASS(wrap_vector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: itype
+REAL(r8) :: norm
+norm=self%inner%norm(itype)
+END FUNCTION wv_norm
+SUBROUTINE wv_stitch(self,up_method)
+CLASS(wrap_vector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: up_method
+CALL self%inner%stitch(up_method)
+END SUBROUTINE wv_stitch
+!---Complex wrapper
+SUBROUTINE wc_new_real(self,new)
+CLASS(wrap_cvector), INTENT(in) :: self
+CLASS(oft_vector), POINTER, INTENT(out) :: new
+CALL self%inner%new(new)
+END SUBROUTINE wc_new_real
+SUBROUTINE wc_new_complex(self,new)
+CLASS(wrap_cvector), INTENT(in) :: self
+CLASS(oft_cvector), POINTER, INTENT(out) :: new
+CLASS(oft_cvector), POINTER :: tmp
+CALL self%inner%new(tmp)
+CALL wrap_cvector_create(tmp,new)
+END SUBROUTINE wc_new_complex
+SUBROUTINE wc_set(self,alpha,iblock,random)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), INTENT(in) :: alpha
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+LOGICAL, OPTIONAL, INTENT(in) :: random
+CALL self%inner%set(alpha,iblock,random)
+END SUBROUTINE wc_set
+SUBROUTINE wc_get_local(self,array,iblock)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), POINTER, INTENT(inout) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+CALL self%inner%get_local(array,iblock)
+END SUBROUTINE wc_get_local
+SUBROUTINE wc_restore_local(self,array,iblock,add,wait)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), INTENT(in) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+LOGICAL, OPTIONAL, INTENT(in) :: add,wait
+CALL self%inner%restore_local(array,iblock,add,wait)
+END SUBROUTINE wc_restore_local
+SUBROUTINE wc_get_slice(self,array,iblock)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), POINTER, INTENT(inout) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+CALL self%inner%get_slice(array,iblock)
+END SUBROUTINE wc_get_slice
+SUBROUTINE wc_restore_slice(self,array,iblock,wait)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), INTENT(in) :: array(:)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock
+LOGICAL, OPTIONAL, INTENT(in) :: wait
+CALL self%inner%restore_slice(array,iblock,wait)
+END SUBROUTINE wc_restore_slice
+SUBROUTINE wc_add_real(self,gamma,alpha,a,beta,b)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), INTENT(in) :: gamma,alpha
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+COMPLEX(c8), OPTIONAL, INTENT(in) :: beta
+CLASS(oft_vector), TARGET, OPTIONAL, INTENT(inout) :: b
+CALL self%inner%add(gamma,alpha,a,beta,b)
+END SUBROUTINE wc_add_real
+SUBROUTINE wc_add_complex(self,gamma,alpha,a,beta,b)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), INTENT(in) :: gamma,alpha
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a
+COMPLEX(c8), OPTIONAL, INTENT(in) :: beta
+CLASS(oft_cvector), TARGET, OPTIONAL, INTENT(inout) :: b
+CALL self%inner%add(gamma,alpha,a,beta,b)
+END SUBROUTINE wc_add_complex
+SUBROUTINE wc_mult_real(self,a,div_flag)
+CLASS(wrap_cvector), INTENT(inout) :: self
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+LOGICAL, OPTIONAL, INTENT(in) :: div_flag
+CALL self%inner%mult(a,div_flag)
+END SUBROUTINE wc_mult_real
+SUBROUTINE wc_mult_complex(self,a,div_flag)
+CLASS(wrap_cvector), INTENT(inout) :: self
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a
+LOGICAL, OPTIONAL, INTENT(in) :: div_flag
+CALL self%inner%mult(a,div_flag)
+END SUBROUTINE wc_mult_complex
+FUNCTION wc_dot_real(self,a) RESULT(dot)
+CLASS(wrap_cvector), INTENT(inout) :: self
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+COMPLEX(c8) :: dot
+dot=self%inner%dot(a)
+END FUNCTION wc_dot_real
+FUNCTION wc_dot_complex(self,a) RESULT(dot)
+CLASS(wrap_cvector), INTENT(inout) :: self
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a
+COMPLEX(c8) :: dot
+dot=self%inner%dot(a)
+END FUNCTION wc_dot_complex
+FUNCTION wc_mdot_real(self,a,n) RESULT(dots)
+CLASS(wrap_cvector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: n
+TYPE(oft_vector_ptr), INTENT(inout) :: a(n)
+COMPLEX(c8) :: dots(n)
+dots=self%inner%mdot(a,n)
+END FUNCTION wc_mdot_real
+FUNCTION wc_mdot_complex(self,a,n) RESULT(dots)
+CLASS(wrap_cvector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: n
+TYPE(oft_cvector_ptr), INTENT(inout) :: a(n)
+COMPLEX(c8) :: dots(n)
+dots=self%inner%mdot(a,n)
+END FUNCTION wc_mdot_complex
+SUBROUTINE wc_scale(self,alpha)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8), INTENT(in) :: alpha
+CALL self%inner%scale(alpha)
+END SUBROUTINE wc_scale
+FUNCTION wc_sum(self) RESULT(sum)
+CLASS(wrap_cvector), INTENT(inout) :: self
+COMPLEX(c8) :: sum
+sum=self%inner%sum()
+END FUNCTION wc_sum
+FUNCTION wc_norm(self,itype) RESULT(norm)
+CLASS(wrap_cvector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: itype
+REAL(r8) :: norm
+norm=self%inner%norm(itype)
+END FUNCTION wc_norm
+SUBROUTINE wc_stitch(self,up_method)
+CLASS(wrap_cvector), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: up_method
+CALL self%inner%stitch(up_method)
+END SUBROUTINE wc_stitch
+END MODULE test_wrap_vectors
 PROGRAM test_native_la
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -42,7 +363,9 @@ USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvecto
   native_pattern_live
 USE oft_la_base, ONLY: oft_cmatrix, oft_graph_ptr
 USE oft_la_utils, ONLY: create_matrix
+USE oft_stitching, ONLY: oft_seam, oft_global_stitch, seam_free_plan
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
+USE test_wrap_vectors, ONLY: wrap_vector_create, wrap_cvector_create
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob, oft_vlag_zerob
@@ -63,8 +386,10 @@ nfail=0
 CALL test_ops()
 CALL test_access()
 CALL test_multi()
+CALL test_nonnative()
 CALL test_bc()
 CALL test_stitch()
+CALL test_stitch_owner()
 CALL test_accumulate()
 CALL test_pattern()
 CALL test_zero()
@@ -150,6 +475,13 @@ d=maxdiff(x,y)
 CALL y%delete
 DEALLOCATE(y)
 END FUNCTION inconsistency
+! Maximum absolute value of a (possibly empty) array
+PURE FUNCTION maxabs(d) RESULT(m)
+REAL(r8), INTENT(in) :: d(:)
+REAL(r8) :: m
+m=0.d0
+IF(SIZE(d)>0)m=MAXVAL(ABS(d))
+END FUNCTION maxabs
 ! Reproducible value for a global index
 PURE FUNCTION gval(ig,a,b) RESULT(v)
 INTEGER(i8), INTENT(in) :: ig
@@ -645,6 +977,130 @@ CALL x%delete
 CALL ones%delete
 DEALLOCATE(x,ones)
 END SUBROUTINE test_stitch
+! maxpy and mdot with non-native vectors in the list, which are copied, give the same
+! results as with the native vectors they wrap (same kernels on the same values)
+SUBROUTINE test_nonnative()
+INTEGER(i4), PARAMETER :: nv=4
+INTEGER(i4) :: k
+REAL(r8) :: alpha(nv),dref(nv),dmix(nv)
+COMPLEX(c8) :: calpha(nv),cdref(nv),cdmix(nv)
+TYPE(oft_vector_ptr) :: vs(nv),ws(nv)
+TYPE(oft_cvector_ptr) :: cvs(nv),cws(nv)
+CLASS(oft_vector), POINTER :: x,y
+CLASS(oft_cvector), POINTER :: cx,cy
+!---Real vectors; every other one wrapped in a non-native vector type
+DO k=1,nv
+  CALL ML_oft_lagrange%vec_create(vs(k)%f)
+  CALL fill(vs(k)%f,0.13d0*REAL(k,r8),0.1d0*REAL(k-2,r8))
+  alpha(k)=0.3d0*REAL(k,r8)-0.7d0
+  ws(k)%f=>vs(k)%f
+END DO
+DO k=2,nv,2
+  CALL wrap_vector_create(vs(k)%f,ws(k)%f)
+END DO
+CALL ML_oft_lagrange%vec_create(x)
+CALL ML_oft_lagrange%vec_create(y)
+CALL fill(x,0.29d0,-0.05d0)
+CALL y%copy(x)
+CALL x%maxpy(alpha,vs,nv)
+CALL y%maxpy(alpha,ws,nv)
+CALL check_exact('maxpy with non-native vectors',maxdiff(x,y),0.d0)
+dref=x%mdot(vs,nv)
+dmix=x%mdot(ws,nv)
+CALL check_exact('mdot with non-native vectors',MAXVAL(ABS(dmix-dref)),0.d0)
+!---Complex vectors; every other one wrapped
+DO k=1,nv
+  CALL x%new(cvs(k)%f)
+  CALL cfill(cvs(k)%f,0.17d0*REAL(k,r8),0.2d0*REAL(k-2,r8))
+  calpha(k)=CMPLX(alpha(k),0.1d0*REAL(k,r8),c8)
+  cws(k)%f=>cvs(k)%f
+END DO
+DO k=2,nv,2
+  CALL wrap_cvector_create(cvs(k)%f,cws(k)%f)
+END DO
+CALL x%new(cx)
+CALL x%new(cy)
+CALL cfill(cx,0.31d0,0.07d0)
+CALL cy%copy(cx)
+CALL cx%maxpy(calpha,cvs,nv)
+CALL cy%maxpy(calpha,cws,nv)
+CALL check_exact('Complex maxpy with non-native vectors',cmaxdiff(cx,cy),0.d0)
+cdref=cx%mdot(cvs,nv)
+cdmix=cx%mdot(cws,nv)
+CALL check_exact('Complex mdot with non-native vectors',MAXVAL(ABS(cdmix-cdref)),0.d0)
+!---Mixed real/complex mdot
+cdref=x%mdot(cvs,nv)
+cdmix=x%mdot(cws,nv)
+CALL check_exact('Real-complex mdot with non-native vectors',MAXVAL(ABS(cdmix-cdref)),0.d0)
+cdref=cx%mdot(vs,nv)
+cdmix=cx%mdot(ws,nv)
+CALL check_exact('Complex-real mdot with non-native vectors',MAXVAL(ABS(cdmix-cdref)),0.d0)
+!---Cleanup (wrappers only reference the native vectors)
+DO k=2,nv,2
+  DEALLOCATE(ws(k)%f,cws(k)%f)
+END DO
+DO k=1,nv
+  CALL vs(k)%f%delete
+  CALL cvs(k)%f%delete
+  DEALLOCATE(vs(k)%f,cvs(k)%f)
+END DO
+CALL x%delete
+CALL y%delete
+CALL cx%delete
+CALL cy%delete
+DEALLOCATE(x,y,cx,cy)
+END SUBROUTINE test_nonnative
+! Synchronization by ownership uses the ownership current at the time of the stitch, also
+! when the stitching plan was built before ownership was set or changed
+SUBROUTINE test_stitch_owner()
+INTEGER(i4) :: i
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: raw,ref,a
+LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: leo_orig,leo_tmp
+TYPE(oft_seam) :: sc
+CLASS(oft_vector), POINTER :: x
+CALL ML_oft_lagrange%vec_create(x)
+SELECT TYPE(x)
+TYPE IS(oft_native_vector)
+  ALLOCATE(raw(x%n),ref(x%n),a(x%n))
+  DO i=1,x%n
+    raw(i)=gval(INT(i+1000*oft_env%rank,i8),0.37d0,0.2d0)
+  END DO
+  !---Reference: synchronization with the vector's own seam
+  ref=raw
+  CALL oft_global_stitch(x%stitch_info,ref,0)
+  !---Copy of the seam (shares linkage) whose ownership is changed below
+  sc=x%stitch_info
+  CALL seam_free_plan(sc)
+  leo_orig=>x%stitch_info%leo
+  !---Plan built by summation before ownership is set
+  NULLIFY(sc%leo)
+  a=raw
+  CALL oft_global_stitch(sc,a,1)
+  sc%leo=>leo_orig
+  a=raw
+  CALL oft_global_stitch(sc,a,0)
+  CALL check_exact('Stitch(0) after ownership set',oft_mpi_max(maxabs(a-ref)),0.d0)
+  !---Ownership changed in place after the plan was built
+  IF(ASSOCIATED(leo_orig))THEN
+    ALLOCATE(leo_tmp(SIZE(leo_orig)))
+    leo_tmp=.TRUE.
+    sc%leo=>leo_tmp
+    a=raw
+    CALL oft_global_stitch(sc,a,0)
+    leo_tmp=leo_orig
+    a=raw
+    CALL oft_global_stitch(sc,a,0)
+    CALL check_exact('Stitch(0) after ownership changed in place',oft_mpi_max(maxabs(a-ref)),0.d0)
+    DEALLOCATE(leo_tmp)
+  END IF
+  CALL seam_free_plan(sc)
+  DEALLOCATE(raw,ref,a)
+CLASS DEFAULT
+  CALL oft_abort('Native vector expected','test_stitch_owner',__FILE__)
+END SELECT
+CALL x%delete
+DEALLOCATE(x)
+END SUBROUTINE test_stitch_owner
 ! Distinct values on every copy of an entry (local index and rank dependent)
 SUBROUTINE cfill_raw(c)
 CLASS(oft_cvector), INTENT(inout) :: c

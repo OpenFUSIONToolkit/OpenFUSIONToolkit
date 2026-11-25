@@ -513,11 +513,11 @@ subroutine zerob_apply(self,a)
 class(oft_lag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
 integer(i4) :: i,j
-real(r8), pointer, contiguous, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(vloc)
-call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,self%ML_lag_rep%current_level%nbe
@@ -526,7 +526,7 @@ do i=1,self%ML_lag_rep%current_level%nbe
 end do
 !---
 !---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
-call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -545,7 +545,7 @@ end subroutine zerob_delete
 subroutine zerogrnd_apply(self,a)
 class(oft_lag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER ::lag_rep
 DEBUG_STACK_PUSH
@@ -567,7 +567,7 @@ subroutine vzerob_apply(self,a)
 class(oft_vlag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, contiguous, dimension(:) :: vx,vy,vz
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vx,vy,vz
 CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
@@ -580,11 +580,11 @@ lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
-  if(lag_rep%global%gbe(j))then
+  IF(lag_rep%global%gbe(j))THEN
     vx(j)=0.d0
     vy(j)=0.d0
     vz(j)=0.d0
-  end if
+  END IF
 end do
 !---
 !---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
@@ -1173,7 +1173,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 real(r8) :: bcc(1),vol,det,goptmp(3,4)
-real(r8), pointer, contiguous :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: rop(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
@@ -1182,7 +1182,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1204,7 +1204,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project
 !------------------------------------------------------------------------------
@@ -1220,7 +1220,7 @@ class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,vol,goptmp(3,4)
-real(r8), pointer, contiguous :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: gop(:,:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1231,7 +1231,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,gop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1253,7 +1253,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,gop)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project_div
 !------------------------------------------------------------------------------
@@ -1442,7 +1442,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,goptmp(3,4),vol
 real(r8), pointer, dimension(:,:) :: vectmp
-real(r8), pointer, contiguous, dimension(:) :: vtmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vtmp
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -2096,7 +2096,7 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
 NULLIFY(array_c,array_f)
@@ -2120,8 +2120,8 @@ class(oft_vector), intent(inout) :: afine !< Needs docs
 class(oft_vector), intent(inout) :: acors !< Needs docs
 integer(i4), pointer :: lptmp(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, DIMENSION(:) :: alias
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
 DEBUG_STACK_PUSH
 !---
@@ -2146,9 +2146,9 @@ do i=1,lag_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
-call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
-deallocate(alias)
+CALL acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+DEALLOCATE(alias)
 DEBUG_STACK_POP
 end subroutine lag_base_push
 !------------------------------------------------------------------------------
