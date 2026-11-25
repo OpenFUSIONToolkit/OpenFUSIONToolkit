@@ -114,8 +114,9 @@ END SUBROUTINE k_scale
 !! All arrays are processed in a single pass over row blocks of
 !! @ref oft_native_kernels_base::native_vec_chunk "native_vec_chunk" entries, so each
 !! block of `y` is loaded once for all `m` updates. Each thread processes one
-!! contiguous range of rows. Terms are added in order of increasing `k`, giving the
-!! same result as `m` successive `axpy` operations.
+!! contiguous range of rows. Terms are added in order of increasing `k`, as with `m`
+!! successive `axpy` operations (equal to rounding; not necessarily bitwise, since the
+!! compiler may contract the multiply-adds differently).
 !---------------------------------------------------------------------------------
 SUBROUTINE k_maxpy(n,m,alpha,x,y)
 INTEGER(i4), INTENT(in) :: n !< Number of entries
