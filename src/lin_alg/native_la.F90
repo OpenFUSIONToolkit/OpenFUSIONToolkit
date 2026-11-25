@@ -966,7 +966,8 @@ end function vec_dot_cvec
 !! @ref oft_native_kernels::nk_owned_mdot "nk_owned_mdot"), so each block of `self` is
 !! loaded once for all `n` products. Values shared with other processes are counted
 !! only on their owner and the results are combined with a single MPI reduction,
-!! which is skipped when the local mesh is complete (`stitch_info%full`).
+!! which is skipped when the local mesh is complete (`stitch_info%full`). Non-native
+!! vectors in `a` are copied with `get_local` first.
 !---------------------------------------------------------------------------------
 function vec_mdot_vec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
@@ -974,23 +975,22 @@ integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: k,nw
+logical :: copied(n)
 integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
-  select type(this=>a(k)%f)
-  class is(oft_native_vector)
-    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_mdot_vec',__FILE__)
-    vals(k)%v=>this%v
-  class default
-    CALL oft_abort('"a" is not a native vector.','vec_mdot_vec',__FILE__)
-  end select
+  IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','vec_mdot_vec',__FILE__)
+  copied(k)=native_get_rvals(a(k)%f,vals(k)%v) ! Non-native vectors are copied
 END DO
 dots=0.d0
 IF(n>0)THEN
   IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
+DO k=1,n
+  IF(copied(k))DEALLOCATE(vals(k)%v)
+END DO
 DEBUG_STACK_POP
 end function vec_mdot_vec
 !---------------------------------------------------------------------------------
@@ -1004,23 +1004,22 @@ integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: k,nw
+logical :: copied(n)
 integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
-  select type(this=>a(k)%f)
-  class is(oft_native_cvector)
-    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','vec_mdot_cvec',__FILE__)
-    vals(k)%v=>this%v
-  class default
-    CALL oft_abort('"a" is not a native complex vector.','vec_mdot_cvec',__FILE__)
-  end select
+  IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','vec_mdot_cvec',__FILE__)
+  copied(k)=native_get_cvals(a(k)%f,vals(k)%v) ! Non-native vectors are copied
 END DO
 dots=(0.d0,0.d0)
 IF(n>0)THEN
   IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
+DO k=1,n
+  IF(copied(k))DEALLOCATE(vals(k)%v)
+END DO
 DEBUG_STACK_POP
 end function vec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -1231,6 +1230,7 @@ end subroutine vec_copy
 !! once for all `n` updates. Terms are added in order of increasing `k`, as with `n`
 !! successive calls to `add`; results agree to rounding, but need not be bitwise equal
 !! (the compiler may contract the multiply-adds differently).
+!! Non-native vectors in `a` are copied with `get_local` first.
 !---------------------------------------------------------------------------------
 subroutine vec_maxpy(self,alpha,a,n)
 class(oft_native_vector), intent(inout) :: self !< Vector object
@@ -1238,18 +1238,17 @@ integer(i4), intent(in) :: n !< Number of vectors
 real(r8), intent(in) :: alpha(n) !< Scale factors [n]
 type(oft_vector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
 integer(i4) :: k
+logical :: copied(n)
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
-  select type(this=>a(k)%f)
-  class is(oft_native_vector)
-    IF(self%n/=this%n)CALL oft_abort('Vector lengths do not match.','vec_maxpy',__FILE__)
-    vals(k)%v=>this%v
-  class default
-    CALL oft_abort('"a" is not a native vector.','vec_maxpy',__FILE__)
-  end select
+  IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','vec_maxpy',__FILE__)
+  copied(k)=native_get_rvals(a(k)%f,vals(k)%v) ! Non-native vectors are copied
 END DO
 CALL nk_maxpy(self%n,n,alpha,vals,self%v)
+DO k=1,n
+  IF(copied(k))DEALLOCATE(vals(k)%v)
+END DO
 DEBUG_STACK_POP
 end subroutine vec_maxpy
 !---------------------------------------------------------------------------------
@@ -1928,23 +1927,22 @@ integer(i4), intent(in) :: n !< Length of vector array
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
 integer(i4) :: k,nw
+logical :: copied(n)
 integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
-  select type(this=>a(k)%f)
-  class is(oft_native_vector)
-    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_mdot_vec',__FILE__)
-    vals(k)%v=>this%v
-  class default
-    CALL oft_abort('"a" is not a native vector.','cvec_mdot_vec',__FILE__)
-  end select
+  IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','cvec_mdot_vec',__FILE__)
+  copied(k)=native_get_rvals(a(k)%f,vals(k)%v) ! Non-native vectors are copied
 END DO
 dots=(0.d0,0.d0)
 IF(n>0)THEN
   IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
+DO k=1,n
+  IF(copied(k))DEALLOCATE(vals(k)%v)
+END DO
 DEBUG_STACK_POP
 end function cvec_mdot_vec
 !---------------------------------------------------------------------------------
@@ -1958,23 +1956,22 @@ integer(i4), intent(in) :: n !< Length of vector array
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
 integer(i4) :: k,nw
+logical :: copied(n)
 integer(c_int8_t), pointer, contiguous, dimension(:) :: w
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
-  select type(this=>a(k)%f)
-  class is(oft_native_cvector)
-    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_mdot_cvec',__FILE__)
-    vals(k)%v=>this%v
-  class default
-    CALL oft_abort('"a" is not a native complex vector.','cvec_mdot_cvec',__FILE__)
-  end select
+  IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','cvec_mdot_cvec',__FILE__)
+  copied(k)=native_get_cvals(a(k)%f,vals(k)%v) ! Non-native vectors are copied
 END DO
 dots=(0.d0,0.d0)
 IF(n>0)THEN
   IF(native_seam_owned(self%stitch_info,self%n,nw,w))CALL nk_owned_mdot(self%n,n,self%v,vals,nw,w,dots)
   IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 END IF
+DO k=1,n
+  IF(copied(k))DEALLOCATE(vals(k)%v)
+END DO
 DEBUG_STACK_POP
 end function cvec_mdot_cvec
 !---------------------------------------------------------------------------------
@@ -2167,18 +2164,17 @@ integer(i4), intent(in) :: n !< Number of vectors
 complex(c8), intent(in) :: alpha(n) !< Scale factors [n]
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
 integer(i4) :: k
+logical :: copied(n)
 type(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
-  select type(this=>a(k)%f)
-  class is(oft_native_cvector)
-    IF(self%n/=this%n)CALL oft_abort('Vector lengths do not match.','cvec_maxpy',__FILE__)
-    vals(k)%v=>this%v
-  class default
-    CALL oft_abort('"a" is not a native complex vector.','cvec_maxpy',__FILE__)
-  end select
+  IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','cvec_maxpy',__FILE__)
+  copied(k)=native_get_cvals(a(k)%f,vals(k)%v) ! Non-native vectors are copied
 END DO
 CALL nk_maxpy(self%n,n,alpha,vals,self%v)
+DO k=1,n
+  IF(copied(k))DEALLOCATE(vals(k)%v)
+END DO
 DEBUG_STACK_POP
 end subroutine cvec_maxpy
 !---------------------------------------------------------------------------------
