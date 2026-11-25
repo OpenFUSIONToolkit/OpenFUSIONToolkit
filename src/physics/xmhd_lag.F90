@@ -3694,7 +3694,7 @@ REAL(r8), ALLOCATABLE :: b_loc(:,:),te_loc(:),lag_loc(:,:)
 integer(i4) :: i,ii,ip,j,m,jr,jc,jp,ptind(2),li
 integer(i4), allocatable :: j_lag(:)
 REAL(r8), TARGET, ALLOCATABLE :: lag_rop(:),lag_gop(:,:)
-real(r8), pointer, contiguous, dimension(:) :: neqin,nout,tout,teout,vacc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: neqin,nout,tout,teout,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vout,bout
 real(r8), pointer, dimension(:) :: vtmp
 real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,fulltmp(41)

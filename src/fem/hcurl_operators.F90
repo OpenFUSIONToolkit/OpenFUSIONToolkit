@@ -275,7 +275,7 @@ class(oft_afem_type), intent(inout) :: lag_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: aloc
-real(r8), pointer, contiguous, dimension(:) :: bloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bloc
 integer(i4) :: i,jr,jc,m
 integer(i4), allocatable :: j_curl(:),j_grad(:)
 real(r8) :: goptmp(3,4)
@@ -336,7 +336,7 @@ deallocate(j_curl,j_grad)
 deallocate(rop_curl,rop_grad,btmp)
 !$omp end parallel
 CALL b%release_local(bloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
-deallocate(aloc)
+DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine hcurl_div
 !------------------------------------------------------------------------------
@@ -377,8 +377,8 @@ subroutine hcurl_gradtp(hcurl_fe,a,b)
 class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_vector), intent(inout) :: a !< Input field
 class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
-real(r8), pointer, dimension(:) :: aloc
-real(r8), pointer, contiguous, dimension(:) :: bloc
+REAL(r8), POINTER, DIMENSION(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer :: i,j,k
 class(oft_mesh), pointer :: mesh
@@ -421,7 +421,7 @@ end subroutine hcurl_gradtp
 subroutine zerob_apply(self,a)
 class(oft_hcurl_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, contiguous, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 ! Cast to vector type
@@ -886,7 +886,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto H(Curl) basis
 integer(i4) :: i,jc,m
 integer(i4), allocatable, dimension(:) :: j
 real(r8) :: det,vol,bcc(3),goptmp(3,4)
-real(r8), pointer, contiguous, dimension(:) :: xloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: xloc
 real(r8), allocatable, dimension(:,:) :: rop
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
@@ -895,7 +895,7 @@ IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel default(firstprivate) shared(xloc,field) private(curved,det)
 allocate(j(hcurl_rep%nce),rop(3,hcurl_rep%nce))
@@ -916,7 +916,7 @@ do i=1,hcurl_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_project
 !---------------------------------------------------------------------------------
@@ -946,7 +946,7 @@ smesh=>bhcurl_rep%mesh
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Operator integration loop
 det=0.d0
 !$omp parallel private(j,rop,m,vol,sgop,vgop,norm,cell,ptmap,flog,etmp,det)
@@ -974,7 +974,7 @@ do i=1,smesh%nc
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_bcurl
 !------------------------------------------------------------------------------
@@ -1514,7 +1514,7 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer :: lbege(:)
 integer(i4) :: i
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lbege=>self%ML_FE_rep%ml_mesh%inter(self%ML_FE_rep%ml_mesh%nbase)%lbege
 NULLIFY(array_c,array_f)
@@ -1538,8 +1538,8 @@ class(oft_vector), intent(inout) :: afine !< Vector to transfer
 class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer :: lbege(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias
-real(r8), pointer, contiguous, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, DIMENSION(:) :: alias
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: hcurl_fine => NULL()
 DEBUG_STACK_PUSH
 !---
@@ -1564,9 +1564,9 @@ do i=1,hcurl_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
-call afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
-deallocate(alias)
+CALL acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+DEALLOCATE(alias)
 DEBUG_STACK_POP
 end subroutine hcurl_base_push
 !------------------------------------------------------------------------------

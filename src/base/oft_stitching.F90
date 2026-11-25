@@ -337,10 +337,10 @@ end function global_reduction_c8
 !! and elements with two or more (three or more values including their own) in
 !! `lmulti`. Rebuilt automatically when `nbe`, `nle` or `full` change.
 !---------------------------------------------------------------------------------
-subroutine seam_setup_plan(self)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4) :: i,j,k,e,p,active_procs,nsend,nloc
-integer(i4), allocatable :: ksend(:),lsend(:),lsrc(:),ldst(:),bpos(:),kfill(:),kfill_loc(:),nrem(:)
+SUBROUTINE seam_setup_plan(self)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4) :: i,j,k,e,p,active_procs,nsend,nloc
+INTEGER(i4), ALLOCATABLE :: ksend(:),lsend(:),lsrc(:),ldst(:),bpos(:),kfill(:),kfill_loc(:),nrem(:)
 DEBUG_STACK_PUSH
 CALL seam_free_plan(self)
 active_procs=self%nproc_con
@@ -435,12 +435,12 @@ self%plan_key=seam_linkage_key(self)
 self%plan_sum=seam_linkage_sum(self)
 #endif
 DEBUG_STACK_POP
-end subroutine seam_setup_plan
+END SUBROUTINE seam_setup_plan
 !---------------------------------------------------------------------------------
 !> Release the scatter plan and combination lists of a seam (rebuilt on next stitch)
 !---------------------------------------------------------------------------------
-subroutine seam_free_plan(self)
-type(oft_seam), intent(inout) :: self !< Seam structure
+SUBROUTINE seam_free_plan(self)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
 CALL scatter_plan_delete(self%plan)
 IF(ALLOCATED(self%smask))DEALLOCATE(self%smask)
 IF(ALLOCATED(self%pbe))DEALLOCATE(self%pbe)
@@ -457,7 +457,7 @@ self%nmulti=-1
 self%multi_max=0
 self%plan_nbe=-1
 self%plan_key=-1
-end subroutine seam_free_plan
+END SUBROUTINE seam_free_plan
 !---------------------------------------------------------------------------------
 !> Check that the stitching plan of a seam is current, building it if needed
 !!
@@ -570,15 +570,15 @@ END SUBROUTINE seam_refresh_mask
 !! this need not be the thread that initialized MPI, but no other thread may make
 !! MPI calls at the same time.
 !---------------------------------------------------------------------------------
-subroutine global_stitch_r8(self,a,up_method)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
-real(r8), intent(inout) :: a(:) !< Local data to be stitched
-integer(i4) :: i,k,l,m,n,e
-real(r8) :: tmp
+SUBROUTINE global_stitch_r8(self,a,up_method)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4), INTENT(in) :: up_method !< Stitching method (0, 1 or 2)
+REAL(r8), INTENT(inout) :: a(:) !< Local data to be stitched
+INTEGER(i4) :: i,k,l,m,n,e
+REAL(r8) :: tmp
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
-if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_r8',__FILE__)
+IF(up_method>2.OR.up_method<0)CALL oft_abort('Invalid stitch method','global_stitch_r8',__FILE__)
 CALL seam_check_plan(self)
 IF(up_method==0)THEN
   IF(.NOT.ASSOCIATED(self%leo))CALL oft_abort('Synchronization requires ownership','global_stitch_r8',__FILE__)
@@ -647,22 +647,22 @@ CASE(2)
 END SELECT
 CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
-end subroutine global_stitch_r8
+END SUBROUTINE global_stitch_r8
 !---------------------------------------------------------------------------------
 !> complex(c8) implementation of \ref oft_stitching::oft_global_stitch
 !!
 !! See @ref global_stitch_r8. Values with three or more contributions are summed in
 !! ascending order of real part, then imaginary part.
 !---------------------------------------------------------------------------------
-subroutine global_stitch_c8(self,a,up_method)
-type(oft_seam), intent(inout) :: self !< Seam structure
-integer(i4), intent(in) :: up_method !< Stitching method (0, 1 or 2)
-complex(c8), intent(inout) :: a(:) !< Local data to be stitched
-integer(i4) :: i,k,l,m,n,e
-complex(c8) :: tmp
+SUBROUTINE global_stitch_c8(self,a,up_method)
+TYPE(oft_seam), INTENT(inout) :: self !< Seam structure
+INTEGER(i4), INTENT(in) :: up_method !< Stitching method (0, 1 or 2)
+COMPLEX(c8), INTENT(inout) :: a(:) !< Local data to be stitched
+INTEGER(i4) :: i,k,l,m,n,e
+COMPLEX(c8) :: tmp
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
-if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_c8',__FILE__)
+IF(up_method>2.OR.up_method<0)CALL oft_abort('Invalid stitch method','global_stitch_c8',__FILE__)
 CALL seam_check_plan(self)
 IF(up_method==0)THEN
   IF(.NOT.ASSOCIATED(self%leo))CALL oft_abort('Synchronization requires ownership','global_stitch_c8',__FILE__)
@@ -732,7 +732,7 @@ CASE(2)
 END SELECT
 CALL scatter_wait_send(self%plan,a)
 DEBUG_STACK_POP
-end subroutine global_stitch_c8
+END SUBROUTINE global_stitch_c8
 !---------------------------------------------------------------------------------
 !> Validate stitching structure
 !---------------------------------------------------------------------------------

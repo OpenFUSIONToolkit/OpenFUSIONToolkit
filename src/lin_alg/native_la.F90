@@ -25,7 +25,7 @@
 !! @ingroup doxy_oft_native_la
 !---------------------------------------------------------------------------------
 MODULE oft_native_la
-USE, INTRINSIC :: iso_c_binding, only: c_int, c_int8_t
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_int8_t
 USE oft_local
 USE oft_base
 USE oft_sort, ONLY: search_array, sort_array
@@ -49,8 +49,8 @@ private
 type, public, extends(oft_vector) :: oft_native_vector
   real(r8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
   real(r8), pointer, contiguous, dimension(:) :: local_tmp => NULL() !< Local value cache
-  real(r8), pointer, contiguous, dimension(:) :: acc => NULL() !< Accumulation storage (`OFT_ACCESS_ACCUMULATE`, persistent)
-  logical :: acc_open = .FALSE. !< Accumulation in progress?
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: acc => NULL() !< Accumulation storage (`OFT_ACCESS_ACCUMULATE`, persistent)
+  LOGICAL :: acc_open = .FALSE. !< Accumulation in progress?
 contains
   procedure :: new_real => vec_new_vec
   procedure :: new_complex => vec_new_cvec
@@ -81,13 +81,13 @@ contains
   !> Perform global stitching
   procedure :: stitch => vec_stitch
   !> Borrow local values without a copy
-  procedure :: borrow_local => vec_borrow_local
+  PROCEDURE :: borrow_local => vec_borrow_local
   !> Release borrowed local values
-  procedure :: release_local => vec_release_local
+  PROCEDURE :: release_local => vec_release_local
   !> Copy values from a second vector
-  procedure :: copy => vec_copy
+  PROCEDURE :: copy => vec_copy
   !> Add a linear combination of vectors
-  procedure :: maxpy => vec_maxpy
+  PROCEDURE :: maxpy => vec_maxpy
   !> Delete vector
   procedure :: delete => vec_delete
 end type oft_native_vector
@@ -99,8 +99,8 @@ end type oft_native_vector
 type, public, extends(oft_cvector) :: oft_native_cvector
   complex(c8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
   complex(c8), pointer, contiguous, dimension(:) :: local_tmp => NULL() !< Local value cache
-  complex(c8), pointer, contiguous, dimension(:) :: acc => NULL() !< Accumulation storage (`OFT_ACCESS_ACCUMULATE`, persistent)
-  logical :: acc_open = .FALSE. !< Accumulation in progress?
+  COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: acc => NULL() !< Accumulation storage (`OFT_ACCESS_ACCUMULATE`, persistent)
+  LOGICAL :: acc_open = .FALSE. !< Accumulation in progress?
 contains
   procedure :: new_real => cvec_new_vec
   procedure :: new_complex => cvec_new_cvec
@@ -131,13 +131,13 @@ contains
   !> Perform global stitching
   procedure :: stitch => cvec_stitch
   !> Borrow local values without a copy
-  procedure :: borrow_local => cvec_borrow_local
+  PROCEDURE :: borrow_local => cvec_borrow_local
   !> Release borrowed local values
-  procedure :: release_local => cvec_release_local
-  procedure :: copy_real => cvec_copy_vec
-  procedure :: copy_complex => cvec_copy_cvec
+  PROCEDURE :: release_local => cvec_release_local
+  PROCEDURE :: copy_real => cvec_copy_vec
+  PROCEDURE :: copy_complex => cvec_copy_cvec
   !> Add a linear combination of vectors
-  procedure :: maxpy => cvec_maxpy
+  PROCEDURE :: maxpy => cvec_maxpy
   !> Delete vector
   procedure :: delete => cvec_delete
 end type oft_native_cvector
@@ -147,19 +147,19 @@ end type oft_native_cvector
 !! Built on first use by the transpose products and released with the pattern. Entries
 !! within each column are ordered by increasing row index.
 !---------------------------------------------------------------------------------
-type :: native_csc_index
-  integer(i4), pointer, contiguous, dimension(:) :: kc => NULL() !< Column pointer to row list [nc+1]
-  integer(i4), pointer, contiguous, dimension(:) :: lr => NULL() !< Row index of each entry [nnz]
-  integer(i4), pointer, contiguous, dimension(:) :: lm => NULL() !< Location of each entry in CRS value array [nnz]
-end type native_csc_index
+TYPE :: native_csc_index
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kc => NULL() !< Column pointer to row list [nc+1]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lr => NULL() !< Row index of each entry [nnz]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lm => NULL() !< Location of each entry in CRS value array [nnz]
+END TYPE native_csc_index
 !---------------------------------------------------------------------------------
 !> Location of the diagonal entry in each row of a native CRS matrix
 !!
 !! Built on first use by matrix assembly and released with the pattern.
 !---------------------------------------------------------------------------------
-type :: native_diag_index
-  integer(i4), pointer, contiguous, dimension(:) :: loc => NULL() !< Location of diagonal in CRS value array (0 if absent) [nr]
-end type native_diag_index
+TYPE :: native_diag_index
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: loc => NULL() !< Location of diagonal in CRS value array (0 if absent) [nr]
+END TYPE native_diag_index
 !---------------------------------------------------------------------------------
 !> Non-zero pattern of native CRS matrices, shared between matrices by reference counting
 !!
@@ -190,39 +190,39 @@ end type native_diag_index
 !! `kr`, `lc`, `map`, `linkage`, `redind`, `nred` and `nnz` of a matrix are aliases of
 !! the pattern components and must be treated as read-only.
 !---------------------------------------------------------------------------------
-type, public :: oft_native_pattern
-  integer(i4) :: refcount = 0 !< Number of references held (matrices and other holders)
-  integer(i4) :: nr = 0 !< Number of rows
-  integer(i4) :: nc = 0 !< Number of columns
-  integer(i4) :: nnz = 0 !< Number of non-zero entries
-  integer(i4) :: ni = 0 !< Number of row blocks in `map`
-  integer(i4) :: nj = 0 !< Number of column blocks in `map`
-  integer(i4) :: nred = 0 !< Number of redundant rows (set by @ref native_matrix_setup_full)
-  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list [nr+1]
-  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list [nnz]
-  integer(2), pointer, contiguous, dimension(:) :: lc_small => NULL() !< 2-byte copy of column list (built by assembly)
-  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows [nred]
-  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Block maps [ni,nj] (optional)
-  type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrices (built by @ref native_matrix_setup_full)
-  type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
-  type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
-end type oft_native_pattern
+TYPE, PUBLIC :: oft_native_pattern
+  INTEGER(i4) :: refcount = 0 !< Number of references held (matrices and other holders)
+  INTEGER(i4) :: nr = 0 !< Number of rows
+  INTEGER(i4) :: nc = 0 !< Number of columns
+  INTEGER(i4) :: nnz = 0 !< Number of non-zero entries
+  INTEGER(i4) :: ni = 0 !< Number of row blocks in `map`
+  INTEGER(i4) :: nj = 0 !< Number of column blocks in `map`
+  INTEGER(i4) :: nred = 0 !< Number of redundant rows (set by @ref native_matrix_setup_full)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr => NULL() !< Row pointer to column list [nr+1]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lc => NULL() !< Column list [nnz]
+  INTEGER(2), POINTER, CONTIGUOUS, DIMENSION(:) :: lc_small => NULL() !< 2-byte copy of column list (built by assembly)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: redind => NULL() !< Redundant rows [nred]
+  TYPE(oft_matrix_map), POINTER, DIMENSION(:,:) :: map => NULL() !< Block maps [ni,nj] (optional)
+  TYPE(oft_seam), POINTER :: linkage => NULL() !< Seam for full local matrices (built by @ref native_matrix_setup_full)
+  TYPE(native_csc_index), PRIVATE :: csc !< Transposed index (built by transpose products)
+  TYPE(native_diag_index), PRIVATE :: diag_index !< Diagonal locations (built by assembly)
+END TYPE oft_native_pattern
 !---------------------------------------------------------------------------------
 !> Native CRS matrix class
 !---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_native_matrix
   logical :: full_current = .FALSE. !< Is full matrix current?
-  integer(i4) :: nnz = 0 !< Number of non-zero entries (alias of `pattern%nnz`)
-  integer(i4) :: nred = 0 !< Number of redundant rows (alias of `pattern%nred`)
-  type(oft_native_pattern), pointer :: pattern => NULL() !< Non-zero pattern (possibly shared)
-  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows (alias of `pattern%redind`)
-  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list (alias of `pattern%kr`)
-  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list (alias of `pattern%lc`)
+  INTEGER(i4) :: nnz = 0 !< Number of non-zero entries (alias of `pattern%nnz`)
+  INTEGER(i4) :: nred = 0 !< Number of redundant rows (alias of `pattern%nred`)
+  TYPE(oft_native_pattern), POINTER :: pattern => NULL() !< Non-zero pattern (possibly shared)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: redind => NULL() !< Redundant rows (alias of `pattern%redind`)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr => NULL() !< Row pointer to column list (alias of `pattern%kr`)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lc => NULL() !< Column list (alias of `pattern%lc`)
   real(r8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   real(r8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
-  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Block maps (alias of `pattern%map`)
-  type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrix (alias of `pattern%linkage`)
+  TYPE(oft_matrix_map), POINTER, DIMENSION(:,:) :: map => NULL() !< Block maps (alias of `pattern%map`)
+  TYPE(oft_seam), POINTER :: linkage => NULL() !< Seam for full local matrix (alias of `pattern%linkage`)
 contains
   procedure :: apply_real => mat_apply_vec
   procedure :: apply_complex => mat_apply_cvec
@@ -254,18 +254,18 @@ end type oft_native_matrix
 !---------------------------------------------------------------------------------
 type, public, extends(oft_cmatrix) :: oft_native_cmatrix
   logical :: full_current = .FALSE. !< Is full matrix current?
-  integer(i4) :: nnz = 0 !< Number of non-zero entries (alias of `pattern%nnz`)
-  integer(i4) :: nred = 0 !< Number of redundant rows (alias of `pattern%nred`)
+  INTEGER(i4) :: nnz = 0 !< Number of non-zero entries (alias of `pattern%nnz`)
+  INTEGER(i4) :: nred = 0 !< Number of redundant rows (alias of `pattern%nred`)
   integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
-  type(oft_native_pattern), pointer :: pattern => NULL() !< Non-zero pattern (possibly shared)
-  integer(i4), pointer, contiguous, dimension(:) :: redind => NULL() !< Redundant rows (alias of `pattern%redind`)
-  integer(i4), pointer, contiguous, dimension(:) :: kr => NULL() !< Row pointer to column list (alias of `pattern%kr`)
-  integer(i4), pointer, contiguous, dimension(:) :: lc => NULL() !< Column list (alias of `pattern%lc`)
+  TYPE(oft_native_pattern), POINTER :: pattern => NULL() !< Non-zero pattern (possibly shared)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: redind => NULL() !< Redundant rows (alias of `pattern%redind`)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr => NULL() !< Row pointer to column list (alias of `pattern%kr`)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lc => NULL() !< Column list (alias of `pattern%lc`)
   complex(c8), pointer, contiguous, dimension(:) :: M => NULL() !< Matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Md => NULL() !< Diagonal matrix entries
   complex(c8), pointer, contiguous, dimension(:) :: Mfull => NULL() !< Full local matrix entries
-  type(oft_matrix_map), pointer, dimension(:,:) :: map => NULL() !< Block maps (alias of `pattern%map`)
-  type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrix (alias of `pattern%linkage`)
+  TYPE(oft_matrix_map), POINTER, DIMENSION(:,:) :: map => NULL() !< Block maps (alias of `pattern%map`)
+  TYPE(oft_seam), POINTER :: linkage => NULL() !< Seam for full local matrix (alias of `pattern%linkage`)
 contains
   procedure :: apply_real => cmat_apply_vec
   procedure :: apply_complex => cmat_apply_cvec
@@ -293,8 +293,8 @@ end type oft_native_cmatrix
 !---------------------------------------------------------------------------------
 type, public, extends(oft_native_matrix) :: oft_native_submatrix
   integer(i4) :: slice = -1 !< Slice of parent matrix
-  integer(i4), pointer, dimension(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz]
-  type(oft_scatter_plan) :: vplan !< Value gather plan from the parent's full values (built with `lcmap`)
+  INTEGER(i4), POINTER, DIMENSION(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz]
+  TYPE(oft_scatter_plan) :: vplan !< Value gather plan from the parent's full values (built with `lcmap`)
   integer(i4), pointer, dimension(:) :: part => NULL() !< Column list
   class(oft_native_matrix), pointer :: parent => NULL() !< Parent matrix
 contains
@@ -414,8 +414,8 @@ END INTERFACE native_matrix_share
 public native_vector_cast, native_cvector_cast, native_matrix_cast, native_cmatrix_cast
 public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
-public native_pattern_create, native_pattern_retain, native_pattern_release
-public native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
+PUBLIC native_pattern_create, native_pattern_retain, native_pattern_release
+PUBLIC native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -675,7 +675,7 @@ real(r8), intent(in) :: alpha !< Updated vector value
 integer(i4), optional, intent(in) :: iblock !< Vector sub-block to act on
 logical, optional, intent(in) :: random !< Set to random number, if true alpha is ignored (optional)
 logical :: random_flag
-integer(i4) :: i1,i2
+INTEGER(i4) :: i1,i2
 DEBUG_STACK_PUSH
 random_flag=.FALSE.
 IF(PRESENT(random))random_flag=random
@@ -702,11 +702,11 @@ end subroutine vec_set
 !---------------------------------------------------------------------------------
 !> Get values for locally-owned portion of vector (slice)
 !---------------------------------------------------------------------------------
-subroutine vec_get_slice(self,array,iblock)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-real(r8), pointer, intent(inout) :: array(:) !< Slice values
-integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i
+SUBROUTINE vec_get_slice(self,array,iblock)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+REAL(r8), POINTER, INTENT(inout) :: array(:) !< Slice values
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Sub-block to retrieve
+INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_slice',__FILE__)
@@ -734,7 +734,7 @@ ELSE
   END IF
 END IF
 DEBUG_STACK_POP
-end subroutine vec_get_slice
+END SUBROUTINE vec_get_slice
 !---------------------------------------------------------------------------------
 !> Set/add values for locally-owned portion of vector (slice)
 !---------------------------------------------------------------------------------
@@ -743,7 +743,7 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: array(:) !< Slice values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: wait !< Wait to perform global sync?
-integer(i4) :: i
+INTEGER(i4) :: i
 logical :: do_wait
 DEBUG_STACK_PUSH
 do_wait=.FALSE.
@@ -782,7 +782,7 @@ subroutine vec_get_local(self,array,iblock)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), pointer, intent(inout) :: array(:) !< Local values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i1,i2
+INTEGER(i4) :: i1,i2
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_local',__FILE__)
@@ -806,8 +806,8 @@ integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: add !< Add values instead of replace
 logical, optional, intent(in) :: wait !< Wait to perform global sync
 logical :: do_add,do_wait
-integer(i4) :: i1,i2
-real(r8), allocatable, dimension(:) :: atmp
+INTEGER(i4) :: i1,i2
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 do_add=.FALSE.
 IF(PRESENT(add))do_add=add
@@ -851,7 +851,7 @@ contains
 !
 subroutine full_restore_local(array_loc)
 real(r8), intent(inout) :: array_loc(:)
-call oft_global_stitch(self%stitch_info,array_loc,1)
+CALL oft_global_stitch(self%stitch_info,array_loc,1)
 CALL nk_axpby(self%n,1.d0,1.d0,array_loc,self%v)
 end subroutine full_restore_local
 end subroutine vec_restore_local
@@ -867,7 +867,7 @@ real(r8), intent(in) :: alpha !< Scale of first vector
 class(oft_vector), target, intent(inout) :: a !< First vector to add
 real(r8), optional, intent(in) :: beta !< Scale of second vector (optional)
 class(oft_vector), target, optional, intent(inout) :: b !< Second vector to add (optional)
-logical :: copied(2)
+LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','vec_add_vec',__FILE__)
@@ -892,7 +892,7 @@ subroutine vec_mult(self,a,div_flag)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< vector for multiplication
 logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
-logical :: div,copied
+LOGICAL :: div,copied
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 div=.FALSE.
@@ -924,8 +924,8 @@ function vec_dot_vec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
 real(r8) :: dot !< \f$ \sum_i self_i a_i \f$
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_vector)
@@ -945,8 +945,8 @@ function vec_dot_cvec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
 complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_cvector)
@@ -969,15 +969,15 @@ end function vec_dot_cvec
 !! which is skipped when the local mesh is complete (`stitch_info%full`). Non-native
 !! vectors in `a` are copied with `get_local` first.
 !---------------------------------------------------------------------------------
-function vec_mdot_vec(self,a,n) result(dots)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-integer(i4), intent(in) :: n !< Length of vector array
-type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
-real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: k,nw
-logical :: copied(n)
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
-type(native_rvals_ptr) :: vals(n)
+FUNCTION vec_mdot_vec(self,a,n) RESULT(dots)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), INTENT(in) :: n !< Length of vector array
+TYPE(oft_vector_ptr), INTENT(inout) :: a(n) !< Array of vectors for dot product [n]
+REAL(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
+INTEGER(i4) :: k,nw
+LOGICAL :: copied(n)
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
+TYPE(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
   IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','vec_mdot_vec',__FILE__)
@@ -992,21 +992,21 @@ DO k=1,n
   IF(copied(k))DEALLOCATE(vals(k)%v)
 END DO
 DEBUG_STACK_POP
-end function vec_mdot_vec
+END FUNCTION vec_mdot_vec
 !---------------------------------------------------------------------------------
 !> Dot products with an array of complex vectors
 !!
 !! Single pass over row blocks with a single MPI reduction, see @ref vec_mdot_vec.
 !---------------------------------------------------------------------------------
-function vec_mdot_cvec(self,a,n) result(dots)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-integer(i4), intent(in) :: n !< Length of vector array
-type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
-complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
-integer(i4) :: k,nw
-logical :: copied(n)
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
-type(native_cvals_ptr) :: vals(n)
+FUNCTION vec_mdot_cvec(self,a,n) RESULT(dots)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), INTENT(in) :: n !< Length of vector array
+TYPE(oft_cvector_ptr), INTENT(inout) :: a(n) !< Array of vectors for dot product [n]
+COMPLEX(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
+INTEGER(i4) :: k,nw
+LOGICAL :: copied(n)
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
+TYPE(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
   IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','vec_mdot_cvec',__FILE__)
@@ -1021,15 +1021,15 @@ DO k=1,n
   IF(copied(k))DEALLOCATE(vals(k)%v)
 END DO
 DEBUG_STACK_POP
-end function vec_mdot_cvec
+END FUNCTION vec_mdot_cvec
 !---------------------------------------------------------------------------------
 !> Sum reduction over vector
 !---------------------------------------------------------------------------------
 function vec_sum(self) result(sum)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8) :: sum !< Sum of vector elements
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 sum=0.d0
 IF(native_seam_owned(self%stitch_info,self%n,nw,w))sum=nk_owned_sum(self%n,self%v,nw,w)
@@ -1043,8 +1043,8 @@ function vec_norm(self,itype) result(norm)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
 real(r8) :: norm !< Specified norm of vector
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
@@ -1082,13 +1082,13 @@ end subroutine vec_stitch
 !! `full` when only periodic images on this process are compared), so it can be used
 !! on local vectors from worker threads (eg. block sub-solvers) without MPI calls.
 !---------------------------------------------------------------------------------
-subroutine native_check_shared(seam,vals,caller)
-type(oft_seam), intent(inout) :: seam !< Seam structure of the vector
-real(r8), intent(in) :: vals(:) !< Local values of the vector
-character(LEN=*), intent(in) :: caller !< Name of calling routine (for error message)
-integer(i4) :: i,j,nbad
-real(r8) :: dmax
-real(r8), allocatable, dimension(:) :: tmp
+SUBROUTINE native_check_shared(seam,vals,caller)
+TYPE(oft_seam), INTENT(inout) :: seam !< Seam structure of the vector
+REAL(r8), INTENT(in) :: vals(:) !< Local values of the vector
+CHARACTER(LEN=*), INTENT(in) :: caller !< Name of calling routine (for error message)
+INTEGER(i4) :: i,j,nbad
+REAL(r8) :: dmax
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: tmp
 IF(seam%skip)RETURN
 ALLOCATE(tmp(SIZE(vals)))
 tmp=vals
@@ -1110,7 +1110,7 @@ IF(nbad>0)WRITE(*,'(A,I8,A,I8,A,ES12.4)')'Rank ',oft_env%rank,': ',nbad, &
 IF(.NOT.seam%full)nbad=oft_mpi_sum(nbad)
 IF(nbad>0)CALL oft_abort('Shared values inconsistent after release_local with sync=.FALSE. ('//caller//')', &
   'native_check_shared',__FILE__)
-end subroutine native_check_shared
+END SUBROUTINE native_check_shared
 #endif
 !---------------------------------------------------------------------------------
 !> Borrow local values without a copy
@@ -1118,11 +1118,11 @@ end subroutine native_check_shared
 !! Returns a pointer to the vector's own storage (or to the range of block `iblock`).
 !! See @ref oft_la_base::vector_borrow_local "vector_borrow_local" for the contract.
 !---------------------------------------------------------------------------------
-subroutine vec_borrow_local(self,array,mode,iblock)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-real(r8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
-integer(i4), intent(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
-integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
+SUBROUTINE vec_borrow_local(self,array,mode,iblock)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+REAL(r8), POINTER, CONTIGUOUS, INTENT(inout) :: array(:) !< Local values (output)
+INTEGER(i4), INTENT(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Sub-block to borrow (optional)
 DEBUG_STACK_PUSH
 IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vec_borrow_local',__FILE__)
@@ -1149,7 +1149,7 @@ ELSE
   END IF
 END IF
 DEBUG_STACK_POP
-end subroutine vec_borrow_local
+END SUBROUTINE vec_borrow_local
 !---------------------------------------------------------------------------------
 !> Release local values obtained with `borrow_local`
 !!
@@ -1157,14 +1157,14 @@ end subroutine vec_borrow_local
 !! is performed. See @ref oft_la_base::vector_release_local "vector_release_local"
 !! for the contract.
 !---------------------------------------------------------------------------------
-subroutine vec_release_local(self,array,mode,sync,iblock)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-real(r8), pointer, contiguous, intent(inout) :: array(:) !< Borrowed local values (nullified on return)
-integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
-logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
-integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
-logical :: match
-real(r8), pointer, contiguous, dimension(:) :: vals
+SUBROUTINE vec_release_local(self,array,mode,sync,iblock)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+REAL(r8), POINTER, CONTIGUOUS, INTENT(inout) :: array(:) !< Borrowed local values (nullified on return)
+INTEGER(i4), INTENT(in) :: mode !< Access mode used in the matching borrow
+LOGICAL, INTENT(in) :: sync !< Synchronize shared values from their owner after writing?
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Sub-block used in the matching borrow (optional)
+LOGICAL :: match
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vals
 DEBUG_STACK_PUSH
 IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vec_release_local',__FILE__)
@@ -1202,16 +1202,16 @@ IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
 IF((.NOT.sync).AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL native_check_shared(self%stitch_info,self%v,'vec_release_local')
 #endif
 DEBUG_STACK_POP
-end subroutine vec_release_local
+END SUBROUTINE vec_release_local
 !---------------------------------------------------------------------------------
 !> Copy values from a second vector
 !!
 !! self = a
 !---------------------------------------------------------------------------------
-subroutine vec_copy(self,a)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-class(oft_vector), target, intent(inout) :: a !< Source vector
-real(r8), pointer, contiguous, dimension(:) :: atmp
+SUBROUTINE vec_copy(self,a)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Source vector
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','vec_copy',__FILE__)
 NULLIFY(atmp)
@@ -1219,7 +1219,7 @@ CALL a%borrow_local(atmp,OFT_ACCESS_READ)
 CALL nk_copy(self%n,atmp,self%v)
 CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
 DEBUG_STACK_POP
-end subroutine vec_copy
+END SUBROUTINE vec_copy
 !---------------------------------------------------------------------------------
 !> Add a linear combination of vectors
 !!
@@ -1232,14 +1232,14 @@ end subroutine vec_copy
 !! (the compiler may contract the multiply-adds differently).
 !! Non-native vectors in `a` are copied with `get_local` first.
 !---------------------------------------------------------------------------------
-subroutine vec_maxpy(self,alpha,a,n)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-integer(i4), intent(in) :: n !< Number of vectors
-real(r8), intent(in) :: alpha(n) !< Scale factors [n]
-type(oft_vector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
-integer(i4) :: k
-logical :: copied(n)
-type(native_rvals_ptr) :: vals(n)
+SUBROUTINE vec_maxpy(self,alpha,a,n)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), INTENT(in) :: n !< Number of vectors
+REAL(r8), INTENT(in) :: alpha(n) !< Scale factors [n]
+TYPE(oft_vector_ptr), INTENT(inout) :: a(n) !< Vectors to add [n]
+INTEGER(i4) :: k
+LOGICAL :: copied(n)
+TYPE(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
   IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','vec_maxpy',__FILE__)
@@ -1250,7 +1250,7 @@ DO k=1,n
   IF(copied(k))DEALLOCATE(vals(k)%v)
 END DO
 DEBUG_STACK_POP
-end subroutine vec_maxpy
+END SUBROUTINE vec_maxpy
 !---------------------------------------------------------------------------------
 !> Finalize vector
 !---------------------------------------------------------------------------------
@@ -1259,7 +1259,7 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 DEBUG_STACK_PUSH
 if(associated(self%v))deallocate(self%v)
 if(associated(self%local_tmp))deallocate(self%local_tmp)
-if(associated(self%acc))deallocate(self%acc)
+IF(ASSOCIATED(self%acc))DEALLOCATE(self%acc)
 self%acc_open=.FALSE.
 self%n=-1
 self%nslice=-1
@@ -1580,7 +1580,7 @@ complex(c8), intent(in) :: alpha !< Updated vector value
 integer(i4), optional, intent(in) :: iblock !< Vector sub-block to act on
 logical, optional, intent(in) :: random !< Set to random number, if true alpha is ignored (optional)
 logical :: random_flag
-integer(i4) :: i1,i2
+INTEGER(i4) :: i1,i2
 DEBUG_STACK_PUSH
 random_flag=.FALSE.
 IF(PRESENT(random))random_flag=random
@@ -1607,11 +1607,11 @@ end subroutine cvec_set
 !---------------------------------------------------------------------------------
 !> Get values for locally-owned portion of vector (slice)
 !---------------------------------------------------------------------------------
-subroutine cvec_get_slice(self,array,iblock)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-complex(c8), pointer, intent(inout) :: array(:) !< Slice values
-integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i
+SUBROUTINE cvec_get_slice(self,array,iblock)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+COMPLEX(c8), POINTER, INTENT(inout) :: array(:) !< Slice values
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Sub-block to retrieve
+INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_get_slice',__FILE__)
@@ -1639,7 +1639,7 @@ ELSE
   END IF
 END IF
 DEBUG_STACK_POP
-end subroutine cvec_get_slice
+END SUBROUTINE cvec_get_slice
 !---------------------------------------------------------------------------------
 !> Set/add values for locally-owned portion of vector (slice)
 !---------------------------------------------------------------------------------
@@ -1648,7 +1648,7 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: array(:) !< Slice values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: wait !< Wait to perform global sync?
-integer(i4) :: i
+INTEGER(i4) :: i
 logical :: do_wait
 DEBUG_STACK_PUSH
 do_wait=.FALSE.
@@ -1687,7 +1687,7 @@ subroutine cvec_get_local(self,array,iblock)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), pointer, intent(inout) :: array(:) !< Local values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
-integer(i4) :: i1,i2
+INTEGER(i4) :: i1,i2
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_get_local',__FILE__)
@@ -1709,10 +1709,10 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: array(:) !< Local values
 integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
 logical, optional, intent(in) :: add !< Add values instead of replace
-logical, optional, intent(in) :: wait !< Wait to perform global sync
+LOGICAL, OPTIONAL, INTENT(in) :: wait !< Wait to perform global sync
 logical :: do_add,do_wait
-integer(i4) :: i1,i2
-complex(c8), allocatable, dimension(:) :: atmp
+INTEGER(i4) :: i1,i2
+COMPLEX(c8), ALLOCATABLE, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 do_add=.FALSE.
 IF(PRESENT(add))do_add=add
@@ -1756,7 +1756,7 @@ contains
 !
 subroutine full_restore_local(array_loc)
 complex(c8), intent(inout) :: array_loc(:)
-call oft_global_stitch(self%stitch_info,array_loc,1)
+CALL oft_global_stitch(self%stitch_info,array_loc,1)
 CALL nk_axpby(self%n,(1.d0,0.d0),(1.d0,0.d0),array_loc,self%v)
 end subroutine full_restore_local
 end subroutine cvec_restore_local
@@ -1772,7 +1772,7 @@ complex(c8), intent(in) :: alpha !< Scale of first vector
 class(oft_vector), target, intent(inout) :: a !< First vector to add
 complex(c8), optional, intent(in) :: beta !< Scale of second vector (optional)
 class(oft_vector), target, optional, intent(inout) :: b !< Second vector to add (optional)
-logical :: copied(2)
+LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','cvec_add_vec',__FILE__)
@@ -1800,7 +1800,7 @@ complex(c8), intent(in) :: alpha !< Scale of first vector
 class(oft_cvector), target, intent(inout) :: a !< First vector to add
 complex(c8), optional, intent(in) :: beta !< Scale of second vector (optional)
 class(oft_cvector), target, optional, intent(inout) :: b !< Second vector to add (optional)
-logical :: copied(2)
+LOGICAL :: copied(2)
 COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','cvec_add_cvec',__FILE__)
@@ -1825,7 +1825,7 @@ subroutine cvec_mult_vec(self,a,div_flag)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< vector for multiplication
 logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
-logical :: div,copied
+LOGICAL :: div,copied
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 div=.FALSE.
@@ -1849,7 +1849,7 @@ subroutine cvec_mult_cvec(self,a,div_flag)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< vector for multiplication
 logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
-logical :: div,copied
+LOGICAL :: div,copied
 COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 div=.FALSE.
@@ -1880,9 +1880,9 @@ end subroutine cvec_scale
 function cvec_dot_vec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
-complex(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+COMPLEX(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_vector)
@@ -1901,13 +1901,13 @@ end function cvec_dot_vec
 function cvec_dot_cvec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
-complex(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+COMPLEX(c8) :: dot !< \f$ \sum_i \overline{self_i} a_i \f$
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 select type(this=>a)
   class is(oft_native_cvector)
-    if(self%n/=this%n)call oft_abort('Vector lengths do not match.','cvec_dot_cvec',__FILE__)
+    IF(self%n/=this%n)CALL oft_abort('Vector lengths do not match.','cvec_dot_cvec',__FILE__)
     dot=(0.d0,0.d0)
     IF(native_seam_owned(self%stitch_info,self%n,nw,w))dot=nk_owned_dot(self%n,self%v,this%v,nw,w)
     IF(.NOT.self%stitch_info%full)dot=oft_mpi_sum(dot)
@@ -1921,15 +1921,15 @@ end function cvec_dot_cvec
 !!
 !! Single pass over row blocks with a single MPI reduction, see @ref vec_mdot_vec.
 !---------------------------------------------------------------------------------
-function cvec_mdot_vec(self,a,n) result(dots)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-integer(i4), intent(in) :: n !< Length of vector array
-type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
-complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: k,nw
-logical :: copied(n)
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
-type(native_rvals_ptr) :: vals(n)
+FUNCTION cvec_mdot_vec(self,a,n) RESULT(dots)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), INTENT(in) :: n !< Length of vector array
+TYPE(oft_vector_ptr), INTENT(inout) :: a(n) !< Array of vectors for dot product [n]
+COMPLEX(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
+INTEGER(i4) :: k,nw
+LOGICAL :: copied(n)
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
+TYPE(native_rvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
   IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','cvec_mdot_vec',__FILE__)
@@ -1944,21 +1944,21 @@ DO k=1,n
   IF(copied(k))DEALLOCATE(vals(k)%v)
 END DO
 DEBUG_STACK_POP
-end function cvec_mdot_vec
+END FUNCTION cvec_mdot_vec
 !---------------------------------------------------------------------------------
 !> Dot products with an array of complex vectors
 !!
 !! Single pass over row blocks with a single MPI reduction, see @ref vec_mdot_vec.
 !---------------------------------------------------------------------------------
-function cvec_mdot_cvec(self,a,n) result(dots)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-integer(i4), intent(in) :: n !< Length of vector array
-type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
-complex(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
-integer(i4) :: k,nw
-logical :: copied(n)
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
-type(native_cvals_ptr) :: vals(n)
+FUNCTION cvec_mdot_cvec(self,a,n) RESULT(dots)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), INTENT(in) :: n !< Length of vector array
+TYPE(oft_cvector_ptr), INTENT(inout) :: a(n) !< Array of vectors for dot product [n]
+COMPLEX(c8) :: dots(n) !< \f$ \sum_i \overline{self_i} a(j)_i \f$
+INTEGER(i4) :: k,nw
+LOGICAL :: copied(n)
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
+TYPE(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
   IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','cvec_mdot_cvec',__FILE__)
@@ -1973,15 +1973,15 @@ DO k=1,n
   IF(copied(k))DEALLOCATE(vals(k)%v)
 END DO
 DEBUG_STACK_POP
-end function cvec_mdot_cvec
+END FUNCTION cvec_mdot_cvec
 !---------------------------------------------------------------------------------
 !> Sum reduction over vector
 !---------------------------------------------------------------------------------
 function cvec_sum(self) result(sum)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8) :: sum !< Sum of vector elements
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 sum=(0.d0,0.d0)
 IF(native_seam_owned(self%stitch_info,self%n,nw,w))sum=nk_owned_sum(self%n,self%v,nw,w)
@@ -1994,9 +1994,9 @@ end function cvec_sum
 function cvec_norm(self,itype) result(norm)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
-real(r8) :: norm !< Specified norm of vector
-integer(i4) :: nw
-integer(c_int8_t), pointer, contiguous, dimension(:) :: w
+REAL(r8) :: norm !< Specified norm of vector
+INTEGER(i4) :: nw
+INTEGER(c_int8_t), POINTER, CONTIGUOUS, DIMENSION(:) :: w
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
   CASE(1)
@@ -2028,11 +2028,11 @@ end subroutine cvec_stitch
 !! Returns a pointer to the vector's own storage (or to the range of block `iblock`).
 !! See @ref oft_la_base::vector_borrow_local "vector_borrow_local" for the contract.
 !---------------------------------------------------------------------------------
-subroutine cvec_borrow_local(self,array,mode,iblock)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
-integer(i4), intent(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
-integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
+SUBROUTINE cvec_borrow_local(self,array,mode,iblock)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+COMPLEX(c8), POINTER, CONTIGUOUS, INTENT(inout) :: array(:) !< Local values (output)
+INTEGER(i4), INTENT(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Sub-block to borrow (optional)
 DEBUG_STACK_PUSH
 IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvec_borrow_local',__FILE__)
@@ -2059,7 +2059,7 @@ ELSE
   END IF
 END IF
 DEBUG_STACK_POP
-end subroutine cvec_borrow_local
+END SUBROUTINE cvec_borrow_local
 !---------------------------------------------------------------------------------
 !> Release local values obtained with `borrow_local`
 !!
@@ -2067,14 +2067,14 @@ end subroutine cvec_borrow_local
 !! is performed. See @ref oft_la_base::vector_release_local "vector_release_local"
 !! for the contract.
 !---------------------------------------------------------------------------------
-subroutine cvec_release_local(self,array,mode,sync,iblock)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Borrowed local values (nullified on return)
-integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
-logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
-integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
-logical :: match
-complex(c8), pointer, contiguous, dimension(:) :: vals
+SUBROUTINE cvec_release_local(self,array,mode,sync,iblock)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+COMPLEX(c8), POINTER, CONTIGUOUS, INTENT(inout) :: array(:) !< Borrowed local values (nullified on return)
+INTEGER(i4), INTENT(in) :: mode !< Access mode used in the matching borrow
+LOGICAL, INTENT(in) :: sync !< Synchronize shared values from their owner after writing?
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Sub-block used in the matching borrow (optional)
+LOGICAL :: match
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: vals
 DEBUG_STACK_PUSH
 IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvec_release_local',__FILE__)
@@ -2116,16 +2116,16 @@ IF((.NOT.sync).AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))THEN
 END IF
 #endif
 DEBUG_STACK_POP
-end subroutine cvec_release_local
+END SUBROUTINE cvec_release_local
 !---------------------------------------------------------------------------------
 !> Copy values from a real vector
 !!
 !! self = a
 !---------------------------------------------------------------------------------
-subroutine cvec_copy_vec(self,a)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-class(oft_vector), target, intent(inout) :: a !< Source vector
-real(r8), pointer, contiguous, dimension(:) :: atmp
+SUBROUTINE cvec_copy_vec(self,a)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Source vector
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','cvec_copy_vec',__FILE__)
 NULLIFY(atmp)
@@ -2133,16 +2133,16 @@ CALL a%borrow_local(atmp,OFT_ACCESS_READ)
 CALL nk_copy(self%n,atmp,self%v)
 CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
 DEBUG_STACK_POP
-end subroutine cvec_copy_vec
+END SUBROUTINE cvec_copy_vec
 !---------------------------------------------------------------------------------
 !> Copy values from a second complex vector
 !!
 !! self = a
 !---------------------------------------------------------------------------------
-subroutine cvec_copy_cvec(self,a)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-class(oft_cvector), target, intent(inout) :: a !< Source vector
-complex(c8), pointer, contiguous, dimension(:) :: atmp
+SUBROUTINE cvec_copy_cvec(self,a)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a !< Source vector
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 DEBUG_STACK_PUSH
 IF(self%n/=a%n)CALL oft_abort('Source does not match destination size.','cvec_copy_cvec',__FILE__)
 NULLIFY(atmp)
@@ -2150,7 +2150,7 @@ CALL a%borrow_local(atmp,OFT_ACCESS_READ)
 CALL nk_copy(self%n,atmp,self%v)
 CALL a%release_local(atmp,OFT_ACCESS_READ,.FALSE.)
 DEBUG_STACK_POP
-end subroutine cvec_copy_cvec
+END SUBROUTINE cvec_copy_cvec
 !---------------------------------------------------------------------------------
 !> Add a linear combination of complex vectors
 !!
@@ -2158,14 +2158,14 @@ end subroutine cvec_copy_cvec
 !!
 !! Single pass over row blocks, see @ref vec_maxpy.
 !---------------------------------------------------------------------------------
-subroutine cvec_maxpy(self,alpha,a,n)
-class(oft_native_cvector), intent(inout) :: self !< Vector object
-integer(i4), intent(in) :: n !< Number of vectors
-complex(c8), intent(in) :: alpha(n) !< Scale factors [n]
-type(oft_cvector_ptr), intent(inout) :: a(n) !< Vectors to add [n]
-integer(i4) :: k
-logical :: copied(n)
-type(native_cvals_ptr) :: vals(n)
+SUBROUTINE cvec_maxpy(self,alpha,a,n)
+CLASS(oft_native_cvector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), INTENT(in) :: n !< Number of vectors
+COMPLEX(c8), INTENT(in) :: alpha(n) !< Scale factors [n]
+TYPE(oft_cvector_ptr), INTENT(inout) :: a(n) !< Vectors to add [n]
+INTEGER(i4) :: k
+LOGICAL :: copied(n)
+TYPE(native_cvals_ptr) :: vals(n)
 DEBUG_STACK_PUSH
 DO k=1,n
   IF(self%n/=a(k)%f%n)CALL oft_abort('Vector lengths do not match.','cvec_maxpy',__FILE__)
@@ -2176,7 +2176,7 @@ DO k=1,n
   IF(copied(k))DEALLOCATE(vals(k)%v)
 END DO
 DEBUG_STACK_POP
-end subroutine cvec_maxpy
+END SUBROUTINE cvec_maxpy
 !---------------------------------------------------------------------------------
 !> Finalize vector
 !---------------------------------------------------------------------------------
@@ -2185,7 +2185,7 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 DEBUG_STACK_PUSH
 if(associated(self%v))deallocate(self%v)
 if(associated(self%local_tmp))deallocate(self%local_tmp)
-if(associated(self%acc))deallocate(self%acc)
+IF(ASSOCIATED(self%acc))DEALLOCATE(self%acc)
 self%acc_open=.FALSE.
 self%n=-1
 self%nslice=-1
@@ -2608,15 +2608,15 @@ end subroutine mat_apply_vec
 !!
 !! b = self * a
 !---------------------------------------------------------------------------------
-subroutine mat_apply_cvec(self,a,b)
-class(oft_native_matrix), intent(inout) :: self !< Matrix object
-class(oft_cvector), target, intent(inout) :: a !< Source vector
-class(oft_cvector), intent(inout) :: b !< Result of matrix product
+SUBROUTINE mat_apply_cvec(self,a,b)
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a !< Source vector
+CLASS(oft_cvector), INTENT(inout) :: b !< Result of matrix product
 LOGICAL :: copied(2)
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_cvec',__FILE__)
-if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_cvec',__FILE__)
+IF(b%n/=self%nr)CALL oft_abort('Row mismatch','mat_apply_cvec',__FILE__)
+IF(a%n/=self%nc)CALL oft_abort('Col mismatch','mat_apply_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
 IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
@@ -2627,9 +2627,9 @@ ELSE
 END IF
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
-IF(.NOT.self%force_local)call b%stitch(1)
+IF(.NOT.self%force_local)CALL b%stitch(1)
 DEBUG_STACK_POP
-end subroutine mat_apply_cvec
+END SUBROUTINE mat_apply_cvec
 !---------------------------------------------------------------------------------
 !> Apply matrix vector product for matrix transpose
 !!
@@ -2694,7 +2694,7 @@ integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: loc(n,m)
+INTEGER(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ANY(i_inds>self%nr))call oft_abort('Index exceeds graph','mat_set_values',__FILE__)
@@ -2717,7 +2717,7 @@ real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: loc(n,m)
+INTEGER(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_add_values',__FILE__)
@@ -2731,7 +2731,7 @@ end subroutine mat_add_values
 !> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
 subroutine mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -2740,7 +2740,7 @@ real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: loc(n,m)
+INTEGER(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','mat_atomic_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','mat_atomic_add_values',__FILE__)
@@ -2804,7 +2804,7 @@ integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: ioff
+INTEGER(i4) :: ioff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
@@ -2818,13 +2818,13 @@ end subroutine mat_zero_rows
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine mat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: coff
+INTEGER(i4) :: coff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
@@ -2841,7 +2841,7 @@ end subroutine mat_zero_cols
 !! the pattern is only freed if no other matrix (or holder) uses it.
 !---------------------------------------------------------------------------------
 subroutine mat_delete(self)
-class(oft_native_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ASSOCIATED(self%M))deallocate(self%M)
@@ -2921,7 +2921,7 @@ type(eout), allocatable, dimension(:) :: lerecv,lesend
 type(emap), allocatable, dimension(:) :: lrmaps
 integer(i4) :: i,j,k,m,mm,ierr,nbetmp,nbemax,jp,jn,jk,neout,netmp,neel
 integer(i4), allocatable, dimension(:) :: isort,lsort,ind_sort
-integer(i4), allocatable, dimension(:) :: lle_tmp,ncon,nrecv,bemap
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lle_tmp,ncon,nrecv,bemap
 integer(i8) :: last
 integer(i8), allocatable, dimension(:) :: lge,sort_list
 integer(i8), pointer, dimension(:,:) :: letmp,leout
@@ -3342,8 +3342,8 @@ end subroutine native_matrix_setup_full
 !---------------------------------------------------------------------------------
 !> Update full local matrix with values from other processors
 !---------------------------------------------------------------------------------
-subroutine matrix_update_slice(self)
-class(oft_native_matrix), intent(inout) :: self !< Matrix object
+SUBROUTINE matrix_update_slice(self)
+CLASS(oft_native_matrix), INTENT(inout) :: self !< Matrix object
 IF(self%full_current)RETURN
 DEBUG_STACK_PUSH
 IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
@@ -3361,7 +3361,7 @@ CALL oft_global_stitch(self%pattern%linkage,self%Mfull,1)
 IF(self%pattern%nred>0)CALL nk_csr_identity_rows(self%pattern%nred,self%pattern%redind,self%kr,self%lc,self%Mfull)
 self%full_current=.TRUE.
 DEBUG_STACK_POP
-end subroutine matrix_update_slice
+END SUBROUTINE matrix_update_slice
 !---------------------------------------------------------------------------------
 !> Setup local submatrix from parent matrix
 !! - Create stitching structures for parent matrix if necessary
@@ -3540,16 +3540,16 @@ end FUNCTION native_cmatrix_cast
 !!
 !! b = self * a
 !---------------------------------------------------------------------------------
-subroutine cmat_apply_vec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
-class(oft_vector), target, intent(inout) :: a !< Source vector
-class(oft_cvector), intent(inout) :: b !< Result of matrix product
+SUBROUTINE cmat_apply_vec(self,a,b)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Source vector
+CLASS(oft_cvector), INTENT(inout) :: b !< Result of matrix product
 LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_vec',__FILE__)
-if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_vec',__FILE__)
+IF(b%n/=self%nr)CALL oft_abort('Row mismatch','cmat_apply_vec',__FILE__)
+IF(a%n/=self%nc)CALL oft_abort('Col mismatch','cmat_apply_vec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
 IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
@@ -3560,23 +3560,23 @@ ELSE
 END IF
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
-IF(.NOT.self%force_local)call b%stitch(1)
+IF(.NOT.self%force_local)CALL b%stitch(1)
 DEBUG_STACK_POP
-end subroutine cmat_apply_vec
+END SUBROUTINE cmat_apply_vec
 !---------------------------------------------------------------------------------
 !> Compute matrix-vector product with a complex vector
 !!
 !! b = self * a
 !---------------------------------------------------------------------------------
-subroutine cmat_apply_cvec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
-class(oft_cvector), target, intent(inout) :: a !< Source vector
-class(oft_cvector), intent(inout) :: b !< Result of matrix product
+SUBROUTINE cmat_apply_cvec(self,a,b)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a !< Source vector
+CLASS(oft_cvector), INTENT(inout) :: b !< Result of matrix product
 LOGICAL :: copied(2)
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nr)call oft_abort('Row mismatch','cmat_apply_cvec',__FILE__)
-if(a%n/=self%nc)call oft_abort('Col mismatch','cmat_apply_cvec',__FILE__)
+IF(b%n/=self%nr)CALL oft_abort('Row mismatch','cmat_apply_cvec',__FILE__)
+IF(a%n/=self%nc)CALL oft_abort('Col mismatch','cmat_apply_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
 IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
@@ -3587,24 +3587,24 @@ ELSE
 END IF
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
-IF(.NOT.self%force_local)call b%stitch(1)
+IF(.NOT.self%force_local)CALL b%stitch(1)
 DEBUG_STACK_POP
-end subroutine cmat_apply_cvec
+END SUBROUTINE cmat_apply_cvec
 !---------------------------------------------------------------------------------
 !> Apply matrix vector product for matrix transpose with a real vector
 !!
 !! b = self^T * a
 !---------------------------------------------------------------------------------
-subroutine cmat_applyt_vec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
-class(oft_vector), target, intent(inout) :: a !< Source vector
-class(oft_cvector), intent(inout) :: b !< Result of matrix product
+SUBROUTINE cmat_applyt_vec(self,a,b)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Source vector
+CLASS(oft_cvector), INTENT(inout) :: b !< Result of matrix product
 LOGICAL :: copied(2)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
 COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_vec',__FILE__)
-if(a%n/=self%nr)call oft_abort('Row mismatch','cmat_applyt_vec',__FILE__)
+IF(b%n/=self%nc)CALL oft_abort('Col mismatch','cmat_applyt_vec',__FILE__)
+IF(a%n/=self%nr)CALL oft_abort('Row mismatch','cmat_applyt_vec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
 IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
@@ -3614,23 +3614,23 @@ CALL native_csc_build(self%pattern%csc,self%kr,self%lc,self%nr,self%nc)
 CALL nk_csc_matvec(self%nc,self%pattern%csc%kc,self%pattern%csc%lr,self%pattern%csc%lm,self%M,atmp,btmp)
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
-IF(.NOT.self%force_local)call b%stitch(1)
+IF(.NOT.self%force_local)CALL b%stitch(1)
 DEBUG_STACK_POP
-end subroutine cmat_applyt_vec
+END SUBROUTINE cmat_applyt_vec
 !---------------------------------------------------------------------------------
 !> Apply matrix vector product for matrix transpose with a complex vector
 !!
 !! b = self^T * a
 !---------------------------------------------------------------------------------
-subroutine cmat_applyt_cvec(self,a,b)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
-class(oft_cvector), target, intent(inout) :: a !< Source vector
-class(oft_cvector), intent(inout) :: b !< Result of matrix product
+SUBROUTINE cmat_applyt_cvec(self,a,b)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_cvector), TARGET, INTENT(inout) :: a !< Source vector
+CLASS(oft_cvector), INTENT(inout) :: b !< Result of matrix product
 LOGICAL :: copied(2)
-complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
-if(b%n/=self%nc)call oft_abort('Col mismatch','cmat_applyt_cvec',__FILE__)
-if(a%n/=self%nr)call oft_abort('Row mismatch','cmat_applyt_cvec',__FILE__)
+IF(b%n/=self%nc)CALL oft_abort('Col mismatch','cmat_applyt_cvec',__FILE__)
+IF(a%n/=self%nr)CALL oft_abort('Row mismatch','cmat_applyt_cvec',__FILE__)
 copied(1)=native_get_vals(a,atmp)
 copied(2)=native_get_vals(b,btmp)
 IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
@@ -3640,14 +3640,14 @@ CALL native_csc_build(self%pattern%csc,self%kr,self%lc,self%nr,self%nc)
 CALL nk_csc_matvec(self%nc,self%pattern%csc%kc,self%pattern%csc%lr,self%pattern%csc%lm,self%M,atmp,btmp)
 IF(copied(1))DEALLOCATE(atmp)
 CALL native_put_vals(b,btmp,copied(2))
-IF(.NOT.self%force_local)call b%stitch(1)
+IF(.NOT.self%force_local)CALL b%stitch(1)
 DEBUG_STACK_POP
-end subroutine cmat_applyt_cvec
+END SUBROUTINE cmat_applyt_cvec
 !---------------------------------------------------------------------------------
 !> Set values of a matrix
 !---------------------------------------------------------------------------------
 subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
@@ -3655,7 +3655,7 @@ integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: loc(n,m)
+INTEGER(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ANY(i_inds>self%nr))call oft_abort('Index exceeds graph','cmat_set_values',__FILE__)
@@ -3668,17 +3668,17 @@ end subroutine cmat_set_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix
 !---------------------------------------------------------------------------------
-subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: loc(n,m)
+SUBROUTINE cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries to add [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries to add [m]
+COMPLEX(c8), INTENT(in) :: b(n,m) !< Values to set [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4), OPTIONAL, INTENT(inout) :: loc_cache(n,m) !< Cache of entry locations
+INTEGER(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','cmat_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','cmat_add_values',__FILE__)
@@ -3687,21 +3687,21 @@ CALL native_locate(self%kr,self%lc,self%map,self%j_map,n,m,i_inds,j_inds,loc,ibl
 IF(ANY(loc==0))CALL oft_abort('Entry not found!','cmat_add_values',__FILE__)
 CALL nk_add_at(n,m,loc,b,self%M)
 DEBUG_STACK_POP
-end subroutine cmat_add_values
+END SUBROUTINE cmat_add_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
 subroutine cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: n !< Number of rows in local matrix
 integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
-complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
+COMPLEX(c8), INTENT(in) :: b(n,m) !< Values to set [n,m]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
-integer(i4) :: loc(n,m)
+INTEGER(i4) :: loc(n,m)
 DEBUG_STACK_PUSH
 IF(ANY(i_inds>self%nr))CALL oft_abort('Index exceeds graph','cmat_atomic_add_values',__FILE__)
 IF(ANY(j_inds>self%nc))CALL oft_abort('Index exceeds graph','cmat_atomic_add_values',__FILE__)
@@ -3715,7 +3715,7 @@ end subroutine cmat_atomic_add_values
 !> Finish assembly of matrix and optionally extract diagonals
 !---------------------------------------------------------------------------------
 subroutine cmat_assemble(self,diag)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%pattern))CALL native_matrix_adopt_pattern(self)
@@ -3749,7 +3749,7 @@ end subroutine cmat_assemble
 !> Zero all entries in matrix
 !---------------------------------------------------------------------------------
 subroutine cmat_zero(self)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 CALL nk_set(self%nnz,(0.d0,0.d0),self%M)
@@ -3759,13 +3759,13 @@ end subroutine cmat_zero
 !> Zero all entries in the specified rows
 !---------------------------------------------------------------------------------
 subroutine cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: ioff
+INTEGER(i4) :: ioff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
@@ -3779,13 +3779,13 @@ end subroutine cmat_zero_rows
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: coff
+INTEGER(i4) :: coff
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 zero_diag=.TRUE.
@@ -3802,7 +3802,7 @@ end subroutine cmat_zero_cols
 !! the pattern is only freed if no other matrix (or holder) uses it.
 !---------------------------------------------------------------------------------
 subroutine cmat_delete(self)
-class(oft_native_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_cmatrix), INTENT(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 if(ASSOCIATED(self%M))deallocate(self%M)
@@ -3827,7 +3827,7 @@ end subroutine cmat_delete
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_apply_vec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of matrix product
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -3846,7 +3846,7 @@ end subroutine dense_mat_apply_vec
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_apply_cvec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -3865,7 +3865,7 @@ end subroutine dense_mat_apply_cvec
 !! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_applyt_vec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of matrix product
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -3884,7 +3884,7 @@ end subroutine dense_mat_applyt_vec
 !! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_mat_applyt_cvec(self,a,b)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -3900,16 +3900,16 @@ end subroutine dense_mat_applyt_cvec
 !---------------------------------------------------------------------------------
 !> Set values of a matrix
 !---------------------------------------------------------------------------------
-subroutine dense_mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
-real(r8), intent(in) :: b(n,m) !< Values [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: ioff,joff
+SUBROUTINE dense_mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries [m]
+REAL(r8), INTENT(in) :: b(n,m) !< Values [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4) :: ioff,joff
 DEBUG_STACK_PUSH
 ioff=0
 joff=0
@@ -3923,21 +3923,21 @@ IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_set_
 IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_set_values',__FILE__)
 CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,0)
 DEBUG_STACK_POP
-end subroutine dense_mat_set_values
+END SUBROUTINE dense_mat_set_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix
 !---------------------------------------------------------------------------------
-subroutine dense_mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
-real(r8), intent(in) :: b(n,m) !< Values [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
-integer(i4) :: ioff,joff
+SUBROUTINE dense_mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries [m]
+REAL(r8), INTENT(in) :: b(n,m) !< Values [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4), OPTIONAL, INTENT(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+INTEGER(i4) :: ioff,joff
 DEBUG_STACK_PUSH
 ioff=0
 joff=0
@@ -3951,21 +3951,21 @@ IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_add_
 IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_add_values',__FILE__)
 CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,1)
 DEBUG_STACK_POP
-end subroutine dense_mat_add_values
+END SUBROUTINE dense_mat_add_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
-subroutine dense_mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
-real(r8), intent(in) :: b(n,m) !< Values [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
-integer(i4) :: ioff,joff
+SUBROUTINE dense_mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries [m]
+REAL(r8), INTENT(in) :: b(n,m) !< Values [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4), OPTIONAL, INTENT(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+INTEGER(i4) :: ioff,joff
 DEBUG_STACK_PUSH
 ioff=0
 joff=0
@@ -3979,12 +3979,12 @@ IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_mat_atom
 IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_mat_atomic_add_values',__FILE__)
 CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,2)
 DEBUG_STACK_POP
-end subroutine dense_mat_atomic_add_values
+END SUBROUTINE dense_mat_atomic_add_values
 !---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !---------------------------------------------------------------------------------
 subroutine dense_mat_assemble(self,diag)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
@@ -4018,13 +4018,13 @@ end subroutine dense_mat_zero
 !> Zero all entries in the specified rows
 !---------------------------------------------------------------------------------
 subroutine dense_mat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: offset
+INTEGER(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
@@ -4037,13 +4037,13 @@ end subroutine dense_mat_zero_rows
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine dense_mat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_dense_matrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_matrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: offset
+INTEGER(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
@@ -4071,7 +4071,7 @@ end subroutine dense_mat_delete
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_apply_vec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals
@@ -4091,7 +4091,7 @@ end subroutine dense_cmat_apply_vec
 !! b = self * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_apply_cvec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -4110,9 +4110,9 @@ end subroutine dense_cmat_apply_cvec
 !! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_vec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
-class(oft_cvector), intent(inout) :: b !< Result of matrix product
+CLASS(oft_cvector), INTENT(inout) :: b !< Result of matrix product
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: bvals
 DEBUG_STACK_PUSH
@@ -4130,7 +4130,7 @@ end subroutine dense_cmat_applyt_vec
 !! b = self^T * a
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_cvec(self,a,b)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source field
 class(oft_cvector), intent(inout) :: b !< Result of matrix product
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -4146,16 +4146,16 @@ end subroutine dense_cmat_applyt_cvec
 !---------------------------------------------------------------------------------
 !> Set values of a matrix
 !---------------------------------------------------------------------------------
-subroutine dense_cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
-complex(c8), intent(in) :: b(n,m) !< Values [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4) :: ioff,joff
+SUBROUTINE dense_cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries [m]
+COMPLEX(c8), INTENT(in) :: b(n,m) !< Values [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4) :: ioff,joff
 DEBUG_STACK_PUSH
 ioff=0
 joff=0
@@ -4169,21 +4169,21 @@ IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_set
 IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_set_values',__FILE__)
 CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,0)
 DEBUG_STACK_POP
-end subroutine dense_cmat_set_values
+END SUBROUTINE dense_cmat_set_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix
 !---------------------------------------------------------------------------------
-subroutine dense_cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
-complex(c8), intent(in) :: b(n,m) !< Values [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
-integer(i4) :: ioff,joff
+SUBROUTINE dense_cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries [m]
+COMPLEX(c8), INTENT(in) :: b(n,m) !< Values [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4), OPTIONAL, INTENT(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+INTEGER(i4) :: ioff,joff
 DEBUG_STACK_PUSH
 ioff=0
 joff=0
@@ -4197,21 +4197,21 @@ IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_add
 IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_add_values',__FILE__)
 CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,1)
 DEBUG_STACK_POP
-end subroutine dense_cmat_add_values
+END SUBROUTINE dense_cmat_add_values
 !---------------------------------------------------------------------------------
 !> Add values to a matrix atomically (for concurrent assembly)
 !---------------------------------------------------------------------------------
-subroutine dense_cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
-integer(i4), intent(in) :: i_inds(n) !< Row indices of entries [n]
-integer(i4), intent(in) :: j_inds(m) !< Column indices of entries [m]
-complex(c8), intent(in) :: b(n,m) !< Values [n,m]
-integer(i4), optional, intent(in) :: iblock !< Row block (optional)
-integer(i4), optional, intent(in) :: jblock !< Column block (optional)
-integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
-integer(i4) :: ioff,joff
+SUBROUTINE dense_cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
+INTEGER(i4), INTENT(in) :: n !< Number of rows in local matrix
+INTEGER(i4), INTENT(in) :: m !< Number of columns in local matrix
+INTEGER(i4), INTENT(in) :: i_inds(n) !< Row indices of entries [n]
+INTEGER(i4), INTENT(in) :: j_inds(m) !< Column indices of entries [m]
+COMPLEX(c8), INTENT(in) :: b(n,m) !< Values [n,m]
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Row block (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: jblock !< Column block (optional)
+INTEGER(i4), OPTIONAL, INTENT(inout) :: loc_cache(n,m) !< Cache of entry locations (unused)
+INTEGER(i4) :: ioff,joff
 DEBUG_STACK_PUSH
 ioff=0
 joff=0
@@ -4225,12 +4225,12 @@ IF(ANY(ioff+i_inds>self%nr))CALL oft_abort('Index exceeds graph','dense_cmat_ato
 IF(ANY(joff+j_inds>self%nc))CALL oft_abort('Index exceeds graph','dense_cmat_atomic_add_values',__FILE__)
 CALL nk_dense_insert(self%nr,self%nc,self%M,n,m,i_inds,j_inds,ioff,joff,b,2)
 DEBUG_STACK_POP
-end subroutine dense_cmat_atomic_add_values
+END SUBROUTINE dense_cmat_atomic_add_values
 !---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_assemble(self,diag)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
@@ -4264,13 +4264,13 @@ end subroutine dense_cmat_zero
 !> Zero all entries in the specified rows
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: offset
+INTEGER(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)
@@ -4283,13 +4283,13 @@ end subroutine dense_cmat_zero_rows
 !> Zero all entries in the specified columns
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
-class(oft_native_dense_cmatrix), intent(inout) :: self !< Matrix object
+CLASS(oft_native_dense_cmatrix), INTENT(inout) :: self !< Matrix object
 integer(i4), intent(in) :: ncols !< Number of columns to zero
 integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
-integer(i4) :: offset
+INTEGER(i4) :: offset
 DEBUG_STACK_PUSH
 zero_diag=.TRUE.
 IF(PRESENT(keep_diag))zero_diag=(.NOT.keep_diag)

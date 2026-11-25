@@ -421,7 +421,7 @@ class(oft_vector), intent(inout) :: b !< Result of matrix product
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_real',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_real',__FILE__)
-call b%copy(a)
+CALL b%copy(a)
 call b%mult(self%D)
 DEBUG_STACK_POP
 end subroutine diagmat_apply_real
@@ -437,7 +437,7 @@ class(oft_cvector), intent(inout) :: b !<
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_comp',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_comp',__FILE__)
-call b%copy(a)
+CALL b%copy(a)
 call b%mult(self%D)
 DEBUG_STACK_POP
 end subroutine diagmat_apply_comp

@@ -3160,7 +3160,7 @@ real(r8), allocatable, dimension(:,:) :: vpin_loc,lag_loc
 real(r8), target, allocatable, dimension(:) :: lag_rop
 real(r8), target, allocatable, dimension(:,:) :: lag_gop,hgrad_rop,hcurl_rop,hcurl_cop
 real(r8), pointer, contiguous, dimension(:) :: jpin,npin
-real(r8), pointer, contiguous, dimension(:) :: bcout,bgout,nout,tout,teout,j2out,n2out,vacc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bcout,bgout,nout,tout,teout,j2out,n2out,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vpin,vout
 real(r8), pointer, dimension(:) :: vtmp
 logical :: curved,back_step
@@ -3791,7 +3791,7 @@ real(r8), allocatable :: bc_loc(:),bg_loc(:),te_loc(:),lag_loc(:,:)
 integer(i4) :: i,ii,ip,j,m,jr,jc,jp,ptind(2)
 integer(i4), allocatable :: j_lag(:),j_hgrad(:),j_hcurl(:)
 real(r8), target, allocatable :: lag_rop(:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
-real(r8), pointer, contiguous, dimension(:) :: neqin,bcout,bgout,nout,tout,teout,vacc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: neqin,bcout,bgout,nout,tout,teout,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vout
 real(r8), pointer, dimension(:) :: vtmp
 real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,cgop(3,6),fulltmp(40)

@@ -1315,19 +1315,19 @@ subroutine zerob_apply(self,a)
 class(oft_gs_zerob), intent(inout) :: self !< BC object
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer, contiguous, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 DEBUG_STACK_PUSH
 NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
-call a%borrow_local(vloc,OFT_ACCESS_READWRITE)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do
 do i=1,self%fe_rep%ne
   IF(self%node_flag(i))vloc(i)=0.d0
 end do
 !---
-call a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.TRUE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
