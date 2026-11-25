@@ -254,11 +254,8 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
         mfnk = True
     nprocs = mpi_ranks(nbase, nlevels)
     if nparts > 1:
-        # xmhd: total partitions per FE level (divided across processes); xmhd_lag: partitions per process
-        if representation == 'hcurl':
-            rep_options += " xmhd_nparts={0}\n".format(','.join([str(nparts*nprocs)]*(nlevels+order-1)))
-        else:
-            rep_options += " xmhd_nparts={0}\n".format(nparts)
+        # Total partitions per FE level, divided across processes
+        rep_options += " xmhd_nparts={0}\n".format(','.join([str(nparts*nprocs)]*(nlevels+order-1)))
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(SOUND_TEMPLATE.format(nbase=nbase, nlevels=nlevels, order=order, minlev=minlev, nu_mhd=nu_mhd,
