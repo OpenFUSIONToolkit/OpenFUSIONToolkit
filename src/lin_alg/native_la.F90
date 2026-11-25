@@ -1098,7 +1098,9 @@ nbad=0
 dmax=0.d0
 DO i=1,seam%nbe
   j=seam%lbe(i)
-  IF(ABS(tmp(j)-vals(j))>1.d-12*MAX(ABS(tmp(j)),ABS(vals(j))))THEN
+  !---A NaN on only one side compares false above, so check NaN mismatches separately
+  IF((ABS(tmp(j)-vals(j))>1.d-12*MAX(ABS(tmp(j)),ABS(vals(j)))) &
+    .OR.(IEEE_IS_NAN(tmp(j)).NEQV.IEEE_IS_NAN(vals(j))))THEN
     nbad=nbad+1
     dmax=MAX(dmax,ABS(tmp(j)-vals(j)))
   END IF
