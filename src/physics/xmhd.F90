@@ -38,7 +38,7 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
-  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat
+  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ
 USE oft_deriv_matrices, ONLY: oft_mf_matrix, oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -2621,7 +2621,7 @@ end subroutine xmhd_build_ops
 subroutine xmhd_alloc_ops
 integer(i4) :: i,j,level,levelin
 integer(i4), ALLOCATABLE :: j_lag(:)
-REAL(r8), POINTER :: node_flag(:)
+REAL(r8), POINTER, CONTIGUOUS :: node_flag(:)
 CLASS(oft_vector), POINTER :: vectmp
 type(xmhd_ops), pointer :: ops
 DEBUG_STACK_PUSH
@@ -2760,7 +2760,7 @@ DO level=levelin,xmhd_minlev,-1
   oft_xmhd_ops%solid_node=.FALSE.
   CALL xmhd_ML_lagrange%vec_create(vectmp)
   CALL vectmp%set(0.d0)
-  CALL vectmp%get_local(node_flag)
+  CALL vectmp%borrow_local(node_flag,OFT_ACCESS_ACCUMULATE)
   !
   ALLOCATE(j_lag(oft_lagrange%nce))
   DO i=1,mesh%nc
@@ -2770,13 +2770,14 @@ DO level=levelin,xmhd_minlev,-1
     END IF
   END DO
   DEALLOCATE(j_lag)
-  CALL vectmp%restore_local(node_flag,add=.TRUE.)
-  CALL vectmp%get_local(node_flag)
+  CALL vectmp%release_local(node_flag,OFT_ACCESS_ACCUMULATE,.TRUE.) ! Flags summed across processes
+  CALL vectmp%borrow_local(node_flag,OFT_ACCESS_READ)
   DO i=1,oft_lagrange%ne
     IF(node_flag(i)>0.d0)oft_xmhd_ops%solid_node(i)=.TRUE.
   END DO
+  CALL vectmp%release_local(node_flag,OFT_ACCESS_READ,.FALSE.)
   CALL vectmp%delete
-  DEALLOCATE(node_flag,vectmp)
+  DEALLOCATE(vectmp)
   CALL xmhd_set_bc()
 END DO
 call xmhd_set_level(levelin)
@@ -3159,7 +3160,7 @@ real(r8), allocatable, dimension(:,:) :: vpin_loc,lag_loc
 real(r8), target, allocatable, dimension(:) :: lag_rop
 real(r8), target, allocatable, dimension(:,:) :: lag_gop,hgrad_rop,hcurl_rop,hcurl_cop
 real(r8), pointer, contiguous, dimension(:) :: jpin,npin
-real(r8), pointer, contiguous, dimension(:) :: bcout,bgout,nout,tout,teout,j2out,n2out
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bcout,bgout,nout,tout,teout,j2out,n2out,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vpin,vout
 real(r8), pointer, dimension(:) :: vtmp
 logical :: curved,back_step
@@ -3200,21 +3201,16 @@ END IF
 !------------------------------------------------------------------------------
 NULLIFY(bcout,bgout,nout,tout,teout,j2out,n2out)
 CALL b%set(0.d0)
-CALL b%get_local(bcout,1)
-CALL b%get_local(bgout,2)
+CALL b%borrow_local(bcout,OFT_ACCESS_ACCUMULATE,1)
+CALL b%borrow_local(bgout,OFT_ACCESS_ACCUMULATE,2)
 ALLOCATE(vout(oft_lagrange%ne,3))
-vtmp=>vout(:,1)
-CALL b%get_local(vtmp,3)
-vtmp=>vout(:,2)
-CALL b%get_local(vtmp,4)
-vtmp=>vout(:,3)
-CALL b%get_local(vtmp,5)
+vout=0.d0
 CALL lagrange_vector_unpack(oft_lagrange,vout,.TRUE.)
-CALL b%get_local(nout,6)
-CALL b%get_local(tout,7)
-IF(xmhd_two_temp)CALL b%get_local(teout,te_ind)
-IF(j2_ind>0)CALL b%get_local(j2out,j2_ind)
-IF(n2_ind>0)CALL b%get_local(n2out,n2_ind)
+CALL b%borrow_local(nout,OFT_ACCESS_ACCUMULATE,6)
+CALL b%borrow_local(tout,OFT_ACCESS_ACCUMULATE,7)
+IF(xmhd_two_temp)CALL b%borrow_local(teout,OFT_ACCESS_ACCUMULATE,te_ind)
+IF(j2_ind>0)CALL b%borrow_local(j2out,OFT_ACCESS_ACCUMULATE,j2_ind)
+IF(n2_ind>0)CALL b%borrow_local(n2out,OFT_ACCESS_ACCUMULATE,n2_ind)
 !---Zero diagnostic values
 diag_vals=0.d0
 ptind=(/1,2/)
@@ -3748,19 +3744,18 @@ CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),(ABS(oft_x
 ! Set result from local field values, summing contributions across seams
 !------------------------------------------------------------------------------
 CALL lagrange_vector_repack(oft_lagrange,vout,.TRUE.)
-CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,1)
-CALL b%restore_local(vtmp,3,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,2)
-CALL b%restore_local(vtmp,4,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,3)
-CALL b%restore_local(vtmp,5,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(nout,6,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(tout,7,add=.TRUE.,wait=(7/=xmhd_rep%nfields))
-IF(xmhd_two_temp)CALL b%restore_local(teout,te_ind,add=.TRUE.,wait=(te_ind/=xmhd_rep%nfields))
-IF(n2_ind>0)CALL b%restore_local(n2out,n2_ind,add=.TRUE.,wait=(n2_ind/=xmhd_rep%nfields))
-IF(j2_ind>0)CALL b%restore_local(j2out,j2_ind,add=.TRUE.,wait=(j2_ind/=xmhd_rep%nfields))
+DO j=1,3
+  CALL b%borrow_local(vacc,OFT_ACCESS_ACCUMULATE,2+j)
+  vacc=vout(:,j)
+  CALL b%release_local(vacc,OFT_ACCESS_ACCUMULATE,.FALSE.,2+j)
+END DO
+CALL b%release_local(bcout,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL b%release_local(bgout,OFT_ACCESS_ACCUMULATE,.FALSE.,2)
+CALL b%release_local(nout,OFT_ACCESS_ACCUMULATE,.FALSE.,6)
+IF(xmhd_two_temp)CALL b%release_local(teout,OFT_ACCESS_ACCUMULATE,.FALSE.,te_ind)
+IF(n2_ind>0)CALL b%release_local(n2out,OFT_ACCESS_ACCUMULATE,.FALSE.,n2_ind)
+IF(j2_ind>0)CALL b%release_local(j2out,OFT_ACCESS_ACCUMULATE,.FALSE.,j2_ind)
+CALL b%release_local(tout,OFT_ACCESS_ACCUMULATE,.TRUE.,7) ! Completes accumulation (sum across seams)
 !---Pack diagnostics
 IF(self%dt<0.d0)THEN
   diag_vals(3:4)=diag_vals(3:4)/(2*pi)
@@ -3769,10 +3764,7 @@ END IF
 !------------------------------------------------------------------------------
 ! Destroy worker arrays
 !------------------------------------------------------------------------------
-DEALLOCATE(bcout,bgout,vout,nout,tout)
-IF(xmhd_two_temp)DEALLOCATE(teout)
-IF(n2_ind>0)DEALLOCATE(n2out)
-IF(j2_ind>0)DEALLOCATE(j2out)
+DEALLOCATE(vout)
 IF(back_step)THEN
   DEALLOCATE(jpin,npin)
   IF(xmhd_upwind)DEALLOCATE(vpin)
@@ -3799,7 +3791,7 @@ real(r8), allocatable :: bc_loc(:),bg_loc(:),te_loc(:),lag_loc(:,:)
 integer(i4) :: i,ii,ip,j,m,jr,jc,jp,ptind(2)
 integer(i4), allocatable :: j_lag(:),j_hgrad(:),j_hcurl(:)
 real(r8), target, allocatable :: lag_rop(:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
-real(r8), pointer, contiguous, dimension(:) :: neqin,bcout,bgout,nout,tout,teout
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: neqin,bcout,bgout,nout,tout,teout,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vout
 real(r8), pointer, dimension(:) :: vtmp
 real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,cgop(3,6),fulltmp(40)
@@ -3828,19 +3820,14 @@ END IF
 !------------------------------------------------------------------------------
 NULLIFY(bcout,bgout,nout,tout,teout)
 CALL b%set(0.d0)
-CALL b%get_local(bcout,1)
-CALL b%get_local(bgout,2)
+CALL b%borrow_local(bcout,OFT_ACCESS_ACCUMULATE,1)
+CALL b%borrow_local(bgout,OFT_ACCESS_ACCUMULATE,2)
 ALLOCATE(vout(oft_lagrange%ne,3))
-vtmp=>vout(:,1)
-CALL b%get_local(vtmp,3)
-vtmp=>vout(:,2)
-CALL b%get_local(vtmp,4)
-vtmp=>vout(:,3)
-CALL b%get_local(vtmp,5)
+vout=0.d0
 CALL lagrange_vector_unpack(oft_lagrange,vout,.TRUE.)
-CALL b%get_local(nout,6)
-CALL b%get_local(tout,7)
-IF(xmhd_two_temp)CALL b%get_local(teout,te_ind)
+CALL b%borrow_local(nout,OFT_ACCESS_ACCUMULATE,6)
+CALL b%borrow_local(tout,OFT_ACCESS_ACCUMULATE,7)
+IF(xmhd_two_temp)CALL b%borrow_local(teout,OFT_ACCESS_ACCUMULATE,te_ind)
 !---Zero diagnostic values
 diag_vals=0.d0
 ptind=(/1,2/)
@@ -4012,21 +3999,16 @@ CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),(ABS(oft_x
 ! Set result from local field values, summing contributions across seams
 !------------------------------------------------------------------------------
 CALL lagrange_vector_repack(oft_lagrange,vout,.TRUE.)
-CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,1)
-CALL b%restore_local(vtmp,3,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,2)
-CALL b%restore_local(vtmp,4,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,3)
-CALL b%restore_local(vtmp,5,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(nout,6,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(tout,7,add=.TRUE.,wait=(7/=xmhd_rep%nfields))
-IF(xmhd_two_temp)CALL b%restore_local(teout,te_ind,add=.TRUE.,wait=(te_ind/=xmhd_rep%nfields))
-tout=0.d0
-IF(n2_ind>0)CALL b%restore_local(tout,n2_ind,add=.TRUE.,wait=(n2_ind/=xmhd_rep%nfields))
-bcout=0.d0
-IF(j2_ind>0)CALL b%restore_local(bcout,j2_ind,add=.TRUE.,wait=(j2_ind/=xmhd_rep%nfields))
+DO j=1,3
+  CALL b%borrow_local(vacc,OFT_ACCESS_ACCUMULATE,2+j)
+  vacc=vout(:,j)
+  CALL b%release_local(vacc,OFT_ACCESS_ACCUMULATE,.FALSE.,2+j)
+END DO
+CALL b%release_local(bcout,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL b%release_local(bgout,OFT_ACCESS_ACCUMULATE,.FALSE.,2)
+CALL b%release_local(nout,OFT_ACCESS_ACCUMULATE,.FALSE.,6)
+IF(xmhd_two_temp)CALL b%release_local(teout,OFT_ACCESS_ACCUMULATE,.FALSE.,te_ind)
+CALL b%release_local(tout,OFT_ACCESS_ACCUMULATE,.TRUE.,7) ! Completes accumulation (sum across seams)
 !---Pack diagnostics
 diag_vals(2)=diag_vals(2)
 diag_vals(3:4)=diag_vals(3:4)/(2*pi)
@@ -4035,9 +4017,8 @@ self%diag_vals=oft_mpi_sum(diag_vals,7)
 !------------------------------------------------------------------------------
 ! Destroy worker arrays
 !------------------------------------------------------------------------------
-DEALLOCATE(bcout,bgout,vout,nout,tout)
+DEALLOCATE(vout)
 IF(ASSOCIATED(neqin))DEALLOCATE(neqin)
-IF(xmhd_two_temp)DEALLOCATE(teout)
 CALL full_interp%delete
 DEBUG_STACK_POP
 end subroutine xmhd_massmatrix_apply

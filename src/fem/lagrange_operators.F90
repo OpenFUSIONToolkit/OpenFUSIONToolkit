@@ -28,7 +28,8 @@ USE oft_sort, ONLY: sort_array, search_array
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr, oft_local_mat
+  oft_graph, oft_graph_ptr, oft_local_mat, &
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
@@ -512,11 +513,11 @@ subroutine zerob_apply(self,a)
 class(oft_lag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,self%ML_lag_rep%current_level%nbe
@@ -524,8 +525,8 @@ do i=1,self%ML_lag_rep%current_level%nbe
   if(self%ML_lag_rep%current_level%global%gbe(j))vloc(j)=0.d0
 end do
 !---
-call a%restore_local(vloc)
-deallocate(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -544,19 +545,19 @@ end subroutine zerob_delete
 subroutine zerogrnd_apply(self,a)
 class(oft_lag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER ::lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zerogrnd_apply",__FILE__)
 !---Zero boundary values
 NULLIFY(aloc)
-CALL a%get_local(aloc)
+CALL a%borrow_local(aloc,OFT_ACCESS_READWRITE)
 !---
 if(lag_rep%mesh%igrnd(1)>0)aloc(lag_rep%mesh%igrnd(1))=0.d0
 if(lag_rep%mesh%igrnd(2)>0)aloc(lag_rep%mesh%igrnd(2))=0.d0
-CALL a%restore_local(aloc)
-DEALLOCATE(aloc)
+!---The ground node is set on every process that holds it, so no sync is needed
+CALL a%release_local(aloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !------------------------------------------------------------------------------
@@ -566,28 +567,30 @@ subroutine vzerob_apply(self,a)
 class(oft_vlag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer :: vloc(:,:),vtmp(:)
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vx,vy,vz
 CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
-ALLOCATE(vloc(3,a%n))
-DO i=1,3
-  vtmp=>vloc(i,:)
-  call a%get_local(vtmp,i)
-END DO
+NULLIFY(vx,vy,vz)
+CALL a%borrow_local(vx,OFT_ACCESS_READWRITE,1)
+CALL a%borrow_local(vy,OFT_ACCESS_READWRITE,2)
+CALL a%borrow_local(vz,OFT_ACCESS_READWRITE,3)
 !---Zero boundary values
 lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
-  if(lag_rep%global%gbe(j))vloc(:,j)=0.d0
+  IF(lag_rep%global%gbe(j))THEN
+    vx(j)=0.d0
+    vy(j)=0.d0
+    vz(j)=0.d0
+  END IF
 end do
 !---
-DO i=1,3
-  vtmp=>vloc(i,:)
-  call a%restore_local(vtmp,i,wait=(i/=3))
-END DO
-DEALLOCATE(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(vx,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
+CALL a%release_local(vy,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+CALL a%release_local(vz,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=3)
 DEBUG_STACK_POP
 end subroutine vzerob_apply
 !------------------------------------------------------------------------------
@@ -1170,7 +1173,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 real(r8) :: bcc(1),vol,det,goptmp(3,4)
-real(r8), pointer :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: rop(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
@@ -1179,7 +1182,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1201,8 +1204,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project
 !------------------------------------------------------------------------------
@@ -1218,7 +1220,7 @@ class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,vol,goptmp(3,4)
-real(r8), pointer :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: gop(:,:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1229,7 +1231,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,gop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1251,8 +1253,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,gop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project_div
 !------------------------------------------------------------------------------
@@ -1441,7 +1442,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,goptmp(3,4),vol
 real(r8), pointer, dimension(:,:) :: vectmp
-real(r8), pointer, dimension(:) :: vtmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vtmp
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1452,12 +1453,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 ALLOCATE(vectmp(3,lag_rep%ne))
 call x%set(0.d0)
-vtmp=>vectmp(1,:)
-CALL x%get_local(vtmp,1)
-vtmp=>vectmp(2,:)
-CALL x%get_local(vtmp,2)
-vtmp=>vectmp(3,:)
-CALL x%get_local(vtmp,3)
+vectmp=0.d0
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1484,12 +1480,11 @@ end do
 deallocate(j,rop)
 !$omp end parallel
 CALL lagrange_vector_repack(lag_rep,vectmp)
-vtmp=>vectmp(1,:)
-CALL x%restore_local(vtmp,1,add=.TRUE.,wait=.TRUE.)
-vtmp=>vectmp(2,:)
-CALL x%restore_local(vtmp,2,add=.TRUE.,wait=.TRUE.)
-vtmp=>vectmp(3,:)
-CALL x%restore_local(vtmp,3,add=.TRUE.)
+DO i=1,3
+  CALL x%borrow_local(vtmp,OFT_ACCESS_ACCUMULATE,i)
+  vtmp=vectmp(i,:)
+  CALL x%release_local(vtmp,OFT_ACCESS_ACCUMULATE,(i==3),i) ! Last block completes accumulation
+END DO
 deallocate(vectmp)
 DEBUG_STACK_POP
 end subroutine oft_lag_vproject
@@ -2101,17 +2096,19 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
-real(r8), pointer, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_READ)
+CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE)
 !$omp parallel do
 do i=1,afine%n
   array_f(i)=array_c(lptmp(i))
 end do
-CALL afine%restore_local(array_f)
-DEALLOCATE(array_c,array_f)
+!---Keep owner sync: base-level values are computed independently on each process
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine lag_base_pop
 !------------------------------------------------------------------------------
@@ -2123,13 +2120,15 @@ class(oft_vector), intent(inout) :: afine !< Needs docs
 class(oft_vector), intent(inout) :: acors !< Needs docs
 integer(i4), pointer :: lptmp(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias,array_c,array_f
+REAL(r8), POINTER, DIMENSION(:) :: alias
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
 DEBUG_STACK_PUSH
 !---
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_WRITE)
+CALL afine%borrow_local(array_f,OFT_ACCESS_READ)
 lag_fine=>self%ML_FE_rep%levels(self%ML_FE_rep%level+1)%fe
 !---
 allocate(alias(acors%n))
@@ -2147,8 +2146,9 @@ do i=1,lag_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%restore_local(array_c)
-deallocate(alias,array_c,array_f)
+CALL acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+DEALLOCATE(alias)
 DEBUG_STACK_POP
 end subroutine lag_base_push
 !------------------------------------------------------------------------------

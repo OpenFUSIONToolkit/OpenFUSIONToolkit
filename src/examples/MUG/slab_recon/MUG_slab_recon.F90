@@ -324,8 +324,10 @@ minv%A=>mop ! Set matrix to be solved
 minv%its=-2 ! Set convergence type (in this case "full" CG convergence)
 ! CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 CALL create_bjacobi_pre(minv%pre,-1)
-DEALLOCATE(minv%pre%pre)
-CALL create_ilu_pre(minv%pre%pre)
+IF(ASSOCIATED(minv%pre%pre))THEN ! Native only (PETSc block-Jacobi uses its own sub-solver)
+  DEALLOCATE(minv%pre%pre)
+  CALL create_ilu_pre(minv%pre%pre)
+END IF
 !---Create fields for solver
 CALL xmhd_ML_hcurl_grad%vec_create(u)
 CALL xmhd_ML_hcurl_grad%vec_create(v)
@@ -353,8 +355,10 @@ CALL u%delete ! Destroy LHS vector
 CALL v%delete ! Destroy RHS vector
 CALL mop%delete ! Destroy mass matrix
 DEALLOCATE(u,v,mop) ! Deallocate objects
-CALL minv%pre%pre%delete ! Destroy preconditioner
-DEALLOCATE(minv%pre%pre)
+IF(ASSOCIATED(minv%pre%pre))THEN
+  CALL minv%pre%pre%delete ! Destroy preconditioner
+  DEALLOCATE(minv%pre%pre)
+END IF
 CALL minv%pre%delete ! Destroy preconditioner
 DEALLOCATE(minv%pre)
 CALL minv%delete ! Destroy solver

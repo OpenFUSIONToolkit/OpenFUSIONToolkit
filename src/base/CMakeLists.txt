@@ -7,6 +7,7 @@ set( BASE_OBJS
   oft_base.F90
   oft_sort.F90
   oft_io.F90
+  oft_scatter.F90
   oft_stitching.F90
   oft_xml.F90
 )
