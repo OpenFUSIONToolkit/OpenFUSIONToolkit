@@ -26,7 +26,7 @@ USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_pt
   c_associated
 USE oft_local
 USE oft_base
-USE oft_la_base, ONLY: oft_vector, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_graph
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_la, ONLY: oft_native_matrix, oft_native_submatrix, native_matrix_cast
 IMPLICIT NONE
@@ -235,6 +235,9 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
 #ifdef HAVE_MKL
   TYPE(pardiso_struc) :: pardiso_struct !< MKL/PARDISO solver information
 #endif
+  !> Submatrix of locally-owned rows/columns, factored in place of the full local matrix
+  !! when it contains redundant rows from periodicity (see @ref lu_use_slice)
+  TYPE(oft_native_submatrix), POINTER :: A_slice => NULL()
 CONTAINS
   !> Solve linear system
   PROCEDURE :: apply => ilusolver_apply
@@ -548,6 +551,7 @@ LOGICAL :: graph_changed
 REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
 CLASS(oft_native_matrix), POINTER :: A_native
+CLASS(oft_matrix), POINTER :: A_tmp
 TYPE(oft_timer) :: mytimer
 TYPE(oft_graph) :: csr_graph
 TYPE(oft_graph) :: csc_graph
@@ -574,24 +578,19 @@ IF(self%dist%active)THEN
   RETURN
 END IF
 !---Factor only locally-owned rows/columns if the matrix contains redundant rows (periodicity).
-!---Matrix values may have been modified directly (without resetting `full_current`), so the
-!---stitched matrix is always recomputed before (re)building the submatrix for a factorization.
+!---The solver package state refers to the submatrix's arrays, so a new non-zero pattern (or a
+!---replaced matrix) requires the solver to be reinitialized with a rebuilt submatrix.
+IF(self%initialized.AND.ASSOCIATED(self%A_slice))THEN
+  IF((self%refactor.AND.self%update_graph).OR.(.NOT.ASSOCIATED(self%A_slice%parent,A_native)))THEN
+    A_tmp=>self%A
+    CALL self%delete
+    self%A=>A_tmp
+  END IF
+END IF
 IF(.NOT.self%initialized)THEN
-  IF(lu_use_slice(A_native,g))THEN
-    ALLOCATE(self%A_slice)
-    A_native%full_current=.FALSE.
-    CALL self%A_slice%setup(A_native,u)
-  END IF
-ELSE IF(ASSOCIATED(self%A_slice))THEN
-  IF(.NOT.ASSOCIATED(self%A_slice%parent,A_native))THEN
-    !---Matrix has been replaced, rebuild submatrix
-    CALL self%A_slice%delete
-    A_native%full_current=.FALSE.
-    CALL self%A_slice%setup(A_native,u)
-  ELSE IF(self%refactor)THEN
-    A_native%full_current=.FALSE.
-    CALL self%A_slice%update_slice
-  END IF
+  IF(lu_use_slice(A_native,g))CALL lu_slice_setup(self%A_slice,A_native,u)
+ELSE IF(ASSOCIATED(self%A_slice).AND.self%refactor)THEN
+  CALL lu_slice_update(self%A_slice)
 END IF
 IF(ASSOCIATED(self%A_slice))THEN
   IF(self%nrhs>1)CALL oft_abort('Multiple RHS not supported with redundant (periodic) rows', &
@@ -1215,6 +1214,31 @@ DO i=1,A%ni
   IF(A%i_map(i)%per)use_slice=.TRUE.
 END DO
 END FUNCTION lu_use_slice
+!------------------------------------------------------------------------------
+!> Create the locally-owned submatrix of a matrix with redundant (periodic) rows
+!!
+!! Matrix values may have been modified directly (without resetting `full_current`), so
+!! the stitched matrix is always recomputed.
+!------------------------------------------------------------------------------
+SUBROUTINE lu_slice_setup(A_slice,A,u)
+TYPE(oft_native_submatrix), POINTER, INTENT(inout) :: A_slice !< Submatrix (allocated here)
+CLASS(oft_native_matrix), INTENT(inout) :: A !< Parent matrix
+CLASS(oft_vector), INTENT(inout) :: u !< Vector in the row space of `A`
+ALLOCATE(A_slice)
+A%full_current=.FALSE.
+CALL A_slice%setup(A,u)
+END SUBROUTINE lu_slice_setup
+!------------------------------------------------------------------------------
+!> Update the values of a locally-owned submatrix from its parent matrix
+!!
+!! Matrix values may have been modified directly (without resetting `full_current`), so
+!! the stitched matrix is always recomputed.
+!------------------------------------------------------------------------------
+SUBROUTINE lu_slice_update(A_slice)
+TYPE(oft_native_submatrix), INTENT(inout) :: A_slice !< Submatrix to update
+A_slice%parent%full_current=.FALSE.
+CALL A_slice%update_slice
+END SUBROUTINE lu_slice_update
 !------------------------------------------------------------------------------
 !> Solve the full distributed linear system using a parallel direct solver
 !!
@@ -1917,6 +1941,7 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: mat_vals
 REAL(r8), POINTER, DIMENSION(:) :: csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
 CLASS(oft_native_matrix), POINTER :: A_native
+CLASS(oft_matrix), POINTER :: A_tmp
 TYPE(oft_timer) :: mytimer
 TYPE(oft_graph) :: csr_graph
 TYPE(oft_graph) :: csc_graph
@@ -1925,6 +1950,25 @@ IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
 IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'ilusolver_apply',__FILE__)
+!---Factor only locally-owned rows/columns if the matrix contains redundant rows (periodicity),
+!---reinitializing for a new non-zero pattern or a replaced matrix (see @ref lusolver_apply)
+IF(self%initialized.AND.ASSOCIATED(self%A_slice))THEN
+  IF((self%refactor.AND.self%update_graph).OR.(.NOT.ASSOCIATED(self%A_slice%parent,A_native)))THEN
+    A_tmp=>self%A
+    CALL self%delete
+    self%A=>A_tmp
+  END IF
+END IF
+IF(.NOT.self%initialized)THEN
+  IF(lu_use_slice(A_native,g))CALL lu_slice_setup(self%A_slice,A_native,u)
+ELSE IF(ASSOCIATED(self%A_slice).AND.self%refactor)THEN
+  CALL lu_slice_update(self%A_slice)
+END IF
+IF(ASSOCIATED(self%A_slice))THEN
+  IF(self%nrhs>1)CALL oft_abort('Multiple RHS not supported with redundant (periodic) rows', &
+    'ilusolver_apply',__FILE__)
+  A_native=>self%A_slice
+END IF
 IF(ASSOCIATED(A_native%Mfull))THEN
   mat_vals=>A_native%Mfull
 ELSE
@@ -1957,10 +2001,14 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---Call factorization
-ALLOCATE(vals(u%n,self%nrhs))
+ALLOCATE(vals(A_native%nr,self%nrhs))
 nrhs=1
 vtmp=>vals(:,1)
-CALL g%get_local(vtmp)
+IF(ASSOCIATED(self%A_slice))THEN
+  CALL g%get_slice(vtmp)
+ELSE
+  CALL g%get_local(vtmp)
+END IF
 IF(self%nrhs>1)THEN
   nrhs=self%nrhs
   DO i=2,self%nrhs
@@ -2042,7 +2090,11 @@ SELECT CASE(TRIM(self%package))
   CASE DEFAULT
     CALL oft_abort('Unknown factorization package','ilusolver_apply',__FILE__)
 END SELECT
-CALL u%restore_local(vals(:,1))
+IF(ASSOCIATED(self%A_slice))THEN
+  CALL u%restore_slice(vals(:,1))
+ELSE
+  CALL u%restore_local(vals(:,1))
+END IF
 IF(self%nrhs>1)THEN
   DO i=2,self%nrhs
     self%sec_rhs(:,i-1) = vals(:,i)
@@ -2134,6 +2186,10 @@ SELECT CASE(TRIM(self%package))
     END IF
 END SELECT
 DEALLOCATE(ivals,rvals)
+IF(ASSOCIATED(self%A_slice))THEN
+  CALL self%A_slice%delete
+  DEALLOCATE(self%A_slice)
+END IF
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine ilusolver_delete
