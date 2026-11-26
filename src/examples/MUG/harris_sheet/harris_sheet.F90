@@ -131,7 +131,7 @@ REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
 LOGICAL :: linear=.FALSE.
-LOGICAL :: upwind=.FALSE. !< Use streamline upwinding for n, V and T
+LOGICAL :: upwind=.FALSE. ! Use streamline upwinding for n, V and T
 NAMELIST/harris_sheet_options/order, chi, eta, nu, gamma, D_diff, &
 dt, nsteps, rst_freq, pre_freq, ittarget, use_mfnk, pm, linear, n0, psi0, velx0, vely0, velz0, &
 t0, by0, den_scale, delta, lam_n, lam_b, L_x, L_z, upwind

@@ -12,7 +12,7 @@
 # is obtained by fitting E_k = A*cosh^2(gamma*t) to the whole kinetic energy history, and, as a check, from the
 # slope of ln(E_k)/2 over the part of the run with gamma*t > 3 (where tanh(gamma*t) > 0.995).
 #
-# Usage (from the directory containing MUG_rt_2d, oft.in, and oft_in.xml):
+# Usage (from the directory containing MUG_rt_2d, oft.in, oft_in.xml, and oft_in_mpi.xml for --np > 1):
 #   python run_scan.py [--b_frac 0 0.25 ...] [--by0 1.E-2] [--np 1] [--plot]
 import argparse
 import os
@@ -43,6 +43,29 @@ def set_option(text, name, value):
     if pattern.search(text) is None:
         raise ValueError('Option "{0}" not found'.format(name))
     return pattern.sub(lambda m: m.group(1) + value + m.group(3), text, count=1)
+
+
+def parallel_settings(text, nprocs):
+    '''Adapt an input file for a run on nprocs MPI processes
+
+    Returns the input text and the solver XML file to use. With more than one process the base mesh is distributed
+    over the processes (nlevels=2, a transfer level, not a refinement), the overlapping block-Jacobi preconditioner
+    in oft_in_mpi.xml is used, and ittarget is raised to at least 200, since that preconditioner needs more linear
+    iterations per step (see the example documentation).
+    '''
+    if nprocs <= 1:
+        return text, 'oft_in.xml'
+    text = set_option(text, 'nlevels', '2')
+    text = set_option(text, 'ittarget', str(max(200, int(read_option(text, 'ittarget')[0]))))
+    return text, 'oft_in_mpi.xml'
+
+
+def run_command(exe, xml_file, nprocs):
+    '''Command line for one run of the example'''
+    cmd = [exe, 'oft.in', xml_file]
+    if nprocs > 1:
+        cmd = ['mpirun', '-np', str(nprocs)] + cmd
+    return cmd
 
 
 class rt_case:
@@ -104,16 +127,12 @@ def run_case(exe, template, case, b_frac, by0, nprocs):
     text = set_option(text, 'by0', '{0:.6E}'.format(by0))
     text = set_option(text, 'nsteps', str(nsteps))
     text = set_option(text, 'rst_freq', str(nsteps))
-    if nprocs > 1:
-        # Distribute the base mesh over the processes (a transfer level, not a refinement)
-        text = set_option(text, 'nlevels', '2')
+    text, xml_file = parallel_settings(text, nprocs)
     with open(os.path.join(case_dir, 'oft.in'), 'w') as fid:
         fid.write(text)
     # Copy the XML file, since long paths are truncated by the executable
-    shutil.copy('oft_in.xml', case_dir)
-    cmd = [exe, 'oft.in', 'oft_in.xml']
-    if nprocs > 1:
-        cmd = ['mpirun', '-np', str(nprocs)] + cmd
+    shutil.copy(xml_file, case_dir)
+    cmd = run_command(exe, xml_file, nprocs)
     with open(os.path.join(case_dir, 'run.log'), 'w') as log:
         result = subprocess.run(cmd, cwd=case_dir, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode != 0:

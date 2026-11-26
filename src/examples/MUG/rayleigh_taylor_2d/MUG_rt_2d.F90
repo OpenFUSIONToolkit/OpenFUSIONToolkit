@@ -94,21 +94,21 @@ MODULE rt_2d_helpers
 USE oft_local
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 IMPLICIT NONE
-CHARACTER(LEN=4) :: profile = 'exp' !< Equilibrium profile: 'exp' (linear benchmark) or 'tanh' (transition layer)
-REAL(r8) :: n_0 = 1.d19 !< Density at z=0 [m^-3]
-REAL(r8) :: T_0 = 1.d2 !< Temperature at z=0 [eV]
-REAL(r8) :: L_n = 0.5d0 !< Density scale length [m] (> 0 is unstable, 'exp' only)
-REAL(r8) :: atwood = 0.5d0 !< Atwood number (n_top-n_bot)/(n_top+n_bot) ('tanh' only, > 0 is unstable)
-REAL(r8) :: delta = 0.04d0 !< Half-width of the transition layer [m] ('tanh' only)
-REAL(r8) :: sigma = 0.15d0 !< Width of the seed about z=0 [m] ('tanh' only)
-REAL(r8) :: g = 1.d8 !< Gravitational acceleration along -z [m/s^2]
-REAL(r8) :: B_0 = 0.d0 !< In-plane field along x at z=0 [T]
-REAL(r8) :: V1 = 1.d0 !< Seed amplitude [m/s]
-REAL(r8) :: den_scale = 1.d19 !< Density normalization used by the solver [m^-3]
-REAL(r8) :: L_x = 1.d0 !< Periodic length in x [m] (set from the mesh)
-REAL(r8) :: L_z = 1.d0 !< Distance between the walls [m] (set from the mesh)
+CHARACTER(LEN=4) :: profile = 'exp' ! Equilibrium profile: 'exp' (linear benchmark) or 'tanh' (transition layer)
+REAL(r8) :: n_0 = 1.d19 ! Density at z=0 [m^-3]
+REAL(r8) :: T_0 = 1.d2 ! Temperature at z=0 [eV]
+REAL(r8) :: L_n = 0.5d0 ! Density scale length [m] (> 0 is unstable, 'exp' only)
+REAL(r8) :: atwood = 0.5d0 ! Atwood number (n_top-n_bot)/(n_top+n_bot) ('tanh' only, > 0 is unstable)
+REAL(r8) :: delta = 0.04d0 ! Half-width of the transition layer [m] ('tanh' only)
+REAL(r8) :: sigma = 0.15d0 ! Width of the seed about z=0 [m] ('tanh' only)
+REAL(r8) :: g = 1.d8 ! Gravitational acceleration along -z [m/s^2]
+REAL(r8) :: B_0 = 0.d0 ! In-plane field along x at z=0 [T]
+REAL(r8) :: V1 = 1.d0 ! Seed amplitude [m/s]
+REAL(r8) :: den_scale = 1.d19 ! Density normalization used by the solver [m^-3]
+REAL(r8) :: L_x = 1.d0 ! Periodic length in x [m] (set from the mesh)
+REAL(r8) :: L_z = 1.d0 ! Distance between the walls [m] (set from the mesh)
 CONTAINS
-!> Equilibrium density n0(z)/n_0
+! Equilibrium density n0(z)/n_0
 FUNCTION n_prof(z) RESULT(f)
 REAL(r8), INTENT(in) :: z
 REAL(r8) :: f
@@ -118,13 +118,13 @@ ELSE
   f = EXP(z/L_n)
 END IF
 END FUNCTION n_prof
-!> Equilibrium density n0(z), normalized by den_scale
+! Equilibrium density n0(z), normalized by den_scale
 SUBROUTINE n_eq(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
 val = (n_0/den_scale)*n_prof(pt(2))
 END SUBROUTINE n_eq
-!> Equilibrium pressure [Pa] from total force balance, d(p + Bx^2/(2 mu0))/dz = -m_i n0 g
+! Equilibrium pressure [Pa] from total force balance, d(p + Bx^2/(2 mu0))/dz = -m_i n0 g
 FUNCTION p_eq(z) RESULT(p)
 REAL(r8), INTENT(in) :: z
 REAL(r8) :: p,x
@@ -136,13 +136,13 @@ ELSE
   p = 2.d0*elec_charge*n_0*T_0 - (proton_mass*n_0*g*L_n + B_0**2/(2.d0*mu0))*(EXP(z/L_n)-1.d0)
 END IF
 END FUNCTION p_eq
-!> Equilibrium temperature [eV], with p = 2 n e T
+! Equilibrium temperature [eV], with p = 2 n e T
 SUBROUTINE T_eq(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
 val = p_eq(pt(2))/(2.d0*elec_charge*n_0*n_prof(pt(2)))
 END SUBROUTINE T_eq
-!> Equilibrium flux, Bx = -dpsi/dz: B_0*exp(z/(2 L)) ('exp', constant Alfven speed) or B_0 ('tanh')
+! Equilibrium flux, Bx = -dpsi/dz: B_0*exp(z/(2 L)) ('exp', constant Alfven speed) or B_0 ('tanh')
 SUBROUTINE psi_eq(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
@@ -152,8 +152,8 @@ ELSE
   val = -2.d0*L_n*B_0*EXP(pt(2)/(2.d0*L_n))
 END IF
 END SUBROUTINE psi_eq
-!> Vertical structure f(z) of the seed and its derivative: the m=1 eigenmode e^{-z/2L} cos(pi z/L_z) ('exp'),
-!! or cos(pi z/L_z) e^{-(z/sigma)^2}, localized on the layer ('tanh')
+! Vertical structure f(z) of the seed and its derivative: the m=1 eigenmode e^{-z/2L} cos(pi z/L_z) ('exp'),
+! or cos(pi z/L_z) e^{-(z/sigma)^2}, localized on the layer ('tanh')
 SUBROUTINE seed_f(z, f, fp)
 REAL(r8), INTENT(in) :: z
 REAL(r8), INTENT(out) :: f, fp
@@ -168,7 +168,7 @@ ELSE
   fp = -e*(COS(pi*z/L_z)/(2.d0*L_n) + (pi/L_z)*SIN(pi*z/L_z))
 END IF
 END SUBROUTINE seed_f
-!> Seed vz = V1 f(z) cos(kx)
+! Seed vz = V1 f(z) cos(kx)
 SUBROUTINE vz_seed(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
@@ -176,7 +176,7 @@ REAL(r8) :: f,fp
 CALL seed_f(pt(2),f,fp)
 val = V1*f*COS(2.d0*pi*pt(1)/L_x)
 END SUBROUTINE vz_seed
-!> Seed vx = -(V1/k) f'(z) sin(kx), from div(v) = 0
+! Seed vx = -(V1/k) f'(z) sin(kx), from div(v) = 0
 SUBROUTINE vx_seed(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
@@ -223,26 +223,26 @@ CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_vector), POINTER :: u,v
 REAL(r8) :: zmin,zmax,k,K2,v_A,v_A_crit,B_crit,gamma_rt,c_s2,p_min
-INTEGER(i4) :: order = 2 !< FE order
-INTEGER(i4) :: nsteps = 100 !< Number of time steps
-INTEGER(i4) :: rst_freq = 10 !< Restart (and plot) file frequency
-INTEGER(i4) :: ittarget = 1000 !< Target iteration count for time step adaptation (large keeps dt fixed)
-INTEGER(i4) :: pre_freq = 1 !< Preconditioner update frequency in time steps (`use_mfnk=T` only)
-LOGICAL :: linear = .FALSE. !< Run the linearized model?
-LOGICAL :: plot_run = .FALSE. !< Generate plot files from existing restart files instead of running
-LOGICAL :: pm = .FALSE. !< Print solver progress?
-LOGICAL :: use_mfnk = .FALSE. !< Use the matrix-free Newton-Krylov method?
-LOGICAL :: timestep_cn = .TRUE. !< Use second-order time stepping (CN nonlinear, BDF2 linear)
-LOGICAL :: upwind = .FALSE. !< Use streamline upwinding for n, V and T (nonlinear runs only)
-REAL(r8) :: by0 = 0.d0 !< Uniform out-of-plane field [T]
-REAL(r8) :: nu = 1.d0 !< Kinematic viscosity [m^2/s]
-REAL(r8) :: eta = 1.d0 !< Resistivity [m^2/s] (eta/mu0)
-REAL(r8) :: chi = 0.d0 !< Thermal diffusivity [m^2/s]
-REAL(r8) :: D_diff = 0.d0 !< Particle diffusivity [m^2/s]
-REAL(r8) :: gamma = 5.d0/3.d0 !< Adiabatic index
-REAL(r8) :: dt = 2.d-6 !< Time step [s]
-REAL(r8) :: lin_tol = 1.d-10 !< Absolute linear solver tolerance
-REAL(r8) :: nl_tol = 1.d-8 !< Absolute nonlinear solver tolerance
+INTEGER(i4) :: order = 2 ! FE order
+INTEGER(i4) :: nsteps = 100 ! Number of time steps
+INTEGER(i4) :: rst_freq = 10 ! Restart (and plot) file frequency
+INTEGER(i4) :: ittarget = 1000 ! Target iteration count for time step adaptation (large keeps dt fixed)
+INTEGER(i4) :: pre_freq = 1 ! Preconditioner update frequency in time steps (`use_mfnk=T` only)
+LOGICAL :: linear = .FALSE. ! Run the linearized model?
+LOGICAL :: plot_run = .FALSE. ! Generate plot files from existing restart files instead of running
+LOGICAL :: pm = .FALSE. ! Print solver progress?
+LOGICAL :: use_mfnk = .FALSE. ! Use the matrix-free Newton-Krylov method?
+LOGICAL :: timestep_cn = .TRUE. ! Use second-order time stepping (CN nonlinear, BDF2 linear)
+LOGICAL :: upwind = .FALSE. ! Use streamline upwinding for n, V and T (nonlinear runs only)
+REAL(r8) :: by0 = 0.d0 ! Uniform out-of-plane field [T]
+REAL(r8) :: nu = 1.d0 ! Kinematic viscosity [m^2/s]
+REAL(r8) :: eta = 1.d0 ! Resistivity [m^2/s] (eta/mu0)
+REAL(r8) :: chi = 0.d0 ! Thermal diffusivity [m^2/s]
+REAL(r8) :: D_diff = 0.d0 ! Particle diffusivity [m^2/s]
+REAL(r8) :: gamma = 5.d0/3.d0 ! Adiabatic index
+REAL(r8) :: dt = 2.d-6 ! Time step [s]
+REAL(r8) :: lin_tol = 1.d-10 ! Absolute linear solver tolerance
+REAL(r8) :: nl_tol = 1.d-8 ! Absolute nonlinear solver tolerance
 NAMELIST/rt_2d_options/order,linear,plot_run,pm,profile,n_0,T_0,L_n,atwood,delta,sigma,g,B_0,by0,V1,nu,eta,chi, &
   D_diff,gamma,dt,nsteps,rst_freq,use_mfnk,pre_freq,timestep_cn,upwind,ittarget,lin_tol,nl_tol,den_scale
 !!\subsubsection doc_mug2d_rt_ex_code_setup Mesh and FE setup
@@ -408,8 +408,9 @@ DEALLOCATE(minv)
 !!\subsubsection doc_mug2d_rt_ex_code_run Run simulation
 !!
 !! The kinetic energy (`ven`) in the history file `xmhd_2d.hist` gives the growth rate,
-!! \f$ \gamma = \frac{1}{2} \partial_t \ln E_k \f$ (see `run_scan.py`). In linear runs it is computed with the
-!! equilibrium density.
+!! \f$ \gamma = \frac{1}{2} \partial_t \ln E_k \f$ (see `run_scan.py`). In linear runs both energies are those of the
+!! perturbation: `ven` is computed with the equilibrium density, and the magnetic energy (`men`) from the perturbed
+!! field only, without \f$ B_0 \f$, so either can be used to measure \f$ \gamma \f$.
 IF(linear)THEN
   CALL mhd_sim%run_lin_simulation()
 ELSE
@@ -417,11 +418,11 @@ ELSE
 END IF
 CALL oft_finalize
 CONTAINS
-!> Project field_init onto the Lagrange basis and store it in field `ifield` of `uout`
+! Project field_init onto the Lagrange basis and store it in field `ifield` of `uout`
 SUBROUTINE project_field(ifield,uout,zero_bc)
-INTEGER(i4), INTENT(in) :: ifield !< Index of the field in `uout`
-CLASS(oft_vector), INTENT(inout) :: uout !< Solution vector
-LOGICAL, OPTIONAL, INTENT(in) :: zero_bc !< Zero the field on boundary nodes?
+INTEGER(i4), INTENT(in) :: ifield ! Index of the field in `uout`
+CLASS(oft_vector), INTENT(inout) :: uout ! Solution vector
+LOGICAL, OPTIONAL, INTENT(in) :: zero_bc ! Zero the field on boundary nodes?
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -453,7 +454,7 @@ END PROGRAM MUG_rt_2d
 ! OFT_DOC_INCLUDE: oft_in.xml
 !!
 !! To plot a run, set `plot_run=T` in `oft.in` and run the executable again in the same directory. This writes
-!! XDMF/HDF5 files (in `all/`) for VisIt or ParaView, which `plot_rt_2d.py` also reads to draw density snapshots
+!! XDMF/HDF5 files (`oft_xdmf.*.h5`, one per MPI process) for VisIt or ParaView, which `plot_rt_2d.py` also reads to draw density snapshots
 !! with matplotlib, eg.
 !! \verbatim
 !! python plot_rt_2d.py --runs . --times 6.E-4 7.E-4 7.4E-4 7.6E-4
