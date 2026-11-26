@@ -414,39 +414,98 @@ def _joined_cells(cells, reg, insulated):
     return [c for c in cells if int(reg[c]) not in ins_regions]
 
 
-def _check_insulation(tab, jmask, reg, insulated, split_regions):
-    '''! Reject insulated regions and pairs of regions that are not separated at any junction edge
+def _unsplit_interfaces(tab, jmask, reg):
+    '''! Pairs of regions that meet on ordinary (unsplit, two-cell) edges
 
-    Insulation only acts at junction edges, so a region that is on none, or a pair of regions that never meet on one,
-    would silently leave the model uninsulated.
+    Insulation cannot act on these edges; they are only split at region interfaces with `split_regions`.
+
+    @param tab Edge table from @ref _edge_table
+    @param jmask Junction edges of `tab`
+    @param reg Region list [nc]
+    @result {region: set of regions it meets on unsplit edges}
+    '''
+    ptr, cells = tab['ptr'], tab['cells']
+    ordinary = numpy.flatnonzero((tab['count'] == 2) & (~jmask))
+    r1 = reg[cells[ptr[ordinary]]].astype(numpy.int64)
+    r2 = reg[cells[ptr[ordinary] + 1]].astype(numpy.int64)
+    diff = r1 != r2
+    pairs = numpy.unique(numpy.c_[numpy.minimum(r1[diff], r2[diff]), numpy.maximum(r1[diff], r2[diff])], axis=0)
+    neighbours = {}
+    for a, b in pairs.tolist():
+        neighbours.setdefault(a, set()).add(b)
+        neighbours.setdefault(b, set()).add(a)
+    return neighbours
+
+
+def _check_insulation(tab, jmask, reg, insulated, split_regions):
+    '''! Reject insulation that has no effect, and warn about insulation that only acts at some edges
+
+    Insulation only acts at junction edges. A region that is on none, or a pair of regions that never meet on one,
+    would silently leave the model uninsulated, so these raise an error. A region or pair that is also joined across
+    ordinary (unsplit, two-cell) edges is only partly insulated, so this gives a warning. Both point to
+    `--split_regions` where splitting at region interfaces would help.
 
     @param tab Edge table from @ref _edge_table
     @param jmask Junction edges of `tab`
     @param reg Region list [nc]
     @param insulated Insulation, see @ref find_junction_holes
-    @param split_regions Was the mesh also split at all region interfaces (used for the error message)?
+    @param split_regions Was the mesh also split at all region interfaces (used for the messages)?
     '''
     ins_regions, ins_pairs = _insulation(insulated)
     if not (ins_regions or ins_pairs):
         return
     ptr, cells = tab['ptr'], tab['cells']
     reg = numpy.asarray(reg)
+    present = set(numpy.unique(reg).tolist())
     found_regions, found_pairs = set(), set()
     for e in numpy.flatnonzero(jmask).tolist():
         regions = frozenset(reg[cells[ptr[e]:ptr[e + 1]]].tolist())
         found_regions |= regions
         found_pairs.add(regions)
-    if split_regions:
-        hint = 'the mesh is already split at all region interfaces, so this insulation is not possible'
-    else:
-        hint = ('to insulate regions where they meet two at a time, split the mesh at region interfaces too '
-                '("OFT_ThinCurr_holes --split_regions")')
-    errors = ['region {0} is not on any junction edge'.format(k) for k in sorted(ins_regions - found_regions)]
+    unsplit = _unsplit_interfaces(tab, jmask, reg)
+    hint = ('split the mesh at region interfaces too ("OFT_ThinCurr_holes --split_regions") to insulate regions '
+            'where they meet two at a time')
+    # Insulation with no effect
+    errors, fixable = [], False
+    for k in sorted(ins_regions - found_regions):
+        if k not in present:
+            errors.append('region {0} is not in the mesh'.format(k))
+        elif k in unsplit:
+            errors.append('region {0} is not on any junction edge'.format(k))
+            fixable = True
+        else:
+            errors.append('region {0} does not meet any other region along an edge'.format(k))
     for pair in sorted(ins_pairs - found_pairs, key=sorted):
-        if not any(pair < regions for regions in found_pairs):
-            errors.append('regions {0} do not meet on any junction edge'.format(sorted(pair)))
+        if any(pair < regions for regions in found_pairs):
+            continue
+        a, b = sorted(pair)
+        missing = sorted(pair - present)
+        if missing:
+            errors.append('region {0} is not in the mesh'.format(missing[0]))
+        elif b in unsplit.get(a, ()):
+            errors.append('regions {0} do not meet on any junction edge'.format([a, b]))
+            fixable = True
+        else:
+            errors.append('regions {0} do not meet along an edge'.format([a, b]))
     if errors:
-        raise ValueError('Insulation has no effect: {0}; {1}'.format(', '.join(errors), hint))
+        msg = 'Insulation has no effect: {0}'.format(', '.join(errors))
+        if fixable:
+            msg += '; ' + hint
+        elif split_regions:
+            msg += ' (the mesh is already split at all region interfaces)'
+        raise ValueError(msg)
+    # Insulation that only acts at some of the edges where the regions meet
+    partial = []
+    for k in sorted(ins_regions):
+        if k in unsplit:
+            partial.append('region {0} is still joined to region(s) {1}'.format(k, sorted(unsplit[k])))
+    for pair in sorted(ins_pairs, key=sorted):
+        a, b = sorted(pair)
+        if b in unsplit.get(a, ()) and not (a in ins_regions or b in ins_regions):
+            partial.append('regions {0} are still joined'.format([a, b]))
+    if partial:
+        warnings.warn('Insulation is only partial: {0} across edges where only two regions meet, which are not '
+                      'split; {1}'.format(', '.join(partial), hint))
 
 
 def _dual_links(lc, reg, insulated, tab, jmask):

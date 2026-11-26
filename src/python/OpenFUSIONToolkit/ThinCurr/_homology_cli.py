@@ -327,7 +327,9 @@ def script_entry():
 # inductance). The split only matters for insulation, which acts at junction edges only: it allows sheets that meet
 # two at a time (e.g. the sectors of a torus) to be insulated from each other when the model is set up, with
 # `setup_model(insulated_junctions=...)`, without generating a new mesh file. Without the split, regions or pairs of
-# regions that do not meet at a junction edge cannot be insulated (an error is raised if this is requested).
+# regions that do not meet at a junction edge cannot be insulated (an error is raised if this is requested), and a
+# region insulated at a junction stays joined to any region it also meets on ordinary two-cell edges (a warning is
+# given).
 #
 # Only use `--split_regions` if this insulation is needed, as the split mesh has more vertices, junction constraints
 # and hole elements, which increases the cost of setting up the model, and jumpers cannot run along the split region

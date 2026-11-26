@@ -10,6 +10,7 @@
 # folder and passed to the solver by name, relative to the folder mp_run() runs in.
 import os
 import copy
+import warnings
 import numpy as np
 import scipy.sparse
 import pytest
@@ -674,6 +675,27 @@ def test_split_regions_with_junctions():
     with pytest.raises(ValueError, match='already split') as err:
         find_junction_holes(r, lc, reg, insulated=[(2, 4)], split_regions=True)
     assert '--split_regions' not in str(err.value)
+    # Without the split, regions that never meet (or do not exist) get no "--split_regions" hint either
+    for insulated, msg in (([(2, 4)], 'do not meet along an edge'), ([9], 'region 9 is not in the mesh'),
+                           ([(1, 9)], 'region 9 is not in the mesh')):
+        with pytest.raises(ValueError, match=msg) as err:
+            find_junction_holes(r, lc, reg, insulated=insulated)
+        assert '--split_regions' not in str(err.value)
+
+
+@pytest.mark.parametrize("insulated", ([1], [1, 4]))
+def test_partial_insulation_warns(insulated):
+    '''Without "split_regions", insulation that also leaves a region joined across unsplit two-cell edges warns'''
+    r, lc, reg = torus_with_rib()
+    with pytest.warns(UserWarning, match='only partial.*--split_regions'):
+        part = find_junction_holes(r, lc, reg, insulated=insulated)
+    assert part['n_unknowns'] == part['n_loops'] == current_loop_count(lc, reg, insulated=insulated)
+    # Insulation at the junction alone does not warn, and splitting at region interfaces insulates fully
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        find_junction_holes(r, lc, reg, insulated=[(1, 4)])
+        full = find_junction_holes(r, lc, reg, insulated=insulated, split_regions=True)
+    assert full['n_unknowns'] < part['n_unknowns']
 
 
 @pytest.mark.parametrize("split_regions", (False, True))

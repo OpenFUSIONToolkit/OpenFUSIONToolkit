@@ -275,7 +275,9 @@ unknowns is checked against the number of cycles of the graph.
    on the same junction edge, current can pass between the pair through it, so the pair has no effect there (a
    warning is given). Insulation only acts at junction edges, so regions that meet two at a time can only be
    insulated from each other in a mesh split with `--split_regions`. Insulation that would have no effect (a region
-   on no junction edge, or a pair of regions that never meet on one) is rejected with an error.
+   on no junction edge, or a pair of regions that never meet on one) is rejected with an error. Without
+   `--split_regions`, a region (or pair) that also meets another region on ordinary two-cell edges stays joined
+   across them, so it is only partly insulated (a warning is given).
 
 Junctions are not yet supported for periodic models (`nfp`, or a periodic point map `pmap`).
 
