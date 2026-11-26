@@ -30,7 +30,7 @@ USE oft_la_base, ONLY: oft_vector, oft_cvector
 USE oft_la_utils, ONLY: csr_remove_redundant
 USE oft_deriv_matrices, ONLY: oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, native_vector_cast, &
-  native_vector_slice_push, native_vector_slice_pop, oft_native_dense_matrix
+  native_vector_slice_push, native_vector_slice_pop, oft_native_dense_matrix, native_matrix_adopt_pattern
 USE oft_solver_base, ONLY: oft_solver, oft_csolver
 USE oft_lu, ONLY: lapack_matinv, lapack_cholesky
 USE axi_green, ONLY: green, grad_green, axi_coil_set
@@ -3077,6 +3077,7 @@ DO i=1,tw_obj%n_vcoils
 END DO
 ! !$omp end parallel
 CALL csr_remove_redundant(Rmat%nr,Rmat%kr,Rmat%nnz,Rmat%lc)
+CALL native_matrix_adopt_pattern(Rmat) ! Structure is final, move it into a pattern
 !---Compute resistivity matrix
 ALLOCATE(Rmat%M(Rmat%nnz))
 Rmat%M=0.d0
@@ -5413,6 +5414,7 @@ Rred%nnz=nnz
 Rred%kr=>NULL(); Rred%lc=>NULL(); Rred%M=>NULL()
 ALLOCATE(Rred%kr(nr+1),Rred%lc(nnz),Rred%M(nnz))
 Rred%kr=kr; Rred%lc=lc; Rred%M=mvals
+CALL native_matrix_adopt_pattern(Rred)
 self%junc%Rmat_exp=>Rexp
 self%Rmat=>Rred
 DEALLOCATE(pt_kr,pt_lc,pt_val,tmp,mark,kr,lc,mvals,acc,ind)

@@ -20,6 +20,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
+ use_petsc={8}
 /
 
 &mesh_options
@@ -61,7 +62,9 @@ oft_in_template = """
 /
 """
 
-def taylor_green_setup(nbase, nlevels, order, mf=False, ni=8, dt='2.5E-2', nsteps=20, nu='1.E-2'):
+def taylor_green_setup(nbase, nlevels, order, mf=False, ni=8, dt='2.5E-2', nsteps=20, nu='1.E-2', petsc=False):
+    # `petsc` runs with the PETSc linear algebra backend, using the same preconditioner XML (additive Schwarz
+    # without overlap in place of block-Jacobi)
     # The level above nbase is the base mesh distributed over the processes (a transfer level, not a refinement),
     # so MPI runs reproduce the serial errors
     nproc = 1
@@ -75,7 +78,7 @@ def taylor_green_setup(nbase, nlevels, order, mf=False, ni=8, dt='2.5E-2', nstep
     mf_flag = ('T' if mf else 'F')
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order, ni, dt, nsteps, nu, mf_flag))
+        fid.write(oft_in_template.format(nbase, nlevels, order, ni, dt, nsteps, nu, mf_flag, 'T' if petsc else 'F'))
     try:
         os.remove('taylor_green_2d.results')
     except FileNotFoundError:
@@ -108,72 +111,72 @@ def test_validate_result_accepts_finite(tmp_path, monkeypatch):
 
 #============================================================================
 # Quadratic elements
-@pytest.mark.parametrize("mf", (False, True))
-def test_taylor_green_p2(mf):
+@pytest.mark.parametrize("mf,petsc_flag", ((False, False), (True, False), (False, True)))
+def test_taylor_green_p2(mf, petsc_flag):
     '''Taylor-Green vortex with quadratic elements, serial.
-    Also covers matrix-free Newton-Krylov.'''
+    Also covers matrix-free Newton-Krylov and PETSc runs.'''
     vxerr_exp = 2.9214986850512860E-2
     vzerr_exp = 2.9214986892598150E-2
     perr_exp = 8.2921136337263515E-2
-    assert taylor_green_setup(1, 1, 2, mf=mf)
+    assert taylor_green_setup(1, 1, 2, mf=mf, petsc=petsc_flag)
     assert validate_result(vxerr_exp, vzerr_exp, perr_exp)
 
 @pytest.mark.mpi
 @pytest.mark.coverage
-@pytest.mark.parametrize("mf", (False, True))
-def test_taylor_green_p2_mpi(mf):
+@pytest.mark.parametrize("mf,petsc_flag", ((False, False), (True, False), (False, True)))
+def test_taylor_green_p2_mpi(mf, petsc_flag):
     '''Taylor-Green vortex with quadratic elements, on two MPI processes.
-    Also covers matrix-free Newton-Krylov.'''
+    Also covers matrix-free Newton-Krylov and PETSc runs.'''
     vxerr_exp = 2.9214986850512860E-2
     vzerr_exp = 2.9214986892598150E-2
     perr_exp = 8.2921136337263515E-2
-    assert taylor_green_setup(1, 2, 2, mf=mf)
+    assert taylor_green_setup(1, 2, 2, mf=mf, petsc=petsc_flag)
     assert validate_result(vxerr_exp, vzerr_exp, perr_exp)
 
 #============================================================================
 # Cubic elements
-@pytest.mark.parametrize("mf", (False, True))
-def test_taylor_green_p3(mf):
+@pytest.mark.parametrize("mf,petsc_flag", ((False, False), (True, False), (False, True)))
+def test_taylor_green_p3(mf, petsc_flag):
     '''Taylor-Green vortex with cubic elements, serial.
-    Also covers matrix-free Newton-Krylov.'''
+    Also covers matrix-free Newton-Krylov and PETSc runs.'''
     vxerr_exp = 1.4264674522612337E-3
     vzerr_exp = 1.4264676548348997E-3
     perr_exp = 5.8785206705912092E-3
-    assert taylor_green_setup(1, 1, 3, mf=mf)
+    assert taylor_green_setup(1, 1, 3, mf=mf, petsc=petsc_flag)
     assert validate_result(vxerr_exp, vzerr_exp, perr_exp)
 
 @pytest.mark.mpi
 @pytest.mark.coverage
-@pytest.mark.parametrize("mf", (False, True))
-def test_taylor_green_p3_mpi(mf):
+@pytest.mark.parametrize("mf,petsc_flag", ((False, False), (True, False), (False, True)))
+def test_taylor_green_p3_mpi(mf, petsc_flag):
     '''Taylor-Green vortex with cubic elements, on two MPI processes.
-    Also covers matrix-free Newton-Krylov.'''
+    Also covers matrix-free Newton-Krylov and PETSc runs.'''
     vxerr_exp = 1.4264674522612337E-3
     vzerr_exp = 1.4264676548348997E-3
     perr_exp = 5.8785206705912092E-3
-    assert taylor_green_setup(1, 2, 3, mf=mf)
+    assert taylor_green_setup(1, 2, 3, mf=mf, petsc=petsc_flag)
     assert validate_result(vxerr_exp, vzerr_exp, perr_exp)
 
 #============================================================================
 # Quartic elements
-@pytest.mark.parametrize("mf", (False, True))
-def test_taylor_green_p4(mf):
+@pytest.mark.parametrize("mf,petsc_flag", ((False, False), (True, False), (False, True)))
+def test_taylor_green_p4(mf, petsc_flag):
     '''Taylor-Green vortex with quartic elements, serial.
-    Also covers matrix-free Newton-Krylov.'''
+    Also covers matrix-free Newton-Krylov and PETSc runs.'''
     vxerr_exp = 5.6846822406755744E-5
     vzerr_exp = 5.6845321594545741E-5
     perr_exp = 2.4035705160280522E-4
-    assert taylor_green_setup(1, 1, 4, mf=mf)
+    assert taylor_green_setup(1, 1, 4, mf=mf, petsc=petsc_flag)
     assert validate_result(vxerr_exp, vzerr_exp, perr_exp)
 
 @pytest.mark.mpi
 @pytest.mark.coverage
-@pytest.mark.parametrize("mf", (False, True))
-def test_taylor_green_p4_mpi(mf):
+@pytest.mark.parametrize("mf,petsc_flag", ((False, False), (True, False), (False, True)))
+def test_taylor_green_p4_mpi(mf, petsc_flag):
     '''Taylor-Green vortex with quartic elements, on two MPI processes.
-    Also covers matrix-free Newton-Krylov.'''
+    Also covers matrix-free Newton-Krylov and PETSc runs.'''
     vxerr_exp = 5.6846822406755744E-5
     vzerr_exp = 5.6845321594545741E-5
     perr_exp = 2.4035705160280522E-4
-    assert taylor_green_setup(1, 2, 4, mf=mf)
+    assert taylor_green_setup(1, 2, 4, mf=mf, petsc=petsc_flag)
     assert validate_result(vxerr_exp, vzerr_exp, perr_exp)
