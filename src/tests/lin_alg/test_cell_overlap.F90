@@ -89,7 +89,7 @@ CALL run_cases(.TRUE.,3)
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A,I8,A,I8)')'Checks: ',nchecks,' failed: ',nfail
   OPEN(NEWUNIT=io_unit,FILE='cell_overlap.results')
-  WRITE(io_unit,*)nfail,nchecks
+  WRITE(io_unit,'(I0,1X,I0)')nfail,nchecks
   CLOSE(io_unit)
 END IF
 CALL oft_finalize

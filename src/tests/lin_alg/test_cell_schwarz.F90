@@ -108,10 +108,10 @@ DO ip=1,2
 END DO
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='cell_schwarz.results')
-  WRITE(io_unit,*)nfail
+  WRITE(io_unit,'(I0)')nfail
   DO ip=1,2
     WRITE(*,'(A,I2,A,21I5)')'nparts=',nparts_list(ip),' results: ',its(:,ip)
-    WRITE(io_unit,*)its(:,ip)
+    WRITE(io_unit,'(*(I0,1X))')its(:,ip)
   END DO
   CLOSE(io_unit)
 END IF

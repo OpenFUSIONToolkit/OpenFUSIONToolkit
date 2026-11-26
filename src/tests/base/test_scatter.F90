@@ -339,8 +339,8 @@ nfail=oft_mpi_sum(nfail)
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A,I6,A,I4)')'Scatter plan checks per process: ',ncheck,', failed (all processes): ',nfail
   OPEN(NEWUNIT=io_unit,FILE='scatter.results')
-  WRITE(io_unit,*)nfail
-  WRITE(io_unit,*)ncheck
+  WRITE(io_unit,'(I0)')nfail
+  WRITE(io_unit,'(I0)')ncheck
   CLOSE(io_unit)
 END IF
 CALL oft_finalize

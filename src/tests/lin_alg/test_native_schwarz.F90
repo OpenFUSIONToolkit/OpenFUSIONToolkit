@@ -154,8 +154,8 @@ SUBROUTINE write_results()
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A,11I6)')'Iterations: ',its
   OPEN(NEWUNIT=io_unit,FILE='schwarz.results')
-  WRITE(io_unit,*)nfail
-  WRITE(io_unit,*)its
+  WRITE(io_unit,'(I0)')nfail
+  WRITE(io_unit,'(*(I0,1X))')its
   CLOSE(io_unit)
 END IF
 END SUBROUTINE write_results
