@@ -1172,6 +1172,9 @@ SELECT CASE(TRIM(self%package))
   CASE("mumps")
     self%mumps_struct%job = -2
     CALL dmumps(self%mumps_struct)
+    !---User-supplied arrays are not freed by MUMPS
+    IF(ASSOCIATED(self%mumps_struct%irn))DEALLOCATE(self%mumps_struct%irn)
+    NULLIFY(self%mumps_struct%jcn,self%mumps_struct%A,self%mumps_struct%rhs)
 #endif
 #ifdef HAVE_MKL
   CASE("mkl")
@@ -1179,6 +1182,7 @@ SELECT CASE(TRIM(self%package))
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,nr, &
       rvals,ivals,ivals,self%pardiso_struct%perm, &
       1,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,rvals,rvals,ierr)
+    IF(ASSOCIATED(self%pardiso_struct%perm))DEALLOCATE(self%pardiso_struct%perm)
 #endif
   CASE("lapack")
     DEALLOCATE(self%ipiv,self%atmp)
