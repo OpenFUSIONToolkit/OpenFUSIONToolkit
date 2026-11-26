@@ -27,7 +27,7 @@ direct evaluation on tets for the residual at up to 1.7 GB of extra memory, and 
 |---|---|---|
 | `xmhd_qcache` | 1 | 0 = evaluate basis functions directly at every quadrature point (reference implementation), 1 = quadrature-point cache for the NL residual and for the Jacobian of every level on the finest mesh |
 | `xmhd_jac_posmap` | 1 | precomputed CSR positions of the local Jacobian entries (native matrices); 0 = search the column lists |
-| `xmhd_jac_posmap_maxmb` | -1 | skip the position map of a level that needs more memory per rank [MB] (negative: no limit) |
+| `xmhd_jac_posmap_maxmb` | 1024 | memory cap of the position map per level and per rank [MB] (negative: no limit); a level over the cap assembles by searching the column lists, and the total can reach the cap times the number of levels |
 | `xmhd_coarse_quad` | F | **experimental**: integrate the Jacobian of coarse polynomial MG levels with their own (lower) quadrature order |
 
 **BLAS threading.** The Jacobian calls `dgemm` from inside OpenMP parallel regions. The BLAS must run
@@ -252,7 +252,8 @@ with block-Jacobi ILU / p-MG smoothing and the ILU factorizations.
 | `curved_p3_mg` | 16305 | 26.2 | 3.3 | 528 | 25.4 | 4.05 | 5285 / 5791 |
 
 The position map needs `4*sum(nce_s*nce_t)` bytes per cell and level (9-19% of the Jacobian's CSR storage summed
-over the p-MG levels, ~8-13% of RSS). It is independent of the thread count.
+over the p-MG levels, ~8-13% of RSS). It is independent of the thread count. All cases above stay well below
+the default cap of 1 GB per level and rank (`xmhd_jac_posmap_maxmb`).
 
 ### Experimental coarse-level quadrature (`xmhd_coarse_quad=T`, 4 threads)
 

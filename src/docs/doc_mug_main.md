@@ -44,7 +44,8 @@ basis functions plus per-cell geometry, so it needs little memory (a few MB to a
 `xmhd_qcache=0` selects the original direct evaluation of the basis functions at every quadrature point, which
 gives the same results to round-off. Jacobian assembly into native matrices also uses precomputed CSR positions
 by default (`xmhd_jac_posmap=1`), which costs `4*sum(nce_s*nce_t)` bytes per cell and level (eg. 25 KB per cell
-for tetrahedra at p=3) and can be limited with `xmhd_jac_posmap_maxmb`.
+for tetrahedra at p=3). Its memory is capped per level and per MPI rank by `xmhd_jac_posmap_maxmb` (1 GB by default);
+a level over the cap assembles by searching the column lists instead.
 
 \b BLAS \b threading: the Jacobian forms its local matrices with many small BLAS `dgemm` calls from inside
 OpenMP parallel regions. The BLAS library must therefore run single-threaded inside OpenMP regions, which the

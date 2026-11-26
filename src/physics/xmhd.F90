@@ -478,7 +478,7 @@ INTEGER(i4), PUBLIC :: xmhd_qcache = 1
 !> Precomputed CSR positions of local Jacobian entries for native matrices: 0 = off (search every
 !! entry), 1 = on (see \ref xmhd::xmhd_jac_posmap_setup "xmhd_jac_posmap_setup")
 INTEGER(i4), PUBLIC :: xmhd_jac_posmap = 1
-REAL(r8), PUBLIC :: xmhd_jac_posmap_maxmb = -1.d0 !< Skip the position map of a level if it needs more memory per rank [MB] (negative: no limit)
+REAL(r8), PUBLIC :: xmhd_jac_posmap_maxmb = 1024.d0 !< Skip the position map of a level if it needs more memory per rank [MB] (negative: no limit)
 !> EXPERIMENTAL (off by default): integrate the Jacobian of coarse polynomial levels on the finest mesh with their
 !! own quadrature rule (that of the level's H(Curl) space) instead of the finest level's. This changes the coarse
 !! operators of the p-multigrid preconditioner (not the solution of the nonlinear system)
@@ -584,7 +584,7 @@ CONTAINS
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
 !! | `xmhd_qcache=1`    | Quadrature implementation of the NL residual and the Jacobian: 0 = evaluate basis functions directly at every quadrature point (reference implementation), 1 = precomputed quadrature-point cache (reference basis tables + per-cell geometry; used for the NL residual and for the Jacobian of all levels on the finest mesh). Both give the same result to round-off. See the BLAS threading note below | int |
 !! | `xmhd_jac_posmap=1` | Precompute the CSR positions of local Jacobian entries for native matrices (0 = off: search the column list for every entry). Uses `4*sum(nce_s*nce_t)` bytes per cell and level (eg. 25 KB per cell for tets at p=3) | int |
-!! | `xmhd_jac_posmap_maxmb=-1` | Skip the position map of a level if it needs more memory per MPI rank [MB] (neg for no limit) | real |
+!! | `xmhd_jac_posmap_maxmb=1024` | Memory cap of the position map per level and per MPI rank [MB] (neg for no limit). A level whose map would exceed it assembles by searching the column lists instead. The cap applies to each level separately, so the total can reach the cap times the number of levels (eg. ~3 GB per rank for p=4 with p-multigrid down to p=2) | real |
 !! | `xmhd_coarse_quad=F` | **Experimental, off by default**: integrate the Jacobian of coarse polynomial MG levels with their own (lower order) quadrature rule instead of the finest level's. Changes the preconditioner, not the solution; MG convergence has only been checked on simple cases | bool |
 !!
 !! @note **BLAS threading.** The Jacobian forms its local matrices with many small BLAS `dgemm` calls from
