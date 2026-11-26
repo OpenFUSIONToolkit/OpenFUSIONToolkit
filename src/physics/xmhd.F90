@@ -226,6 +226,9 @@ type :: xmhd_jac_work
   REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: wv => NULL() !< Contracted trial functions for value components [ntmax,nval*nqp]
   REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: wd => NULL() !< Contracted trial functions for derivative components [ntmax,nder*nqp]
   REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: c => NULL() !< Local matrices, column-major [nce,ntmax]
+  !> Entry positions for column-search assembly (`loc_cache` of `mat_add_values`), one table per column
+  !! space shared by all blocks with the same row and column spaces [nce*sum(nce_t)]
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: ind => NULL()
 end type xmhd_jac_work
 !------------------------------------------------------------------------------
 !> xMHD operator container
@@ -2538,32 +2541,50 @@ END SUBROUTINE xmhd_jac_plan_delete
 !> Allocate the per-thread work arrays of a Jacobian build and point local matrix views into them
 !!
 !! `mloc(f,g,p)%%m` is a view of the columns of block `(f,g)` in the local matrix `wk(s)%%c` of its row space
-!! for cell kind `p`; only blocks of the plan are associated.
+!! for cell kind `p`; only blocks of the plan are associated. `mloc(f,g,p)%%ind` is the entry position table
+!! of the block's (row space, column space) pair in `wk(s)%%ind`: blocks with the same spaces have the same
+!! graph, so the positions found for the first of them are reused for the others when assembling by
+!! column search (reset per cell with \ref xmhd_jac_reset_ind).
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_jac_work_alloc(plan,wk,mloc)
 TYPE(xmhd_jac_plan), INTENT(in) :: plan !< Block structure
 TYPE(xmhd_jac_work), INTENT(inout) :: wk(3) !< Work arrays per row space
 TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:,:) !< Local matrix views [nfld,nfld,2]
-INTEGER(i4) :: s,p,k,f,g,m,ng
+INTEGER(i4) :: s,p,k,f,g,m,ng,t,ioff(3)
+ioff(1)=0; ioff(2)=plan%nce(1); ioff(3)=plan%nce(1)+plan%nce(2)
 DO s=1,3
   m=plan%nce(s)
   ALLOCATE(wk(s)%ev(m,MAX(1,plan%nval(s)),plan%nqp),wk(s)%ed(m,plan%nder(s),plan%nqp))
   ALLOCATE(wk(s)%wv(plan%ntmax(s),MAX(1,plan%nval(s))*plan%nqp))
   ALLOCATE(wk(s)%wd(plan%ntmax(s),plan%nder(s)*plan%nqp))
-  ALLOCATE(wk(s)%c(m*plan%ntmax(s)))
-  wk(s)%ev=0.d0; wk(s)%ed=0.d0; wk(s)%wv=0.d0; wk(s)%wd=0.d0; wk(s)%c=0.d0
+  ALLOCATE(wk(s)%c(m*plan%ntmax(s)),wk(s)%ind(MAX(1,m*SUM(plan%nce))))
+  wk(s)%ev=0.d0; wk(s)%ed=0.d0; wk(s)%wv=0.d0; wk(s)%wd=0.d0; wk(s)%c=0.d0; wk(s)%ind=0
 END DO
 DO p=1,2
   DO s=1,3
     m=plan%nce(s)
     DO k=1,plan%nch(s,p)
       f=plan%chf(k,s,p); g=plan%chg(k,s,p)
-      ng=plan%nce(plan%fsp(g))
+      t=plan%fsp(g)
+      ng=plan%nce(t)
       mloc(f,g,p)%m(1:m,1:ng)=>wk(s)%c(plan%choff(k,s,p)*m+1:(plan%choff(k,s,p)+ng)*m)
+      mloc(f,g,p)%ind(1:m,1:ng)=>wk(s)%ind(ioff(t)*m+1:(ioff(t)+ng)*m)
     END DO
   END DO
 END DO
 END SUBROUTINE xmhd_jac_work_alloc
+!------------------------------------------------------------------------------
+!> Invalidate the entry position tables of a cell's local matrices (see \ref xmhd_jac_work_alloc)
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_jac_reset_ind(mloc)
+TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:) !< Local matrices of the cell
+INTEGER(i4) :: f,g
+DO g=1,SIZE(mloc,2)
+  DO f=1,SIZE(mloc,1)
+    IF(ASSOCIATED(mloc(f,g)%ind))mloc(f,g)%ind(1,1)=0
+  END DO
+END DO
+END SUBROUTINE xmhd_jac_reset_ind
 !------------------------------------------------------------------------------
 !> Free per-thread work arrays of a Jacobian build
 !------------------------------------------------------------------------------
@@ -2572,7 +2593,7 @@ TYPE(xmhd_jac_work), INTENT(inout) :: wk(3) !< Work arrays per row space
 TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:,:) !< Local matrix views
 INTEGER(i4) :: s,i,j,p
 DO s=1,3
-  DEALLOCATE(wk(s)%ev,wk(s)%ed,wk(s)%wv,wk(s)%wd,wk(s)%c)
+  DEALLOCATE(wk(s)%ev,wk(s)%ed,wk(s)%wv,wk(s)%wd,wk(s)%c,wk(s)%ind)
 END DO
 DO p=1,SIZE(mloc,3)
   DO j=1,SIZE(mloc,2)
@@ -2941,6 +2962,8 @@ IF(ASSOCIATED(oft_xmhd_ops%pm))THEN
     RETURN
   END SELECT
 END IF
+!---Column search: positions found for the first block of each (row, column) space pair are reused
+CALL xmhd_jac_reset_ind(mtmp)
 IF(nolock)THEN
   CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc)
 ELSE
