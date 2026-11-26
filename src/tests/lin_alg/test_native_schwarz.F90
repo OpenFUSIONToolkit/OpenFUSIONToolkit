@@ -96,6 +96,9 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 USE test_native_schwarz_helpers, ONLY: solve_concurrent, local_vec
 IMPLICIT NONE
+#ifdef SUB_LU_MKL
+EXTERNAL :: mkl_set_num_threads
+#endif
 INTEGER(i4) :: io_unit,nfail,its(11)
 INTEGER(i4), PARAMETER :: order=3
 TYPE(multigrid_mesh) :: mg_mesh
@@ -117,6 +120,11 @@ WRITE(*,*)'SKIP TEST: no direct solver package for the subdomain solves'
 STOP
 #endif
 CALL oft_init
+#ifdef SUB_LU_MKL
+!---Separate factorizations of the same matrix by multithreaded MKL PARDISO are not
+!   bitwise identical, but the checks against block-Jacobi compare solutions exactly
+CALL mkl_set_num_threads(1)
+#endif
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)
