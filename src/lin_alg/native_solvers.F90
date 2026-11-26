@@ -2747,8 +2747,8 @@ IF(.NOT.ASSOCIATED(self%A%cell_ovl))CALL oft_abort('Cell mode requires a cell ov
   'attached to the matrix ("cell_ovl")','schwarz_cell_setup',__FILE__)
 IF(self%boundary_overlap)CALL oft_abort('"boverlap" is not supported in cell mode', &
   'schwarz_cell_setup',__FILE__)
-IF(self%nlocal<-1)CALL oft_abort('Slice groups are not supported in cell mode', &
-  'schwarz_cell_setup',__FILE__)
+IF(self%nlocal<0)CALL oft_abort('Field based blocks (nlocal<0) are not supported in cell mode: '// &
+  'the cell overlap builder defines the blocks','schwarz_cell_setup',__FILE__)
 IF((self%adjacency<OFT_CELL_ADJ_POINT).OR.(self%adjacency>OFT_CELL_ADJ_FACE))CALL oft_abort( &
   'Invalid cell adjacency','schwarz_cell_setup',__FILE__)
 CALL solver_setup(self)

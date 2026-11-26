@@ -120,7 +120,7 @@ In the native backend subdomains are grown in one of two modes (`overlap_mode`):
   "oft_fem_cell_overlap") that the physics module or application attaches to the matrix
   (`cell_ovl`; MUG attaches one to its native Jacobians on every level, with `xmhd_nparts` setting
   the blocks); cell mode aborts if none is attached, and the builder's block count replaces
-  `nlocal` (field based blocks and `boverlap` are not supported). Blocks may cross process
+  `nlocal` (field based blocks, `nlocal<0`, and `boverlap` are not supported, and abort). Blocks may cross process
   boundaries for any number of blocks per process: the union of the blocks of each process is
   assembled as one subdomain across processes, so the setup needs a fixed number of exchanges
   whatever the overlap. With `overlap=0` the blocks are the DoFs of the core cells, which already
@@ -142,7 +142,7 @@ been tested with this preconditioner.
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `nlocal`   | Number of local blocks (-1 for field based; graph mode, replaced by the builder's block count in cell mode) | int | Yes |
+| `nlocal`   | Number of local blocks (-1 for field based, graph mode only; replaced by the builder's block count in cell mode, where `nlocal<0` aborts) | int | Yes |
 | `groups`   | Group index for each field in multi-field vector [n] (native graph mode only) | int | Yes |
 | `boverlap` | Overlap boundary rows, as for block-Jacobi (native graph mode only) | bool | No |
 | `overlap`  | Number of overlap layers (native default: 1; layers of cells in cell mode) | int | Yes |
