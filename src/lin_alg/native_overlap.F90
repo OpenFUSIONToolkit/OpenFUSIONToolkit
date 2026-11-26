@@ -861,16 +861,17 @@ INTEGER(i8), INTENT(in) :: greq(:)
 INTEGER(i4), INTENT(in) :: oreq(:)
 INTEGER(i4), INTENT(in) :: noff
 INTEGER(i4) :: kk,jj,qq,rr,nn,ntot,mm
-INTEGER(i4), ALLOCATABLE :: sc(:),rc(:),ip(:),ordr(:)
+INTEGER(i4), ALLOCATABLE :: sc(:),rc(:),ip(:),ordr(:),nq(:)
 INTEGER(i8), ALLOCATABLE :: sb(:),rb(:),sb2(:),rb2(:)
 INTEGER(i4), ALLOCATABLE :: t4(:)
 INTEGER(i8), ALLOCATABLE :: t8(:)
-ALLOCATE(sc(0:np-1),rc(0:np-1),ip(0:np-1))
-!---Requested global indices, grouped by owner
+ALLOCATE(sc(0:np-1),rc(0:np-1),ip(0:np-1),nq(0:np-1))
+!---Requested global indices, grouped by owner (counts per owner kept in nq)
 sc=0
 DO kk=1,nreq
   sc(oreq(kk))=sc(oreq(kk))+1
 END DO
+nq=sc
 ALLOCATE(sb(MAX(1,nreq)),ordr(MAX(1,nreq)))
 CALL csr_offsets(sc,ip)
 DO kk=1,nreq
@@ -929,7 +930,7 @@ CALL MOVE_ALLOC(t4,go)
 kk=0
 nn=0
 DO qq=0,np-1
-  DO jj=1,COUNT(oreq(1:nreq)==qq)
+  DO jj=1,nq(qq)
     kk=kk+1
     ng_rows=ng_rows+1
     rr=INT(rb2(nn+1),4)
@@ -945,7 +946,7 @@ DO qq=0,np-1
     dsrc(noff+ordr(kk))=-ng_rows
   END DO
 END DO
-DEALLOCATE(sc,rc,ip,sb,rb,sb2,rb2,ordr)
+DEALLOCATE(sc,rc,ip,nq,sb,rb,sb2,rb2,ordr)
 END SUBROUTINE request_rows
 !> Number of entries of a row (source src) with columns in the subdomain
 FUNCTION count_sub_row(src) RESULT(nc)
