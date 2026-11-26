@@ -189,13 +189,15 @@ def parse_qcheck(output):
     return blocks, diags, flags, max_rel
 
 
-def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False, xml=oft_in_xml):
+def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False, xml=oft_in_xml,
+                threads=None):
     '''Write the input, run the equivalence check, and validate the reported differences
 
     nlevels is the expected number of Jacobian levels (polynomial levels on the finest mesh); jac=False
     skips the Jacobian comparison (memory-heavy configurations); petsc=True uses the PETSc linear algebra
     backend (skipped if OFT is not compiled with PETSc), where the Jacobians are compared through products
-    with random vectors only; xml is the XML input (preconditioner and regions)'''
+    with random vectors only; xml is the XML input (preconditioner and regions); threads sets the number of
+    OpenMP threads for this run (default: inherited from the environment)'''
     if not jac:
         bench += " jac_check=F\n"
     os.chdir(test_dir)
@@ -204,8 +206,19 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
                                          petsc='T' if petsc else 'F', **mesh))
     with open('oft_in_qcache.xml', 'w+') as fid:
         fid.write(xml)
-    status, output = run_OFT("./xmhd_bench oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
+    threads_save = os.environ.get('OMP_NUM_THREADS')
+    if threads is not None:
+        os.environ['OMP_NUM_THREADS'] = str(threads)
+    try:
+        status, output = run_OFT("./xmhd_bench oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
+    finally:
+        if threads_save is None:
+            os.environ.pop('OMP_NUM_THREADS', None)
+        else:
+            os.environ['OMP_NUM_THREADS'] = threads_save
     assert status
+    if threads is not None:
+        assert re.search(r'XMHD_BENCH nthreads=\s*{0}\b'.format(threads), output)
     blocks, diags, flags, max_rel = parse_qcheck(output)
     # 3 cases for every field block, 7 diagnostics (dt<0 case), 3 flag comparisons
     assert max_rel is not None
@@ -317,6 +330,13 @@ def test_qcache_curved_p2():
     '''Residual and Jacobian implementations agree on a curved (quadratic) tet mesh with shaping, floors and solid cells'''
     bench = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
     assert qcheck_case(curved_mesh(), 2, xmhd=" xmhd_hall=T\n", bench=bench)
+
+
+def test_qcache_posmap_threads():
+    '''Position map setup and assembly with 4 OpenMP threads: Jacobians of a p-multigrid hierarchy (p=3, 2) built
+    with the precomputed CSR positions agree entrywise with column-search assembly (both threaded)'''
+    assert qcheck_case(cube_mesh(2), 3, xmhd=" xmhd_hall=T\n", bench=" shaping=T\n qcheck_solid=T\n", minlev=2,
+                       nlevels=2, threads=4)
 
 
 @pytest.mark.parametrize("petsc_flag", [False, True])

@@ -2746,7 +2746,7 @@ CLASS IS(oft_native_matrix)
   END IF
   ALLOCATE(pm%rel(pm%ncell,mesh%nc))
   fail=.FALSE.
-  !$omp parallel private(i,s,t,f,g,jr,jc,jp,jn,o,dofs) reduction(.OR.:fail)
+  !$omp parallel private(i,k,s,t,f,g,jr,jc,jp,jn,o,dofs) reduction(.OR.:fail)
   ALLOCATE(dofs(MAXVAL(plan%nce),3))
   !$omp do schedule(static)
   DO i=1,mesh%nc
