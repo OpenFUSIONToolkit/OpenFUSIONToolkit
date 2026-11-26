@@ -62,7 +62,7 @@ IMPLICIT NONE
 INTEGER(i4), PARAMETER :: nres=21
 INTEGER(i4) :: io_unit,ierr,nfail,ip,order=3
 INTEGER(i4) :: its(nres,2)
-INTEGER(i8) :: psig(3,2),gsig
+INTEGER(i8) :: psig(4,2),gsig
 INTEGER(i4), PARAMETER :: nparts_list(2)=[1,3]
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
@@ -130,7 +130,7 @@ CONTAINS
 SUBROUTINE run_cases(nparts,res,sig)
 INTEGER(i4), INTENT(in) :: nparts
 INTEGER(i4), INTENT(out) :: res(nres)
-INTEGER(i8), INTENT(out) :: sig(3) !< Hashes of the cell partition, DoF colors and graph blocks
+INTEGER(i8), INTENT(out) :: sig(4) !< Hashes of the cell partition, DoF colors, graph blocks and cell ranks
 INTEGER(i4) :: kfull,ia,k,nb
 REAL(r8) :: rnorm,t0
 TYPE(oft_overlap_dofs) :: dofs
@@ -143,6 +143,7 @@ nb=cbld%nblocks()
 !---Partition signature (the reference iteration tables hold for one partition only)
 sig(1)=part_hash(cbld%mesh%nc,cbld%cpart,cbld%mesh%global%lc)
 sig(2)=part_hash(cbld%ndofs,cbld%dcolor,row_gidx())
+sig(4)=part_hash(cbld%mesh%nc,[(oft_env%rank+1,k=1,cbld%mesh%nc)],cbld%mesh%global%lc)
 !---Smallest number of point layers for every block to cover the whole mesh
 kfull=-1
 DO k=0,64

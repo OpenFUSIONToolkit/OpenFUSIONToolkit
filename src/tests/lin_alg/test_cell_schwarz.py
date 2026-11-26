@@ -48,8 +48,10 @@ oft_in_template = """
 #  re-setup, 18: after update with a new pattern, 19: weighted additive iterations with the
 #  covering layers, 20: weighted additive with one layer of point adjacent cells
 # The test also writes a signature of the partition behind each row: hashes of the cell
-# partition and of the graph mode blocks (both from METIS) and of the DoF colors, each over the
-# global indices of the cells or rows. The DoF colors also depend on the tie breaking between
+# partition and of the graph mode blocks within each process, of the DoF colors and of the
+# decomposition of the mesh between processes (the rank of each cell), each over the global
+# indices of the cells or rows. The cell partition, graph blocks and decomposition come from
+# METIS, and so depend on the METIS build. The DoF colors also depend on the tie breaking between
 # parts in mesh_local_partition, which uses the compiler's random number generator (so they vary
 # with the compiler and the thread count); this moves counts by about one, within the tolerance
 # of the tables, so only the METIS hashes select the reference table.
@@ -68,21 +70,19 @@ def run_cell_schwarz(nprocs, nlevels, order, timeout=600, ref_per='F,F,F'):
     if nfail != 0:
         print("FAILED: {0} cell Schwarz checks failed".format(nfail))
         return None
-    return its, [sig[0:3], sig[3:6]]
+    return its, [sig[0:4], sig[4:8]]
 
 def partition_key(sig):
-    # METIS cell partition and graph mode blocks (see run_cell_schwarz)
-    return [sig[0], sig[2]]
+    # METIS cell partition, graph mode blocks and decomposition (see run_cell_schwarz)
+    return [sig[0], sig[2], sig[3]]
 
 def check_counts(result, expected, expected_sig):
     its, sigs = result
     for ip, (row, ref, sig, ref_sig) in enumerate(zip(its, expected, sigs, expected_sig)):
         print("nparts={0}: {1}".format([1, 3][ip], row))
-        print("nparts={0} partition signature (cells, DoF colors, graph blocks): {1}".format([1, 3][ip], sig))
-        # The covering layers and iteration counts depend on the partition, which can differ
-        # between platforms (METIS built by another compiler or with other floating point
-        # options, or another random number generator for the tie breaking between parts).
-        # Compare them with the table only for the partition it was made with.
+        print("nparts={0} partition signature (cells, DoF colors, graph blocks, ranks): {1}".format([1, 3][ip], sig))
+        # The covering layers and iteration counts depend on the partition, which differs between
+        # METIS builds. Compare them with the table only for the partition it was made with.
         if partition_key(sig) == ref_sig:
             # Covering layers exact, iteration counts within 5% of the expected values
             assert row[0] == ref[0]
@@ -91,17 +91,18 @@ def check_counts(result, expected, expected_sig):
             assert abs(row[20]-ref[20]) <= max(1, 0.05*ref[20])
         else:
             print("=" * 80)
-            print("NOTE: nparts={0}: partition {1} is not the reference partition {2} (cells, graph blocks); the "
-                  "reference table does not apply, checking partition-independent properties only".format(
-                      [1, 3][ip], partition_key(sig), ref_sig))
+            print("NOTE: nparts={0}: partition {1} is not the reference partition {2} (cells, graph blocks, "
+                  "ranks); the reference table does not apply, checking partition-independent properties "
+                  "only".format([1, 3][ip], partition_key(sig), ref_sig))
             print("NOTE:   row:       {0}".format(row))
             print("NOTE:   reference: {0}".format(ref))
             print("=" * 80)
             # Also as a warning: pytest shows its warnings summary for passing tests, whose
             # output is otherwise captured
             warnings.warn(UserWarning("nparts={0}: partition {1} is not the reference partition {2} "
-                                      "(cells, graph blocks), reference table not applied; row {3}, "
-                                      "reference {4}".format([1, 3][ip], partition_key(sig), ref_sig, row, ref)))
+                                      "(cells, graph blocks, ranks), reference table not applied; row {3}, "
+                                      "reference {4}, signature {5}".format([1, 3][ip], partition_key(sig), ref_sig,
+                                                                           row, ref, sig)))
         # Exactness: one restricted iteration with the covering layers
         assert row[1] == 1
         # Point adjacency: non-increasing with layers; face <= edge <= point overlap per layer
@@ -132,16 +133,18 @@ expected = {
                 [10, 1, 1, 33, 14, 10, 33, 15, 12, 33, 19, 16, 62, 56, 56, 14, 14, 14, 14, 1, 18]],
 }
 
-# Partitions the rows above were made with: METIS cell partition and graph block hashes (see
-# run_cell_schwarz). Recorded with gfortran, the Ubuntu system METIS 5.1.0 (built without GKRAND)
-# and OMP_NUM_THREADS=2; other METIS builds (eg. by another compiler) may partition differently,
-# and then fall back to the partition-independent checks.
+# Partitions the rows above were made with: hashes of the METIS cell partition, graph blocks and
+# decomposition between processes (see run_cell_schwarz). These rows and keys were recorded with
+# gfortran, the Ubuntu system METIS 5.1.0 (built without GKRAND) and OMP_NUM_THREADS=2. CI builds
+# METIS 5.1.0 with build_libs.py (GKRAND), which partitions differently, so on CI these rows fall
+# back to the partition-independent checks; the rows run in CI are to be replaced by the CI rows.
+# The slow configurations, which CI does not run, stay on the system METIS reference.
 expected_sig = {
-    (1, 3, 3): [[1369331334, 0], [864203196, 434180095]],
-    (2, 4, 3): [[1369331334, 0], [1004189096, 1018507348]],
-    (4, 4, 2): [[1369331334, 0], [802654272, 2008392473]],
-    (2, 5, 2): [[699839912, 0], [599442501, 817245016]],
-    (4, 5, 2): [[699839912, 0], [1936146723, 1953782997]],
+    (1, 3, 3): [[1369331334, 0, 1369331334], [864203196, 434180095, 1369331334]],
+    (2, 4, 3): [[1369331334, 0, 1767070778], [1004189096, 1018507348, 1767070778]],
+    (4, 4, 2): [[1369331334, 0, 1643773048], [802654272, 2008392473, 1643773048]],
+    (2, 5, 2): [[699839912, 0, 2015186007], [599442501, 817245016, 2015186007]],
+    (4, 5, 2): [[699839912, 0, 1673343115], [1936146723, 1953782997, 1673343115]],
 }
 
 # Cube periodic in x (`ref_per=T,F,F`): blocks and graph subdomains grow across the periodic seam
@@ -159,15 +162,17 @@ expected_periodic = {
                 [9, 1, 1, 52, 22, 14, 52, 26, 18, 52, 31, 26, 82, 66, 63, 22, 22, 22, 22, 1, 24]],
 }
 
-# Partitions the rows above were made with: METIS cell partition and graph block hashes (see
-# run_cell_schwarz). Recorded with gfortran, the Ubuntu system METIS 5.1.0 (built without GKRAND)
-# and OMP_NUM_THREADS=2; other METIS builds (eg. by another compiler) may partition differently,
-# and then fall back to the partition-independent checks.
+# Partitions the rows above were made with: hashes of the METIS cell partition, graph blocks and
+# decomposition between processes (see run_cell_schwarz). These rows and keys were recorded with
+# gfortran, the Ubuntu system METIS 5.1.0 (built without GKRAND) and OMP_NUM_THREADS=2. CI builds
+# METIS 5.1.0 with build_libs.py (GKRAND), which partitions differently, so on CI these rows fall
+# back to the partition-independent checks; the rows run in CI are to be replaced by the CI rows.
+# The slow configurations, which CI does not run, stay on the system METIS reference.
 expected_periodic_sig = {
-    (1, 3, 3): [[1145285914, 0], [133795671, 1648869163]],
-    (2, 4, 3): [[1145285914, 0], [885882329, 834950068]],
-    (4, 4, 2): [[1145285914, 0], [1720874087, 1493531299]],
-    (2, 5, 2): [[355298977, 0], [484386452, 1957902133]],
+    (1, 3, 3): [[1145285914, 0, 1145285914], [133795671, 1648869163, 1145285914]],
+    (2, 4, 3): [[1145285914, 0, 996153002], [885882329, 834950068, 996153002]],
+    (4, 4, 2): [[1145285914, 0, 1956384897], [1720874087, 1493531299, 1956384897]],
+    (2, 5, 2): [[355298977, 0, 495323792], [484386452, 1957902133, 495323792]],
 }
 
 @pytest.mark.coverage
