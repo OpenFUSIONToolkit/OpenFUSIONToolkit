@@ -1185,7 +1185,7 @@ class TokaMaker():
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ returned as `l_i` ('std', 'ITER'); both forms are also returned as `l_i_std` and `l_i_iter`
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
@@ -1198,7 +1198,7 @@ class TokaMaker():
         r'''! Print information (Ip, q, etc.) about current G-S equilbirium
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ to print ('std', 'ITER', or 'all' for both)
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         '''
@@ -2549,6 +2549,10 @@ class TokaMaker():
         @param coil_currents Coil currents at the end of the timestep (if `None`, current coil currents are used)
         @param coil_voltages Coil voltages to apply over the timestep (if `None`, zero voltages are assumed)
         @result new time, new dt, # of NL iterations, # of linear iterations, # of retries
+
+        @note If every attempt fails, # of retries is negative (-4), but the returned time is still advanced (by the
+        last reduced timestep, `dt/16`) even though the solution is not advanced. Check that # of retries is
+        non-negative after each step.
         '''
         dt = c_double(dt)
         time = c_double(time)
@@ -3699,7 +3703,7 @@ class TokaMaker_equilibrium():
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ returned as `l_i` ('std', 'ITER'); both forms are also returned as `l_i_std` and `l_i_iter`
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
@@ -3747,11 +3751,12 @@ class TokaMaker_equilibrium():
                         zbounds[0,:] = x_points[-(i+1),:]
                         break
         # Compute normalized inductance
-        if li_normalization.lower() == 'std':
-            li = (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2)
-        elif li_normalization.lower() == 'iter':
-            li = 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
-        else:
+        li = {
+            'std': (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2),
+            'iter': 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
+        }
+        li_norm = li_normalization.lower()
+        if li_norm not in li:
             raise ValueError('Invalid "li_normalization"')
         # Compute geometric major/minor radius
         if geom_type == 'mid':
@@ -3787,7 +3792,9 @@ class TokaMaker_equilibrium():
             'beta_pol': 100.0*(2.0*pvol*mu0/vol)/numpy.power(Ip*mu0/dl,2),
             'dflux': dflux,
             'tflux': tflux,
-            'l_i': li
+            'l_i': li[li_norm],
+            'l_i_std': li['std'],
+            'l_i_iter': li['iter']
         }
         if abs(self._F0) > 0.0:
             F0_abs = abs(self._F0)
@@ -3799,11 +3806,15 @@ class TokaMaker_equilibrium():
         r'''! Print information (Ip, q, etc.) about current G-S equilbirium
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ to print ('std', 'ITER', or 'all' for both)
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         '''
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,axis_pad=axis_pad,li_normalization=li_normalization,geom_type=geom_type,beta_Ip=beta_Ip)
+        li_norm = li_normalization.lower()
+        stats_norm = li_normalization
+        if li_norm == 'all':
+            stats_norm = 'std'
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,axis_pad=axis_pad,li_normalization=stats_norm,geom_type=geom_type,beta_Ip=beta_Ip)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
@@ -3831,7 +3842,13 @@ class TokaMaker_equilibrium():
         print("  <Beta_n>   [%]          =   {0:7.4F}".format(eq_stats['beta_n'])) if 'beta_n' in eq_stats else None
         print("  Diamagnetic flux [Wb]   =   {0:11.4E}".format(eq_stats['dflux'])) if 'dflux' in eq_stats else None
         print("  Toroidal flux [Wb]      =   {0:11.4E}".format(eq_stats['tflux'])) if 'tflux' in eq_stats else None
-        print("  l_i                     =   {0:7.4F}".format(eq_stats['l_i'])) if 'l_i' in eq_stats else None
+        if 'l_i' in eq_stats:
+            if li_norm == 'all':
+                li_keys = [key for key in eq_stats if key.startswith('l_i_')]
+            else:
+                li_keys = ['l_i_'+li_norm]
+            for key in li_keys:
+                print("  {0:24}=   {1:7.4F}".format(key,eq_stats[key]))
 
     def calc_loopvoltage(self):
         r'''! Get plasma loop voltage

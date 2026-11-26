@@ -22,6 +22,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
+ use_petsc={7}
 /
 
 &mesh_options
@@ -126,19 +127,21 @@ def alfven_linear(nu_gyro, hall=False, me_factor=100.):
     x = expm(np.linalg.solve(mass, mat)*t_final) @ x0
     return np.array([[-x[0].imag, x[0].real], [-x[1].imag, x[1].real]])
 
-def gyro_case(nu_gyro, hall=False, me_factor=100., linear=False):
+def gyro_case(nu_gyro, hall=False, me_factor=100., linear=False, exe='./test_MUG_gyro', petsc=False):
     '''Write the input for an Alfven wave with ion temperature ti0 and run test_MUG_gyro
 
     `hall` enables the Hall, electron pressure, and electron inertia terms, with electron mass factor `me_factor`.
     `linear` advances the wave with the linearized model (xmhd_lin_run, started with a backward Euler step) about
-    the uniform equilibrium instead of the nonlinear model.
+    the uniform equilibrium instead of the nonlinear model. `exe` selects the driver program (`./test_MUG_gyro_lag`
+    for the Lagrange-only module). `petsc` runs with the PETSc linear algebra backend.
     '''
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(ti0, eta, nu_visc, nu_gyro, 'T' if hall else 'F', me_factor,
-                                         'T' if linear else 'F'))
-    # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command)
-    return run_OFT("./test_MUG_gyro oft.in oft_in_xmhd.xml", 1, 600)
+                                         'T' if linear else 'F', 'T' if petsc else 'F'))
+    # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command),
+    # also used for PETSc runs (additive Schwarz without overlap)
+    return run_OFT("{0} oft.in oft_in_xmhd.xml".format(exe), 1, 600)
 
 def validate_result(nu_gyro, err_exp, hall=False, me_factor=100.):
     '''Compare the final transverse velocity with linear theory
@@ -171,27 +174,33 @@ def validate_result(nu_gyro, err_exp, hall=False, me_factor=100.):
 # tolerance but have separate regression values
 #============================================================================
 # Reference case without gyroviscosity
-@pytest.mark.parametrize("linear,err_exp", ((False, 8.439817E-004), pytest.param(True, 7.539158E-04, marks=pytest.mark.linear)))
-def test_alfven_ref(linear, err_exp):
+@pytest.mark.parametrize("linear,petsc_flag,err_exp", ((False, False, 8.439817E-004),
+                                                  pytest.param(True, False, 7.539158E-04, marks=pytest.mark.linear),
+                                                  (False, True, 8.439817E-004)))
+def test_alfven_ref(linear, petsc_flag, err_exp):
     '''Linearly polarized shear Alfven wave without gyroviscosity, which keeps its polarization.'''
-    assert gyro_case(-1., linear=linear)
+    assert gyro_case(-1., linear=linear, petsc=petsc_flag)
     assert validate_result(0.0, err_exp)
 
 # Gyroviscous rotation of the polarization
-@pytest.mark.parametrize("linear,err_exp", ((False, 1.848943E-003), pytest.param(True, 2.152501E-03, marks=pytest.mark.linear)))
-def test_gyro_rotation(linear, err_exp):
+@pytest.mark.parametrize("linear,petsc_flag,err_exp", ((False, False, 1.848943E-003),
+                                                  pytest.param(True, False, 2.152501E-03, marks=pytest.mark.linear),
+                                                  (False, True, 1.848943E-003)))
+def test_gyro_rotation(linear, petsc_flag, err_exp):
     '''Shear Alfven wave with Braginskii's gyroviscous stress (S. I. Braginskii, Rev. Plasma Phys. 1, 205 (1965)),
     whose polarization rotates from x toward y (B along +z) at half the split between the circular polarizations,
     eta_4 k^2/rho = k^2 T_i/B0. The opposite sign of the stress would rotate it the other way.'''
-    assert gyro_case(1., linear=linear)
+    assert gyro_case(1., linear=linear, petsc=petsc_flag)
     assert validate_result(1.0, err_exp)
 
 #============================================================================
 # Gyroviscosity with the Hall term (Hall-only cases are in test_MUG_hall.py)
-@pytest.mark.parametrize("linear,err_exp", ((False, 2.029630E-03), pytest.param(True, 1.941121E-03, marks=pytest.mark.linear)))
-def test_hall_gyro(linear, err_exp):
+@pytest.mark.parametrize("linear,petsc_flag,err_exp", ((False, False, 2.029630E-03),
+                                                  pytest.param(True, False, 1.941121E-03, marks=pytest.mark.linear),
+                                                  (False, True, 2.029630E-03)))
+def test_hall_gyro(linear, petsc_flag, err_exp):
     '''Shear Alfven wave with both gyroviscosity and the Hall term (default electron mass factor of 100). Their
     rotation rates are in the ratio beta_i/2 ~ 0.96 and, with the conventions above, add, which checks the relative
     sign of the two terms.'''
-    assert gyro_case(1., hall=True, linear=linear)
+    assert gyro_case(1., hall=True, linear=linear, petsc=petsc_flag)
     assert validate_result(1.0, err_exp, hall=True)

@@ -153,6 +153,8 @@ def test_ITER_eq(order,helicity):
     are checked against the equilibrium itself'''
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     eq_dict = ITER_eq_dict_helicity(helicity)
+    eq_dict['l_i_std'] = 1.1532768229095525 # Both l_i forms are always returned
+    eq_dict['l_i_iter'] = eq_dict['l_i']
     results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)

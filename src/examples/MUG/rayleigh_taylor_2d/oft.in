@@ -1,0 +1,54 @@
+&runtime_options
+ ppn=1
+ debug=0
+/
+
+&mesh_options
+ meshname='rt'
+ cad_type=92
+ nlevels=1            ! Use 2 for MPI runs (base mesh distributed over the processes)
+ nbase=1
+ grid_order=2
+ fix_boundary=T
+/
+
+&cube_options
+ mesh_type=1          ! Triangular mesh
+ ni=48,96,0           ! Cells in x (periodic) and z (between walls)
+ rscale=1.,2.,0.      ! Lx = 1 m, Lz = 2 m
+ shift=-0.5,-1.,0.    ! Center the domain on the origin
+ ref_per=T,F,F        ! Periodic in x
+/
+
+&rt_2d_options
+ order=2              ! FE order
+ linear=F             ! Nonlinear run (requires profile='tanh')
+ plot_run=F           ! Run the simulation (T: make plot files from restart files)
+ pm=F                 ! Do not print solver progress
+ profile='tanh'       ! Transition layer ('exp': exponential profile, linear benchmark only)
+ n_0=1.E19            ! Density at z=0 [m^-3]
+ T_0=100.             ! Temperature at z=0 [eV]
+ atwood=0.5           ! Atwood number (density ratio 3)
+ delta=0.1            ! Half-width of the transition layer [m]
+ sigma=0.2            ! Width of the seed about z=0 [m]
+ L_n=0.5              ! Density scale length [m] ('exp' only)
+ g=1.E8               ! Gravity along -z [m/s^2]
+ B_0=0.               ! In-plane field along x [T]
+ by0=0.               ! Uniform out-of-plane field [T]
+ V1=1.                ! Seed amplitude [m/s]
+ nu=10.               ! Viscosity [m^2/s]
+ eta=1.               ! Resistivity [m^2/s]
+ chi=1.               ! Thermal diffusivity [m^2/s]
+ D_diff=1.            ! Particle diffusivity [m^2/s]
+ gamma=1.6666667      ! Adiabatic index
+ den_scale=1.E19      ! Density normalization [m^-3]
+ dt=2.E-6             ! Time step [s]
+ nsteps=450           ! Number of time steps (t = 790 us)
+ rst_freq=5           ! Restart (and plot) file frequency
+ ittarget=60          ! Target linear iterations per step: dt shrinks once the flow is nonlinear (~200 for MPI runs)
+ timestep_cn=T        ! Crank-Nicolson (nonlinear) or BDF2 (linear) time stepping
+ use_mfnk=T           ! Matrix-free Newton-Krylov (preconditioner from the assembled Jacobian)
+ pre_freq=4           ! Rebuild the preconditioner every 4 steps
+ lin_tol=1.E-10       ! Absolute linear tolerance
+ nl_tol=1.E-8         ! Absolute nonlinear tolerance
+/

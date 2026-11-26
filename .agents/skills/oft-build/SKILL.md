@@ -131,6 +131,7 @@ python <repo_root>/src/utilities/build_libs.py \
 | `--oft_build_debug=1` | Debug build (runtime checks on; tests get 4× timeouts) |
 | `--oft_build_examples=1` | Build examples (`OFT_BUILD_EXAMPLES`) |
 | `--oft_build_docs=1` | Build Doxygen documentation (`OFT_BUILD_DOCS`) |
+| `--use_accelerate` | macOS only (≥ 14.0): use Accelerate for BLAS/LAPACK instead of building OpenBLAS, via a static shim library (`<config_dir>/accelerate_shim/lib/liboftaccelerate.a`, which auto-links the Accelerate framework; built by `src/utilities/accelerate_shim.py`) passed to CMake as `OFT_LAPACK_LIBRARIES` |
 | `--build_arpack=1`, `--build_superlu=1`, `--build_superlu_dist=1`, `--build_umfpack=1`, `--build_strumpack=1`, `--build_petsc=1` | Optional solver libraries (add `--strumpack_mpi=1` to build STRUMPACK with MPI and ScaLAPACK for distributed factorization) |
 
 ### Stage 2: configure, build, install

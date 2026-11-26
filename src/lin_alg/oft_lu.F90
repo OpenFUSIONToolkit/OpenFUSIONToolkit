@@ -43,6 +43,9 @@ IMPLICIT NONE
 #else
 #define DEF_ILU_PACK "native"
 #endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_STRUMPACK)
+#define DEF_LU_PACK "strumpack"
+#endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_UMFPACK)
 #define DEF_LU_PACK "umfpack"
 #endif
@@ -54,9 +57,6 @@ IMPLICIT NONE
 #endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_SUPERLU_DIST)
 #define DEF_LU_PACK "superd"
-#endif
-#if !defined(DEF_LU_PACK) && defined(HAVE_STRUMPACK)
-#define DEF_LU_PACK "strumpack"
 #endif
 #if !defined(DEF_LU_PACK)
 #define DEF_LU_PACK "none"
@@ -1059,6 +1059,7 @@ logical :: thread_safe
 thread_safe=.TRUE.
 IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 IF(self%package(1:6)=='superd')thread_safe=.FALSE.
+IF(self%package(1:9)=='strumpack')thread_safe=.FALSE.
 end function lusolver_check_thread
 !------------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage

@@ -16,6 +16,7 @@
 MODULE thin_wall_hodlr
 USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_float, c_sizeof
 USE thin_wall
+USE oft_la_base, ONLY: OFT_ACCESS_READ, OFT_ACCESS_WRITE
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------------
@@ -2720,7 +2721,8 @@ CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
-COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
+COMPLEX(8), POINTER, CONTIGUOUS, DIMENSION(:) :: utmp,gtmp
+COMPLEX(8), POINTER, DIMENSION(:) :: ue,ge
 COMPLEX(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 COMPLEX(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
@@ -2793,8 +2795,8 @@ IF(self%refactor)THEN
 END IF
 !
 NULLIFY(utmp,gtmp)
-CALL u%get_local(utmp)
-CALL g%get_local(gtmp)
+CALL u%borrow_local(utmp,OFT_ACCESS_WRITE)
+CALL g%borrow_local(gtmp,OFT_ACCESS_READ)
 utmp=(0.d0,0.d0)
 IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   ALLOCATE(ue(tw_nelems_exp(self%mf_obj%tw_obj)),ge(tw_nelems_exp(self%mf_obj%tw_obj)))
@@ -2835,9 +2837,10 @@ IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   CALL tw_junction_reduce_vec_c(self%mf_obj%tw_obj,ue,utmp)
   DEALLOCATE(ue,ge)
 END IF
-CALL u%restore_local(utmp)
+CALL u%release_local(utmp,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL g%release_local(gtmp,OFT_ACCESS_READ,sync=.FALSE.)
 CALL g%set((0.d0,0.d0))
-DEALLOCATE(utmp,gtmp,hole_inds)
+DEALLOCATE(hole_inds)
 DEBUG_STACK_POP
 CONTAINS
 !------------------------------------------------------------------------------
@@ -2937,7 +2940,8 @@ CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(4) :: i,j,k,l,n,level,iblock,max_size,info
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
-REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
+REAL(8), POINTER, CONTIGUOUS, DIMENSION(:) :: utmp,gtmp
+REAL(8), POINTER, DIMENSION(:) :: ue,ge
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 REAL(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
@@ -3020,8 +3024,8 @@ IF(self%refactor)THEN
 END IF
 !
 NULLIFY(utmp,gtmp)
-CALL u%get_local(utmp)
-CALL g%get_local(gtmp)
+CALL u%borrow_local(utmp,OFT_ACCESS_WRITE)
+CALL g%borrow_local(gtmp,OFT_ACCESS_READ)
 utmp=0.d0
 IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   ALLOCATE(ue(tw_nelems_exp(self%mf_obj%tw_obj)),ge(tw_nelems_exp(self%mf_obj%tw_obj)))
@@ -3064,9 +3068,10 @@ IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   CALL tw_junction_reduce_vec(self%mf_obj%tw_obj,ue,utmp)
   DEALLOCATE(ue,ge)
 END IF
-CALL u%restore_local(utmp)
+CALL u%release_local(utmp,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL g%release_local(gtmp,OFT_ACCESS_READ,sync=.FALSE.)
 CALL g%set(0.d0)
-DEALLOCATE(utmp,gtmp,hole_inds)
+DEALLOCATE(hole_inds)
 DEBUG_STACK_POP
 CONTAINS
 !------------------------------------------------------------------------------

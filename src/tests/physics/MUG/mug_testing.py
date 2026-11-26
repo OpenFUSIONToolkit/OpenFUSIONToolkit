@@ -199,8 +199,8 @@ ALFVEN_TEMPLATE = """
 /
 """
 
-# Magnetic field representation of the 3-D xMHD modules: the mixed H(curl)/Lagrange module (xmhd) sets a Dirichlet
-# condition on B at the wall; the nodal Lagrange module (xmhd_lag) relies on divergence cleaning instead
+# Magnetic field representation of the 3-D xMHD modules: the mixed H(curl)/Lagrange module (xmhd) and the nodal
+# Lagrange module (xmhd_lag), which adds a divergence cleaning term (k_db) to the induction equation
 REPRESENTATIONS = ('hcurl', 'lagrange')
 
 
@@ -237,7 +237,7 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
     only) are finite-difference approximations, so the linear tolerance is relaxed.
     '''
     exe, rep_options, timeout = {'hcurl': ('./test_sound', " bbc='bc'\n nu_visc=0.\n", 2000),
-                                 'lagrange': ('./test_sound_lag', " k_db=1.\n", 1000)}[representation]
+                                 'lagrange': ('./test_sound_lag', " bbc='bc'\n nu_visc=0.\n k_db=1.\n", 1000)}[representation]
     # Start linear BDF2 runs with a backward Euler step
     if linear:
         rep_options += " xmhd_lin_euler_start=T\n"
@@ -273,9 +273,8 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
     (nonlinear runs only); `bdf2=False` uses first-order backward Euler steps (linear runs only). Order 4 needs a tighter linear tolerance to reach the expected error, otherwise MPI
     runs (with a different multigrid layout) do not reproduce the serial errors.
     '''
-    # nu_par is parallel-only viscosity in xmhd (no effect on this transverse wave) but the fluid viscosity in xmhd_lag
     exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n nu_visc=1.E-3\n", 4000),
-                                 'lagrange': ('./test_alfven_lag', " nu_par=1.e-3\n", 2000)}[representation]
+                                 'lagrange': ('./test_alfven_lag', " bbc='bc'\n nu_visc=1.E-3\n k_db=1.\n", 2000)}[representation]
     # Start linear BDF2 runs with a backward Euler step, or use backward Euler throughout
     if linear:
         if bdf2:

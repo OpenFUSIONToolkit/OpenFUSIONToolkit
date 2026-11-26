@@ -9,6 +9,7 @@
 import os
 import sys
 import numpy as np
+import pytest
 from scipy.linalg import expm
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
@@ -20,6 +21,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
+ use_petsc={6}
 /
 
 &mesh_options
@@ -103,16 +105,18 @@ def sound_linear(nu_long):
     u_hat = (expm(mat*t_final) @ x0)[1]/0.6
     return np.array([-u_hat.imag, u_hat.real])
 
-def visc_case(visc_type,nu_visc,nu_par,b_dir):
+def visc_case(visc_type,nu_visc,nu_par,b_dir,exe='./test_MUG_visc',petsc=False):
     '''Write the input for a damped sound wave and run test_MUG_visc
 
-    `b_dir` is the (unnormalized) field direction as a namelist string.
+    `b_dir` is the (unnormalized) field direction as a namelist string. `exe` selects the driver program
+    (`./test_MUG_visc_lag` for the Lagrange-only module). `petsc` runs with the PETSc linear algebra backend.
     '''
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(b_dir,visc_type,nu_visc,nu_par,d_dens,kappa))
-    # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command)
-    return run_OFT("./test_MUG_visc oft.in oft_in_xmhd.xml", 1, 600)
+        fid.write(oft_in_template.format(b_dir,visc_type,nu_visc,nu_par,d_dens,kappa,'T' if petsc else 'F'))
+    # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command),
+    # also used for PETSc runs (additive Schwarz without overlap)
+    return run_OFT("{0} oft.in oft_in_xmhd.xml".format(exe), 1, 600)
 
 def validate_result(nu_long,err_exp):
     '''Compare the final velocity with linear theory
@@ -148,35 +152,40 @@ def validate_result(nu_long,err_exp):
 
 #============================================================================
 # Isotropic viscosity
-def test_kin():
+@pytest.mark.parametrize("petsc_flag", (False, True))
+def test_kin(petsc_flag):
     '''Sound wave damped by the `kin` viscous stress (nu grad V), which acts on the longitudinal velocity with
     coefficient nu.'''
-    assert visc_case('kin',nu_visc,-1.,'0.,0.,1.')
+    assert visc_case('kin',nu_visc,-1.,'0.,0.,1.',petsc=petsc_flag)
     assert validate_result(nu_visc,6.246040061832365E-003)
 
-def test_iso():
+@pytest.mark.parametrize("petsc_flag", (False, True))
+def test_iso(petsc_flag):
     '''Sound wave damped by the `iso` viscous stress (nu W, with W the rate of strain tensor), which acts on the
     longitudinal velocity with coefficient 4/3 nu.'''
-    assert visc_case('iso',nu_visc,-1.,'0.,0.,1.')
+    assert visc_case('iso',nu_visc,-1.,'0.,0.,1.',petsc=petsc_flag)
     assert validate_result(4.0*nu_visc/3.0,7.595011428105933E-003)
 
 #============================================================================
 # Parallel viscosity
-def test_par_aligned():
+@pytest.mark.parametrize("petsc_flag", (False, True))
+def test_par_aligned(petsc_flag):
     '''Sound wave along B damped by Braginskii's parallel stress (S. I. Braginskii, Rev. Plasma Phys. 1, 205
     (1965)) with eta_0 = m_i n0 nu_par, which acts on the longitudinal velocity with coefficient 4/3 nu_par, the same
     as `iso`.'''
-    assert visc_case('kin',0.,nu_visc,'0.,0.,1.')
+    assert visc_case('kin',0.,nu_visc,'0.,0.,1.',petsc=petsc_flag)
     assert validate_result(4.0*nu_visc/3.0,7.728128494748115E-003)
 
-def test_par_perp():
+@pytest.mark.parametrize("petsc_flag", (False, True))
+def test_par_perp(petsc_flag):
     '''Sound wave across B damped by the parallel stress, which acts on the longitudinal velocity with coefficient
     1/3 nu_par, a quarter of the field-aligned case.'''
-    assert visc_case('kin',0.,nu_visc,'1.,0.,0.')
+    assert visc_case('kin',0.,nu_visc,'1.,0.,0.',petsc=petsc_flag)
     assert validate_result(nu_visc/3.0,3.337417275579408E-003)
 
-def test_par_magic():
+@pytest.mark.parametrize("petsc_flag", (False, True))
+def test_par_magic(petsc_flag):
     '''Sound wave at the angle to B where b.W.b = 0 (cos^2 = 1/3), so the parallel stress vanishes and the wave
     is undamped.'''
-    assert visc_case('kin',0.,nu_visc,b_magic)
+    assert visc_case('kin',0.,nu_visc,b_magic,petsc=petsc_flag)
     assert validate_result(0.0,1.452759324069408E-003)

@@ -43,17 +43,20 @@
 !! not change with the time step or element order, so it is not the gravitational instability and is
 !! still under investigation.
 !!
-!! \warning Even without the Hall term, a second mode, seeded by the small force imbalance of the discrete
-!! equilibrium, grows at \f$ \gamma \approx 0.0066 \Omega_i \f$ for all \f$ \beta \f$ at the default
-!! resolution. It dominates the late stage of runs for \f$ \beta \gtrsim 2.5 \times 10^{-3} \f$, where the
-!! gravitational mode is slow or stable. It needs both gyroviscosity and a non-uniform equilibrium,
-!! but not gravity, and it grows faster at higher resolution (\f$ \gamma \approx 0.019 \Omega_i \f$ with twice
-!! the cells in \f$ x \f$ and \f$ z \f$), so it is numerical and still under investigation. For
-!! \f$ \beta \le 2 \times 10^{-3} \f$ the gravitational mode dominates and its growth rate agrees with
-!! Eq. 15 to within about 2%. At these lower \f$ \beta \f$ the runs may still fail near the end (the time
-!! step collapses once the kinetic energy reaches about \f$ 10^{-9} \f$). This, and the second mode at higher
-!! \f$ \beta \f$, can bias the fit in `run_scan.py`, which uses the last 30% of each run, so check the
-!! kinetic energy history in `xmhd.hist` before trusting a measured growth rate.
+!! \warning Even without the Hall term, a second mode grows at \f$ \gamma \approx 0.007 \Omega_i \f$ for all
+!! \f$ \beta \f$ at the default resolution. It grows from round-off: with no perturbation (`eps=0`) and the
+!! initial field projection converged (kinetic energy after the first step about \f$ 2 \times 10^{-26} \f$),
+!! it reaches the same amplitude as with the default `eps`, so tightening the initial force balance does
+!! not remove it. It overtakes the gravitational mode late in runs with \f$ \beta \gtrsim 2.5 \times 10^{-3} \f$,
+!! where that mode is slow or stable (at \f$ \beta = 3 \times 10^{-3} \f$, stable by Eq. 15, the fit returns this
+!! mode). It needs both gyroviscosity and a non-uniform equilibrium, but not gravity, and it grows faster at
+!! higher resolution (\f$ \gamma \approx 0.019 \Omega_i \f$ with twice the cells in \f$ x \f$ and \f$ z \f$),
+!! so it is numerical and still under investigation. For \f$ \beta \le 2.5 \times 10^{-3} \f$ the measured
+!! growth rate agrees with Eq. 15 to within about 2%. Runs may still fail near the end (at
+!! \f$ \beta = 10^{-3} \f$ the time step collapses once the kinetic energy reaches about \f$ 10^{-9} \f$).
+!! To avoid this late stage, and the second mode at higher \f$ \beta \f$, `run_scan.py` fits \f$ \ln E_k \f$ only over the exponential growth
+!! phase, the longest part of the run where its slope is constant to within 10% (`--fit-tol`), and prints
+!! that window. Still check the kinetic energy history in `xmhd.hist` before trusting a measured growth rate.
 !!
 !!\section doc_mug_gyro_grav_ex_code Code walk through
 !!
@@ -67,31 +70,31 @@ USE oft_base
 USE fem_utils, ONLY: fem_interp
 IMPLICIT NONE
 !------------------------------------------------------------------------------
-!> Initial condition for the gravitational instability (SI units)
+! Initial condition for the gravitational instability (SI units)
 !------------------------------------------------------------------------------
 TYPE, EXTENDS(fem_interp) :: grav_interp
-  CHARACTER(LEN=1) :: field = 'n' !< Field to evaluate ('n' or 'b')
-  REAL(r8) :: n0 = 1.d19 !< Density at the midplane [m^-3]
-  REAL(r8) :: B0 = 1.d0 !< Field at the midplane [T]
-  REAL(r8) :: Ln = 1.d0 !< Density gradient scale length [m]
-  REAL(r8) :: bcoef = 0.d0 !< \f$ 2 \mu_0 (m_i g L_n + k T) \f$
-  REAL(r8) :: eps = 1.d-6 !< Relative amplitude of the density perturbation
-  REAL(r8) :: kx = 1.d0 !< Wavenumber along x [m^-1]
-  REAL(r8) :: Lz = 1.d0 !< Distance between the walls [m]
+  CHARACTER(LEN=1) :: field = 'n' ! Field to evaluate ('n' or 'b')
+  REAL(r8) :: n0 = 1.d19 ! Density at the midplane [m^-3]
+  REAL(r8) :: B0 = 1.d0 ! Field at the midplane [T]
+  REAL(r8) :: Ln = 1.d0 ! Density gradient scale length [m]
+  REAL(r8) :: bcoef = 0.d0 ! \f$ 2 \mu_0 (m_i g L_n + k T) \f$
+  REAL(r8) :: eps = 1.d-6 ! Relative amplitude of the density perturbation
+  REAL(r8) :: kx = 1.d0 ! Wavenumber along x [m^-1]
+  REAL(r8) :: Lz = 1.d0 ! Distance between the walls [m]
 CONTAINS
-  !> Evaluate field
+  ! Evaluate field
   PROCEDURE :: interp => grav_interp_apply
 END TYPE grav_interp
 CONTAINS
 !------------------------------------------------------------------------------
-!> Evaluate the density (equilibrium plus perturbation) or the equilibrium field
+! Evaluate the density (equilibrium plus perturbation) or the equilibrium field
 !------------------------------------------------------------------------------
 SUBROUTINE grav_interp_apply(self,cell,f,gop,val)
-CLASS(grav_interp), INTENT(inout) :: self !< Interpolation object
-INTEGER(i4), INTENT(in) :: cell !< Cell for interpolation
-REAL(r8), INTENT(in) :: f(:) !< Position in cell in logical coord [4]
-REAL(r8), INTENT(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-REAL(r8), INTENT(out) :: val(:) !< Field value at the point
+CLASS(grav_interp), INTENT(inout) :: self ! Interpolation object
+INTEGER(i4), INTENT(in) :: cell ! Cell for interpolation
+REAL(r8), INTENT(in) :: f(:) ! Position in cell in logical coord [4]
+REAL(r8), INTENT(in) :: gop(3,4) ! Logical gradient vectors at f [3,4]
+REAL(r8), INTENT(out) :: val(:) ! Field value at the point
 REAL(r8) :: pt(3),neq
 pt=self%mesh%log2phys(cell,f)
 neq=self%n0*EXP(pt(3)/self%Ln)
@@ -153,15 +156,15 @@ TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
 TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: io_unit,ierr
 REAL(r8) :: d_i,omega_i,g_phys,T0,Lx,zmin,zmax
-INTEGER(i4) :: order = 2 !< FE order
-INTEGER(i4) :: minlev = 1 !< Lowest FE level for multigrid
-REAL(r8) :: n_bar = 1.d19 !< Reference density [m^-3]
-REAL(r8) :: B_bar = 1.d-2 !< Reference field [T]
-REAL(r8) :: beta = 1.d-3 !< Plasma beta at the midplane
-REAL(r8) :: g = 5.d-3 !< Gravity [d_i Omega_i^2]
-REAL(r8) :: Ln = 1.d2 !< Density gradient scale length [d_i]
-REAL(r8) :: I0 = 1.d2 !< Field at the midplane [B_bar]
-REAL(r8) :: eps = 1.d-6 !< Relative amplitude of the density perturbation
+INTEGER(i4) :: order = 2 ! FE order
+INTEGER(i4) :: minlev = 1 ! Lowest FE level for multigrid
+REAL(r8) :: n_bar = 1.d19 ! Reference density [m^-3]
+REAL(r8) :: B_bar = 1.d-2 ! Reference field [T]
+REAL(r8) :: beta = 1.d-3 ! Plasma beta at the midplane
+REAL(r8) :: g = 5.d-3 ! Gravity [d_i Omega_i^2]
+REAL(r8) :: Ln = 1.d2 ! Density gradient scale length [d_i]
+REAL(r8) :: I0 = 1.d2 ! Field at the midplane [B_bar]
+REAL(r8) :: eps = 1.d-6 ! Relative amplitude of the density perturbation
 NAMELIST/gyro_grav_options/order,minlev,n_bar,B_bar,beta,g,Ln,I0,eps
 !!\subsubsection doc_mug_gyro_grav_ex_code_setup Mesh and FE setup
 CALL oft_init
@@ -227,12 +230,19 @@ IF(init_field%B0**2<=init_field%bcoef*n_bar*(EXP(zmax/init_field%Ln)-1.d0)) &
 !!
 !! The magnetic field is projected onto the H(Curl) space and the density onto the Lagrange space.
 !! The temperature is uniform and the plasma starts at rest.
+!!
+!! The projection of the magnetic field must be converged with a relative tolerance. The field is supported
+!! almost entirely by its own pressure (\f$ \beta \sim 10^{-3} \f$, and the gravitational drive is smaller
+!! still), so a small relative error in \f$ B \f$ gives a force imbalance much larger than the seeded
+!! perturbation. The right-hand side of the projection is small (it scales with the cell size), so the
+!! absolute tolerance used for the density (`atol=1.d-12`) would stop the solve well before that level.
 NULLIFY(mop)
 CALL hcurl_grad_getmop(xmhd_ML_hcurl_grad%current_level,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
-minv%atol=1.d-12
+minv%atol=0.d0
+minv%rtol=1.d-14
 CALL create_diag_pre(minv%pre)
 CALL xmhd_ML_hcurl_grad%vec_create(u)
 CALL xmhd_ML_hcurl_grad%vec_create(v)
