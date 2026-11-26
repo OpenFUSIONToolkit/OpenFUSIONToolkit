@@ -36,12 +36,46 @@
 #define SUB_LU_PACK 'umfpack'
 #elif defined(HAVE_MKL)
 #define SUB_LU_PACK 'mkl'
+#define SUB_LU_MKL
 #elif defined(HAVE_SUPERLU_DIST)
 #define SUB_LU_PACK 'superd'
 #else
 #define SUB_LU_PACK 'none'
 #define SUB_LU_MISSING
 #endif
+!------------------------------------------------------------------------------
+! Concurrent direct solves (a module procedure: no OpenMP in internal procedures)
+!------------------------------------------------------------------------------
+MODULE test_native_schwarz_helpers
+USE oft_base
+USE oft_native_la, ONLY: oft_native_vector
+USE oft_lu, ONLY: oft_lusolver
+USE oft_stitching, ONLY: oft_seam
+IMPLICIT NONE
+CONTAINS
+! Local vector of n values with a seam that skips all stitching
+SUBROUTINE local_vec(vec,n,seam)
+TYPE(oft_native_vector), INTENT(inout) :: vec
+INTEGER(i4), INTENT(in) :: n
+TYPE(oft_seam), TARGET, INTENT(inout) :: seam
+ALLOCATE(vec%v(MAX(1,n)))
+vec%n=n
+vec%ng=INT(n,i8)
+vec%nslice=n
+vec%stitch_info=>seam
+END SUBROUTINE local_vec
+! Apply each solver to its own right-hand side, concurrently
+SUBROUTINE solve_concurrent(n,lus,xs,bs)
+INTEGER(i4), INTENT(in) :: n
+TYPE(oft_lusolver), INTENT(inout) :: lus(n)
+TYPE(oft_native_vector), INTENT(inout) :: xs(n),bs(n)
+INTEGER(i4) :: i
+!$omp parallel do schedule(static,1)
+DO i=1,n
+  CALL lus(i)%apply(xs(i),bs(i))
+END DO
+END SUBROUTINE solve_concurrent
+END MODULE test_native_schwarz_helpers
 !------------------------------------------------------------------------------
 PROGRAM test_native_schwarz
 USE oft_base
@@ -60,6 +94,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
+USE test_native_schwarz_helpers, ONLY: solve_concurrent, local_vec
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,nfail,its(11)
 INTEGER(i4), PARAMETER :: order=3
@@ -131,6 +166,11 @@ CALL check_subdomain(2)
 !---Subdomains from a given DOF list
 CALL check_dofs(1)
 CALL check_dofs(2)
+!---Concurrent direct solves on submatrices sharing a graph
+CALL check_shared_graph(SUB_LU_PACK)
+#if defined(HAVE_MKL) && !defined(SUB_LU_MKL)
+CALL check_shared_graph('mkl')
+#endif
 !---Iteration counts with overlap across processes
 its(1)=solve(1,0,.FALSE.,.TRUE.,v)
 its(2)=solve(1,1,.FALSE.,.TRUE.,v)
@@ -490,6 +530,64 @@ DO WHILE(ilow<=ihigh)
 END DO
 END FUNCTION search_sorted
 ! Global maximum of |x_i - y_i| over all local entries
+! Direct solves of submatrices that share a graph (the same rows, so the same cached
+! extraction), factored and applied concurrently, match a solve of the same system on
+! its own (MKL PARDISO modifies the graph it is given while it runs)
+SUBROUTINE check_shared_graph(package)
+CHARACTER(LEN=*), INTENT(in) :: package
+INTEGER(i4), PARAMETER :: ncopy=4
+TYPE(oft_native_submatrix), TARGET :: subs(ncopy)
+TYPE(oft_lusolver), TARGET :: lus(ncopy),lref
+TYPE(oft_native_vector), TARGET :: xs(ncopy),bs(ncopy),xref,bref
+TYPE(oft_seam), TARGET :: lseam
+INTEGER(i4) :: i,j,nr,nbad
+REAL(r8) :: d
+lref%package=package
+IF(.NOT.lref%check_thread())RETURN
+DO i=1,ncopy
+  CALL subs(i)%setup(A,u)
+END DO
+nr=subs(1)%nr
+nbad=0
+DO i=2,ncopy
+  IF(.NOT.(ASSOCIATED(subs(i)%kr,subs(1)%kr).AND.ASSOCIATED(subs(i)%lc,subs(1)%lc)))nbad=nbad+1
+END DO
+CALL check_exact('Submatrices with the same rows share a graph',REAL(oft_mpi_sum(nbad),r8),0.d0)
+!---Reference: one solve on its own
+lseam%skip=.TRUE.
+CALL local_vec(xref,nr,lseam)
+CALL local_vec(bref,nr,lseam)
+xref%v=0.d0
+DO j=1,nr
+  bref%v(j)=1.d0+REAL(MOD(j,7),r8)
+END DO
+lref%A=>subs(1)
+CALL lref%apply(xref,bref)
+!---All copies factored and solved at the same time
+DO i=1,ncopy
+  CALL local_vec(xs(i),nr,lseam)
+  CALL local_vec(bs(i),nr,lseam)
+  xs(i)%v=0.d0
+  DO j=1,nr
+    bs(i)%v(j)=1.d0+REAL(MOD(j,7),r8)
+  END DO
+  lus(i)%package=package
+  lus(i)%A=>subs(i)
+END DO
+CALL solve_concurrent(ncopy,lus,xs,bs)
+d=0.d0
+DO i=1,ncopy
+  IF(nr>0)d=MAX(d,MAXVAL(ABS(xs(i)%v-xref%v))/MAX(MAXVAL(ABS(xref%v)),1.d-300))
+END DO
+CALL check_tol('Concurrent solves on a shared graph ('//TRIM(package)//')',oft_mpi_max(d),1.d-10)
+CALL lref%delete
+DEALLOCATE(xref%v,bref%v)
+DO i=1,ncopy
+  CALL lus(i)%delete
+  CALL subs(i)%delete
+  DEALLOCATE(xs(i)%v,bs(i)%v)
+END DO
+END SUBROUTINE check_shared_graph
 FUNCTION maxdiff(x,y) RESULT(d)
 CLASS(oft_vector), INTENT(inout) :: x,y
 REAL(r8) :: d
