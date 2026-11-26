@@ -189,6 +189,15 @@ its(9)=solve(1,1,.TRUE.,.TRUE.,v,weighted=.TRUE.)
 its(10)=solve(1,2,.TRUE.,.TRUE.,v,weighted=.TRUE.)
 !---Numeric update of the subdomain matrices after the operator values change
 CALL check_update()
+!---Sub-solver life cycle (setup, updates, delete and re-setup) through the Schwarz paths
+CALL check_lifecycle(SUB_LU_PACK,1)
+CALL check_lifecycle(SUB_LU_PACK,4)
+#if defined(HAVE_SUPERLU_DIST)
+IF(TRIM(SUB_LU_PACK)/='superd')THEN
+  CALL check_lifecycle('superd',1)
+  CALL check_lifecycle('superd',4)
+END IF
+#endif
 !---Several blocks per process: no overlap, additive and restricted with overlap 1
 its(6)=solve(4,0,.TRUE.,.TRUE.,v)
 its(7)=solve(4,1,.TRUE.,.TRUE.,v)
@@ -281,6 +290,54 @@ TYPE IS(oft_native_matrix)
 END SELECT
 CALL sw%delete
 END SUBROUTINE check_update
+! Schwarz preconditioner (overlap 1, one subdomain per process across processes or 4 blocks
+! per process) through the life cycle of its sub-solvers with a given direct package: setup
+! and factorization, numeric update, update with a new pattern, delete and re-setup, and a
+! final delete. Each solve reproduces the first one. With SuperLU-DIST, sub-solvers deleted
+! after the subdomain matrix they point to freed their factors with a wrong size.
+SUBROUTINE check_lifecycle(package,nlocal)
+CHARACTER(LEN=*), INTENT(in) :: package
+INTEGER(i4), INTENT(in) :: nlocal
+TYPE(oft_native_gmres_solver) :: linv
+TYPE(oft_schwarz_precond), TARGET :: sw
+TYPE(oft_lusolver), TARGET :: sub
+INTEGER(i4) :: k,nits(4)
+REAL(r8) :: d(3)
+CHARACTER(LEN=32) :: lab
+WRITE(lab,'(3A,I1,A)')' (',TRIM(package),', nlocal=',nlocal,')'
+sub%package=package
+linv%A=>lop
+linv%its=-3
+linv%nrits=20
+sw%nlocal=nlocal
+sw%overlap=1
+sw%pre=>sub
+linv%pre=>sw
+CALL v%set(0.d0)
+CALL g%copy(g0)
+CALL linv%apply(v,g)
+nits(1)=linv%cits
+DO k=1,3
+  SELECT CASE(k)
+  CASE(1)
+    CALL linv%update(.FALSE.)
+  CASE(2)
+    CALL linv%update(.TRUE.)
+  CASE(3)
+    !---Delete resets the number of blocks
+    CALL sw%delete
+    sw%nlocal=nlocal
+  END SELECT
+  CALL w%set(0.d0)
+  CALL g%copy(g0)
+  CALL linv%apply(w,g)
+  nits(k+1)=linv%cits
+  d(k)=maxdiff(v,w)/SQRT(v%dot(v))
+END DO
+CALL sw%delete
+CALL check_exact('Sub-solver life cycle iterations'//TRIM(lab),REAL(MAXVAL(ABS(nits(2:4)-nits(1))),r8),0.d0)
+CALL check_tol('Sub-solver life cycle solutions'//TRIM(lab),MAXVAL(d),1.d-10)
+END SUBROUTINE check_lifecycle
 ! Global matrix assembled from the local (unassembled) matrices of all processes,
 ! as sorted unique keys (row-1)*nrg+col with summed values
 SUBROUTINE assemble_global()

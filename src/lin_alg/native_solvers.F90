@@ -3086,14 +3086,15 @@ IF(ASSOCIATED(self%usol))THEN
   DEALLOCATE(self%usol)
 END IF
 IF(ASSOCIATED(self%ovl))THEN
-  CALL native_overlap_delete(self%ovl)
-  DEALLOCATE(self%ovl)
-  !---Single sub-solver of the cross-process subdomain
+  !---Single sub-solver of the cross-process subdomain, before the subdomain matrix it
+  !   points to (as for the blocks in bjprecond_delete)
   IF(ASSOCIATED(self%solvers))THEN
     CALL self%solvers(1)%s%delete(propogate)
     DEALLOCATE(self%solvers(1)%s)
     DEALLOCATE(self%solvers)
   END IF
+  CALL native_overlap_delete(self%ovl)
+  DEALLOCATE(self%ovl)
 END IF
 IF(ASSOCIATED(self%usub))THEN
   IF(ASSOCIATED(self%usub%v))DEALLOCATE(self%usub%v)

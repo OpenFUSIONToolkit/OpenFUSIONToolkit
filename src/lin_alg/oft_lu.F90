@@ -1111,6 +1111,7 @@ IF(self%dist%active)THEN
 END IF
 nrhs=0
 ldb=0
+nr=0
 ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU
@@ -1124,7 +1125,10 @@ SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU_DIST
   CASE("superd")
     mode=4
-    CALL oft_superlu_dist_dgssv(mode,self%A%nr,nrhs,nrhs,rvals,ivals,ivals, &
+    !---Size of the factored system from the solver's own graph: the matrix (self%A) may
+    !   already have been deleted, and SuperLU-DIST needs the size to free its factors
+    IF(ASSOCIATED(self%superlu_struct%kr))nr=SIZE(self%superlu_struct%kr)-1
+    CALL oft_superlu_dist_dgssv(mode,nr,nrhs,nrhs,rvals,ivals,ivals, &
       rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     self%superlu_struct%f_factors=C_NULL_PTR
     mode=2
@@ -1161,6 +1165,7 @@ SELECT CASE(TRIM(self%package))
 #ifdef HAVE_MKL
   CASE("mkl")
     mode=-1
+    IF(ASSOCIATED(self%pardiso_struct%kr))nr=SIZE(self%pardiso_struct%kr)-1
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,nr, &
       rvals,ivals,ivals,self%pardiso_struct%perm, &
       1,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,rvals,rvals,ierr)
