@@ -137,8 +137,9 @@ integer-handle `mpi` module, so OFT uses the header-based MPI interface.
   between the backends to 6e-15 (profile mode, tet p2).
 - **Not #457** (seen during this validation):
   - Run-mode PETSc with an XML block-Jacobi preconditioner (`nlocal>0`) crashes in `PCSetUp_ASM`/`ISSort` with
-    PETSc 3.23; fixed by #459 (separate PR). The PETSc runs above used #459 applied locally (native tet p2: this
-    branch alone); the p3 p-MG comparison used #459 and #456 for both backends.
+    PETSc 3.23; fixed in `main` by #459, which this branch now includes. The PETSc runs above used #459 applied
+    locally before it was merged (native tet p2: this branch alone); the p3 p-MG comparison used #459 and #456 for
+    both backends. With both in the branch, all PETSc variants of the MUG suite pass with PETSc 3.23 unpatched.
   - Native p-MG with an exact (SuperLU) LU smoother gave NaN from round-off in the native global reductions,
     with both implementations and with the position map off. This was also the cause of the native
     `test_alfven.py::test_nl_r1_p3`, `test_lin_r1_p3` and `test_lin_r1_p3_mpi[False]` failures in SuperLU
