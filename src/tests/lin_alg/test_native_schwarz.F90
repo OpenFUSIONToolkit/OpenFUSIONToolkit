@@ -84,8 +84,9 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_stitching, ONLY: oft_seam
-USE oft_la_base, ONLY: oft_vector, oft_matrix, OFT_ACCESS_READ
-USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_submatrix
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_graph_ptr, OFT_ACCESS_READ
+USE oft_la_utils, ONLY: create_matrix
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_submatrix, native_matrix_set_pattern
 USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_setup_dofs, &
   native_overlap_update, native_overlap_gather, native_overlap_index, native_overlap_delete
 USE oft_native_solvers, ONLY: oft_bjprecond, oft_schwarz_precond, oft_native_gmres_solver
@@ -189,6 +190,9 @@ its(9)=solve(1,1,.TRUE.,.TRUE.,v,weighted=.TRUE.)
 its(10)=solve(1,2,.TRUE.,.TRUE.,v,weighted=.TRUE.)
 !---Numeric update of the subdomain matrices after the operator values change
 CALL check_update()
+!---Operator rebuilt with another sparsity pattern and update with a new pattern
+CALL check_new_pattern(1)
+CALL check_new_pattern(4)
 !---Sub-solver life cycle (setup, updates, delete and re-setup) through the Schwarz paths
 CALL check_lifecycle(SUB_LU_PACK,1)
 CALL check_lifecycle(SUB_LU_PACK,4)
@@ -290,6 +294,157 @@ TYPE IS(oft_native_matrix)
 END SELECT
 CALL sw%delete
 END SUBROUTINE check_update
+! Schwarz preconditioner (overlap 1, one subdomain per process across processes or 4 blocks
+! per process) after its operator is rebuilt in place with another sparsity pattern and the
+! solver is updated with a new pattern: the subdomains are rebuilt, and the solve matches a
+! fresh setup on the new operator, first with more and then with fewer non-zeros than the
+! previous pattern
+SUBROUTINE check_new_pattern(nlocal)
+INTEGER(i4), INTENT(in) :: nlocal
+CLASS(oft_matrix), POINTER :: asmall,afull,opx
+TYPE(oft_native_gmres_solver) :: linv
+TYPE(oft_schwarz_precond), TARGET :: sw
+TYPE(oft_lusolver), TARGET :: sub
+INTEGER(i4) :: k,nits,nfresh
+CHARACTER(LEN=32) :: lab
+NULLIFY(asmall,afull,opx)
+CALL pattern_operator(asmall,.TRUE.)
+CALL pattern_operator(afull,.FALSE.)
+CALL pattern_operator(opx,.TRUE.)
+sub%package=SUB_LU_PACK
+linv%A=>opx
+linv%its=-3
+linv%nrits=20
+sw%nlocal=nlocal
+sw%overlap=1
+sw%pre=>sub
+linv%pre=>sw
+CALL w%set(0.d0)
+CALL g%copy(g0)
+CALL linv%apply(w,g)
+DO k=1,2
+  IF(k==1)THEN
+    CALL replace_operator(opx,afull)
+    WRITE(lab,'(A,I1,A)')' (more non-zeros, nlocal=',nlocal,')'
+  ELSE
+    CALL replace_operator(opx,asmall)
+    WRITE(lab,'(A,I1,A)')' (fewer non-zeros, nlocal=',nlocal,')'
+  END IF
+  CALL linv%update(.TRUE.)
+  CALL w%set(0.d0)
+  CALL g%copy(g0)
+  CALL linv%apply(w,g)
+  nits=linv%cits
+  nfresh=fresh_solve(opx,nlocal,v)
+  CALL check_exact('New pattern = fresh setup (iterations)'//TRIM(lab),REAL(nits-nfresh,r8),0.d0)
+  CALL check_tol('New pattern = fresh setup (solution)'//TRIM(lab),maxdiff(v,w)/SQRT(v%dot(v)),1.d-10)
+END DO
+CALL sw%delete
+CALL opx%delete
+CALL asmall%delete
+CALL afull%delete
+DEALLOCATE(opx,asmall,afull)
+END SUBROUTINE check_new_pattern
+! Solve with a freshly set up Schwarz preconditioner (overlap 1) on an operator
+FUNCTION fresh_solve(op,nlocal,x) RESULT(nits)
+CLASS(oft_matrix), POINTER, INTENT(in) :: op
+INTEGER(i4), INTENT(in) :: nlocal
+CLASS(oft_vector), INTENT(inout) :: x
+INTEGER(i4) :: nits
+TYPE(oft_native_gmres_solver) :: linv
+TYPE(oft_schwarz_precond), TARGET :: sw
+TYPE(oft_lusolver), TARGET :: sub
+sub%package=SUB_LU_PACK
+linv%A=>op
+linv%its=-3
+linv%nrits=20
+sw%nlocal=nlocal
+sw%overlap=1
+sw%pre=>sub
+linv%pre=>sw
+CALL x%set(0.d0)
+CALL g%copy(g0)
+CALL linv%apply(x,g)
+nits=linv%cits
+CALL sw%delete
+END FUNCTION fresh_solve
+! Copy of the operator on its own pattern, optionally without the couplings between rows
+! and columns whose global indices sum to a multiple of 5 (a symmetric rule, the same on
+! every process), lumped onto the diagonal: removing a symmetric pair of entries a and
+! adding |a| to both diagonal entries adds a positive semi-definite term, so the operator
+! stays symmetric positive definite
+SUBROUTINE pattern_operator(mat,drop)
+CLASS(oft_matrix), POINTER, INTENT(inout) :: mat
+LOGICAL, INTENT(in) :: drop
+TYPE(oft_graph_ptr) :: graphs(1,1)
+INTEGER(i4) :: i,k,m,n
+ALLOCATE(graphs(1,1)%g)
+graphs(1,1)%g%nr=A%nr
+graphs(1,1)%g%nrg=A%nrg
+graphs(1,1)%g%nc=A%nc
+graphs(1,1)%g%ncg=A%ncg
+ALLOCATE(graphs(1,1)%g%kr(A%nr+1),graphs(1,1)%g%lc(MAX(1,A%nnz)))
+n=0
+graphs(1,1)%g%kr(1)=1
+DO i=1,A%nr
+  DO k=A%kr(i),A%kr(i+1)-1
+    IF(dropped(i,A%lc(k),drop))CYCLE
+    n=n+1
+    graphs(1,1)%g%lc(n)=A%lc(k)
+  END DO
+  graphs(1,1)%g%kr(i+1)=n+1
+END DO
+graphs(1,1)%g%nnz=n
+CALL create_matrix(mat,graphs,u,u,native=.TRUE.)
+DEALLOCATE(graphs(1,1)%g%kr,graphs(1,1)%g%lc)
+DEALLOCATE(graphs(1,1)%g)
+!---Values of the operator on the kept entries, dropped entries lumped onto the diagonal
+SELECT TYPE(mat)
+TYPE IS(oft_native_matrix)
+  DO i=1,A%nr
+    DO k=A%kr(i),A%kr(i+1)-1
+      IF(dropped(i,A%lc(k),drop))THEN
+        DO m=mat%kr(i),mat%kr(i+1)-1
+          IF(mat%lc(m)==i)mat%M(m)=mat%M(m)+ABS(A%M(k))
+        END DO
+        CYCLE
+      END IF
+      DO m=mat%kr(i),mat%kr(i+1)-1
+        IF(mat%lc(m)==A%lc(k))mat%M(m)=mat%M(m)+A%M(k)
+      END DO
+    END DO
+  END DO
+CLASS DEFAULT
+  CALL oft_abort('Native matrix expected','pattern_operator',__FILE__)
+END SELECT
+END SUBROUTINE pattern_operator
+! Coupling dropped from the operator by pattern_operator
+FUNCTION dropped(ii,jj,drop) RESULT(skip)
+INTEGER(i4), INTENT(in) :: ii,jj
+LOGICAL, INTENT(in) :: drop
+LOGICAL :: skip
+INTEGER(i8) :: gi,gj
+gi=A%i_map(1)%offsetg+A%i_map(1)%lge(ii)
+gj=A%j_map(1)%offsetg+A%j_map(1)%lge(jj)
+skip=drop.AND.(gi/=gj).AND.(MOD(gi+gj,5_i8)==0)
+END FUNCTION dropped
+! Rebuild an operator in place on the pattern and values of another one (as for an operator
+! whose sparsity changes between solves)
+SUBROUTINE replace_operator(dst,src)
+CLASS(oft_matrix), POINTER, INTENT(inout) :: dst,src
+SELECT TYPE(dst)
+TYPE IS(oft_native_matrix)
+  SELECT TYPE(src)
+  TYPE IS(oft_native_matrix)
+    CALL native_matrix_set_pattern(dst,src%pattern)
+    DEALLOCATE(dst%M)
+    ALLOCATE(dst%M(dst%nnz))
+    dst%M=src%M(1:src%nnz)
+    IF(ASSOCIATED(dst%Mfull))DEALLOCATE(dst%Mfull)
+    dst%full_current=.FALSE.
+  END SELECT
+END SELECT
+END SUBROUTINE replace_operator
 ! Schwarz preconditioner (overlap 1, one subdomain per process across processes or 4 blocks
 ! per process) through the life cycle of its sub-solvers with a given direct package: setup
 ! and factorization, numeric update, update with a new pattern, delete and re-setup, and a

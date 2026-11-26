@@ -332,6 +332,7 @@ TYPE, PUBLIC, EXTENDS(oft_bjprecond) :: oft_schwarz_precond
   LOGICAL :: cell_mode = .FALSE. !< Grow blocks by layers of cells (requires `A%cell_ovl`) instead of the matrix graph
   INTEGER(i4) :: adjacency = OFT_CELL_ADJ_POINT !< Cell adjacency used to grow blocks in cell mode (`OFT_CELL_ADJ_*`)
   INTEGER(i4) :: base_layers = -1 !< Base mesh layers bounding the halo in cell mode (<0: builder default)
+  INTEGER(i4) :: nlocal_req = 1 !< Number of local blocks requested in graph mode (setup may replace `nlocal`; restored when rebuilding for a new pattern)
   TYPE(oft_native_overlap), POINTER :: ovl => NULL() !< Subdomain across processes (`nlocal=1`, `overlap>0`; union of blocks in cell mode)
   TYPE(oft_seam), POINTER :: sub_seam => NULL() !< Seam of subdomain vectors (no stitching)
   TYPE(oft_native_vector), POINTER :: usub => NULL() !< Subdomain solution vector (initial guess in cell mode)
@@ -2657,6 +2658,8 @@ TYPE(oft_timer) :: stimer
 INTEGER(i8) :: nsent0
 DEBUG_STACK_PUSH
 IF(self%overlap<0)CALL oft_abort('Negative overlap','schwarz_apply',__FILE__)
+!---Requested number of blocks (graph mode setup may replace nlocal)
+IF(.NOT.self%initialized)self%nlocal_req=self%nlocal
 !---Blocks grown by layers of cells (may cross processes)
 IF(self%cell_mode)THEN
   IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
@@ -2930,19 +2933,30 @@ END SUBROUTINE schwarz_cell_apply
 !------------------------------------------------------------------------------
 !> Update Schwarz preconditioner after changing settings/operators
 !!
-!! As @ref bjprecond_update (numeric update on next application), except that in
-!! cell mode a new matrix pattern (`new_pattern=.TRUE.`) frees the blocks and
-!! subdomain, which are rebuilt on the next application.
+!! As @ref bjprecond_update (numeric update on next application), except that a new
+!! matrix pattern (`new_pattern=.TRUE.`) frees the subdomains and blocks built from the
+!! old one (their gather plans and submatrix extractions refer to the old pattern), which
+!! are rebuilt on the next application: the blocks and subdomain in cell mode, and in
+!! graph mode the subdomain of each process or the blocks within each process (with the
+!! number of blocks originally requested).
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE schwarz_update(self,new_pattern)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
 LOGICAL, OPTIONAL, INTENT(in) :: new_pattern !< Update matrix non-zero pattern (optional)
 LOGICAL :: rebuild
+INTEGER(i4) :: nl
 DEBUG_STACK_PUSH
 rebuild=.FALSE.
 IF(PRESENT(new_pattern))rebuild=new_pattern
-IF(self%cell_mode.AND.rebuild.AND.ASSOCIATED(self%cdofs))THEN
+!---With a new pattern, subdomains and blocks built from the old one are rebuilt on the
+!   next application (cell mode: blocks and subdomain; graph mode: the subdomain across
+!   processes or the blocks within each process, with the requested number of blocks)
+IF(rebuild.AND.self%cell_mode.AND.ASSOCIATED(self%cdofs))THEN
   CALL schwarz_delete(self)
+ELSE IF(rebuild.AND.(.NOT.self%cell_mode).AND.self%initialized)THEN
+  nl=self%nlocal_req
+  CALL schwarz_delete(self)
+  self%nlocal=nl
 ELSE
   CALL bjprecond_update(self,new_pattern)
 END IF
