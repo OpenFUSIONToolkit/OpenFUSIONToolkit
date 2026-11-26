@@ -866,9 +866,9 @@ CASE("superd")
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
-    CALL c_f_pointer(C_LOC(vals),self%mumps_struct%rhs,[nrhs*g%n])
-    ! self%mumps_struct%rhs => vals(1:g%n,1:nrhs)
-    self%mumps_struct%lrhs = g%n
+    CALL c_f_pointer(C_LOC(vals),self%mumps_struct%rhs,[nrhs*A_native%nr])
+    ! self%mumps_struct%rhs => vals(1:A_native%nr,1:nrhs)
+    self%mumps_struct%lrhs = A_native%nr
     self%mumps_struct%nrhs = nrhs
     !---
     self%mumps_struct%job = 3 ! Solve phase
@@ -1120,6 +1120,13 @@ IF(self%dist%active)THEN
 END IF
 nrhs=0
 ldb=0
+!---Size of factored matrix (locally-owned submatrix if used)
+nr=0
+IF(ASSOCIATED(self%A_slice))THEN
+  nr=self%A_slice%nr
+ELSE IF(ASSOCIATED(self%A))THEN
+  nr=self%A%nr
+END IF
 ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU
@@ -1133,7 +1140,7 @@ SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU_DIST
   CASE("superd")
     mode=4
-    CALL oft_superlu_dist_dgssv(mode,self%A%nr,nrhs,nrhs,rvals,ivals,ivals, &
+    CALL oft_superlu_dist_dgssv(mode,nr,nrhs,nrhs,rvals,ivals,ivals, &
       rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     self%superlu_struct%f_factors=C_NULL_PTR
     mode=2
