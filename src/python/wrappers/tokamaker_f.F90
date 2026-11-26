@@ -1672,7 +1672,8 @@ INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< \f$ \psi \f$ values to compute averages at
 REAL(c_double), INTENT(out) :: qvals(npsi) !< q values
 REAL(c_double), INTENT(out) :: ravgs(npsi,4) !< <R>, <1/R>, <1/R^2>, and dV/dPsi
-REAL(c_double), INTENT(out) :: fsa_avgs(npsi,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+REAL(c_double), INTENT(out) :: fsa_avgs(npsi,9) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>, <|grad(psi)|^2/B^2>,
+!! surface area, cross-section area, B_min, B_max
 REAL(c_double), INTENT(out) :: shape_geo(npsi,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj

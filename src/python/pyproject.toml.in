@@ -46,6 +46,7 @@ OFT_ThinCurr_mesh_tool = "OpenFUSIONToolkit.ThinCurr._mesh_cli:script_entry"
 
 [project.optional-dependencies]
 viz = ["pyvista"]
+imas = ["imas-python>=2.1"]
 
 [tool.setuptools.package-data]
 OpenFUSIONToolkit = ["lib*"]

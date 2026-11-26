@@ -101,17 +101,18 @@ REAL(r8), INTENT(out) :: qf(nr) !< \f$ q/F \f$
 REAL(r8), INTENT(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dpsi
 LOGICAL, INTENT(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point (and star-shaped, with `rz`)
 REAL(r8), OPTIONAL, INTENT(in) :: fpol(nr) !< F on each surface (with `fsa`)
-REAL(r8), OPTIONAL, INTENT(out) :: fsa(nr,4) !< <|grad psi|>, <|grad psi|^2>, <B_p^2>, <1/B^2>
+REAL(r8), OPTIONAL, INTENT(out) :: fsa(nr,9) !< <|grad psi|>, <|grad psi|^2>, <B_p^2>, <1/B^2>,
+!! <|grad psi|^2/B^2>, surface area, cross-section area, B_min, B_max
 REAL(r8), OPTIONAL, INTENT(out) :: xa(:,:,:) !< Extrema [2,4,nx] of the first nx surfaces (see @ref ext_add)
 REAL(r8), OPTIONAL, INTENT(out) :: rz(:,:,:) !< (R,Z) [2,nth,nt] of the first nt surfaces at uniform polar angle
 REAL(r8) :: wind(nr),racc(3,nr),dpsi
-REAL(r8), ALLOCATABLE :: facc(:,:),tacc(:,:,:)
+REAL(r8), ALLOCATABLE :: facc(:,:),bext(:,:),tacc(:,:,:)
 INTEGER(i4) :: k
 IF(PRESENT(fsa).AND.(.NOT.PRESENT(fpol)))CALL oft_abort('"fsa" requires "fpol"','gs_fsa_contour',__FILE__)
 !---Unallocated accumulators are passed as absent (F2008)
-IF(PRESENT(fsa))ALLOCATE(facc(5,nr))
+IF(PRESENT(fsa))ALLOCATE(facc(8,nr),bext(2,nr))
 IF(PRESENT(rz))ALLOCATE(tacc(3,0:SIZE(rz,2),SIZE(rz,3)))
-CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc,fpol,facc,xa,tacc)
+CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc,fpol,facc,xa,tacc,bext)
 ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
 IF(PRESENT(rz))CALL ray_points(tacc,ok,rz)
 ravgs=0.d0
@@ -126,9 +127,15 @@ ELSEWHERE
 END WHERE
 IF(PRESENT(fsa))THEN
   fsa=0.d0
-  DO k=1,4
+  DO k=1,5
     WHERE(ok)fsa(:,k)=facc(k+1,:)/facc(1,:)
   END DO
+  WHERE(ok)
+    fsa(:,6)=2.d0*pi*facc(7,:)
+    fsa(:,7)=ABS(facc(8,:))
+    fsa(:,8)=-bext(1,:)
+    fsa(:,9)=bext(2,:)
+  END WHERE
 END IF
 END SUBROUTINE gs_fsa_contour
 !------------------------------------------------------------------------------
@@ -181,7 +188,7 @@ END SUBROUTINE ray_points
 !! reduced with a total order (@ref ext_merge, @ref tri_upd), which is exact, so they too do not depend
 !! on the thread count or schedule.
 !------------------------------------------------------------------------------
-SUBROUTINE geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc,tacc)
+SUBROUTINE geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc,tacc,bext)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -190,17 +197,21 @@ REAL(r8), INTENT(out) :: wind(nr) !< Winding number about the O-point
 REAL(r8), INTENT(out) :: dpsi !< Axis minus LCFS flux
 REAL(r8), OPTIONAL, INTENT(out) :: racc(3,nr) !< \f$ \oint w\,[R, R^2, 1] \f$
 REAL(r8), OPTIONAL, INTENT(in) :: fpol(nr) !< F on each surface (with `facc`)
-REAL(r8), OPTIONAL, INTENT(out) :: facc(5,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$
+REAL(r8), OPTIONAL, INTENT(out) :: facc(8,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2,
+!! |\nabla\psi|^2/B^2, |\nabla\hat{\psi}|, -\partial_R \hat{\psi}] \f$ (the last two give the surface and cross-section areas)
 REAL(r8), OPTIONAL, INTENT(out) :: xacc(:,:,:) !< Extrema [2,4,nx] of \f$ [-R, R, -Z, Z] \f$ with the other coordinate, first nx surfaces (see @ref ext_add)
 REAL(r8), OPTIONAL, INTENT(out) :: tacc(:,0:,:) !< Ray points [3,0:nth,nt] at uniform polar angle, first nt surfaces (see @ref gs_rays_contour)
+REAL(r8), OPTIONAL, INTENT(out) :: bext(2,nr) !< \f$ -B_{min} \f$, \f$ B_{max} \f$ on each surface (needs `fpol`)
 TYPE(bern_tab) :: bt
 REAL(r8), POINTER :: vals(:)
 REAL(r8), ALLOCATABLE :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:),tloc(:,:,:)
+REAL(r8), ALLOCATABLE :: bloc(:,:)
 REAL(r8) :: x1
 INTEGER(i4) :: nblk,ib,cell,nc,i,k
 g=0.d0; wind=0.d0; dpsi=0.d0
 IF(PRESENT(racc))racc=0.d0
 IF(PRESENT(facc))facc=0.d0
+IF(PRESENT(bext))bext=-HUGE(1.d0)
 IF(PRESENT(xacc))xacc=-HUGE(1.d0)
 IF(PRESENT(tacc))tacc=-HUGE(1.d0)
 IF(nr<1)RETURN
@@ -214,12 +225,16 @@ CALL gseq%psi%get_local(vals)
 nc=gseq%device%fe_rep%mesh%nc
 CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
-ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))),fblk(5,nr,MERGE(nblk,0,PRESENT(facc))))
+ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))),fblk(8,nr,MERGE(nblk,0,PRESENT(facc))))
 !---Thread-private accumulators; unallocated ones are passed to `cell_contrib` as absent (F2008)
-!$omp parallel private(ib,cell,i,k,gloc,wloc,rloc,floc,xloc,tloc)
+!$omp parallel private(ib,cell,i,k,gloc,wloc,rloc,floc,xloc,tloc,bloc)
 ALLOCATE(gloc(nr),wloc(nr))
 IF(PRESENT(racc))ALLOCATE(rloc(3,nr))
-IF(PRESENT(facc))ALLOCATE(floc(5,nr))
+IF(PRESENT(facc))ALLOCATE(floc(8,nr))
+IF(PRESENT(bext))THEN
+  ALLOCATE(bloc(2,nr))
+  bloc=-HUGE(1.d0)
+END IF
 IF(PRESENT(xacc))THEN
   ALLOCATE(xloc(2,4,SIZE(xacc,3)))
   xloc=-HUGE(1.d0)
@@ -236,7 +251,7 @@ DO ib=1,nblk
   DO cell=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,nc)
     IF(gseq%device%fe_rep%mesh%reg(cell)/=1)CYCLE
     CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc,xacc=xloc, &
-      tacc=tloc)
+      tacc=tloc,bext=bloc)
   END DO
   gblk(:,ib)=gloc; wblk(:,ib)=wloc
   IF(PRESENT(racc))rblk(:,:,ib)=rloc
@@ -259,7 +274,13 @@ IF(PRESENT(tacc))THEN
   END DO
 !$omp end critical
 END IF
+IF(PRESENT(bext))THEN
+!$omp critical
+  bext=MAX(bext,bloc)
+!$omp end critical
+END IF
 DEALLOCATE(gloc,wloc)
+IF(ALLOCATED(bloc))DEALLOCATE(bloc)
 IF(ALLOCATED(rloc))DEALLOCATE(rloc)
 IF(ALLOCATED(floc))DEALLOCATE(floc)
 IF(ALLOCATED(xloc))DEALLOCATE(xloc)
@@ -346,7 +367,7 @@ END SUBROUTINE gs_sauter_contour
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding (and optionally geometric or Sauter sums) of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
-SUBROUTINE cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc,tacc)
+SUBROUTINE cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc,tacc,bext)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 TYPE(bern_tab), INTENT(in) :: bt !< Bernstein tables
 REAL(r8), INTENT(in) :: vals(:) !< Local \f$ \psi \f$ values
@@ -362,9 +383,10 @@ REAL(r8), OPTIONAL, INTENT(in) :: bref(nr) !< \f$ B_{ref} \f$ on each surface (S
 REAL(r8), OPTIONAL, INTENT(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_contour)
 REAL(r8), OPTIONAL, INTENT(inout) :: eloc(:) !< Accumulated \f$ B_{max} \f$ [nr]
 REAL(r8), OPTIONAL, INTENT(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
-REAL(r8), OPTIONAL, INTENT(inout) :: facc(:,:) !< Accumulated oint w R [1, |grad psi|, |grad psi|^2, B_p^2, 1/B^2] [5,nr] (needs `fpol`)
+REAL(r8), OPTIONAL, INTENT(inout) :: facc(:,:) !< Accumulated geometric sums [8,nr] (see @ref geom_sums, needs `fpol`)
 REAL(r8), OPTIONAL, INTENT(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nx], first nx surfaces (see @ref ext_add)
 REAL(r8), OPTIONAL, INTENT(inout) :: tacc(:,0:,:) !< Accumulated ray points [3,0:nth,nt], first nt surfaces (see @ref arc_rays)
+REAL(r8), OPTIONAL, INTENT(inout) :: bext(:,:) !< Accumulated \f$ -B_{min} \f$, \f$ B_{max} \f$ [2,nr] (needs `fpol`)
 TYPE(oft_scalar_bfem), POINTER :: lag_rep
 INTEGER(i4) :: jdofs(32),jc,k,ns,d0,i
 INTEGER(i4) :: dep(3*max_depth+4)
@@ -471,7 +493,7 @@ INTEGER(i4) :: k0,k1,k2,ig,kk,nab,ng
 LOGICAL :: ab(3),ext,ray
 REAL(r8) :: p1(2),p2(2),e(2),xi1,xi2,xi,x(2),val,gr(2)
 REAL(r8) :: pt(2),detm,sum,q1(2),q2(2),dth,sig,gmid(2),xg(5),wg(5)
-REAL(r8) :: av(8),rv(3),fv(5),gq,wq,bq,b,sx(0:6),sb(0:6),xs(0:6),sp(2,0:6),sg(2,0:6)
+REAL(r8) :: av(8),rv(3),fv(8),gq,wq,bq,b,sx(0:6),sb(0:6),xs(0:6),sp(2,0:6),sg(2,0:6),gp(2)
 DO kk=1,3
   ab(kk)=(cs(bt%corner(kk))>=s)
 END DO
@@ -498,7 +520,7 @@ IF(dratio>=smooth_ratio)THEN
 ELSE
   ng=5; xg=xg5; wg=wg5
 END IF
-IF(PRESENT(aloc))THEN
+IF(PRESENT(aloc).OR.PRESENT(bext))THEN
   sb(0)=b_mag(p1,iq); sx(0)=xi1
   sb(ng+1)=b_mag(p2,iq); sx(ng+1)=xi2
 END IF
@@ -528,8 +550,13 @@ DO ig=1,ng
   wq=wg(ig)*ABS(detm)/ABS(DOT_PRODUCT(gr,dvec))
   IF(PRESENT(racc))rv=rv+wq*[pt(1),pt(1)**2,1.d0]
   IF(PRESENT(facc))THEN
-    gq=grad_mag(x,gr)
-    fv=fv+wq*pt(1)*[1.d0,gq,gq**2,(gq/pt(1))**2,pt(1)**2/(gq**2+fpol(iq)**2)]
+    gp=phys_grad(x,gr)
+    gq=ABS(dpsi)*SQRT(DOT_PRODUCT(gp,gp))
+    fv=fv+wq*pt(1)*[1.d0,gq,gq**2,(gq/pt(1))**2,pt(1)**2/(gq**2+fpol(iq)**2), &
+      (gq*pt(1))**2/(gq**2+fpol(iq)**2),gq/ABS(dpsi),-gp(1)]
+  END IF
+  IF(PRESENT(bext))THEN
+    sx(ig)=xi; sb(ig)=b_mag(x,iq,gr)
   END IF
   IF(PRESENT(aloc))THEN
     bq=b_mag(x,iq,gr)
@@ -553,6 +580,10 @@ IF(PRESENT(facc))facc(:,iq)=facc(:,iq)+fv*ABS(xi2-xi1)/2.d0
 IF(PRESENT(aloc))THEN
   aloc(:,iq)=aloc(:,iq)+av*ABS(xi2-xi1)/2.d0
   eloc(iq)=MAX(eloc(iq),arc_peak(ng,sx,sb))
+END IF
+IF(PRESENT(bext))THEN
+  bext(1,iq)=MAX(bext(1,iq),arc_peak(ng,sx,-sb))
+  bext(2,iq)=MAX(bext(2,iq),arc_peak(ng,sx,sb))
 END IF
 IF(ext)CALL arc_extrema(s,p1,p2,xi1,xi2,ng,xs,sp,sg,xacc(:,:,iq))
 !---Winding about O-point, oriented with 1-psi-hat increasing to the left
@@ -1076,7 +1107,7 @@ DO j=1,nr
 END DO
 proj=gseq%diverted.AND.(psi_q(1)<0.05d0)
 !---Unallocated outputs are passed as absent (F2008); extrema only where they are used
-IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
+IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,9))
 IF(PRESENT(shape_geo))ALLOCATE(xa(2,4,nr))
 IF(PRESENT(dl))THEN
   ALLOCATE(rz(2,nlcfs,1))
