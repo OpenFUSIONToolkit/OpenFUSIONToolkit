@@ -119,12 +119,23 @@ In the native backend subdomains are grown in one of two modes (`overlap_mode`):
   defined by a cell overlap builder (\ref fem_cell_overlap::oft_fem_cell_overlap
   "oft_fem_cell_overlap") that the physics module or application attaches to the matrix
   (`cell_ovl`; MUG attaches one to its native Jacobians on every level, with `xmhd_nparts` setting
-  the blocks); cell mode aborts if none is attached, and the builder's block count replaces
-  `nlocal` (field based blocks, `nlocal<0`, and `boverlap` are not supported, and abort). Blocks may cross process
+  the blocks); cell mode aborts if none is attached, and the builder's block count replaces a
+  positive `nlocal` (`boverlap` is not supported, and aborts). Blocks may cross process
   boundaries for any number of blocks per process: the union of the blocks of each process is
   assembled as one subdomain across processes, so the setup needs a fixed number of exchanges
   whatever the overlap. With `overlap=0` the blocks are the DoFs of the core cells, which already
   overlap at process and block interfaces.
+  Field based blocks are supported in cell mode as in graph mode: with `nlocal=-1` each block of
+  the builder is split into one block per field of the matrix, and with `nlocal=-n` (`n>1`) into
+  `n` blocks by field group, field `i` going to group `groups(i)` (every field must be given a
+  group in `1..n`; a group with no fields gives empty blocks, which are skipped). The cells, and so
+  the cross-process subdomain, are computed once and shared by all groups: block `(b,g)` holds the
+  DoFs of the cells of block `b` that belong to a field of group `g`, giving the builder's block
+  count times `n` blocks. Each DoF keeps its assigned block for the restricted combination, and the
+  partition of unity of `weighted` counts the blocks of its own group. Coupling between fields of
+  different groups inside a block is dropped, so field based blocks are cheaper to factor but
+  generally need more iterations, and even blocks covering the whole mesh are not exact (they are
+  then block-Jacobi by field group).
 
 Subdomain solutions are combined (`type`, native only):
 - `restricted` (default): each row is taken from the one subdomain (or block) it is assigned to;
@@ -142,8 +153,8 @@ been tested with this preconditioner.
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `nlocal`   | Number of local blocks (-1 for field based, graph mode only; replaced by the builder's block count in cell mode, where `nlocal<0` aborts) | int | Yes |
-| `groups`   | Group index for each field in multi-field vector [n] (native graph mode only) | int | Yes |
+| `nlocal`   | Number of local blocks (-1 for field based, `-n` for `n` field groups; in cell mode a positive value is replaced by the builder's block count, and field based blocks split each builder block) | int | Yes |
+| `groups`   | Group index for each field in multi-field vector [n] (native only, with `nlocal<-1`) | int | Yes |
 | `boverlap` | Overlap boundary rows, as for block-Jacobi (native graph mode only) | bool | No |
 | `overlap`  | Number of overlap layers (native default: 1; layers of cells in cell mode) | int | Yes |
 | `type`     | Combination of subdomain solutions: `restricted` (default), `additive` or `weighted` (native only) | str | No |

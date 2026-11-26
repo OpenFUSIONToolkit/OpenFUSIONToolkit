@@ -277,3 +277,33 @@ def test_gmres_schwarz_cell(schwarz_type):
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False,cell_parts=4)
     assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native Schwarz in cell mode with field based blocks selected from XML: on this single field
+# system one group per field (`nlocal=-1`), or the field in group 2 of 2 (`nlocal=-2`, group 1
+# empty), gives the blocks of the cell overlap builder, and so the counts of test_gmres_schwarz_cell
+# (field based blocks of coupled fields are checked in test_cell_schwarz_fields)
+@pytest.mark.parametrize("nlocal,groups", ((-1, None), (-2, 2)))
+@pytest.mark.parametrize("schwarz_type", ("restricted", "weighted"))
+def test_gmres_schwarz_cell_fields(schwarz_type, nlocal, groups):
+    groups_node = "" if groups is None else "<groups>{0}</groups>".format(groups)
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>{1}</nlocal>
+            {2}
+            <overlap>1</overlap>
+            <overlap_mode>cell</overlap_mode>
+            <adjacency>face</adjacency>
+            <base_layers>2</base_layers>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type, nlocal, groups_node)
+    iteration_count = {"restricted": 58, "weighted": 60}[schwarz_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False,cell_parts=4)
+    assert validate_result(iteration_count,converged_error)

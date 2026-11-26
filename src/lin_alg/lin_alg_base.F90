@@ -983,7 +983,7 @@ ABSTRACT INTERFACE
   END SUBROUTINE oft_veccreate_proto
 END INTERFACE
 !---Declare public entities
-PUBLIC vector_extrapolate, overlap_dofs_delete
+PUBLIC vector_extrapolate, overlap_dofs_delete, overlap_dofs_split_fields
 contains
 !---------------------------------------------------------------------------------
 !> Release resources of a cell overlap builder (default: nothing to do)
@@ -1016,6 +1016,82 @@ IF(ALLOCATED(self%odof))DEALLOCATE(self%odof)
 self%n=0
 self%nblocks=0
 END SUBROUTINE overlap_dofs_delete
+!---------------------------------------------------------------------------------
+!> Split each block of a set of overlapping DoFs by field group
+!!
+!! Block `b` of `self` is replaced by `ngroups` blocks, where block `(b-1)*ngroups+g`
+!! holds the DoFs of block `b` (and of its assigned DoFs) that belong to a field `f`
+!! with `fgroup(f)==g`. The field of each union DoF is found from its global row id,
+!! as global rows are numbered field by field (`i_map(f)%offsetg`). The union, its
+!! owners and the order of the DoFs within each block are unchanged, and as every DoF
+!! is in exactly one field each assigned DoF stays assigned to exactly one block.
+!! Blocks with no DoF of a group are empty.
+!---------------------------------------------------------------------------------
+SUBROUTINE overlap_dofs_split_fields(self,i_map,ngroups,fgroup)
+TYPE(oft_overlap_dofs), INTENT(inout) :: self !< DoF sets to split
+TYPE(oft_map), INTENT(in) :: i_map(:) !< Row maps of the matrix, one per field [nfields]
+INTEGER(i4), INTENT(in) :: ngroups !< Number of field groups
+INTEGER(i4), INTENT(in) :: fgroup(:) !< Group of each field, in 1..ngroups [nfields]
+INTEGER(i4) :: i,f,nf,nb
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dgroup
+TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: blk,asg
+nf=SIZE(i_map)
+IF(ngroups<1)CALL oft_abort('Invalid number of field groups','overlap_dofs_split_fields',__FILE__)
+IF(nf<1)CALL oft_abort('No row maps','overlap_dofs_split_fields',__FILE__)
+IF(SIZE(fgroup)<nf)CALL oft_abort('Missing field groups','overlap_dofs_split_fields',__FILE__)
+IF(ANY(fgroup(1:nf)<1).OR.ANY(fgroup(1:nf)>ngroups))CALL oft_abort('Invalid field group', &
+  'overlap_dofs_split_fields',__FILE__)
+!---Group of each union DoF (union sorted by global id, fields numbered in order)
+ALLOCATE(dgroup(MAX(1,self%n)))
+f=1
+DO i=1,self%n
+  DO WHILE(self%gdof(i)>i_map(f)%offsetg+i_map(f)%ng)
+    f=f+1
+    IF(f>nf)CALL oft_abort('Union DoF outside the row maps','overlap_dofs_split_fields',__FILE__)
+  END DO
+  IF(self%gdof(i)<=i_map(f)%offsetg)CALL oft_abort('Union DoF outside the row maps', &
+    'overlap_dofs_split_fields',__FILE__)
+  dgroup(i)=fgroup(f)
+END DO
+!---Split block and assigned DoF lists
+nb=self%nblocks
+ALLOCATE(blk(nb*ngroups),asg(nb*ngroups))
+DO i=1,nb
+  CALL split_list(self%blk(i),blk((i-1)*ngroups+1:i*ngroups))
+  CALL split_list(self%asg(i),asg((i-1)*ngroups+1:i*ngroups))
+  IF(ASSOCIATED(self%blk(i)%v))DEALLOCATE(self%blk(i)%v)
+  IF(ASSOCIATED(self%asg(i)%v))DEALLOCATE(self%asg(i)%v)
+END DO
+DEALLOCATE(dgroup)
+CALL MOVE_ALLOC(blk,self%blk)
+CALL MOVE_ALLOC(asg,self%asg)
+self%nblocks=nb*ngroups
+CONTAINS
+!---------------------------------------------------------------------------------
+!> Split one list of union positions by group (order kept)
+!---------------------------------------------------------------------------------
+SUBROUTINE split_list(full,parts)
+TYPE(oft_1d_int), INTENT(in) :: full !< List of union positions
+TYPE(oft_1d_int), INTENT(inout) :: parts(:) !< Lists of each group [ngroups]
+INTEGER(i4) :: j,g
+DO g=1,ngroups
+  parts(g)%n=0
+END DO
+DO j=1,full%n
+  g=dgroup(full%v(j))
+  parts(g)%n=parts(g)%n+1
+END DO
+DO g=1,ngroups
+  ALLOCATE(parts(g)%v(parts(g)%n))
+  parts(g)%n=0
+END DO
+DO j=1,full%n
+  g=dgroup(full%v(j))
+  parts(g)%n=parts(g)%n+1
+  parts(g)%v(parts(g)%n)=full%v(j)
+END DO
+END SUBROUTINE split_list
+END SUBROUTINE overlap_dofs_split_fields
 !---------------------------------------------------------------------------------
 !> Borrow the local values (or a block of them) of a vector
 !!

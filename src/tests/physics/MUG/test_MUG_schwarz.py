@@ -12,7 +12,8 @@
 # growing across the periodic seams. The runs in a box with walls also cover the transfer level; the
 # wave is then not a solution, so their errors are regression values only: they come from runs with
 # the block-Jacobi smoother of the other MUG tests (`oft_in_xmhd_mg.xml`, also run here), which the
-# Schwarz runs must reproduce.
+# Schwarz runs must reproduce. The field based runs (`oft_in_xmhd_mg_cell_fields.xml`, `nlocal=-1`) split
+# each block of cells into one block per xMHD field, sharing the cells.
 import pytest
 from mug_testing import REPRESENTATIONS, sound_setup, validate_sound
 
@@ -42,16 +43,20 @@ def test_nl_r1_p3_periodic_mpi(representation, nparts):
     assert sound_setup(representation,1,2,3,3,'0,0,2,2',xml='oft_in_xmhd_mg_cell.xml',nparts=nparts)
     assert validate_sound(*PERIODIC_ERRORS[representation])
 
+XML_FILES = {'block_jacobi': None, 'cell': 'oft_in_xmhd_mg_cell.xml', 'cell_fields': 'oft_in_xmhd_mg_cell_fields.xml'}
+
 #============================================================================
 # Nonlinear runs, tetrahedral mesh, quadratic elements, multigrid on the distributed levels
 @pytest.mark.mpi
 @pytest.mark.parametrize("representation", REPRESENTATIONS)
-@pytest.mark.parametrize("pre,nparts", (('block_jacobi', 1), ('cell', 1), ('cell', 2)))
+@pytest.mark.parametrize("pre,nparts", (('block_jacobi', 1), ('cell', 1), ('cell', 2), ('cell_fields', 1),
+                                        ('cell_fields', 2)))
 def test_nl_r1_p2_walls_mpi(representation, pre, nparts):
     '''Nonlinear sound wave in a box with walls, quadratic elements on a tetrahedral mesh with p-multigrid,
     on two MPI processes. The smoother preconditioner is block-Jacobi (reference) or cell-mode Schwarz with
-    one block per process or two blocks per process (`xmhd_nparts`, the builder's cell parts).'''
-    xml = 'oft_in_xmhd_mg_cell.xml' if pre == 'cell' else None
+    one block per process or two blocks per process (`xmhd_nparts`, the builder's cell parts), each optionally
+    split into one block per field (`nlocal=-1`).'''
+    xml = XML_FILES[pre]
     assert sound_setup(representation,1,2,2,2,'0,2,2',periodic=False,xml=xml,nparts=nparts)
     assert validate_sound(*ERRORS[representation])
 
