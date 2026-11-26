@@ -46,6 +46,12 @@ oft_in_template = """
 #  12-14: graph overlap 0-2, 15: before update, 16: after update, 17: after delete and
 #  re-setup, 18: after update with a new pattern, 19: weighted additive iterations with the
 #  covering layers, 20: weighted additive with one layer of point adjacent cells
+# The test also writes a signature of the partition behind each row: hashes of the cell
+# partition and of the graph mode blocks (both from METIS) and of the DoF colors, each over the
+# global indices of the cells or rows. The DoF colors also depend on the tie breaking between
+# parts in mesh_local_partition, which uses the compiler's random number generator (so they vary
+# with the compiler and the thread count); this moves counts by about one, within the tolerance
+# of the tables, so only the METIS hashes select the reference table.
 def run_cell_schwarz(nprocs, nlevels, order, timeout=600, ref_per='F,F,F'):
     os.chdir(test_dir)
     if os.path.isfile('cell_schwarz.results'):
@@ -57,20 +63,41 @@ def run_cell_schwarz(nprocs, nlevels, order, timeout=600, ref_per='F,F,F'):
     with open('cell_schwarz.results', 'r') as fid:
         nfail = int(fid.readline())
         its = [[int(val) for val in fid.readline().split()] for _ in range(2)]
+        sig = [int(val) for val in fid.readline().split()]
     if nfail != 0:
         print("FAILED: {0} cell Schwarz checks failed".format(nfail))
         return None
-    return its
+    return its, [sig[0:3], sig[3:6]]
 
-def check_counts(its, expected):
-    for ip, (row, ref) in enumerate(zip(its, expected)):
+def partition_key(sig):
+    # METIS cell partition and graph mode blocks (see run_cell_schwarz)
+    return [sig[0], sig[2]]
+
+def check_counts(result, expected, expected_sig):
+    its, sigs = result
+    for ip, (row, ref, sig, ref_sig) in enumerate(zip(its, expected, sigs, expected_sig)):
         print("nparts={0}: {1}".format([1, 3][ip], row))
-        # Exactness: covering layers and one restricted iteration
-        assert row[0] == ref[0]
+        print("nparts={0} partition signature (cells, DoF colors, graph blocks): {1}".format([1, 3][ip], sig))
+        # The covering layers and iteration counts depend on the partition, which can differ
+        # between platforms (METIS built by another compiler or with other floating point
+        # options, or another random number generator for the tie breaking between parts).
+        # Compare them with the table only for the partition it was made with.
+        if partition_key(sig) == ref_sig:
+            # Covering layers exact, iteration counts within 5% of the expected values
+            assert row[0] == ref[0]
+            for val, rval in zip(row[3:15], ref[3:15]):
+                assert abs(val-rval) <= max(1, 0.05*rval)
+            assert abs(row[20]-ref[20]) <= max(1, 0.05*ref[20])
+        else:
+            print("=" * 80)
+            print("NOTE: nparts={0}: partition {1} is not the reference partition {2} (cells, graph blocks); the "
+                  "reference table does not apply, checking partition-independent properties only".format(
+                      [1, 3][ip], partition_key(sig), ref_sig))
+            print("NOTE:   row:       {0}".format(row))
+            print("NOTE:   reference: {0}".format(ref))
+            print("=" * 80)
+        # Exactness: one restricted iteration with the covering layers
         assert row[1] == 1
-        # Iteration counts within 5% of the expected values
-        for val, rval in zip(row[3:15], ref[3:15]):
-            assert abs(val-rval) <= max(1, 0.05*rval)
         # Point adjacency: non-increasing with layers; face <= edge <= point overlap per layer
         assert row[4] <= row[3] and row[5] <= row[4]
         for k in range(3):
@@ -79,10 +106,9 @@ def check_counts(its, expected):
         assert row[4] <= row[13]
         # Update matches a fresh setup (checked in the test), re-setup and rebuild reproduce
         assert row[17] == row[15] and row[18] == row[15]
-        # Weighted additive: exact with covering blocks (checked in the test), and one layer
-        # within 5% of the expected count
+        # Weighted additive: exact with covering blocks (also checked in the test); convergence
+        # with one layer is checked in the test
         assert row[19] == 1
-        assert abs(row[20]-ref[20]) <= max(1, 0.05*ref[20])
 
 # Expected values (OMP_NUM_THREADS=2; counts may differ by one with the thread count, as the
 # reductions and so the final residuals differ in round-off): (nprocs, nlevels, order) -> rows
@@ -100,6 +126,18 @@ expected = {
                 [10, 1, 1, 33, 14, 10, 33, 15, 12, 33, 19, 16, 62, 56, 56, 14, 14, 14, 14, 1, 18]],
 }
 
+# Partitions the rows above were made with: METIS cell partition and graph block hashes (see
+# run_cell_schwarz). Recorded with gfortran, the Ubuntu system METIS 5.1.0 (built without GKRAND)
+# and OMP_NUM_THREADS=2; other METIS builds (eg. by another compiler) may partition differently,
+# and then fall back to the partition-independent checks.
+expected_sig = {
+    (1, 3, 3): [[1369331334, 0], [864203196, 434180095]],
+    (2, 4, 3): [[1369331334, 0], [1004189096, 1018507348]],
+    (4, 4, 2): [[1369331334, 0], [802654272, 2008392473]],
+    (2, 5, 2): [[699839912, 0], [599442501, 817245016]],
+    (4, 5, 2): [[699839912, 0], [1936146723, 1953782997]],
+}
+
 # Cube periodic in x (`ref_per=T,F,F`): blocks and graph subdomains grow across the periodic seam
 # (only x: with `ref_per=T,T,F` this coarse cube aborts in the mesh setup, in
 # mesh_global_igrnd, before any Schwarz code runs; full periodicity is covered by
@@ -115,6 +153,17 @@ expected_periodic = {
                 [9, 1, 1, 52, 22, 14, 52, 26, 18, 52, 31, 26, 82, 66, 63, 22, 22, 22, 22, 1, 24]],
 }
 
+# Partitions the rows above were made with: METIS cell partition and graph block hashes (see
+# run_cell_schwarz). Recorded with gfortran, the Ubuntu system METIS 5.1.0 (built without GKRAND)
+# and OMP_NUM_THREADS=2; other METIS builds (eg. by another compiler) may partition differently,
+# and then fall back to the partition-independent checks.
+expected_periodic_sig = {
+    (1, 3, 3): [[1145285914, 0], [133795671, 1648869163]],
+    (2, 4, 3): [[1145285914, 0], [885882329, 834950068]],
+    (4, 4, 2): [[1145285914, 0], [1720874087, 1493531299]],
+    (2, 5, 2): [[355298977, 0], [484386452, 1957902133]],
+}
+
 @pytest.mark.coverage
 def test_serial():
     '''Cell mode Schwarz on a shared mesh (third order): exact blocks converge in one iteration,
@@ -122,7 +171,7 @@ def test_serial():
     re-setup.'''
     its = run_cell_schwarz(1, 3, 3)
     assert its is not None
-    check_counts(its, expected[(1, 3, 3)])
+    check_counts(its, expected[(1, 3, 3)], expected_sig[(1, 3, 3)])
 
 @pytest.mark.mpi
 @pytest.mark.parametrize('nprocs,order', [(2, 3), (4, 2)])
@@ -131,14 +180,14 @@ def test_mpi_transfer(nprocs, order):
     processes, second order on 4 to limit run time).'''
     its = run_cell_schwarz(nprocs, 4, order)
     assert its is not None
-    check_counts(its, expected[(nprocs, 4, order)])
+    check_counts(its, expected[(nprocs, 4, order)], expected_sig[(nprocs, 4, order)])
 
 @pytest.mark.mpi
 def test_mpi_refined():
     '''Cell mode Schwarz one refinement above the transfer level (second order, 2 processes).'''
     its = run_cell_schwarz(2, 5, 2)
     assert its is not None
-    check_counts(its, expected[(2, 5, 2)])
+    check_counts(its, expected[(2, 5, 2)], expected_sig[(2, 5, 2)])
 
 @pytest.mark.slow
 @pytest.mark.mpi
@@ -146,7 +195,7 @@ def test_mpi4_refined():
     '''Cell mode Schwarz one refinement above the transfer level (second order, 4 processes).'''
     its = run_cell_schwarz(4, 5, 2, timeout=2400)
     assert its is not None
-    check_counts(its, expected[(4, 5, 2)])
+    check_counts(its, expected[(4, 5, 2)], expected_sig[(4, 5, 2)])
 
 @pytest.mark.parametrize('nprocs,nlevels,order', [pytest.param(1, 3, 3, id='serial'),
                                                   pytest.param(2, 4, 3, id='mpi2', marks=pytest.mark.mpi),
@@ -158,4 +207,5 @@ def test_periodic(nprocs, nlevels, order):
     process, cells adjacent across the seam): the same checks as on the plain cube.'''
     its = run_cell_schwarz(nprocs, nlevels, order, timeout=1200, ref_per='T,F,F')
     assert its is not None
-    check_counts(its, expected_periodic[(nprocs, nlevels, order)])
+    check_counts(its, expected_periodic[(nprocs, nlevels, order)],
+                 expected_periodic_sig[(nprocs, nlevels, order)])

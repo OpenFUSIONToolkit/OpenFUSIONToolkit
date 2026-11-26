@@ -62,6 +62,7 @@ IMPLICIT NONE
 INTEGER(i4), PARAMETER :: nres=21
 INTEGER(i4) :: io_unit,ierr,nfail,ip,order=3
 INTEGER(i4) :: its(nres,2)
+INTEGER(i8) :: psig(3,2),gsig
 INTEGER(i4), PARAMETER :: nparts_list(2)=[1,3]
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
@@ -103,8 +104,9 @@ CALL g0%copy(g) ! Solvers overwrite the right-hand side with the residual
 IF(oft_env%head_proc)WRITE(*,'(A,I10,A,I10)')'Global DoFs: ',lop%nrg,' cells: ',mg_mesh%mesh%global%nc
 nfail=0
 its=0
+psig=0_i8
 DO ip=1,2
-  CALL run_cases(nparts_list(ip),its(:,ip))
+  CALL run_cases(nparts_list(ip),its(:,ip),psig(:,ip))
 END DO
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='cell_schwarz.results')
@@ -113,6 +115,7 @@ IF(oft_env%head_proc)THEN
     WRITE(*,'(A,I2,A,21I5)')'nparts=',nparts_list(ip),' results: ',its(:,ip)
     WRITE(io_unit,'(*(I0,1X))')its(:,ip)
   END DO
+  WRITE(io_unit,'(*(I0,1X))')psig
   CLOSE(io_unit)
 END IF
 CALL oft_finalize
@@ -124,9 +127,10 @@ CONTAINS
 ! 18: after delete and re-setup, 19: after update with new pattern,
 ! 20: weighted additive iterations with covering layers, 21: weighted additive with
 ! one layer of point adjacent cells
-SUBROUTINE run_cases(nparts,res)
+SUBROUTINE run_cases(nparts,res,sig)
 INTEGER(i4), INTENT(in) :: nparts
 INTEGER(i4), INTENT(out) :: res(nres)
+INTEGER(i8), INTENT(out) :: sig(3) !< Hashes of the cell partition, DoF colors and graph blocks
 INTEGER(i4) :: kfull,ia,k,nb
 REAL(r8) :: rnorm,t0
 TYPE(oft_overlap_dofs) :: dofs
@@ -136,6 +140,9 @@ t0=omp_get_wtime()
 CALL fem_cell_overlap_create(cbld,mg_mesh,ML_oft_lagrange%current_level,nparts)
 lop%cell_ovl=>cbld
 nb=cbld%nblocks()
+!---Partition signature (the reference iteration tables hold for one partition only)
+sig(1)=part_hash(cbld%mesh%nc,cbld%cpart,cbld%mesh%global%lc)
+sig(2)=part_hash(cbld%ndofs,cbld%dcolor,row_gidx())
 !---Smallest number of point layers for every block to cover the whole mesh
 kfull=-1
 DO k=0,64
@@ -185,9 +192,11 @@ res(21)=solve(nparts,1,.TRUE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm,weighted=.TRUE.)
 CALL check_tol('Cell mode weighted converged'//tag,rnorm,1.d-9)
 CALL check_tol('Cell mode weighted solution'//tag,maxdiff(v,x)/maxabs(x),1.d-5)
 CALL timing('Cell mode counts',tag,t0)
+gsig=0_i8
 DO k=0,2
   res(13+k)=solve(nparts,k,.FALSE.,OFT_CELL_ADJ_POINT,.FALSE.,v,rnorm)
 END DO
+sig(3)=gsig
 CALL timing('Graph mode counts',tag,t0)
 !---Numeric update and delete/re-setup
 CALL check_update(nparts,res(16:19))
@@ -246,9 +255,48 @@ CALL g%copy(g0)
 CALL linv%apply(y,g)
 nits=linv%cits
 rnorm=SQRT(g%dot(g)/g0%dot(g0))
+!---Graph mode blocks without overlap (partition signature)
+IF((.NOT.cell).AND.(overlap==0).AND.(nlocal>1))gsig=graph_hash(sw)
 CALL sw%delete
 CALL linv%delete
 END FUNCTION solve
+! Hash of a partition (part of each local item, weighted by the item's global index), summed
+! over processes: identifies the partition the reference tables in the driver were made with
+FUNCTION part_hash(n,part,gidx) RESULT(h)
+INTEGER(i4), INTENT(in) :: n
+INTEGER(i4), INTENT(in) :: part(:)
+INTEGER(i8), INTENT(in) :: gidx(:)
+INTEGER(i8) :: h
+INTEGER(i8), PARAMETER :: p=2147483647_i8
+INTEGER(i4) :: i
+h=0_i8
+DO i=1,n
+  h=MOD(h+INT(part(i),i8)*MOD(MOD(gidx(i),p)*48271_i8,p),p)
+END DO
+h=MOD(oft_mpi_sum(h),p)
+END FUNCTION part_hash
+! Global index of each local row of the operator
+FUNCTION row_gidx() RESULT(gidx)
+INTEGER(i8), ALLOCATABLE :: gidx(:)
+INTEGER(i4) :: i
+ALLOCATE(gidx(MAX(1,lop%nr)))
+DO i=1,lop%nr
+  gidx(i)=lop%i_map(1)%offsetg+lop%i_map(1)%lge(i)
+END DO
+END FUNCTION row_gidx
+! Hash of the graph mode blocks (block of each local row, 0 for rows in no block)
+FUNCTION graph_hash(sw) RESULT(h)
+TYPE(oft_schwarz_precond), INTENT(in) :: sw
+INTEGER(i8) :: h
+INTEGER(i4) :: b
+INTEGER(i4), ALLOCATABLE :: rpart(:)
+ALLOCATE(rpart(MAX(1,lop%nr)))
+rpart=0
+DO b=1,SIZE(sw%parts)
+  rpart(sw%parts(b)%v)=b
+END DO
+h=part_hash(lop%nr,rpart,row_gidx())
+END FUNCTION graph_hash
 ! Set up GMRES with a Schwarz preconditioner
 SUBROUTINE gmres_init(linv,sw,sub,nlocal,overlap,cell,adj,additive)
 TYPE(oft_native_gmres_solver), INTENT(inout) :: linv
