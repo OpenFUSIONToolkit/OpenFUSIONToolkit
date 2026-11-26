@@ -1,3 +1,10 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# FEM tests: quadrature-point basis cache (fem_quad_cache) against direct evaluation of the basis functions,
+# driven by test_fem_qcache.F90
 import os
 import sys
 import shlex
