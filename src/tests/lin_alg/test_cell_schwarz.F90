@@ -64,7 +64,7 @@ INTEGER(i4) :: io_unit,ierr,nfail,ip,order=3
 INTEGER(i4) :: its(nres,2)
 INTEGER(i8) :: psig(4,2),gsig
 INTEGER(i4), PARAMETER :: nparts_list(2)=[1,3]
-TYPE(multigrid_mesh) :: mg_mesh
+TYPE(multigrid_mesh), TARGET :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 TYPE(oft_fem_cell_overlap), TARGET :: cbld

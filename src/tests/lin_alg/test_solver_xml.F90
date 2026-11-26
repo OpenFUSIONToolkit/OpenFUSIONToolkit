@@ -37,7 +37,7 @@ INTEGER(i4) :: io_unit,ierr
 INTEGER(i4) :: cell_parts=0
 TYPE(oft_fem_cell_overlap), TARGET :: cbld
 NAMELIST/test_solver_xml_options/cell_parts
-TYPE(multigrid_mesh) :: mg_mesh
+TYPE(multigrid_mesh), TARGET :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 !---Initialize enviroment

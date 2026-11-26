@@ -94,6 +94,7 @@ TYPE, PUBLIC, EXTENDS(oft_cell_overlap_builder) :: oft_fem_cell_overlap
   INTEGER(i4) :: level = 0 !< Level of `mesh` in `ml_mesh`
   INTEGER(i4) :: nhalo = 0 !< Number of halo cells received in the last build
   INTEGER(i4) :: nhalo_used = 0 !< Number of halo cells used by a block in the last build
+  LOGICAL :: warned_base_layers = .FALSE. !< Truncation warning (base layers < overlap) already printed
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Multi-level mesh
   CLASS(oft_mesh), POINTER :: mesh => NULL() !< Mesh of the FE representation (one level of `ml_mesh`)
   CLASS(oft_afem_type), POINTER :: fe => NULL() !< Single FE representation (if not composite)
@@ -418,8 +419,12 @@ IF(.NOT.mesh%fullmesh)THEN
   lcpart=>self%ml_mesh%meshes(self%ml_mesh%nbase+1)%base%lcpart
   kb=layers
   IF(base_layers>=0)kb=base_layers
-  IF(oft_env%head_proc.AND.(kb<layers))WRITE(*,'(A,I4,A,I4,A)')' WARNING: Cell overlap base layers (', &
-    kb,') < overlap (',layers,'), blocks may be truncated at process boundaries'
+  !---Warn once per builder (builds repeat on every update with a new pattern)
+  IF((kb<layers).AND.(.NOT.self%warned_base_layers))THEN
+    IF(oft_env%head_proc)WRITE(*,'(A,I4,A,I4,A)')' WARNING: Cell overlap base layers (', &
+      kb,') < overlap (',layers,'), blocks may be truncated at process boundaries'
+    self%warned_base_layers=.TRUE.
+  END IF
   CALL mesh_base_candidates(self%ml_mesh,kb,ncand,cand,cown)
   CALL mesh_cell_base_index(self%ml_mesh,mesh,cb,nref)
   CALL mesh_base_gid_inverse(self%ml_mesh,inv)
