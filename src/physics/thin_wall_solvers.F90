@@ -201,7 +201,7 @@ IF(arsolver%info>=0)THEN
     j = sort_tmp(arsolver%nev+1-i)
     eig_rval(i)=arsolver%eig_val(1,j)
     IF(PRESENT(eig_ival))eig_ival(i)=arsolver%eig_val(2,j)
-    IF(uloc%nslice==uloc%n)THEN
+    IF(.NOT.uloc%stitch_info%replicated)THEN
       eig_vec(:,i)=arsolver%eig_vec(:,j)
     ELSE
       vslice=>arsolver%eig_vec(:,j)

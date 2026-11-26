@@ -282,9 +282,9 @@ CONTAINS
 !> Setup plot files and save static fields
 SUBROUTINE setup_plot_files()
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%xdmf%setup('thincurr',pathprefix,.NOT.LOGICAL(legacy_hdf5))
+  CALL tw_obj%xdmf%setup('thincurr',pathprefix,.NOT.LOGICAL(legacy_hdf5),head_only=.TRUE.)
 ELSE
-  CALL tw_obj%xdmf%setup('thincurr',persistent_space_tracking=.NOT.LOGICAL(legacy_hdf5))
+  CALL tw_obj%xdmf%setup('thincurr',persistent_space_tracking=.NOT.LOGICAL(legacy_hdf5),head_only=.TRUE.)
 END IF
 CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 IF(tw_obj%n_vcoils>0)THEN

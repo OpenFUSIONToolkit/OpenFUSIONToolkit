@@ -162,7 +162,7 @@ TYPE :: tw_type
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cm_red => NULL() !< Model unknowns owned by this processor [cm_nred]
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cm_expmap => NULL() !< Local index of each expanded element (0: not stored) [nelems_exp]
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_primary => NULL() !< Is this processor the primary owner of each stored element? [cm_nexp]
-  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_cell => NULL() !< Cells contributing to the stored elements [mesh%nc]
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_cell => NULL() !< Cells computed on this processor (contributing to the stored elements, and cells with no element rows on processor 0) [mesh%nc]
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: cm_cell_primary => NULL() !< Cells counted on this processor for diagnostics [mesh%nc]
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2dr => NULL() !< Element to driver (icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix (rows: cm_exp)
@@ -1423,7 +1423,7 @@ DO a=1,self%nelems
   j=j+1
   self%cm_red(j)=a
 END DO
-!---Cells contributing to the stored elements, and the primary processor of each cell (for diagnostics)
+!---Cells computed on this processor (contributing to the stored elements), and the primary processor of each cell
 ALLOCATE(self%cm_cell(self%mesh%nc),self%cm_cell_primary(self%mesh%nc))
 DO i=1,self%mesh%nc
   self%cm_cell(i)=.FALSE.
@@ -1440,6 +1440,8 @@ DO i=1,self%mesh%nc
     IF(need(ik))self%cm_cell(i)=.TRUE.
   END DO
   IF(first_row==0)THEN
+    !---Cells with no element rows are kept on processor 0, as diagnostics (eg. V-coil crossings) use all cells
+    self%cm_cell(i)=(oft_env%rank==0)
     self%cm_cell_primary(i)=(oft_env%rank==0)
   ELSE
     self%cm_cell_primary(i)=(exp_owner(first_row)==oft_env%rank)
@@ -2245,7 +2247,8 @@ IF(nmine>0)THEN
   DEALLOCATE(gptr)
 END IF
 DEALLOCATE(cent,glist,mycells)
-IF(oft_env%nprocs>1)nrad_cross=oft_mpi_sum(nrad_cross,ncoils_tot)
+!---Crossings are counted once per cell (on its primary processor), so the sum matches a serial run
+nrad_cross=oft_mpi_sum(nrad_cross,ncoils_tot)
 IF(ANY(nrad_cross(1:tw_obj%n_vcoils)>0))THEN
   CALL oft_warn("One or more elements intersect a Vcoil within its radius, which may lead to invalid inductance values.")
   DO j=1,tw_obj%n_vcoils
@@ -2335,6 +2338,7 @@ END IF
 CALL oft_mpi_barrier(ierr)
 DEALLOCATE(idx,loc)
 CONTAINS
+!---Write the buffered elements (global indices and their rows/columns) as one block, then empty the buffer
 SUBROUTINE write_block()
 IF(n==0)RETURN
 WRITE(io_unit)n,m
@@ -2688,6 +2692,8 @@ IF(PRESENT(save_file))THEN
         CALL oft_decrease_indent
       END IF
     END IF
+    !---All processors must agree before using the cached matrix (the computation below is collective)
+    exists=oft_mpi_and(exists)
     IF(exists)THEN
       DEBUG_STACK_POP
       RETURN

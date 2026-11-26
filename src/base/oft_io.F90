@@ -78,6 +78,7 @@ type :: xdmf_plot_file
   integer(i4) :: n_ts = 0
   integer(i4) :: curr_ts = 0
   integer(i4) :: n_grids = 0
+  logical :: head_only = .FALSE. !< Data is consolidated on the head processor and written by it as a single block
   character(LEN=OFT_PATH_SLEN) :: file_path = ''
   character(LEN=OFT_PATH_SLEN) :: group_name = ''
   character(LEN=OFT_PATH_SLEN) :: grid_names(10) = ''
@@ -329,21 +330,36 @@ CLASS(oft_bin_file), INTENT(inout) :: self
 FLUSH(self%io_unit)
 END SUBROUTINE bin_file_flush
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Setup plot file for the current processor
+!!
+!! By default each processor writes its own block (file) of a distributed mesh. With `head_only`, the full data is
+!! held on the head processor, which alone writes the plot file as a single block (only the head processor should
+!! call this routine and write data in this case).
 !------------------------------------------------------------------------------
-subroutine xmdf_setup(self,group_name,basepath,persistent_space_tracking)
+subroutine xmdf_setup(self,group_name,basepath,persistent_space_tracking,head_only)
 class(xdmf_plot_file), intent(inout) :: self
 CHARACTER(LEN=*), intent(in) :: group_name !< Path to mesh in HDF5 file
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-LOGICAL, OPTIONAL, INTENT(in) :: persistent_space_tracking
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath !< Directory for plot files (optional)
+LOGICAL, OPTIONAL, INTENT(in) :: persistent_space_tracking !< Use persistent free space tracking in HDF5 files? (optional)
+LOGICAL, OPTIONAL, INTENT(in) :: head_only !< Consolidated output written by the head processor only? (optional)
 integer :: error
+CHARACTER(LEN=OFT_MPI_PLEN) :: block_str
+self%head_only=.FALSE.
+IF(PRESENT(head_only))self%head_only=head_only
+IF(self%head_only)THEN
+  IF(.NOT.oft_env%head_proc)CALL oft_abort('Consolidated plot files must be set up by the head processor', &
+    "xmdf_setup", __FILE__)
+  block_str=hdf5_proc_str(0) ! Single block
+ELSE
+  block_str=hdf5_proc_str()
+END IF
 IF(PRESENT(basepath))THEN
   call execute_command_line('mkdir -p '//TRIM(basepath), exitstat=error)
   IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(basepath), &
     "xmdf_setup", __FILE__)
-  self%file_path=TRIM(basepath)//"oft_xdmf."//hdf5_proc_str()//".h5"
+  self%file_path=TRIM(basepath)//"oft_xdmf."//block_str//".h5"
 ELSE
-  self%file_path="oft_xdmf."//hdf5_proc_str()//".h5"
+  self%file_path="oft_xdmf."//block_str//".h5"
 END IF
 self%group_name=TRIM(group_name)
 CALL string_to_lower(self%group_name)
@@ -381,7 +397,11 @@ CALL hdf5_write(mesh_type,TRIM(self%file_path),TRIM(hdf5_path)//"/TYPE")
 CALL hdf5_write(pt_list,TRIM(self%file_path),TRIM(hdf5_path)//"/R",single_prec=.TRUE.)
 CALL hdf5_write(cell_list,TRIM(self%file_path),TRIM(hdf5_path)//"/LC")
 #ifdef HAVE_MPI
-CALL hdf5_write(oft_env%nprocs,TRIM(self%file_path),TRIM(hdf5_path)//"/NBLOCKS")
+IF(self%head_only)THEN
+  CALL hdf5_write(1,TRIM(self%file_path),TRIM(hdf5_path)//"/NBLOCKS")
+ELSE
+  CALL hdf5_write(oft_env%nprocs,TRIM(self%file_path),TRIM(hdf5_path)//"/NBLOCKS")
+END IF
 #endif
 !---Create static storage
 CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))

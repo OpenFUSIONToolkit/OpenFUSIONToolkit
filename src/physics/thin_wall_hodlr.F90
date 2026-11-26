@@ -908,7 +908,7 @@ TYPE :: leaf_range
   INTEGER(4), ALLOCATABLE :: last(:) !< Last leaf of each block
 END TYPE leaf_range
 INTEGER(4) :: i,j,k,l,lev,nleaf,anc,r,rbest,nj,nk,nempty
-INTEGER(4), ALLOCATABLE :: order(:),red_owner(:),pt_kr(:),pt_lc(:),nleaf_rank(:)
+INTEGER(4), ALLOCATABLE :: order(:),red_owner(:),pt_kr(:),pt_lc(:),nleaf_rank(:),row_count(:)
 REAL(8) :: w,total,cum
 REAL(8), ALLOCATABLE :: leaf_w(:),dense_w(:),sparse_w(:),load(:),pt_val(:)
 TYPE(leaf_range), ALLOCATABLE :: ranges(:)
@@ -961,7 +961,12 @@ DO i=1,self%nsparse
     leaf_w(l)=leaf_w(l)+sparse_w(i)*REAL(self%levels(self%nlevels)%blocks(l)%nelems,8)/REAL(nj,8)
   END DO
 END DO
-!---Leaves to processors (contiguous ranges of approximately equal weight)
+!---Leaves to processors (contiguous ranges of approximately equal weight, at least one leaf per processor)
+IF(nleaf<oft_env%nprocs)THEN
+  WRITE(msg,'(A,I6,A,I6,A)')'HODLR partition has fewer leaf blocks (',nleaf,') than processors (',oft_env%nprocs, &
+    '), reduce "target_size" or use fewer processors'
+  CALL oft_abort(TRIM(msg),'tw_hodlr_partition',__FILE__)
+END IF
 ALLOCATE(self%leaf_owner(nleaf))
 total=SUM(leaf_w)
 IF(total<=0.d0)THEN
@@ -971,8 +976,13 @@ END IF
 cum=0.d0
 DO l=1,nleaf
   r=INT((cum+leaf_w(l)/2.d0)/total*REAL(oft_env%nprocs,8),4)
-  self%leaf_owner(l)=MIN(MAX(r,0),oft_env%nprocs-1)
-  IF(l>1)self%leaf_owner(l)=MAX(self%leaf_owner(l),self%leaf_owner(l-1))
+  r=MIN(MAX(r,0),oft_env%nprocs-1)
+  IF(l==1)THEN
+    r=0
+  ELSE
+    r=MIN(MAX(r,self%leaf_owner(l-1)),self%leaf_owner(l-1)+1) ! Contiguous, without skipping processors
+  END IF
+  self%leaf_owner(l)=MAX(r,oft_env%nprocs-1-(nleaf-l)) ! Leave a leaf for each remaining processor
   cum=cum+leaf_w(l)
 END DO
 !---Interactions to processors
@@ -1047,10 +1057,17 @@ IF(oft_env%nprocs>1)THEN
     IF(oft_env%head_proc)WRITE(*,'(2A,I6,A)')oft_indent,'Distributed over ',oft_env%nprocs,' processors'
     IF(oft_env%head_proc)WRITE(*,'(2A,F8.3)')oft_indent,'Est. imbalance = ',MAXVAL(load)/MAX(SUM(load)/REAL(oft_env%nprocs,8),1.d-30)
   END IF
-  IF(nempty>0)THEN
-    WRITE(msg,'(I6,A)')nempty,' processor(s) own no HODLR leaf blocks, consider reducing "target_size"'
-    CALL oft_warn(msg)
+  !---Every processor must own some rows (eg. for parallel ARPACK)
+  ALLOCATE(row_count(0:oft_env%nprocs-1))
+  row_count=0
+  DO i=1,SIZE(self%elem_owner)
+    row_count(self%elem_owner(i))=row_count(self%elem_owner(i))+1
+  END DO
+  IF((nempty>0).OR.ANY(row_count==0))THEN
+    CALL oft_abort('One or more processors own no rows of the HODLR operator, reduce "target_size" or use '// &
+      'fewer processors','tw_hodlr_partition',__FILE__)
   END IF
+  DEALLOCATE(row_count)
 END IF
 DEALLOCATE(nleaf_rank)
 !---Replicated vectors for the model
@@ -1067,6 +1084,15 @@ IF(oft_env%nprocs>1)THEN
   ELSE
     red_owner=self%elem_owner
   END IF
+  !---Every processor must own some model unknowns (eg. for parallel ARPACK)
+  ALLOCATE(row_count(0:oft_env%nprocs-1))
+  row_count=0
+  DO i=1,tw%nelems
+    row_count(red_owner(i))=row_count(red_owner(i))+1
+  END DO
+  IF(ANY(row_count==0))CALL oft_abort('One or more processors own no unknowns of the model, reduce '// &
+    '"target_size" or use fewer processors','tw_hodlr_partition',__FILE__)
+  DEALLOCATE(row_count)
   CALL replace_vector(tw%Uloc,red_owner)
   CALL replace_vector(tw%Uloc_pts,self%pt_owner)
   DEALLOCATE(red_owner)
@@ -1306,42 +1332,42 @@ IF(TRIM(save_file)/='none')THEN
   END IF
   !---Each processor writes its blocks in turn
   DO irank=0,oft_env%nprocs-1
-  CALL oft_mpi_barrier(ierr)
-  IF(irank/=oft_env%rank)CYCLE
-  hash_tmp(6)=0
-  DO il=1,self%ndense_loc
-    i = self%dense_loc(il)
-    level = self%dense_blocks(1,i)
-    j = self%dense_blocks(2,i)
-    k = self%dense_blocks(3,i)
-    hash_tmp(1:3) = [level,j,k]
-    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
-    hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
-    WRITE(matrix_id,'(I5)')i
-    CALL hdf5_write(hash_tmp,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)))
-    CALL hdf5_write(self%dense_mats(i)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id)))
-  END DO
-  !
-  DO il=1,self%nsparse_loc
-    i = self%sparse_loc(il)
-    level = self%sparse_blocks(1,i)
-    j = self%sparse_blocks(2,i)
-    k = self%sparse_blocks(3,i)
-    hash_tmp(1:3) = [level,j,k]
-    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
-    hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
-    WRITE(matrix_id,'(I5)')i
-    IF(ASSOCIATED(self%aca_dense(i)%M))THEN
-      hash_tmp(6)=-1
-      CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
-      CALL hdf5_write(self%aca_dense(i)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id)))
-    ELSE
-      hash_tmp(6)=SIZE(self%aca_V_mats(i)%M,DIM=1)
-      CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
-      CALL hdf5_write(self%aca_U_mats(i)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id)))
-      CALL hdf5_write(self%aca_V_mats(i)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)))
-    END IF
-  END DO
+    CALL oft_mpi_barrier(ierr)
+    IF(irank/=oft_env%rank)CYCLE
+    hash_tmp(6)=0
+    DO il=1,self%ndense_loc
+      i = self%dense_loc(il)
+      level = self%dense_blocks(1,i)
+      j = self%dense_blocks(2,i)
+      k = self%dense_blocks(3,i)
+      hash_tmp(1:3) = [level,j,k]
+      hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+      hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+      WRITE(matrix_id,'(I5)')i
+      CALL hdf5_write(hash_tmp,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+      CALL hdf5_write(self%dense_mats(i)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id)))
+    END DO
+    !
+    DO il=1,self%nsparse_loc
+      i = self%sparse_loc(il)
+      level = self%sparse_blocks(1,i)
+      j = self%sparse_blocks(2,i)
+      k = self%sparse_blocks(3,i)
+      hash_tmp(1:3) = [level,j,k]
+      hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+      hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+      WRITE(matrix_id,'(I5)')i
+      IF(ASSOCIATED(self%aca_dense(i)%M))THEN
+        hash_tmp(6)=-1
+        CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+        CALL hdf5_write(self%aca_dense(i)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id)))
+      ELSE
+        hash_tmp(6)=SIZE(self%aca_V_mats(i)%M,DIM=1)
+        CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+        CALL hdf5_write(self%aca_U_mats(i)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id)))
+        CALL hdf5_write(self%aca_V_mats(i)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)))
+      END IF
+    END DO
   END DO
   CALL oft_mpi_barrier(ierr)
   ! TODO: Save create appropriate hash to enable saving Vcoil matrix
@@ -1708,55 +1734,55 @@ IF(TRIM(save_file)/='none')THEN
   END IF
   !---Each processor writes its blocks in turn
   DO irank=0,oft_env%nprocs-1
-  CALL oft_mpi_barrier(ierr)
-  IF(irank/=oft_env%rank)CYCLE
-  hash_tmp(6)=0
-  DO il=1,self%ndense_loc
-    i = self%dense_loc(il)
-    level = self%dense_blocks(1,i)
-    j = self%dense_blocks(2,i)
-    k = self%dense_blocks(3,i)
-    hash_tmp(1:3) = [level,j,k]
-    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ipts),INT(4*self%levels(level)%blocks(j)%np,8))
-    hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
-    WRITE(matrix_id,'(I5)')i
-    CALL hdf5_write(hash_tmp,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)))
-    DO dim=1,3
-      WRITE(dim_id,'(I1)')dim
-      CALL hdf5_write(self%dense_B_mats(i,dim)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-    END DO
-  END DO
-  !
-  DO il=1,self%nsparse_loc
-    i = self%sparse_loc(il)
-    level = self%sparse_blocks(1,i)
-    j = self%sparse_blocks(2,i)
-    k = self%sparse_blocks(3,i)
-    DO flip=1,2
-      ii=(i-1)*2+flip
-      IF(flip==2)THEN
-        k = self%sparse_blocks(2,i)
-        j = self%sparse_blocks(3,i)
-      END IF
-      WRITE(matrix_id,'(I5)')ii
+    CALL oft_mpi_barrier(ierr)
+    IF(irank/=oft_env%rank)CYCLE
+    hash_tmp(6)=0
+    DO il=1,self%ndense_loc
+      i = self%dense_loc(il)
+      level = self%dense_blocks(1,i)
+      j = self%dense_blocks(2,i)
+      k = self%dense_blocks(3,i)
+      hash_tmp(1:3) = [level,j,k]
+      hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ipts),INT(4*self%levels(level)%blocks(j)%np,8))
+      hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+      WRITE(matrix_id,'(I5)')i
+      CALL hdf5_write(hash_tmp,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)))
       DO dim=1,3
-        hash_tmp(1:3) = [level,j,k]
-        hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
-        hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ipts),INT(4*self%levels(level)%blocks(k)%np,8))
         WRITE(dim_id,'(I1)')dim
-        IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))THEN
-          hash_tmp(6)=-1
-          CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-          CALL hdf5_write(self%aca_B_dense(ii,dim)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-        ELSE
-          hash_tmp(6)=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)
-          CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-          CALL hdf5_write(self%aca_BU_mats(ii,dim)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-          CALL hdf5_write(self%aca_BV_mats(ii,dim)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-        END IF
+        CALL hdf5_write(self%dense_B_mats(i,dim)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
       END DO
     END DO
-  END DO
+    !
+    DO il=1,self%nsparse_loc
+      i = self%sparse_loc(il)
+      level = self%sparse_blocks(1,i)
+      j = self%sparse_blocks(2,i)
+      k = self%sparse_blocks(3,i)
+      DO flip=1,2
+        ii=(i-1)*2+flip
+        IF(flip==2)THEN
+          k = self%sparse_blocks(2,i)
+          j = self%sparse_blocks(3,i)
+        END IF
+        WRITE(matrix_id,'(I5)')ii
+        DO dim=1,3
+          hash_tmp(1:3) = [level,j,k]
+          hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+          hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ipts),INT(4*self%levels(level)%blocks(k)%np,8))
+          WRITE(dim_id,'(I1)')dim
+          IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))THEN
+            hash_tmp(6)=-1
+            CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+            CALL hdf5_write(self%aca_B_dense(ii,dim)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          ELSE
+            hash_tmp(6)=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)
+            CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+            CALL hdf5_write(self%aca_BU_mats(ii,dim)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+            CALL hdf5_write(self%aca_BV_mats(ii,dim)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          END IF
+        END DO
+      END DO
+    END DO
   END DO
   CALL oft_mpi_barrier(ierr)
   ! TODO: Save create appropriate hash to enable saving coil matrices

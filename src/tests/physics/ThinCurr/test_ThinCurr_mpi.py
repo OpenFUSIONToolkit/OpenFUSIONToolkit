@@ -181,3 +181,20 @@ def test_mpi_dense_error():
                               return_stdout=True)
     assert result
     assert std_out.find('Expected failure detected') > -1
+
+
+@pytest.mark.mpi
+def test_mpi_too_few_leaves():
+    '''A HODLR partition with fewer leaf blocks than processes is rejected with a clear error (not a hang)'''
+    if not oft_testing.env_flag('OFT_HAVE_MPI'):
+        pytest.skip("Not compiled with MPI")
+    os.chdir(test_dir)
+    write_cyl_xml()
+    case = {'mesh': 'tw_test-cyl.h5', 'xml': 'oft_in_mpi.xml', 'jumper_start': 2, 'basepath': 'few_leaves/',
+            'out': 'few_leaves.npz', 'hodlr': dict(hodlr_opts, target_size=5000)}
+    with open('few_leaves.json', 'w+') as fid:
+        json.dump(case, fid)
+    assert run_OFT('{0} thincurr_mpi_driver.py few_leaves.json'.format(sys.executable), 2, 120,
+                   expect_abort='fewer leaf blocks')
+    if os.path.isdir(case['basepath']):
+        shutil.rmtree(case['basepath'])

@@ -42,7 +42,9 @@ CLASS(oft_cvector), POINTER :: cu,cv
 TYPE(oft_vector_ptr) :: vlist(2)
 TYPE(oft_cvector_ptr) :: cvlist(2)
 INTEGER(i4) :: n = 1000
-NAMELIST/test_replicated_options/n
+LOGICAL :: one_owner = .FALSE. ! All entries owned by the last processor (others own none)
+LOGICAL :: skip_eigs = .FALSE. ! Skip the eigenvalue test
+NAMELIST/test_replicated_options/n,one_owner,skip_eigs
 !------------------------------------------------------------------------------
 ! Initialize enviroment
 !------------------------------------------------------------------------------
@@ -56,6 +58,7 @@ nfail=0
 ALLOCATE(owner(n))
 DO i=1,n
   owner(i)=MOD((i-1)/7+3*(i-1),oft_env%nprocs)
+  IF(one_owner)owner(i)=oft_env%nprocs-1
 END DO
 n_owned=COUNT(owner==oft_env%rank)
 !---Create replicated vector
@@ -158,7 +161,7 @@ IF(ANY(vals/=[(ref_val(i),i=1,n)]))CALL fail('Slice round trip')
 ! Eigenvalues of a diagonal system
 !------------------------------------------------------------------------------
 #ifdef HAVE_ARPACK
-IF(n>=20)CALL test_eigs() ! Ritz space must fit in the system
+IF((n>=20).AND.(.NOT.skip_eigs))CALL test_eigs() ! Ritz space must fit in the system
 #endif
 !---Report
 nfail=oft_mpi_max(nfail)

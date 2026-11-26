@@ -84,6 +84,17 @@ def main(case):
             from OpenFUSIONToolkit.io import histfile
             hist = histfile(os.path.join(case['basepath'], 'floops.hist'))
             results['td_sensors'] = np.vstack([np.asarray(hist[key]) for key in hist.keys() if key != 'time'])
+    #---Plot files (written by the head process as a single block) and XDMF metadata
+    tw.plot_td(10, plot_freq=10, sensor_obj=sensor_obj)
+    tw.build_XDMF()
+    if myOFT.head_proc:
+        import glob
+        xmf_text = ''
+        for xmf_file in glob.glob(os.path.join(case['basepath'], '*.xmf')):
+            with open(xmf_file, 'r') as fid:
+                xmf_text += fid.read()
+        if xmf_text.find('"J"') < 0 and xmf_text.find('J_v') < 0:
+            raise ValueError('XDMF metadata missing plot fields')
     #---Reduced model from a fixed basis (projections of the coupling matrices)
     basis = np.random.default_rng(7).standard_normal((3, tw.nelems))
     red_file = os.path.join(case['basepath'], 'reduced.h5')

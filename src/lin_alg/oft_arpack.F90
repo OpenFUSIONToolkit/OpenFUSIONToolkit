@@ -311,7 +311,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vslice
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: workd,workl
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: resid,dr,di,workev
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: v
-LOGICAL :: rvec,dist,pm_save
+LOGICAL :: rvec,dist,pm_save,use_parallel
 CHARACTER(LEN=1) :: bmat,howmny
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: select
 CLASS(oft_vector), POINTER :: tmp1,tmp2
@@ -350,6 +350,7 @@ neigs=self%nev
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
+use_parallel=arpack_use_parallel(u) ! Same choice on all processors
 ldv=nslice
 !---Create output arrays
 IF(ASSOCIATED(self%eig_val))DEALLOCATE(self%eig_val)
@@ -390,7 +391,7 @@ i=0
 self%info=0
 DO
   !---Call APRACK driver
-  IF(u%ng==u%nslice)THEN
+  IF(.NOT.use_parallel)THEN
     CALL dnaupd(ido,bmat,nslice,self%which,self%nev,self%tol, &
                 resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
@@ -460,7 +461,7 @@ DO
     self%info=info
     IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Fetching EVs',info
     !---Retrieve eigenvalue and eigenvector
-    IF(u%ng==u%nslice)THEN
+    IF(.NOT.use_parallel)THEN
       CALL dneupd(rvec,'A',select,dr,di,v,ldv, &
                   sigmar,sigmai,workev,bmat,nslice,self%which,self%nev,self%tol, &
                   resid,self%ncv,v,ldv,iparam,ipntr,workd, &
@@ -531,7 +532,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vslice
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: workd,workl
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: resid,dr,di,workev
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: v
-LOGICAL :: rvec,pm_save
+LOGICAL :: rvec,pm_save,use_parallel
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: select
 CHARACTER(LEN=1) :: bmat,howmny
 CHARACTER(LEN=2) :: which
@@ -568,6 +569,7 @@ howmny='A'                ! Form of the basis (A = Compute Ritz vectors)
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
+use_parallel=arpack_use_parallel(u) ! Same choice on all processors
 ldv=nslice
 !------------------------------------------------------------------------------
 ! Create temporary work arrays
@@ -595,7 +597,7 @@ comm = oft_env%comm
 self%info=0
 DO i=1,4000
   !---Call APRACK driver
-  IF(u%ng==u%nslice)THEN
+  IF(.NOT.use_parallel)THEN
     CALL dnaupd(ido,bmat,nslice,which,nev,self%tol,resid,ncv,v, &
       ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
@@ -654,7 +656,7 @@ DO i=1,4000
   ELSE ! Solver has converged
     self%info=info
     !---Retrieve eigenvalues
-    IF(u%ng==u%nslice)THEN
+    IF(.NOT.use_parallel)THEN
       CALL dneupd(rvec,'A',select,dr,di,v,ldv, &
       sigmar,sigmai,workev,bmat,nslice,which,nev,self%tol, &
       resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
@@ -708,7 +710,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vslice
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: workd,workl
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: resid,d,workev
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: v
-LOGICAL :: rvec,pm_save
+LOGICAL :: rvec,pm_save,use_parallel
 CHARACTER(LEN=1) :: bmat,howmny
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: select
 CLASS(oft_vector), POINTER :: tmp1,tmp2
@@ -746,6 +748,7 @@ howmny='A'                        ! Form of the basis (A = Compute Ritz vectors)
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
+use_parallel=arpack_use_parallel(u) ! Same choice on all processors
 ldv=nslice
 !---Create output arrays
 IF(ASSOCIATED(self%eig_val))DEALLOCATE(self%eig_val)
@@ -786,7 +789,7 @@ i=0
 self%info=0
 DO
   !---Call APRACK driver
-  IF(u%ng==u%nslice)THEN
+  IF(.NOT.use_parallel)THEN
     CALL dsaupd(ido,bmat,nslice,self%which,self%nev,self%tol,resid, &
       self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
@@ -855,7 +858,7 @@ DO
     self%info=info
     IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Fetching EVs'
     !---Retrieve eigenvalue and eigenvector
-    IF(u%ng==u%nslice)THEN
+    IF(.NOT.use_parallel)THEN
       CALL dseupd(rvec,'A',select,d,v,ldv, &
         sigma,bmat,nslice,self%which,self%nev,self%tol, &
         resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
@@ -921,7 +924,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vslice
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: workd,workl
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: resid,d,workev
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: v
-LOGICAL :: rvec,dist,pm_save
+LOGICAL :: rvec,dist,pm_save,use_parallel
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: select
 CHARACTER(LEN=1) :: bmat,howmny
 CHARACTER(LEN=2) :: which
@@ -958,6 +961,7 @@ howmny='A'                ! Form of the basis (A = Compute Ritz vectors)
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
+use_parallel=arpack_use_parallel(u) ! Same choice on all processors
 ldv=nslice
 !------------------------------------------------------------------------------
 ! Create temporary work arrays
@@ -985,7 +989,7 @@ comm = oft_env%comm
 self%info=0
 DO
   !---Call APRACK driver
-  IF(u%ng==u%nslice)THEN
+  IF(.NOT.use_parallel)THEN
     CALL dsaupd(ido,bmat,nslice,which,nev,self%tol,resid,ncv, &
       v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
@@ -1056,7 +1060,7 @@ DO
       IF(oft_env%head_proc)WRITE(*,*)'Maximum number of Iterations reached'
     END IF
     !---Retrieve eigenvalues
-    IF(u%ng==u%nslice)THEN
+    IF(.NOT.use_parallel)THEN
       CALL dseupd(rvec,'A',select,d,v(:,1:nev),ldv, &
         sigma,bmat,nslice,which,nev,self%tol,resid,ncv,v,ldv, &
         iparam,ipntr,workd,workl,lworkl,info)
@@ -1092,4 +1096,24 @@ IF(ASSOCIATED(self%eig_vec))DEALLOCATE(self%eig_vec)
 self%initialized=.FALSE.
 end subroutine irlm_delete
 #endif
+!------------------------------------------------------------------------------
+!> Determine if parallel ARPACK (PARPACK) should be used for a vector
+!!
+!! The choice is made collectively, so all processors call the same ARPACK driver: PARPACK is used if any
+!! processor holds only part of the vector (`ng/=nslice`). PARPACK requires at least one locally-owned entry on
+!! every processor, so the run is aborted with an explanation otherwise.
+!!
+!! @result Use PARPACK?
+!------------------------------------------------------------------------------
+FUNCTION arpack_use_parallel(u) RESULT(use_parallel)
+CLASS(oft_vector), INTENT(inout) :: u !< Vector defining the problem layout
+LOGICAL :: use_parallel
+INTEGER(i4) :: nslice_min
+use_parallel=.NOT.oft_mpi_and(u%ng==u%nslice)
+IF(use_parallel)THEN
+  nslice_min=-oft_mpi_max(-u%nslice)
+  IF(nslice_min<1)CALL oft_abort('Parallel ARPACK requires at least one owned entry on every processor, '// &
+    'use fewer processors','arpack_use_parallel',__FILE__)
+END IF
+END FUNCTION arpack_use_parallel
 END MODULE oft_arpack

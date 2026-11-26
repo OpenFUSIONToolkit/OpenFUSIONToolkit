@@ -317,10 +317,10 @@ end FUNCTION native_vector_cast
 !! structures are left untouched (they may be shared with other vectors), so vectors that should use
 !! the new layout must be created from this one (`%new`) after this call.
 !---------------------------------------------------------------------------------
-subroutine native_vector_setup_replicated(self,owner)
-class(oft_native_vector), intent(inout) :: self !< Vector object
-integer(i4), contiguous, target, intent(in) :: owner(:) !< Owning processor (0-based rank) of each entry [n]
-integer(i4) :: i,j,n
+SUBROUTINE native_vector_setup_replicated(self,owner)
+CLASS(oft_native_vector), INTENT(inout) :: self !< Vector object
+INTEGER(i4), CONTIGUOUS, TARGET, INTENT(in) :: owner(:) !< Owning processor (0-based rank) of each entry [n]
+INTEGER(i4) :: i,j,n
 DEBUG_STACK_PUSH
 n=SIZE(owner)
 IF(ASSOCIATED(self%v))THEN
@@ -355,7 +355,7 @@ END DO
 ALLOCATE(self%stitch_info)
 CALL seam_setup_replicated(self%stitch_info,n,owner)
 DEBUG_STACK_POP
-end subroutine native_vector_setup_replicated
+END SUBROUTINE native_vector_setup_replicated
 !---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
 !---------------------------------------------------------------------------------
