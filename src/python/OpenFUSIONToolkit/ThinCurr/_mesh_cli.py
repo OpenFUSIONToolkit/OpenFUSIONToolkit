@@ -161,6 +161,12 @@ class ThinCurrMesh:
         if ('pmap' in tc) or ('nfp' in tc):
             raise ValueError("Input mesh contains periodicity information, which is not yet supported")
 
+        # Meshes split at junctions cannot be edited or combined: their junction data would be lost, leaving the
+        # split sheets disconnected
+        if 'junctions' in tc:
+            raise ValueError("Input mesh '{0}' is split at junctions (thincurr/junctions), which is not supported; use "
+                             "the unsplit mesh and run OFT_ThinCurr_holes on the result".format(filename))
+
         # Copy other fields to keep
         tc_props = {k: tc[k] for k in cls._PROP_KEYS if k in tc}
         mesh_props = {k: mesh_info[k] for k in cls._MESH_PROP_KEYS if k in mesh_info}
@@ -777,6 +783,10 @@ def script_entry(argv=None):
 # this script treats all NODESETs as holes by default, which will be overriden by the `OFT_thincurr_holes`
 # if run. For future meshes only NODESETs corresponding to jumpers should be specified, which can
 # be converted to jumpers instead of holes using the `--jumpers` or `--jumper_range` options.
+#
+# Meshes that have already been split at junctions by `OFT_ThinCurr_holes` (with a `thincurr/junctions` group) are
+# rejected, as their junction data cannot be carried through these operations. Edit or combine the unsplit meshes
+# instead and run `OFT_ThinCurr_holes` on the result.
 #
 # Only one of `--shift`, `--rotate`, or `--scale` may be given at a time. When `--copies`
 # is given, `--shift` or `--rotate` defines the per-copy increment (`--scale` is not

@@ -35,20 +35,24 @@ RECURSIVE              = YES
 EXCLUDE                = @CMAKE_CURRENT_SOURCE_DIR@/base/oft_sort_c.cxx \
                          @CMAKE_CURRENT_SOURCE_DIR@/docs/website \
                          @CMAKE_CURRENT_SOURCE_DIR@/docs/filter_python_doxygen.py \
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/filter_fortran_doxygen.py \
                          @CMAKE_CURRENT_SOURCE_DIR@/python/create_stub.py \
 EXCLUDE_PATTERNS       =
 FILE_PATTERNS          = *.f90 \
                          *.F90 \
+                         *.inc \
                          *.cxx \
                          *.c \
                          *.md \
                          *.html \
                          *.py
 FILTER_SOURCE_FILES    = YES
-FILTER_PATTERNS        = "*.py=@CMAKE_CURRENT_SOURCE_DIR@/docs/filter_python_doxygen.py"
+FILTER_PATTERNS        = "*.py=@CMAKE_CURRENT_SOURCE_DIR@/docs/filter_python_doxygen.py" \
+                         "*.F90=@CMAKE_CURRENT_SOURCE_DIR@/docs/filter_fortran_doxygen.py" \
+                         "*.inc=@CMAKE_CURRENT_SOURCE_DIR@/docs/filter_fortran_doxygen.py"
 
 OPTIMIZE_FOR_FORTRAN   = NO
-EXTENSION_MAPPING      = F90=FortranFree
+EXTENSION_MAPPING      = F90=FortranFree inc=FortranFree
 AUTOLINK_SUPPORT       = YES
 
 BRIEF_MEMBER_DESC      = YES

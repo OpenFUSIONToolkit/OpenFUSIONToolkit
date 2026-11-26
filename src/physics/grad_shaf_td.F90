@@ -22,7 +22,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_graph, oft_graph_ptr, oft_vec
 USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks, graph_add_full_col
 USE oft_solver_base, ONLY: oft_solver
 USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
-USE oft_native_la, ONLY: oft_native_matrix
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_pattern, native_pattern_release
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lu, ONLY: oft_lusolver
@@ -1160,6 +1160,8 @@ type(oft_1d_int), pointer, dimension(:) :: bc_nodes
 CLASS(oft_vector), POINTER :: oft_lag_vec
 TYPE(oft_graph_ptr) :: graphs(1,1)
 TYPE(oft_graph), TARGET :: graph1,graph2
+TYPE(oft_native_pattern), POINTER :: pattern
+LOGICAL :: same_graph
 type(oft_timer) :: mytimer
 CLASS(oft_bmesh), POINTER :: smesh
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
@@ -1222,9 +1224,15 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
         graph1%lc=>graph2%lc
         DEALLOCATE(dense_flag)
     END IF
-    !---Create matrix
+    !---Create matrix (keeping its pattern for the LHS if the graph is not augmented)
     graphs(1,1)%g=>graph1
-    CALL create_matrix(rhs_mat,graphs,oft_lag_vec,oft_lag_vec)
+    NULLIFY(pattern)
+    same_graph=(.NOT.self%gs_device%free).AND.(.NOT.include_bounds)
+    IF(same_graph)THEN
+      CALL create_matrix(rhs_mat,graphs,oft_lag_vec,oft_lag_vec,pattern=pattern)
+    ELSE
+      CALL create_matrix(rhs_mat,graphs,oft_lag_vec,oft_lag_vec)
+    END IF
     NULLIFY(graphs(1,1)%g)
     !---Add dense block for boundary
     IF(self%gs_device%free)THEN
@@ -1250,9 +1258,14 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
         graph1%kr=>graph2%kr
         graph1%lc=>graph2%lc
     END IF
-    !---Create matrix
+    !---Create matrix (sharing the RHS pattern if the graph is unchanged)
     graphs(1,1)%g=>graph1
-    CALL create_matrix(lhs_mat,graphs,oft_lag_vec,oft_lag_vec)
+    IF(same_graph)THEN
+      CALL create_matrix(lhs_mat,graphs,oft_lag_vec,oft_lag_vec,pattern=pattern)
+      CALL native_pattern_release(pattern)
+    ELSE
+      CALL create_matrix(lhs_mat,graphs,oft_lag_vec,oft_lag_vec)
+    END IF
     ALLOCATE(lim_vals(a%n),ax_vals(a%n))
     lim_vals=0.d0; ax_vals=0.d0
     NULLIFY(graphs(1,1)%g)

@@ -163,8 +163,10 @@ CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
 CALL create_bjacobi_pre(linv%pre,-1)
-DEALLOCATE(linv%pre%pre)
-CALL create_ilu_pre(linv%pre%pre)
+IF(ASSOCIATED(linv%pre%pre))THEN ! Native only (PETSc block-Jacobi uses its own sub-solver)
+  DEALLOCATE(linv%pre%pre)
+  CALL create_ilu_pre(linv%pre%pre)
+END IF
 CALL divout%setup(xmhd_ML_hcurl_grad,'grnd',solver=linv)
 divout%pm=.TRUE.
 !------------------------------------------------------------------------------
@@ -183,8 +185,10 @@ CALL divout%apply(pert_fields%B)
 !---Clean up solver
 NULLIFY(divout%solver)
 CALL divout%delete()
-CALL linv%pre%pre%delete()
-DEALLOCATE(linv%pre%pre)
+IF(ASSOCIATED(linv%pre%pre))THEN
+  CALL linv%pre%pre%delete()
+  DEALLOCATE(linv%pre%pre)
+END IF
 CALL linv%pre%delete()
 DEALLOCATE(linv%pre)
 CALL linv%delete()
