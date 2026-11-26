@@ -868,7 +868,9 @@ END SUBROUTINE fem_qcache_cell_rows
 !! as dense `nd x nreg` blocks with a regressor list (kind 2). If no fit reaches `qcache_xf_tol`
 !! the pair is marked kind 3: the oriented functions are not in the span of this space's
 !! canonical functions, and the state's own table block must be used (gather path, or the
-!! per-entity correction in the cell kernels). The maximum relative residual of the accepted
+!! per-entity correction in the cell kernels). A fit with at least as many regressors as samples
+!! (eg. a low-order quadrature rule) cannot validate a transform and is rejected, as are
+!! rank-deficient fits and non-finite residuals. The maximum relative residual of the accepted
 !! fits is stored in `xf_resid`.
 !------------------------------------------------------------------------------
 SUBROUTINE qcache_build_xform(self)
@@ -1030,15 +1032,24 @@ IF(oft_debug_print(1))WRITE(*,'(2A,4I6,A,ES10.2)')oft_indent, &
   'qcache orientation transforms (identity/signed perm/dense/none): ',self%nxf,', fit residual = ',self%xf_resid
 CONTAINS
 !> Least-squares fit of the state-s block of entity i against canonical rows regs(1:nr)
+!!
+!! Returns `res=HUGE(res)` (fit rejected) if there are not more samples than regressors, the
+!! system is rank deficient or the residual is not finite.
 SUBROUTINE fit(nr,xfit,res)
 INTEGER(i4), INTENT(in) :: nr
 REAL(r8), INTENT(out) :: xfit(:,:)
 REAL(r8), INTENT(out) :: res
-INTEGER(i4) :: k,m,mm,jj,rr,info,lwork
+INTEGER(i4) :: k,m,mm,jj,rr,info,lwork,ldb
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: work
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: amat,bmat,a0,b0
 EXTERNAL :: dgels
-ALLOCATE(amat(nm,nr),bmat(nm,nd),a0(nm,nr),b0(nm,nd))
+xfit=0.d0
+res=HUGE(res)
+!---An exact fit with nr>=nm regressors does not validate a transform
+IF(nr>=nm)RETURN
+ldb=MAX(nm,nr)
+ALLOCATE(amat(nm,nr),bmat(ldb,nd),a0(nm,nr),b0(nm,nd))
+bmat=0.d0
 mm=0
 DO iq=1,3
   IF(self%q(iq)%xform<0)CYCLE
@@ -1054,15 +1065,19 @@ DO iq=1,3
     END DO
   END DO
 END DO
-a0=amat; b0=bmat
+a0=amat; b0=bmat(1:nm,:)
 ALLOCATE(work(1))
-CALL dgels('N',nm,nr,nd,amat,nm,bmat,nm,work,-1,info)
+CALL dgels('N',nm,nr,nd,amat,nm,bmat,ldb,work,-1,info)
 lwork=INT(work(1),4)
 DEALLOCATE(work)
 ALLOCATE(work(lwork))
-CALL dgels('N',nm,nr,nd,amat,nm,bmat,nm,work,lwork,info)
+CALL dgels('N',nm,nr,nd,amat,nm,bmat,ldb,work,lwork,info)
 DEALLOCATE(work)
-IF(info/=0)CALL oft_abort('Orientation transform fit failed','qcache_build_xform',__FILE__)
+IF(info<0)CALL oft_abort('Orientation transform fit failed (invalid argument)','qcache_build_xform',__FILE__)
+IF(info>0)THEN ! Rank deficient: reject
+  DEALLOCATE(amat,bmat,a0,b0)
+  RETURN
+END IF
 xfit(1:nr,:)=bmat(1:nr,1:nd)
 ! Snap round-off to zero/+-1 for exact permutations and sparsity
 DO jj=1,nd
@@ -1072,6 +1087,7 @@ DO jj=1,nd
   END DO
 END DO
 res=MAXVAL(ABS(b0-MATMUL(a0,xfit(1:nr,:))))/MAXVAL(ABS(a0))
+IF(.NOT.(res<=HUGE(res)))res=HUGE(res) ! NaN or Inf: reject
 DEALLOCATE(amat,bmat,a0,b0)
 END SUBROUTINE fit
 END SUBROUTINE qcache_build_xform

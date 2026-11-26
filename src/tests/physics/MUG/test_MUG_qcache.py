@@ -377,6 +377,14 @@ def test_qcache_pmg_coarse_quad():
                        minlev=2, nlevels=2)
 
 
+def test_qcache_pmg_coarse_quad_p1():
+    '''Jacobians agree on all levels of a p-multigrid hierarchy down to p=1 (p=4, 3, 2, 1) with the experimental
+    coarse-level quadrature, whose low-order rules on the p=1 level have fewer samples than DOFs for some
+    orientation transform fits (these fall back to per-orientation tables)'''
+    assert qcheck_case(cube_mesh(1), 4, xmhd=" xmhd_coarse_quad=T\n xmhd_hall=T\n", bench=" shaping=T\n", minlev=1,
+                       nlevels=4)
+
+
 @pytest.mark.mpi
 def test_qcache_mpi2():
     '''Residual implementations agree on a mesh distributed over 2 MPI ranks'''
