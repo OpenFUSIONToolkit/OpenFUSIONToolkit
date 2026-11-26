@@ -145,7 +145,7 @@ A representative build environment that can be used for creating a testing sandb
 
 - Free-form Fortran 90+ (`.F90` extension, preprocessed)
 - SPDX license header: `! SPDX-License-Identifier: LGPL-3.0-only`
-- Doxygen-style comments with `!>` and `!!` markers
+- Doxygen-style comments with `!>` and `!!` markers (not in `src/examples/`; see "Test and example code" below)
 - Module names typically prefixed with `oft_` (e.g., `oft_gs`, `oft_la_base`)
 - Line length: unlimited (`-ffree-line-length-none`), but keep reasonable
 - New functions/subroutines must have Doxygen documentation — this applies to code Doxygen actually processes; see "Test and example code" below
@@ -177,7 +177,7 @@ reads `examples/*.F90`, `examples/*/*/*.F90`, and `examples/*/*/*.ipynb` and wri
   - Use `!!` only for the narrative blocks between code sections, with page-style commands only: the page anchor (eg. `!!API Example 1 ... {#doc_api_ex1}`), `\section`, `\subsection`, `\ref`, `\f$ ... \f$`, `\note`, `\image`, and similar.
   - Do not use Doxygen source sentinels (`!>`, `!<`) or documentation commands (`@param`, `@result`, `@brief`) in example sources. They are not parsed as documentation: they show up verbatim in the listings, and a `!!` continuation of a `!>` block splits a listing in two.
   - Use plain `!` comments for notes inside code, including descriptions of routines, arguments and variables.
-  - `! START SOURCE` / `! STOP SOURCE` and `! OFT_DOC_INCLUDE: <file>` are directives for `generate_doc.py`.
+  - `! START SOURCE` / `! STOP SOURCE` and `! OFT_DOC_INCLUDE: <file>` are directives for `generate_doc.py`. All must start in the first column. `! OFT_DOC_INCLUDE: <file>` must also come directly after a `!!` block (before any code line); anywhere else it is copied into the listing as-is and the file is not included.
   - The example notebooks follow the same idea with Markdown cells. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
 - **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!<` documentation blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
 - Doxygen **linking** commands (`\section`, `\ref`, …) remain valid anywhere and may be used where they help, even in files whose functions need no documentation blocks.
