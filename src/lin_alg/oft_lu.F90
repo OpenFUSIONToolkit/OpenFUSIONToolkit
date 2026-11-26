@@ -129,6 +129,8 @@ TYPE :: pardiso_struc
   INTEGER(i8) :: pt(64) = 0 !< Handle to internal data structure
   INTEGER(i4) :: iparm(64) = 0 !< This array is used to pass various parameters to Intel MKL PARDISO
   INTEGER(i4), POINTER, DIMENSION(:) :: perm => NULL() !< Permutation vector
+  INTEGER(i4), POINTER, DIMENSION(:) :: kr => NULL() !< Private copy of the row pointer (1-based), see @ref pardiso_set_graph
+  INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Private copy of the column indices (1-based), see @ref pardiso_set_graph
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< ILU0 factors pointer
 END TYPE pardiso_struc
 !------------------------------------------------------------------------------
@@ -623,6 +625,7 @@ IF(.NOT.self%initialized)THEN
       ALLOCATE(self%pardiso_struct%perm(A_native%nr))
       self%pardiso_struct%iparm(1)=1
       self%pardiso_struct%iparm(27)=1
+      CALL pardiso_set_graph(self%pardiso_struct,A_native)
 #else
       CALL oft_abort('OFT not compiled with MKL-PARDISO','lusolver_apply',__FILE__)
 #endif
@@ -800,9 +803,12 @@ CASE("superd")
     IF(self%refactor)THEN
       !---Update matrix
       mode=22
-      IF(self%update_graph)mode=12
+      IF(self%update_graph)THEN
+        mode=12
+        CALL pardiso_set_graph(self%pardiso_struct,A_native)
+      END IF
       CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
-        mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
+        mat_vals,self%pardiso_struct%kr,self%pardiso_struct%lc,self%pardiso_struct%perm, &
         nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
       IF(ierr/=0)CALL oft_abort('Factorization failed (MKL-PARDISO)','lusolver_apply',__FILE__)
       self%pardiso_struct%iparm(1)=0
@@ -817,7 +823,7 @@ CASE("superd")
       self%pardiso_struct%iparm(8)=1
     END IF
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
-      mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
+      mat_vals,self%pardiso_struct%kr,self%pardiso_struct%lc,self%pardiso_struct%perm, &
       nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
     IF(ierr/=0)CALL oft_abort('Solve failed (MKL-PARDISO)','lusolver_apply',__FILE__)
     DEALLOCATE(b)
@@ -875,6 +881,26 @@ END IF
 DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE lusolver_apply
+!------------------------------------------------------------------------------
+!> Set the private copy of the matrix graph passed to MKL PARDISO
+!!
+!! PARDISO overwrites its `ia` and `ja` arguments while it runs (converting them to
+!! 0-based indices in place and restoring them on return), so they must not be read
+!! by anything else during a call. Matrix graphs are shared (between matrices with
+!! the same pattern, and between submatrices extracted with the same rows and
+!! columns, see @ref native_extraction_get), so solvers working
+!! concurrently on matrices with a shared graph (eg. the blocks of a block-Jacobi or
+!! Schwarz preconditioner) would corrupt each other's indices. Each solver passes
+!! its own copy instead.
+!------------------------------------------------------------------------------
+SUBROUTINE pardiso_set_graph(pstruct,A_native)
+TYPE(pardiso_struc), INTENT(inout) :: pstruct !< PARDISO solver information
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Matrix to factor
+IF(ASSOCIATED(pstruct%kr))DEALLOCATE(pstruct%kr,pstruct%lc)
+ALLOCATE(pstruct%kr(A_native%nr+1),pstruct%lc(A_native%nnz))
+pstruct%kr=A_native%kr(1:A_native%nr+1)
+pstruct%lc=A_native%lc(1:A_native%nnz)
+END SUBROUTINE pardiso_set_graph
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
 !------------------------------------------------------------------------------
@@ -1138,6 +1164,7 @@ SELECT CASE(TRIM(self%package))
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,nr, &
       rvals,ivals,ivals,self%pardiso_struct%perm, &
       1,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,rvals,rvals,ierr)
+    IF(ASSOCIATED(self%pardiso_struct%kr))DEALLOCATE(self%pardiso_struct%kr,self%pardiso_struct%lc)
 #endif
   CASE("lapack")
     DEALLOCATE(self%ipiv,self%atmp)
