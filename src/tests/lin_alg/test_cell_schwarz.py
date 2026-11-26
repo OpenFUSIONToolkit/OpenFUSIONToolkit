@@ -9,6 +9,7 @@
 #------------------------------------------------------------------------------
 import os
 import sys
+import warnings
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
@@ -96,6 +97,11 @@ def check_counts(result, expected, expected_sig):
             print("NOTE:   row:       {0}".format(row))
             print("NOTE:   reference: {0}".format(ref))
             print("=" * 80)
+            # Also as a warning: pytest shows its warnings summary for passing tests, whose
+            # output is otherwise captured
+            warnings.warn(UserWarning("nparts={0}: partition {1} is not the reference partition {2} "
+                                      "(cells, graph blocks), reference table not applied; row {3}, "
+                                      "reference {4}".format([1, 3][ip], partition_key(sig), ref_sig, row, ref)))
         # Exactness: one restricted iteration with the covering layers
         assert row[1] == 1
         # Point adjacency: non-increasing with layers; face <= edge <= point overlap per layer
