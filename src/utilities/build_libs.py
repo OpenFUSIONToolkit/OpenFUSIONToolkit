@@ -963,6 +963,13 @@ class MPICH(package):
             "--without-hip",
             "--without-cuda"
         ]
+        if self.config_dict['OS_TYPE'] == 'Darwin' and self.config_dict['CC_VENDOR'] == 'llvm':
+            # Libtool cannot build shared Fortran libraries with LLVM Flang on macOS (silently falls back
+            # to static), so request static libraries explicitly to ensure dependencies (eg. hwloc) are
+            # included in the compiler wrappers
+            if self.shared_libs:
+                print("  Warning: Shared MPICH libraries are not supported with LLVM on macOS, building static libraries instead")
+            self.shared_libs = False
         if self.shared_libs:
             config_options += [
                 "--enable-shared=yes",
@@ -2065,6 +2072,8 @@ class PETSC(package):
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
         self.mpi_f08 = mpi_f08
+        # Building PETSc with external solvers (eg. MUMPS, SuperLU-DIST) can exceed the default timeout
+        self.build_timeout = 30
 
     def detect_version(self):
         print("  Testing PETSc version")
@@ -2179,6 +2188,10 @@ class PETSC(package):
             options += ['--download-suitesparse']
         if self.with_mumps:
             options += ['--download-mumps', '--download-scalapack', '--download-blacs']
+            if config_dict['CC_VENDOR'] == 'llvm':
+                # ScaLAPACK detection of Fortran name mangling fails with LLVM Flang (STOP message is captured)
+                print('  Warning: Setting ScaLAPACK Fortran name mangling to "Add_" for LLVM, as automatic detection fails with LLVM Flang')
+                options += ['--download-scalapack-cmake-arguments="-DCDEFS=Add_"']
         #
         if 'MKL_ROOT' in self.config_dict:
             options += ['--with-blas-lapack-dir={MKL_ROOT}']
@@ -2196,7 +2209,11 @@ class PETSC(package):
         else:
             options += ['--with-debugging=no']
             if config_dict['CC_VENDOR'] == 'gnu':
-                options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
+                # GCC 15+ defaults to C23, which breaks K&R-style declarations in some PETSc dependencies (eg. SuperLU-DIST)
+                if int(config_dict['CC_VERSION'].split(".")[0]) >= 15:
+                    options += ['--COPTFLAGS="-O2 -std=gnu17"', '--FOPTFLAGS=-O2']
+                else:
+                    options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
             elif config_dict['CC_VENDOR'] == 'intel':
                 options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
