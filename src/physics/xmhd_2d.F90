@@ -16,6 +16,10 @@
 !! \f$ p_h = \sum_j 2 k n_j T_j \phi_j \f$, a group finite element form (C. A. J. Fletcher,
 !! Comput. Methods Appl. Mech. Eng. 37, 225 (1983)), which keeps stratified equilibria free of
 !! spurious instabilities (see \ref doc_mug_xmhd_2d_eqns_pres).
+!!
+!! Optional streamline upwinding (`upwind`), an inconsistent streamline-upwind Petrov-Galerkin
+!! method following the 3D implementation, stabilizes the advection of n, V and T in nonlinear runs
+!! (see \ref doc_mug_xmhd_2d_eqns_upwind).
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
@@ -122,6 +126,11 @@ TYPE, public :: oft_xmhd_2d_sim
   LOGICAL :: linear = .FALSE. !< Linear mode of the last run, set by the run drivers (`run_lin_simulation` sets T and
                               !< `run_simulation` sets F). Set it before calling `xmhd_2d_plot` without a run
   LOGICAL :: timestep_cn = .FALSE. ! Use Crank-Nicolson timestep
+  !> Use streamline upwinding (an inconsistent SUPG method) for the advection of n, V and T in nonlinear
+  !! runs (see \ref doc_mug_xmhd_2d_eqns_upwind). Off by default; ignored (always off) in linear runs.
+  !! Requires positive `nu`, and positive `D_diff` and `chi` in the compressible model
+  LOGICAL :: upwind = .FALSE.
+  REAL(r8), ALLOCATABLE :: he_cell(:) !< Element size of each cell for upwinding [m] (set on first use)
   INTEGER(i4) :: nsteps = -1 !< # of timesteps
   INTEGER(i4) :: rst_base = 0 !< starting index of restart files
   INTEGER(i4) :: rst_freq = 10 !< frequency to generate restart files
@@ -630,7 +639,9 @@ END SUBROUTINE run_lin_simulation
 !!
 !! Material properties default to -1 and must be set for every region that is not
 !! ignored (`ignore_rmask`). Properties that are not used by the chosen model
-!! (eg. \f$ \chi \f$ and \f$ \gamma \f$ when incompressible) are not checked.
+!! (eg. \f$ \chi \f$ and \f$ \gamma \f$ when incompressible) are not checked. When upwinding is active, the
+!! diffusivities of the upwinded fields (`nu`, and `D_diff` and `chi` in the compressible model) must be
+!! positive, as in the 3D implementation (see \ref doc_mug_xmhd_2d_eqns_upwind).
 !---------------------------------------------------------------------------
 SUBROUTINE check_settings(self)
 CLASS(oft_xmhd_2d_sim), INTENT(in) :: self !< Simulation object
@@ -646,8 +657,132 @@ DO i=1,SIZE(self%ignore_rmask)
     IF(self%chi(i)<0.d0)CALL oft_abort("Thermal diffusivity not set or negative","check_settings",__FILE__)
     IF(self%gamma(i)<=1.d0)CALL oft_abort("Adiabatic index must be greater than 1","check_settings",__FILE__)
   END IF
+  IF(upwind_active(self))THEN
+    IF(self%nu(i)<=0.d0)CALL oft_abort('Upwinding requires "nu>0"','check_settings',__FILE__)
+    IF(.NOT.self%incomp)THEN
+      IF(self%D_diff(i)<=0.d0)CALL oft_abort('Upwinding requires "D_diff>0"','check_settings',__FILE__)
+      IF(self%chi(i)<=0.d0)CALL oft_abort('Upwinding requires "chi>0"','check_settings',__FILE__)
+    END IF
+  END IF
 END DO
 END SUBROUTINE check_settings
+!---------------------------------------------------------------------------
+!> Check whether streamline upwinding is active
+!!
+!! Upwinding is used only in nonlinear runs: it is off if `upwind=F` or `linear=T` (which
+!! \ref xmhd_2d::run_lin_simulation "run_lin_simulation" sets).
+!!
+!! @result `.TRUE.` if the upwinding terms are included in the residual and Jacobian
+!---------------------------------------------------------------------------
+PURE FUNCTION upwind_active(self) RESULT(active)
+CLASS(oft_xmhd_2d_sim), INTENT(in) :: self !< Simulation object
+LOGICAL :: active
+active = self%upwind.AND.(.NOT.self%linear)
+END FUNCTION upwind_active
+!---------------------------------------------------------------------------
+!> Evaluate the streamline upwinding weight
+!!
+!! Weight for the inconsistent streamline-upwind Petrov-Galerkin (SUPG) method, where the
+!! streamline modification of the test functions is applied to the advection terms only (see
+!! \ref doc_mug_xmhd_2d_eqns_upwind). As in the 3D implementation (\ref xmhd::xmhd_upwind_weight
+!! "xmhd_upwind_weight"), the weight is the optimal value for 1D advection-diffusion,
+!! \f$ w = \beta h_e / (2 |v|) \f$ with \f$ \beta = \coth(Pe) - 1/Pe \f$ and \f$ Pe = |v| h_e / (2 \nu) \f$,
+!! from A. N. Brooks and T. J. R. Hughes, Comput. Methods Appl. Mech. Eng. 32, 199 (1982).
+!! Zero diffusivities are rejected when upwinding is enabled (see \ref xmhd_2d::check_settings
+!! "check_settings"); a non-positive value (eg. the unused density diffusivity of the incompressible model)
+!! gives full upwinding (\f$ \beta = 1 \f$, the limit \f$ \nu \to 0 \f$).
+!!
+!! @result Upwinding weight [s]
+!---------------------------------------------------------------------------
+PURE FUNCTION upwind_weight(v_mag,he,nu) RESULT(w_up)
+REAL(r8), INTENT(in) :: v_mag !< Advection speed [m/s]
+REAL(r8), INTENT(in) :: he !< Element size [m]
+REAL(r8), INTENT(in) :: nu !< Diffusivity of the advected field [m^2/s]
+REAL(r8) :: Pc,beta,w_up
+IF(nu>0.d0)THEN
+  Pc = MAX(1.d-8,v_mag*he/(2.d0*nu)) ! Peclet number
+  beta = 1.d0/TANH(Pc) - 1.d0/Pc
+ELSE
+  beta = 1.d0 ! Full upwinding without diffusion
+END IF
+w_up = beta*he/(2.d0*MAX(1.d-10,v_mag))
+END FUNCTION upwind_weight
+!---------------------------------------------------------------------------
+!> Get the element sizes used for upwinding
+!!
+!! For each cell, the node spacing of a regular cell (equilateral triangle or square) with the same
+!! area: edge length divided by the Lagrange element order. The area is the planar (mesh) area, also
+!! in cylindrical geometry.
+!---------------------------------------------------------------------------
+SUBROUTINE upwind_elem_sizes(he)
+REAL(r8), ALLOCATABLE, INTENT(inout) :: he(:) !< Element size of each cell [m]
+INTEGER(i4) :: i,m
+REAL(r8) :: area,jac_mat(3,4),jac_det
+TYPE(oft_quad_type), POINTER :: quad
+quad=>oft_blagrange%quad
+ALLOCATE(he(mesh%nc))
+DO i=1,mesh%nc
+  area = 0.d0
+  DO m=1,quad%np
+    CALL mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det)
+    area = area + ABS(jac_det)*quad%wts(m)
+  END DO
+  IF(mesh%cell_np==4)THEN ! Quadrilateral (square)
+    he(i) = SQRT(area)
+  ELSE ! Triangle (equilateral)
+    he(i) = SQRT(4.d0*area/SQRT(3.d0))
+  END IF
+END DO
+he = he/REAL(oft_blagrange%order,8)
+END SUBROUTINE upwind_elem_sizes
+!---------------------------------------------------------------------------
+!> Get the local velocity weights (fields 2-4) of a solution vector
+!---------------------------------------------------------------------------
+SUBROUTINE get_vel_weights(u,vel_weights)
+CLASS(oft_vector), INTENT(inout) :: u !< Solution vector
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(inout) :: vel_weights !< Velocity weights [3,ne] (allocated here)
+REAL(r8), POINTER, DIMENSION(:) :: vtmp
+INTEGER(i4) :: k
+ALLOCATE(vel_weights(3,oft_blagrange%ne))
+DO k=1,3
+  vtmp => vel_weights(k,:)
+  CALL u%get_local(vtmp,k+1)
+END DO
+END SUBROUTINE get_vel_weights
+!---------------------------------------------------------------------------
+!> Evaluate the streamline upwinding terms at a quadrature point
+!!
+!! Returns the in-plane advecting velocity \f$ V_{ad} \f$ (from the start-of-step solution) and the
+!! weights of the density, velocity, and temperature terms, already multiplied by the time step factor,
+!! the quadrature weight, and the volume factor (and divided by \f$ \gamma - 1 \f$ for temperature, like
+!! the rest of that equation). The upwinding contribution of test function \f$ \phi \f$ to the residual
+!! of field \f$ f \f$ is then \f$ w_f (V_{ad} \cdot \nabla \phi) (V \cdot \nabla f) \f$.
+!---------------------------------------------------------------------------
+SUBROUTINE upwind_eval(pt,he,vad_loc,basis_vals,dt_fac,incomp,vad,w_n,w_v,w_T)
+TYPE(xmhd_2d_qpt), INTENT(IN) :: pt !< Quadrature point state
+REAL(r8), INTENT(IN) :: he !< Element size [m]
+REAL(r8), INTENT(IN) :: vad_loc(:,:) !< Local weights of the advecting velocity [3,nce]
+REAL(r8), INTENT(IN) :: basis_vals(:) !< Basis values [nce]
+REAL(r8), INTENT(IN) :: dt_fac !< Time step factor
+LOGICAL, INTENT(IN) :: incomp !< Incompressible model (no temperature term)
+REAL(r8), INTENT(OUT) :: vad(3) !< Advecting velocity (in plane)
+REAL(r8), INTENT(OUT) :: w_n !< Density weight
+REAL(r8), INTENT(OUT) :: w_v !< Velocity weight
+REAL(r8), INTENT(OUT) :: w_T !< Temperature weight
+INTEGER(i4) :: jr
+REAL(r8) :: vad_mag,fac
+vad = 0.d0
+DO jr=1,SIZE(basis_vals)
+  vad = vad + vad_loc(:,jr)*basis_vals(jr)
+END DO
+vad(2) = 0.d0 ! Only the in-plane velocity advects (d/dy = 0)
+vad_mag = SQRT(vad(1)**2 + vad(3)**2)
+fac = dt_fac*pt%int_factor*pt%rmul
+w_n = fac*upwind_weight(vad_mag,he,pt%D_diff)
+w_v = fac*upwind_weight(vad_mag,he,pt%nu)
+w_T = 0.d0
+IF(.NOT.incomp)w_T = fac*upwind_weight(vad_mag,he,(pt%gamma-1.d0)*pt%chi)/(pt%gamma-1.d0)
+END SUBROUTINE upwind_eval
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
 !---------------------------------------------------------------------------
@@ -832,18 +967,24 @@ class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
 CLASS(oft_scalar_bfem), POINTER :: T_fe
-LOGICAL :: cyl_flag, incomp
+LOGICAL :: cyl_flag, incomp, upwind
 INTEGER(i4) :: i
 REAL(r8) :: m_i=proton_mass
 REAL(r8) :: chi, eta(2), nu, D_diff, gamma, diag_vals(5), B_0(3), g_accel
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights,psi_vac_weights
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: T_res,n_res,psi_res,by_res,velx_res,vely_res,velz_res
-REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
+REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights, vad_weights
 quad=>oft_blagrange%quad
-NULLIFY(n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res)
+NULLIFY(n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res, vad_weights)
 
 !---Get weights from solution vector
 CALL get_field_weights(self%parent_sim,a,n_weights,vel_weights,T_weights,psi_weights,by_weights,psi_vac_weights)
+!---Advecting velocity for upwinding: the solution at the start of the time step (parent_sim%u)
+upwind = upwind_active(self%parent_sim)
+IF(upwind)THEN
+  CALL get_vel_weights(self%parent_sim%u,vad_weights)
+  IF(.NOT.ALLOCATED(self%parent_sim%he_cell))CALL upwind_elem_sizes(self%parent_sim%he_cell)
+END IF
 
 B_0 = self%parent_sim%B_0
 cyl_flag = self%parent_sim%cyl_flag
@@ -876,17 +1017,19 @@ INTEGER(i4) :: k,m,jr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs, cell_dofs_T
 REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dpsi_0(3),dby(3),dp_h(3),rmul,rden
 REAL(r8) :: dvel(3,3),div_vel,jac_mat(3,4),jac_det,int_factor,btmp(3),tmp1(3),coords(3)
+REAL(r8) :: he,vad(3),w_n,w_v,w_T,sl,adv_v(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,basis_vals_T,T_loc,n_loc,psi_loc,by_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_loc,basis_grads,basis_grads_T,res_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_loc,vad_loc,basis_grads,basis_grads_T,res_loc
 TYPE(xmhd_2d_qpt) :: pt
 !$omp parallel private(k,m,jr,curved,coords,cell_dofs,cell_dofs_T,basis_vals,basis_grads,basis_vals_T, &
-!$omp basis_grads_T,T_loc,n_loc,psi_loc,by_loc,vel_loc,res_loc,jac_mat,jac_det,int_factor,pt, &
+!$omp basis_grads_T,T_loc,n_loc,psi_loc,by_loc,vel_loc,vad_loc,res_loc,jac_mat,jac_det,int_factor,pt, &
 !$omp T,n,psi,by,vel,dT,dn,dpsi,dpsi_0,dby,dp_h,dvel,div_vel,btmp,tmp1,rmul,rden, &
+!$omp he,vad,w_n,w_v,w_T,sl,adv_v, &
 !$omp chi, m_i, eta, nu, gamma, D_diff) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(basis_vals_T(T_fe%nce),basis_grads_T(3,T_fe%nce))
 ALLOCATE(n_loc(oft_blagrange%nce),psi_loc(oft_blagrange%nce),by_loc(oft_blagrange%nce), &
-  vel_loc(3,oft_blagrange%nce),T_loc(T_fe%nce))
+  vel_loc(3,oft_blagrange%nce),vad_loc(3,oft_blagrange%nce),T_loc(T_fe%nce))
 ALLOCATE(cell_dofs(oft_blagrange%nce),cell_dofs_T(T_fe%nce),res_loc(oft_blagrange%nce,7))
 !$omp do ordered
 DO i=1,mesh%nc
@@ -904,6 +1047,10 @@ DO i=1,mesh%nc
   n_loc = n_weights(cell_dofs)
   psi_loc = psi_weights(cell_dofs) + psi_vac_weights(cell_dofs)
   by_loc = by_weights(cell_dofs)
+  IF(upwind)THEN
+    vad_loc = vad_weights(:, cell_dofs)
+    he = self%parent_sim%he_cell(i)
+  END IF
 
   !Set material properties
   chi = self%parent_sim%chi(mesh%reg(i))
@@ -1093,6 +1240,22 @@ DO i=1,mesh%nc
         + self%dt*basis_vals(jr)*B_0(2)*div_vel*int_factor
       END IF
     END DO
+    !---Streamline upwinding: w*(V_ad.grad(phi))*(V.grad(f)) for f = n, each component of V, and T,
+    !   with the advecting velocity V_ad (in plane) and weight w frozen at the start of the time step
+    IF(upwind)THEN
+      pt%int_factor = int_factor
+      pt%chi = chi; pt%nu = nu; pt%gamma = gamma; pt%D_diff = D_diff
+      CALL upwind_eval(pt,he,vad_loc,basis_vals,self%dt,incomp,vad,w_n,w_v,w_T)
+      DO k=1,3
+        adv_v(k) = DOT_PRODUCT(vel,dvel(k,:))
+      END DO
+      DO jr=1,oft_blagrange%nce
+        sl = DOT_PRODUCT(vad,basis_grads(:,jr))
+        res_loc(jr,1) = res_loc(jr,1) + sl*w_n*DOT_PRODUCT(vel,dn)
+        res_loc(jr,2:4) = res_loc(jr,2:4) + sl*w_v*adv_v
+        IF(.NOT.incomp)res_loc(jr,5) = res_loc(jr,5) + sl*w_T*DOT_PRODUCT(vel,dT)
+      END DO
+    END IF
   END DO
   !---Add local values to full vector
   !$omp ordered
@@ -1119,7 +1282,7 @@ DO i=1,mesh%nc
   !$omp end ordered
 END DO
 !---Cleanup thread-local storage
-DEALLOCATE(basis_vals,basis_grads,basis_vals_T,basis_grads_T,n_loc,T_loc,vel_loc,psi_loc,by_loc, &
+DEALLOCATE(basis_vals,basis_grads,basis_vals_T,basis_grads_T,n_loc,T_loc,vel_loc,vad_loc,psi_loc,by_loc, &
   cell_dofs,cell_dofs_T,res_loc)
 !$omp end parallel
 END BLOCK
@@ -1143,6 +1306,7 @@ self%diag_vals=oft_mpi_sum(diag_vals,5)
 !---Cleanup remaining storage
 DEALLOCATE(n_weights,vel_weights, T_weights, psi_weights, by_weights)
 DEALLOCATE(psi_vac_weights)
+IF(upwind)DEALLOCATE(vad_weights)
 END SUBROUTINE nlfun_apply
 !---------------------------------------------------------------------------
 !> Compute the approximate Jacobian matrix for the compressible system
@@ -1183,15 +1347,23 @@ CLASS(oft_vector), INTENT(INOUT) :: a !< Solution for computing Jacobian
 CLASS(oft_scalar_bfem), INTENT(INOUT) :: T_fe !< Lagrange representation for field 5
 LOGICAL, INTENT(IN) :: incomp !< Field 5 is pressure (incompressible) rather than temperature
 INTEGER(i4) :: i
+LOGICAL :: upwind
 REAL(r8) :: dt_fac
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights,psi_vac_weights
-REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
+REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights,vad_weights
 INTEGER(KIND=omp_lock_kind), ALLOCATABLE, DIMENSION(:) :: tlocks
 TYPE(oft_quad_type), POINTER :: quad
 quad=>oft_blagrange%quad
 CALL self%jacobian%zero
 CALL get_field_weights(self,a,n_weights,vel_weights,T_weights,psi_weights,by_weights,psi_vac_weights)
 dt_fac=self%jac_dt
+!---Advecting velocity for upwinding: the solution at the start of the time step (self%u)
+NULLIFY(vad_weights)
+upwind=upwind_active(self)
+IF(upwind)THEN
+  CALL get_vel_weights(self%u,vad_weights)
+  IF(.NOT.ALLOCATED(self%he_cell))CALL upwind_elem_sizes(self%he_cell)
+END IF
 !---Setup thread locks
 ALLOCATE(tlocks(self%fe_rep%nfields))
 DO i=1,self%fe_rep%nfields
@@ -1201,17 +1373,17 @@ BLOCK
 LOGICAL :: curved
 INTEGER(i4) :: jr,m
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs,cell_dofs_T
-REAL(r8) :: jac_mat(3,4),jac_det,coords(3)
+REAL(r8) :: jac_mat(3,4),jac_det,coords(3),he,vad(3),w_n,w_v,w_T
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,basis_vals_T,n_loc,T_loc,psi_loc,by_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,basis_grads_T,vel_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,basis_grads_T,vel_loc,vad_loc
 TYPE(xmhd_2d_qpt) :: pt
 TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
 TYPE(oft_local_mat), ALLOCATABLE, DIMENSION(:,:) :: jac_loc
 !$omp parallel private(jr,m,curved,cell_dofs,cell_dofs_T,jac_mat,jac_det,coords,basis_vals,basis_grads, &
-!$omp basis_vals_T,basis_grads_T,n_loc,vel_loc,T_loc,psi_loc,by_loc,pt,iloc,jac_loc)
+!$omp basis_vals_T,basis_grads_T,n_loc,vel_loc,vad_loc,T_loc,psi_loc,by_loc,pt,iloc,jac_loc,he,vad,w_n,w_v,w_T)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(basis_vals_T(T_fe%nce),basis_grads_T(3,T_fe%nce))
-ALLOCATE(n_loc(oft_blagrange%nce),vel_loc(3,oft_blagrange%nce),T_loc(T_fe%nce), &
+ALLOCATE(n_loc(oft_blagrange%nce),vel_loc(3,oft_blagrange%nce),vad_loc(3,oft_blagrange%nce),T_loc(T_fe%nce), &
   psi_loc(oft_blagrange%nce),by_loc(oft_blagrange%nce))
 ALLOCATE(cell_dofs(oft_blagrange%nce),cell_dofs_T(T_fe%nce))
 ALLOCATE(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields),iloc(self%fe_rep%nfields))
@@ -1236,6 +1408,10 @@ DO i=1,mesh%nc
   T_loc=T_weights(cell_dofs_T)
   psi_loc=psi_weights(cell_dofs)+psi_vac_weights(cell_dofs)
   by_loc=by_weights(cell_dofs)
+  IF(upwind)THEN
+    vad_loc=vad_weights(:,cell_dofs)
+    he=self%he_cell(i)
+  END IF
   !---Set material properties
   pt%chi=self%chi(mesh%reg(i))
   pt%m_i=self%m_i(mesh%reg(i))
@@ -1263,6 +1439,10 @@ DO i=1,mesh%nc
     ELSE
       CALL jac_add_comp(self,jac_loc,pt,basis_vals,basis_grads,n_loc,T_loc,dt_fac)
     END IF
+    IF(upwind)THEN
+      CALL upwind_eval(pt,he,vad_loc,basis_vals,dt_fac,incomp,vad,w_n,w_v,w_T)
+      CALL jac_add_upwind(jac_loc,pt,basis_vals,basis_grads,vad,w_n,w_v,w_T,incomp)
+    END IF
   END DO
   CALL jac_finish_local(self,jac_loc,cell_dofs,cell_dofs_T)
   !---Add local contributions to matrix
@@ -1272,7 +1452,7 @@ DO i=1,mesh%nc
 END DO
 !---Cleanup thread-local storage
 CALL self%fe_rep%mat_destroy_local(jac_loc)
-DEALLOCATE(basis_vals,basis_grads,basis_vals_T,basis_grads_T,n_loc,vel_loc,T_loc,psi_loc,by_loc, &
+DEALLOCATE(basis_vals,basis_grads,basis_vals_T,basis_grads_T,n_loc,vel_loc,vad_loc,T_loc,psi_loc,by_loc, &
   cell_dofs,cell_dofs_T,jac_loc,iloc)
 !$omp end parallel
 END BLOCK
@@ -1283,6 +1463,7 @@ END DO
 DEALLOCATE(tlocks)
 CALL jac_finalize(self,T_fe)
 DEALLOCATE(n_weights,vel_weights,T_weights,psi_weights,by_weights,psi_vac_weights)
+IF(upwind)DEALLOCATE(vad_weights)
 END SUBROUTINE build_approx_jacobian
 !---------------------------------------------------------------------------
 !> Get local weights of all fields from a solution vector
@@ -1726,6 +1907,49 @@ DO jr=1,SIZE(basis_vals)
   END DO
 END DO
 END SUBROUTINE jac_add_incomp
+!---------------------------------------------------------------------------
+!> Add the Jacobian of the streamline upwinding terms
+!!
+!! The derivatives of \f$ w_f (V_{ad} \cdot \nabla \phi) (V \cdot \nabla f) \f$ with respect to \f$ f \f$ and
+!! \f$ V \f$, for \f$ f \f$ = n, each velocity component, and T (compressible only). The advecting velocity
+!! and weights are fixed during a time step, so these are exact (see @ref upwind_eval).
+!---------------------------------------------------------------------------
+SUBROUTINE jac_add_upwind(jac_loc,pt,basis_vals,basis_grads,vad,w_n,w_v,w_T,incomp)
+TYPE(oft_local_mat), INTENT(INOUT) :: jac_loc(:,:) !< Local (cell) Jacobian
+TYPE(xmhd_2d_qpt), INTENT(IN) :: pt !< Quadrature point state
+REAL(r8), INTENT(IN) :: basis_vals(:) !< Basis values [nce]
+REAL(r8), INTENT(IN) :: basis_grads(:,:) !< Basis gradients [3,nce]
+REAL(r8), INTENT(IN) :: vad(3) !< Advecting velocity (in plane)
+REAL(r8), INTENT(IN) :: w_n !< Density weight
+REAL(r8), INTENT(IN) :: w_v !< Velocity weight
+REAL(r8), INTENT(IN) :: w_T !< Temperature weight
+LOGICAL, INTENT(IN) :: incomp !< Incompressible model (no temperature term)
+INTEGER(i4) :: jr,jc,k,l
+REAL(r8) :: sl,adv_c,vel(3),dn(3),dT(3),dvel(3,3)
+vel=pt%vel; dn=pt%dn; dT=pt%dT; dvel=pt%dvel
+DO jc=1,SIZE(basis_vals)
+  DO jr=1,SIZE(basis_vals)
+    sl = DOT_PRODUCT(vad,basis_grads(:,jr))
+    adv_c = sl*DOT_PRODUCT(vel,basis_grads(:,jc))
+    jac_loc(1,1)%m(jr,jc) = jac_loc(1,1)%m(jr,jc) + w_n*adv_c
+    DO l=1,3
+      jac_loc(1,l+1)%m(jr,jc) = jac_loc(1,l+1)%m(jr,jc) + w_n*sl*basis_vals(jc)*dn(l)
+    END DO
+    DO k=1,3
+      jac_loc(k+1,k+1)%m(jr,jc) = jac_loc(k+1,k+1)%m(jr,jc) + w_v*adv_c
+      DO l=1,3
+        jac_loc(k+1,l+1)%m(jr,jc) = jac_loc(k+1,l+1)%m(jr,jc) + w_v*sl*basis_vals(jc)*dvel(k,l)
+      END DO
+    END DO
+    IF(.NOT.incomp)THEN
+      jac_loc(5,5)%m(jr,jc) = jac_loc(5,5)%m(jr,jc) + w_T*adv_c
+      DO l=1,3
+        jac_loc(5,l+1)%m(jr,jc) = jac_loc(5,l+1)%m(jr,jc) + w_T*sl*basis_vals(jc)*dT(l)
+      END DO
+    END IF
+  END DO
+END DO
+END SUBROUTINE jac_add_upwind
 !---------------------------------------------------------------------------
 !> Apply density scaling and boundary conditions to a local (cell) Jacobian
 !---------------------------------------------------------------------------

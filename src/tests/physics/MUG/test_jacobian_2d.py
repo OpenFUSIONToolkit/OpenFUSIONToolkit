@@ -45,6 +45,9 @@ oft_in_template = """
  b0={3}
  check_abort={4}
  check_plot={5}
+ upwind={6}
+ diff_set={7:.4E}
+ dt={8:.4E}
 /
 """
 
@@ -53,7 +56,10 @@ JAC_TOL = 1.E-6
 
 
 def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=None, check_plot=False,
-                      run_dir=None):
+                      run_dir=None, upwind=False, diff_set=-1.0):
+    # With upwinding a larger time step is used, so that the advection and upwinding terms are not
+    # dominated by the mass matrix and errors in their derivatives are detected
+    dt = 1.E-3 if upwind else 1.E-5
     # run_dir (relative to the test directory) is used to run without any restart files present
     work_dir = test_dir
     command = "./test_jacobian_2d"
@@ -65,7 +71,8 @@ def jacobian_2d_setup(order, cyl, incomp, b0, check_abort=False, expect_abort=No
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(order, 'T' if cyl else 'F', 'T' if incomp else 'F',
                                          ','.join('{0:.4E}'.format(val) for val in b0),
-                                         'T' if check_abort else 'F', 'T' if check_plot else 'F'))
+                                         'T' if check_abort else 'F', 'T' if check_plot else 'F',
+                                         'T' if upwind else 'F', diff_set, dt))
     try:
         return run_OFT(command, 1, 600, return_stdout=True, expect_abort=expect_abort)
     finally:
@@ -88,18 +95,34 @@ def validate_result(result):
 
 
 #============================================================================
+@pytest.mark.parametrize("upwind", (False, True))
 @pytest.mark.parametrize("order", (2, 3))
 @pytest.mark.parametrize("incomp", (False, True))
-def test_jacobian_planar(order, incomp):
+def test_jacobian_planar(order, incomp, upwind):
     '''Jacobian consistency in planar geometry, with a background field in all three directions.'''
-    assert validate_result(jacobian_2d_setup(order, False, incomp, (1.E-2, 2.E-2, 1.5E-2)))
+    assert validate_result(jacobian_2d_setup(order, False, incomp, (1.E-2, 2.E-2, 1.5E-2), upwind=upwind))
 
 
+@pytest.mark.parametrize("upwind", (False, True))
 @pytest.mark.parametrize("order", (2, 3))
 @pytest.mark.parametrize("incomp", (False, True))
-def test_jacobian_cyl(order, incomp):
+def test_jacobian_cyl(order, incomp, upwind):
     '''Jacobian consistency in cylindrical geometry, with a Z-directed background field.'''
-    assert validate_result(jacobian_2d_setup(order, True, incomp, (0.0, 0.0, 1.E-2)))
+    assert validate_result(jacobian_2d_setup(order, True, incomp, (0.0, 0.0, 1.E-2), upwind=upwind))
+
+
+@pytest.mark.parametrize("cyl", (False, True))
+def test_jacobian_upwind_lowdiff(cyl):
+    '''Jacobian consistency with upwinding and very small particle and thermal diffusivities (full upwinding).'''
+    b0 = (0.0, 0.0, 1.E-2) if cyl else (1.E-2, 2.E-2, 1.5E-2)
+    assert validate_result(jacobian_2d_setup(2, cyl, False, b0, upwind=True, diff_set=1.E-6))
+
+
+def test_upwind_zero_diff_abort():
+    '''Upwinding is rejected when the particle diffusivity (or thermal diffusivity) is zero.'''
+    status, _ = jacobian_2d_setup(2, False, False, (0.0, 0.0, 0.0), check_abort=True, upwind=True, diff_set=0.0,
+                                  expect_abort='Upwinding requires "D_diff>0"')
+    assert status
 
 
 def test_plot_without_restart():

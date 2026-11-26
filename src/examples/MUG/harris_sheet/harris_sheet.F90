@@ -131,9 +131,10 @@ REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
 LOGICAL :: linear=.FALSE.
+LOGICAL :: upwind=.FALSE. ! Use streamline upwinding for n, V and T
 NAMELIST/harris_sheet_options/order, chi, eta, nu, gamma, D_diff, &
 dt, nsteps, rst_freq, pre_freq, ittarget, use_mfnk, pm, linear, n0, psi0, velx0, vely0, velz0, &
-t0, by0, den_scale, delta, lam_n, lam_b, L_x, L_z
+t0, by0, den_scale, delta, lam_n, lam_b, L_x, L_z, upwind
 !!\subsection doc_mug2d_harris_ex_setup OFT Initialization
 !! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
@@ -308,6 +309,12 @@ DEALLOCATE(minv)
 !---------------------------------------------------------------------------
 ! Run simulation
 !---------------------------------------------------------------------------
+!!\subsection doc_mug2d_harris_ex_upwind Streamline Upwinding
+!! `upwind=T` enables streamline upwinding of n, V and T (see \ref doc_mug_xmhd_2d_eqns_upwind); it is off
+!! in the default input file. As the current sheet thins, a grid-scale (odd-even) oscillation of the
+!! density can grow along the sheet near the X-point. On an earlier, coarser configuration of this
+!! example (\f$ 64 \times 32 \f$ cells) it stopped the nonlinear solve during the fast reconnection phase,
+!! and upwinding kept it small, changing the reconnected flux before that phase by a few percent.
 mhd_sim%chi=chi
 mhd_sim%eta=eta
 mhd_sim%nu=nu
@@ -322,6 +329,7 @@ mhd_sim%pre_freq=pre_freq
 mhd_sim%ittarget=ittarget
 mhd_sim%mfnk=use_mfnk
 mhd_sim%linear=linear
+mhd_sim%upwind=upwind
 oft_env%pm=pm
 
 IF(linear)THEN

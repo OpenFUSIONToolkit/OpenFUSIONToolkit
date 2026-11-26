@@ -15,8 +15,8 @@ in \ref doc_mug_xmhd_2d_eqns_linear.
 
 The 2D implementation solves a reduced model compared to the
 \ref doc_mug_xmhd_eqns "3D implementation": single-fluid resistive MHD with a single temperature,
-isotropic thermal conduction, and no Hall, heating, upwinding, floor, or hyper-diffusion terms. It
-also supports an incompressible model. All fields use scalar Lagrange elements of the same order (the
+isotropic thermal conduction, optional streamline upwinding (\ref doc_mug_xmhd_2d_eqns_upwind), and no Hall, heating,
+floor, or hyper-diffusion terms. It also supports an incompressible model. All fields use scalar Lagrange elements of the same order (the
 incompressible pressure uses one order lower).
 
 Unlike the 3D implementation, the 2D model has no input-file namelist. Settings are components of the
@@ -278,6 +278,62 @@ Notes:
    for piecewise-constant values.
  - Both resistive terms are integrated by parts with the boundary term dropped.
 
+\section doc_mug_xmhd_2d_eqns_upwind Upwinding
+
+If `upwind=T`, streamline diffusion terms are added to the advection of \f$ n \f$, \f$ V \f$ (each component), and
+\f$ T \f$ (compressible model only), as in the 3D implementation (\ref doc_mug_xmhd_eqns_upwind). For an advected field
+\f$ f \f$ the weak form of its equation gains
+
+\f[ \int w_f \left( V_{ad} \cdot \nabla \phi \right) \left( V \cdot \nabla f \right) \f]
+
+(times \f$ R \f$ in cylindrical geometry, and divided by \f$ \gamma - 1 \f$ in the temperature equation, like its other
+terms), which corresponds to the term \f$ \nabla \cdot \left[ w_f V_{ad} \left( V \cdot \nabla f \right) \right] \f$ on the
+right-hand side of the equations above. This is an inconsistent streamline-upwind Petrov-Galerkin (SUPG) method: the modified
+test function \f$ \phi + w_f V_{ad} \cdot \nabla \phi \f$ is applied to the advection term \f$ V \cdot \nabla f \f$ only, not to
+the time derivative or the other terms, so the scheme adds diffusion along the streamlines. As in 3D:
+ - \f$ V_{ad} \f$ is the in-plane velocity at the start of the time step (\f$ V^n \f$, from the `u` component of the simulation
+   object), and is fixed during the step. The out-of-plane component \f$ V_y \f$ is excluded, since nothing varies in
+   \f$ y \f$. \f$ V \f$ is the velocity of the time level the term is evaluated at.
+ - The weight is the optimal value for 1D advection-diffusion (A. N. Brooks and T. J. R. Hughes, Comput. Methods Appl. Mech.
+   Eng. 32, 199 (1982)),
+
+\f[ w_f = \frac{\beta h_e}{2 |V_{ad}|}, \quad \beta = \coth(Pe) - \frac{1}{Pe}, \quad Pe = \frac{|V_{ad}| h_e}{2 \nu_f} \f]
+
+ - The element size \f$ h_e \f$ is the node spacing of a regular cell with the same (planar) area \f$ A_{cell} \f$:
+   \f$ h_e = \sqrt{4 A_{cell} / \sqrt{3}} / p \f$ for triangles and \f$ h_e = \sqrt{A_{cell}} / p \f$ for quadrilaterals,
+   where \f$ p \f$ is the Lagrange element order.
+
+| Equation | \f$ f \f$ | \f$ \nu_f \f$ |
+|----------|-----------|----------------|
+| Continuity | \f$ n \f$ | \f$ D \f$ |
+| Momentum | \f$ V_x \f$, \f$ V_y \f$, \f$ V_z \f$ | \f$ \nu \f$ |
+| Temperature | \f$ T \f$ | \f$ (\gamma - 1) \chi \f$ |
+
+Notes:
+ - Because \f$ V_{ad} \f$ and \f$ w_f \f$ are frozen, the terms are linear in \f$ V \f$ and \f$ f \f$ during a step, and the
+   Jacobian includes their exact derivatives.
+ - As in the 3D implementation, the diffusivities of the upwinded fields (\f$ \nu \f$, and \f$ D \f$ and \f$ \chi \f$ in the
+   compressible model) must be positive, and the run aborts otherwise. Very small values may be used: as \f$ \nu_f \to 0 \f$,
+   \f$ \beta \to 1 \f$ (full upwinding), giving a streamline diffusivity \f$ h_e |V_{ad}| / 2 \f$.
+ - The weight is applied whenever upwinding is on, and adapts to the local cell Peclet number: where \f$ Pe \ll 1 \f$
+   (slow flow or large diffusivity) \f$ \beta \approx Pe / 3 \f$ and the added streamline diffusivity, \f$ \approx |V_{ad}|^2 h_e^2 / (12 \nu_f) \f$,
+   is small compared with \f$ \nu_f \f$; where \f$ Pe \gg 1 \f$ it approaches \f$ h_e |V_{ad}| / 2 \f$.
+ - The magnetic fields (\f$ \psi \f$, \f$ B_y \f$) are not upwinded, as in 3D: streamline diffusion of the flux would act as
+   an artificial resistivity along the flow and break flux freezing. Their advection is stabilized only by \f$ \eta \f$.
+ - In cylindrical geometry the momentum term upwinds each component, \f$ V \cdot \nabla V_k \f$ (\f$ k = R, \phi, Z \f$). The
+   centrifugal and Coriolis terms are not included in it.
+ - In the incompressible model only \f$ n \f$ (normally not evolved) and \f$ V \f$ are upwinded.
+ - With `timestep_cn=T` the terms are time-centered like the rest of the residual (both time levels use \f$ V_{ad} = V^n \f$).
+ - The scheme adds first-order (in \f$ h_e \f$) diffusion along the streamlines where the cell Peclet number is large, which
+   suppresses the grid-scale oscillations of the Galerkin method where steep gradients are advected. It adds no diffusion across
+   the streamlines and it is not monotone, so it does not control oscillations where the flow stagnates or two streams collide
+   (eg. where plasma spreading along a wall meets itself), or ripples across a steep layer parallel to the flow. There, a small
+   explicit \f$ D \f$ and \f$ \chi \f$ is still needed. See \ref doc_mug2d_rt_ex_upwind for an example.
+ - Upwinding is always disabled in linear runs (\ref xmhd_2d::run_lin_simulation "run_lin_simulation", or `linear=T`), so linear
+   growth rates do not depend on it.
+ - `upwind` defaults to `F` (unlike `xmhd_upwind` in 3D) so that existing 2D results, including the MUG-TokaMaker coupling, are
+   unchanged.
+
 \section doc_mug_xmhd_2d_eqns_bc Boundary conditions
 
 Each field has a node flag array (`n_bc`, `velx_bc`, `vely_bc`, `velz_bc`, `T_bc`, `psi_bc`, `by_bc`). Flagged
@@ -339,7 +395,7 @@ the \f$ 1/n \f$ factors of the force terms. For an equilibrium in force balance 
 force, \f$ -g \, \delta n / n_0 \, \hat{z} \f$ (from \f$ +\delta n \, \nabla p_0 / (m_i n_0^2) \f$ with
 \f$ \nabla p_0 = -m_i n_0 g \hat{z} \f$). Gravity itself is constant and does not appear in \f$ L \f$. \f$ u_0 \f$ need not be an
 exact steady state: \f$ R(u_0) \f$ is not included, so a non-equilibrium \f$ u_0 \f$ only changes the operator about which the
-perturbation evolves.
+perturbation evolves. Streamline upwinding is not used in linear runs.
 
 In the history file (`xmhd_2d.hist`) of a linear run, both energies are those of the perturbation, so their growth
 rates are twice the growth rate of the perturbation:

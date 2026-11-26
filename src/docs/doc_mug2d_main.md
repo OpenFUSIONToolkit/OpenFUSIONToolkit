@@ -41,7 +41,7 @@ arrays with size `mesh%nreg` before calling `setup`, or assign them afterwards. 
 the placeholder value -1, which is not physical. Set every coefficient used by your model:
 `run_simulation` and `run_lin_simulation` abort if, in any region that is not ignored, `m_i` or `eta(:,2)` is not
 positive, `nu` or `eta(:,1)` is negative, or (compressible model only) `D_diff` or `chi` is negative or `gamma` is
-not greater than 1.
+not greater than 1. Nonlinear runs with `upwind=T` also require `nu`, and (compressible model) `D_diff` and `chi`, to be positive.
 
 | Member | Default | Description |
 |--------|---------|-------------|
@@ -59,6 +59,7 @@ not greater than 1.
 | `B_0(3)` | 0 | Background field [T] (only `B_0(3)` if `cyl_flag=T`). Equivalent to `psi_vac` and the initial \f$ B_y \f$ on a non-periodic domain, see \ref doc_mug_xmhd_2d_eqns_conv |
 | `den_scale` | \f$ 10^{19} \f$ | Density normalization |
 | `g_accel` | 0 | Gravitational acceleration along \f$ -z \f$ (the second mesh coordinate) [m/s\f$^2\f$] |
+| `upwind` | `F` | Streamline upwinding of \f$ n \f$, \f$ V \f$ and \f$ T \f$ (nonlinear runs only), see \ref doc_mug_xmhd_2d_eqns_upwind |
 | `nu(nreg)` | -1 | Kinematic viscosity \f$ \nu \f$ [m\f$^2\f$/s] |
 | `chi(nreg)` | -1 | Thermal diffusivity \f$ \chi \f$ [m\f$^2\f$/s] |
 | `D_diff(nreg)` | -1 | Particle diffusivity \f$ D \f$ [m\f$^2\f$/s] |

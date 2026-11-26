@@ -14,6 +14,11 @@
 !! run_simulation can be tested. If `check_plot=T` the plotting routine is called instead, which
 !! is used to test plotting when no restart files (and so no saved background fields) exist.
 !!
+!! With `upwind=T` the streamline upwinding terms are included. Their advecting velocity is taken from
+!! `mhd_sim%u` (the start-of-step solution), which is set to a second pseudo-random state, different
+!! from the state the Jacobian is evaluated at. If `diff_set>=0`, the particle and thermal diffusivities
+!! are set to it: a very small value gives (nearly) full upwinding, and zero tests the input check.
+!!
 !! @ingroup testing
 !------------------------------------------------------------------------------
 PROGRAM test_jacobian_2d
@@ -37,10 +42,12 @@ LOGICAL :: cyl = .FALSE.
 LOGICAL :: incomp = .FALSE.
 LOGICAL :: check_abort = .FALSE.
 LOGICAL :: check_plot = .FALSE.
+LOGICAL :: upwind = .FALSE.
+REAL(r8) :: diff_set = -1.d0
 REAL(r8) :: b0(3) = 0.d0
 REAL(r8) :: dt = 1.d-5
 REAL(r8) :: fd_eps = 1.d-6
-NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,check_plot,b0,dt,fd_eps
+NAMELIST/xmhd_jac_options/order,cyl,incomp,check_abort,check_plot,upwind,diff_set,b0,dt,fd_eps
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -64,6 +71,11 @@ mhd_sim%den_scale=1.d19
 mhd_sim%B_0=b0
 mhd_sim%g_accel=1.d8 ! Constant source: must not change the Jacobian
 mhd_sim%dt=dt
+mhd_sim%upwind=upwind
+IF(diff_set>=0.d0)THEN
+  mhd_sim%D_diff=diff_set
+  mhd_sim%chi=diff_set
+END IF
 !---------------------------------------------------------------------------
 ! Pseudo-random state (n, V, T or p, psi, B_y) and vacuum flux
 !---------------------------------------------------------------------------
@@ -97,6 +109,17 @@ DO i=1,SIZE(vals)
 END DO
 CALL mhd_sim%psi_vac%restore_local(vals)
 DEALLOCATE(vals)
+!---Start-of-step state (advecting velocity for upwinding)
+CALL mhd_sim%u%add(0.d0,1.d0,u)
+DO ic=2,4
+  NULLIFY(vals)
+  CALL mhd_sim%u%get_local(vals,ic)
+  DO i=1,SIZE(vals)
+    vals(i)=scale(ic)*(pseudo_rand(i,20+ic)-0.5d0)
+  END DO
+  CALL mhd_sim%u%restore_local(vals,ic)
+  DEALLOCATE(vals)
+END DO
 !---------------------------------------------------------------------------
 ! Optionally test input checks
 !---------------------------------------------------------------------------
