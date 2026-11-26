@@ -27,6 +27,17 @@
 !! grow across periodic seams.
 !!
 !! @ingroup testing
+! Direct package for the subdomain solves (the exactness checks and iteration tables
+! assume exact sub-solves; without any direct package the test is skipped)
+#if defined(HAVE_SUPERLU)
+#define SUB_LU_PACK 'super'
+#elif defined(HAVE_UMFPACK)
+#define SUB_LU_PACK 'umfpack'
+#elif defined(HAVE_MKL)
+#define SUB_LU_PACK 'mkl'
+#elif defined(HAVE_SUPERLU_DIST)
+#define SUB_LU_PACK 'superd'
+#endif
 !------------------------------------------------------------------------------
 PROGRAM test_cell_schwarz
 USE oft_base
@@ -38,7 +49,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_overlap_dofs, overlap_dofs_de
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_delete
 USE oft_native_solvers, ONLY: oft_schwarz_precond, oft_native_gmres_solver
-USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
+USE oft_lu, ONLY: oft_lusolver
 USE oft_solver_base, ONLY: oft_solver
 USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
@@ -61,6 +72,10 @@ IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
 END IF
+#if !defined(SUB_LU_PACK)
+WRITE(*,*)'SKIP TEST: no direct solver package for the subdomain solves'
+STOP
+#endif
 CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_cell_schwarz_options,IOSTAT=ierr)
@@ -218,13 +233,8 @@ LOGICAL, OPTIONAL, INTENT(in) :: weighted
 INTEGER(i4) :: nits
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_schwarz_precond), TARGET :: sw
-#ifdef HAVE_SUPERLU
 TYPE(oft_lusolver), TARGET :: sub
-sub%package='super'
-#else
-TYPE(oft_ilusolver), TARGET :: sub
-sub%package='native'
-#endif
+sub%package=SUB_LU_PACK
 CALL gmres_init(linv,sw,sub,nlocal,overlap,cell,adj,additive)
 IF(PRESENT(rtol))linv%rtol=rtol
 IF(PRESENT(weighted))sw%weighted=weighted
@@ -265,13 +275,8 @@ REAL(r8) :: rnorm
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_schwarz_precond), TARGET :: sw
 CHARACTER(LEN=16) :: tag
-#ifdef HAVE_SUPERLU
 TYPE(oft_lusolver), TARGET :: sub
-sub%package='super'
-#else
-TYPE(oft_ilusolver), TARGET :: sub
-sub%package='native'
-#endif
+sub%package=SUB_LU_PACK
 WRITE(tag,'(A,I1)')' nparts=',nparts
 CALL gmres_init(linv,sw,sub,nparts,1,.TRUE.,OFT_CELL_ADJ_POINT,.FALSE.)
 CALL v%set(0.d0)

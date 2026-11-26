@@ -28,6 +28,17 @@
 !! (constant null space), so only the subdomain matrices are checked.
 !!
 !! @ingroup testing
+! Direct package for the subdomain solves (the exactness checks and iteration tables
+! assume exact sub-solves; without any direct package the test is skipped)
+#if defined(HAVE_SUPERLU)
+#define SUB_LU_PACK 'super'
+#elif defined(HAVE_UMFPACK)
+#define SUB_LU_PACK 'umfpack'
+#elif defined(HAVE_MKL)
+#define SUB_LU_PACK 'mkl'
+#elif defined(HAVE_SUPERLU_DIST)
+#define SUB_LU_PACK 'superd'
+#endif
 !------------------------------------------------------------------------------
 PROGRAM test_native_schwarz
 USE oft_base
@@ -41,7 +52,7 @@ USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_submat
 USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_setup_dofs, &
   native_overlap_update, native_overlap_gather, native_overlap_index, native_overlap_delete
 USE oft_native_solvers, ONLY: oft_bjprecond, oft_schwarz_precond, oft_native_gmres_solver
-USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
+USE oft_lu, ONLY: oft_lusolver
 USE oft_solver_base, ONLY: oft_solver
 USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
@@ -63,6 +74,10 @@ IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
 END IF
+#if !defined(SUB_LU_PACK)
+WRITE(*,*)'SKIP TEST: no direct solver package for the subdomain solves'
+STOP
+#endif
 CALL oft_init
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
@@ -153,13 +168,8 @@ INTEGER(i4) :: nits
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_bjprecond), TARGET :: bj
 TYPE(oft_schwarz_precond), TARGET :: sw
-#ifdef HAVE_SUPERLU
 TYPE(oft_lusolver), TARGET :: sub
-sub%package='super'
-#else
-TYPE(oft_ilusolver), TARGET :: sub
-sub%package='native'
-#endif
+sub%package=SUB_LU_PACK
 linv%A=>lop
 linv%its=-3
 linv%nrits=20
@@ -190,13 +200,8 @@ END FUNCTION solve
 SUBROUTINE check_update()
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_schwarz_precond), TARGET :: sw
-#ifdef HAVE_SUPERLU
 TYPE(oft_lusolver), TARGET :: sub
-sub%package='super'
-#else
-TYPE(oft_ilusolver), TARGET :: sub
-sub%package='native'
-#endif
+sub%package=SUB_LU_PACK
 linv%A=>lop
 linv%its=-3
 linv%nrits=20
