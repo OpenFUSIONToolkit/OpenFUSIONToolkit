@@ -24,6 +24,7 @@
 !!   field groups, with one group per field and with groups 1,1,2 (written to
 !!   `cell_schwarz_fields.results` for checking by the driver)
 !! - Groups 1,1,1 out of 2 (group 2 empty) reproduce the blocks without field groups
+!! - Without `groups`, `nlocal<-1` uses the builder's default field groups (here 1,1,2)
 !! - Number of blocks is the number of builder blocks times the number of groups
 !! - Additive and weighted additive with one group per field converge
 !! - Numeric update after the operator values change matches a fresh setup, and delete
@@ -177,7 +178,7 @@ END SUBROUTINE set_rhs
 SUBROUTINE run_cases(nparts,res)
 INTEGER(i4), INTENT(in) :: nparts
 INTEGER(i4), INTENT(out) :: res(nres)
-INTEGER(i4) :: kfull,k,nb
+INTEGER(i4) :: kfull,k,kd,nb
 REAL(r8) :: rnorm,t0
 TYPE(oft_overlap_dofs) :: dofs
 CHARACTER(LEN=16) :: tag
@@ -185,6 +186,7 @@ WRITE(tag,'(A,I1)')' nparts=',nparts
 t0=omp_get_wtime()
 CALL fem_cell_overlap_create(cbld,mg_mesh,ML_vlag%current_level,nparts)
 aop%cell_ovl=>cbld
+cbld%field_groups=[1,1,2] ! Default field groups (used by nlocal<-1 without groups)
 nb=cbld%nblocks()
 !---Smallest number of point layers for every block to cover the whole mesh
 kfull=-1
@@ -227,6 +229,11 @@ k=solve(1,1,.TRUE.,.FALSE.,w,rnorm)
 res(14)=solve(-2,1,.TRUE.,.FALSE.,v,rnorm,groups=[1,1,1])
 CALL check_exact('Empty group: iterations'//tag,REAL(res(14),r8),REAL(k,r8))
 CALL check_tol('Empty group: solution'//tag,maxdiff(v,w)/maxabs(w),1.d-12)
+!---No groups given: the builder's default groups (1,1,2)
+k=solve(-2,1,.TRUE.,.FALSE.,w,rnorm,groups=[1,1,2])
+kd=solve(-2,1,.TRUE.,.FALSE.,v,rnorm)
+CALL check_exact('Default groups: iterations'//tag,REAL(kd,r8),REAL(k,r8))
+CALL check_tol('Default groups: solution'//tag,maxdiff(v,w)/maxabs(w),1.d-12)
 !---Additive combinations with one group per field
 res(19)=solve(-1,1,.TRUE.,.TRUE.,v,rnorm,weighted=.TRUE.)
 CALL check_conv('One group per field, weighted'//tag,rnorm,v)

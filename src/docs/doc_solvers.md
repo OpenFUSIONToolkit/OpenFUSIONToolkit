@@ -128,7 +128,11 @@ In the native backend subdomains are grown in one of two modes (`overlap_mode`):
   Field based blocks are supported in cell mode as in graph mode: with `nlocal=-1` each block of
   the builder is split into one block per field of the matrix, and with `nlocal=-n` (`n>1`) into
   `n` blocks by field group, field `i` going to group `groups(i)` (every field must be given a
-  group in `1..n`; a group with no fields gives empty blocks, which are skipped). The cells, and so
+  group in `1..n`; a group with no fields gives empty blocks, which are skipped). Without
+  `groups`, the default groups set on the cell overlap builder by the application are used, and
+  `n` must be their number: MUG defines three, B, V, and the density and temperatures (n, T, and
+  with their options Te and the hyper-diffusion field n2), with the hyper-resistivity current j2 in
+  the B group, so `<nlocal>-3</nlocal>` selects them. The cells, and so
   the cross-process subdomain, are computed once and shared by all groups: block `(b,g)` holds the
   DoFs of the cells of block `b` that belong to a field of group `g`, giving the builder's block
   count times `n` blocks. Each DoF keeps its assigned block for the restricted combination, and the

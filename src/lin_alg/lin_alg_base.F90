@@ -638,8 +638,12 @@ END TYPE oft_overlap_dofs
 !> Abstract builder of cell-grown overlapping DoF sets for a matrix (implemented in `fem`)
 !!
 !! A matrix refers to its builder through `oft_matrix::cell_ovl`, without owning it.
+!! The owner of the builder may also give default field groups for field based blocks
+!! (`field_groups`, used by the Schwarz preconditioner when `nlocal<-1` and no groups
+!! are given).
 !---------------------------------------------------------------------------------
 TYPE, ABSTRACT, PUBLIC :: oft_cell_overlap_builder
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: field_groups !< Default group of each matrix field (1..ngroups; unallocated if none)
 CONTAINS
   !> Build the overlapping DoF sets (collective)
   PROCEDURE(cell_ovl_build), DEFERRED :: build

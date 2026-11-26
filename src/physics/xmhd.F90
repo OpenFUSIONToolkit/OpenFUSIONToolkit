@@ -427,7 +427,7 @@ CONTAINS
 !! | `lin_tol=1E-9`     | Linear solver tolerance | real |
 !! | `nl_tol=1E-5`      | Non-Linear solver tolerance | real |
 !! | `nu_xmhd=1`        | Number of smoother iterations for MG preconditioner | int [nlevels] |
-!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring. When the native `add_schwarz` preconditioner uses `<overlap_mode>cell</overlap_mode>`, these parts are the cores of the overlapping blocks (one block per process when 1) | int [nlevels] |
+!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring. When the native `add_schwarz` preconditioner uses `<overlap_mode>cell</overlap_mode>`, these parts are the cores of the overlapping blocks (one block per process when 1), each split into B, V and n/T (with Te, n2) blocks with `<nlocal>-3</nlocal>` and no `groups` (j2 goes with B) | int [nlevels] |
 !! | `gmres_maxits=200` | Maximum number of GMRES iterations per linear solve | int |
 !! | `gmres_ninner=20`  | GMRES restart length (iterations between restarts) | int |
 !! | `nclean=500`       | Frequency of divergence cleaning | int |
@@ -2742,6 +2742,14 @@ do level=levelin,xmhd_minlev,-1
         CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j)
       END IF
       this%cell_ovl=>xmhd_cell_ovl(level)
+      !---Default field groups for field based Schwarz blocks (`nlocal=-3` without
+      !   `groups`): B (curl and gradient parts), V, then n, T and the other scalar fields (Te, n2); the
+      !   hyper-resistivity current (j2) goes with B
+      ALLOCATE(xmhd_cell_ovl(level)%field_groups(ML_xmhd_rep%nfields))
+      xmhd_cell_ovl(level)%field_groups=3
+      xmhd_cell_ovl(level)%field_groups(1:2)=1
+      xmhd_cell_ovl(level)%field_groups(3:5)=2
+      IF(j2_ind>0)xmhd_cell_ovl(level)%field_groups(j2_ind)=1
     CLASS IS(oft_matrix)
       IF(j>1)THEN
         ALLOCATE(this%color(this%nr))

@@ -267,6 +267,7 @@ CALL clear_cell_sets(self)
 IF(ALLOCATED(self%fields))DEALLOCATE(self%fields)
 IF(ALLOCATED(self%cpart))DEALLOCATE(self%cpart)
 IF(ALLOCATED(self%dcolor))DEALLOCATE(self%dcolor)
+IF(ALLOCATED(self%field_groups))DEALLOCATE(self%field_groups)
 NULLIFY(self%ml_mesh,self%mesh,self%fe,self%fe_comp)
 self%nparts=0
 self%nfields=0

@@ -2733,7 +2733,8 @@ END SUBROUTINE schwarz_apply
 !! "native_overlap_pu_setup").
 !!
 !! Field based blocks: with `nlocal=-1` (one group per field) or `nlocal<-1` (field
-!! `f` in group `slice_group(f)`, groups `1..-nlocal`) each block of the builder is
+!! `f` in group `slice_group(f)`, groups `1..-nlocal`; without groups, the builder's
+!! default `field_groups`, which must have `-nlocal` groups) each block of the builder is
 !! split by field group (@ref oft_la_base::overlap_dofs_split_fields
 !! "overlap_dofs_split_fields"), giving `nb*ngroups` blocks ordered by builder block,
 !! then group. The cells, and so the subdomain, are those of the builder blocks and
@@ -2747,6 +2748,7 @@ CLASS(oft_native_matrix), POINTER, INTENT(in) :: A_native !< Matrix (`self%A` as
 CLASS(oft_vector), INTENT(inout) :: u !< Vector of the matrix row space
 INTEGER(i4) :: i,j,nb,n,ngroups
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,basg,fgroup
+CHARACTER(LEN=80) :: stmp
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt,mult
 TYPE(oft_native_vector) :: uskip
 CLASS(oft_solver), POINTER :: pretmp
@@ -2770,9 +2772,21 @@ IF(self%nlocal==-1)THEN
   fgroup=[(i,i=1,self%A%ni)]
 ELSE IF(self%nlocal<-1)THEN
   ngroups=-self%nlocal
-  IF(self%A%ni>SIZE(self%slice_group))CALL oft_abort('Too many fields for field groups', &
-    'schwarz_cell_setup',__FILE__)
-  fgroup=self%slice_group(1:self%A%ni)
+  IF(ALL(self%slice_group==-1).AND.ALLOCATED(self%A%cell_ovl%field_groups))THEN
+    !---No groups given: default groups of the builder (set by its owner)
+    IF(SIZE(self%A%cell_ovl%field_groups)/=self%A%ni)CALL oft_abort('Default field groups '// &
+      'do not match the matrix fields','schwarz_cell_setup',__FILE__)
+    fgroup=self%A%cell_ovl%field_groups
+    IF(MAXVAL(fgroup)/=ngroups)THEN
+      WRITE(stmp,'(A,I0,A,I0,A)')'Default field groups have ',MAXVAL(fgroup),' groups: use nlocal=-', &
+        MAXVAL(fgroup),' or give "groups"'
+      CALL oft_abort(TRIM(stmp),'schwarz_cell_setup',__FILE__)
+    END IF
+  ELSE
+    IF(self%A%ni>SIZE(self%slice_group))CALL oft_abort('Too many fields for field groups', &
+      'schwarz_cell_setup',__FILE__)
+    fgroup=self%slice_group(1:self%A%ni)
+  END IF
   IF(ANY(fgroup<1).OR.ANY(fgroup>ngroups))CALL oft_abort('Field groups ("groups") must be '// &
     'given for every field and lie in 1..-nlocal','schwarz_cell_setup',__FILE__)
 ELSE
