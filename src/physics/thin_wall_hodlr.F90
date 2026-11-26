@@ -38,6 +38,22 @@ INTEGER(4), PARAMETER :: tw_hole_aca_rmin = 4 !< Minimum ACA rank for groups of 
 REAL(8), PARAMETER :: tw_hole_aca_sep = 1.d0 !< Separation ratio (distance/(sum of extents)) for ACA of hole columns
 REAL(8), PARAMETER :: tw_hole_aca_tol = 1.d-6 !< Relative ACA tolerance for hole columns
 !---------------------------------------------------------------------------------
+!> Reduced unknowns of one diagonal (leaf) block of a junction model, for the block preconditioners
+!!
+!! The rows of the junction map P for the expanded elements of the block, \f$ P_i \f$, with their columns (reduced
+!! unknowns) numbered locally: first the interior unknowns, whose columns of P only have entries in this block, then
+!! the interface unknowns, whose columns span several blocks (e.g. along a junction line).
+!---------------------------------------------------------------------------------
+type :: tw_hodlr_jblock
+  INTEGER(4) :: nint = 0 !< Number of interior reduced unknowns
+  INTEGER(4) :: nface = 0 !< Number of interface reduced unknowns
+  INTEGER(4), ALLOCATABLE, DIMENSION(:) :: cols !< Reduced unknown of each local column, interior first [nint+nface]
+  INTEGER(4), ALLOCATABLE, DIMENSION(:) :: fidx !< Index of each interface column in the interface list [nface]
+  INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kr !< Row pointer of \f$ P_i \f$ (rows: elements of the block) [n+1]
+  INTEGER(4), ALLOCATABLE, DIMENSION(:) :: lc !< Local column of each entry of \f$ P_i \f$
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: val !< Value of each entry of \f$ P_i \f$
+end type tw_hodlr_jblock
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 type oft_tw_level
@@ -65,6 +81,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
   INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires pre_coarse and ARPACK)
+  INTEGER(4) :: pre_smooth = 3 !< Number of smoothing steps applied to the coarse space of the two-level preconditioner
   INTEGER(4) :: pre_evecs_hash = 0 !< Hash of the resistance matrix used for `pre_evecs`
   REAL(r8), POINTER, DIMENSION(:,:) :: pre_evecs => NULL() !< Slowest L/R eigenmodes for the coarse space, kept between runs [nelems,:]
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
@@ -84,6 +101,11 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8), POINTER, DIMENSION(:,:,:) :: Icoil_Bmat => NULL() !< Dense coupling matrix to Icoils (B-field) [np,n_icoils,3]
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL() !< REMOVE
   TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy
+  INTEGER(4) :: jface_n = 0 !< Number of interface reduced unknowns (junction models, see @ref tw_hodlr_junction_blocks)
+  INTEGER(4) :: jblocks_nexp = 0 !< Expanded element count when `jblocks` was built
+  INTEGER(4) :: jblocks_nred = 0 !< Reduced element count when `jblocks` was built
+  INTEGER(4), POINTER, DIMENSION(:) :: jface => NULL() !< Reduced unknowns spanning several blocks (junction models) [jface_n]
+  TYPE(tw_hodlr_jblock), POINTER, DIMENSION(:) :: jblocks => NULL() !< Reduced unknowns of each diagonal block and the hole/V-coil block (junction models) [ndense+1]
   type(tw_type), pointer :: tw_obj => NULL()
 contains
   !> Setup HODLR by performing partitioning and tagging block-block interactions
@@ -105,6 +127,7 @@ end type oft_tw_hodlr_op
 TYPE :: cmat_container
   COMPLEX(c8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
   COMPLEX(c4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
+  COMPLEX(c8), POINTER, DIMENSION(:,:) :: W => NULL() !< Interior-interface coupling \f$ G_{II}^{-1} G_{IF} \f$ (junction models)
 END TYPE
 !------------------------------------------------------------------------------
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
@@ -117,6 +140,7 @@ TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_tw_hodlr_bjpre
   TYPE(oft_tw_hodlr_op), POINTER :: mf_obj => NULL()
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL()
   TYPE(cmat_container), POINTER, DIMENSION(:) :: inverse_mats => NULL()
+  COMPLEX(c8), POINTER, DIMENSION(:,:) :: sinv => NULL() !< Inverse of the interface Schur complement (junction models)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => bjprecond_apply
@@ -129,30 +153,28 @@ END TYPE oft_tw_hodlr_bjpre
 TYPE :: rmat_container
   REAL(r8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
   REAL(r4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: W => NULL() !< Interior-interface coupling \f$ G_{II}^{-1} G_{IF} \f$ (junction models)
 END TYPE
 !------------------------------------------------------------------------------
 !> Real block-Jacobi preconditioner for ThinCurr HODLR matrices
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
-  INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
-  INTEGER(4) :: nz = 0 !< Number of coarse vectors
-  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector, -k: global vector k in z_gvals)
-  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector (0 for block and global vectors)
-  REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
+  INTEGER(4) :: nz = 0 !< Number of coarse vectors (two-level preconditioner)
+  REAL(r8) :: coarse_alpha = 0.d0 !< `alpha` of the operator the coarse space was built for
+  REAL(r8) :: coarse_beta = 0.d0 !< `beta` of the operator the coarse space was built for
   REAL(r8), POINTER, DIMENSION(:,:) :: z_glob => NULL() !< Global vectors to add to the coarse space [nelems,:] (optional, not owned)
-  REAL(r8), POINTER, DIMENSION(:,:) :: z_gvals => NULL() !< Values of each global coarse vector [nelems_exp,:]
-  INTEGER(4) :: nzg = 0 !< Number of global coarse vectors (the last `nzg` of the `nz`, columns of `z_gvals`)
-  REAL(r8), POINTER, DIMENSION(:,:) :: zlz => NULL() !< Z^T L Z
-  REAL(r8), POINTER, DIMENSION(:,:) :: zrz => NULL() !< Z^T R Z
-  REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< (Z^T (alpha*L + beta*R) Z)^-1
+  REAL(r8), POINTER, DIMENSION(:,:) :: z => NULL() !< Coarse vectors, smoothed and orthonormal [nelems,nz]
+  REAL(r8), POINTER, DIMENSION(:,:) :: az => NULL() !< Products A Z of the coarse vectors [nelems,nz]
+  REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< \f$ (Z^T A Z)^{-1} \f$
   REAL(r8) :: alpha = 1.d0
   REAL(r8) :: beta = 1.d0
   REAL(r8) :: times = 0.d0
   TYPE(oft_tw_hodlr_op), POINTER :: mf_obj => NULL()
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL()
   TYPE(rmat_container), POINTER, DIMENSION(:) :: inverse_mats => NULL()
+  REAL(r8), POINTER, DIMENSION(:,:) :: sinv => NULL() !< Inverse of the interface Schur complement (junction models)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => rbjprecond_apply
@@ -673,8 +695,9 @@ REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
 INTEGER(4) :: pre_neigs = 0
+INTEGER(4) :: pre_smooth = 3
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs,pre_smooth
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -707,6 +730,8 @@ self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
 self%pre_coarse=pre_coarse
 self%pre_neigs=pre_neigs
+IF(pre_smooth<0)CALL oft_abort('"pre_smooth" must be >= 0',"tw_hodlr_setup",__FILE__)
+self%pre_smooth=pre_smooth
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -1790,6 +1815,123 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine tw_hodlr_Lapply
 !---------------------------------------------------------------------------------
+!> Apply the HODLR inductance matrix to several vectors at once, B = L A
+!!
+!! Equivalent to @ref tw_hodlr_Lapply on each column, but the block products are matrix-matrix products, which are
+!! several times faster per vector than repeated matrix-vector products (used to build the coarse space of the
+!! two-level preconditioner). The columns are processed in chunks of at most `chunk` vectors to bound the work
+!! arrays. Vectors are on the model unknowns (reduced for junction models).
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_Lapply_multi(self,m,a,b)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
+INTEGER(4), INTENT(in) :: m !< Number of vectors
+REAL(8), CONTIGUOUS, INTENT(in) :: a(:,:) !< Input vectors [nelems,m]
+REAL(8), CONTIGUOUS, INTENT(out) :: b(:,:) !< Output vectors [nelems,m]
+INTEGER(4), PARAMETER :: chunk = 64
+INTEGER(4) :: i,j,k,c0,mc,ne,np,nh,ni,nj,iblock,jblock,level
+REAL(8), ALLOCATABLE :: av(:,:),bv(:,:),row_tmp(:,:),col_tmp(:,:),int_tmp1(:,:),int_tmp2(:,:)
+LOGICAL :: junc
+junc=ASSOCIATED(self%tw_obj%junc)
+ne=tw_nelems_exp(self%tw_obj)
+np=self%tw_obj%np_active
+nh=self%tw_obj%nholes+self%tw_obj%n_vcoils
+ALLOCATE(av(ne,MIN(m,chunk)),bv(ne,MIN(m,chunk)))
+DO c0=1,m,chunk
+  mc=MIN(chunk,m-c0+1)
+  IF(junc)THEN
+    DO i=1,mc
+      CALL tw_junction_expand(self%tw_obj,a(:,c0+i-1),av(:,i))
+    END DO
+  ELSE
+    av(:,1:mc)=a(:,c0:c0+mc-1)
+  END IF
+  bv(:,1:mc)=0.d0
+  !$omp parallel private(i,j,k,ni,nj,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+  ALLOCATE(col_tmp(np,mc),row_tmp(np,mc),int_tmp1(np,mc),int_tmp2(np,mc))
+  int_tmp2=0.d0
+  DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
+    level=self%sparse_blocks(1,j)
+    iblock=self%sparse_blocks(2,j)
+    jblock=self%sparse_blocks(3,j)
+    ni=self%levels(level)%blocks(iblock)%nelems
+    nj=self%levels(level)%blocks(jblock)%nelems
+    CALL gather(self%levels(level)%blocks(iblock)%ielem,ni,col_tmp)
+    IF(ASSOCIATED(self%aca_dense(j)%M))THEN
+      CALL dgemm('N','N',nj,mc,ni,1.d0,self%aca_dense(j)%M,nj,col_tmp,np,0.d0,row_tmp,np)
+    ELSE
+      k=SIZE(self%aca_V_mats(j)%M,DIM=1)
+      CALL dgemm('N','N',k,mc,ni,1.d0,self%aca_V_mats(j)%M,k,col_tmp,np,0.d0,int_tmp1,np)
+      CALL dgemm('N','N',nj,mc,k,1.d0,self%aca_U_mats(j)%M,nj,int_tmp1,np,0.d0,row_tmp,np)
+    END IF
+    CALL scatter(self%levels(level)%blocks(jblock)%ielem,nj,row_tmp,int_tmp2)
+    !---Other side of the diagonal
+    CALL gather(self%levels(level)%blocks(jblock)%ielem,nj,col_tmp)
+    IF(ASSOCIATED(self%aca_dense(j)%M))THEN
+      CALL dgemm('T','N',ni,mc,nj,1.d0,self%aca_dense(j)%M,nj,col_tmp,np,0.d0,row_tmp,np)
+    ELSE
+      k=SIZE(self%aca_V_mats(j)%M,DIM=1)
+      CALL dgemm('T','N',k,mc,nj,1.d0,self%aca_U_mats(j)%M,nj,col_tmp,np,0.d0,int_tmp1,np)
+      CALL dgemm('T','N',ni,mc,k,1.d0,self%aca_V_mats(j)%M,k,int_tmp1,np,0.d0,row_tmp,np)
+    END IF
+    CALL scatter(self%levels(level)%blocks(iblock)%ielem,ni,row_tmp,int_tmp2)
+  END DO
+  DO j=self%L_thread_ptr(2,oft_tid+1),self%L_thread_ptr(2,oft_tid+2)-1
+    level=self%dense_blocks(1,j)
+    iblock=self%dense_blocks(2,j)
+    jblock=self%dense_blocks(3,j)
+    ni=self%levels(level)%blocks(iblock)%nelems
+    nj=self%levels(level)%blocks(jblock)%nelems
+    CALL gather(self%levels(level)%blocks(iblock)%ielem,ni,col_tmp)
+    CALL dgemm('N','N',nj,mc,ni,1.d0,self%dense_mats(j)%M,nj,col_tmp,np,0.d0,row_tmp,np)
+    CALL scatter(self%levels(level)%blocks(jblock)%ielem,nj,row_tmp,int_tmp2)
+  END DO
+  !$omp critical
+  bv(1:np,1:mc)=bv(1:np,1:mc)+int_tmp2
+  !$omp end critical
+  DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
+  !$omp end parallel
+  IF(nh>0)THEN
+    CALL dgemm('N','N',ne,mc,nh,1.d0,self%hole_Vcoil_mat%M,ne,av(np+1,1),ne,1.d0,bv,ne)
+    av(np+1:ne,1:mc)=0.d0 ! Prevent double diagonal contributions
+    CALL dgemm('T','N',nh,mc,ne,1.d0,self%hole_Vcoil_mat%M,ne,av,ne,1.d0,bv(np+1,1),ne)
+  END IF
+  IF(junc)THEN
+    DO i=1,mc
+      CALL tw_junction_reduce_vec(self%tw_obj,bv(:,i),b(:,c0+i-1))
+    END DO
+  ELSE
+    b(:,c0:c0+mc-1)=bv(:,1:mc)
+  END IF
+END DO
+DEALLOCATE(av,bv)
+CONTAINS
+!> Gather the rows of a block from the input chunk
+SUBROUTINE gather(ielem,n,col)
+INTEGER(4), INTENT(in) :: ielem(:) !< Elements of the block
+INTEGER(4), INTENT(in) :: n !< Number of elements
+REAL(8), INTENT(inout) :: col(:,:) !< Gathered rows [np,mc] (thread private, so passed explicitly)
+INTEGER(4) :: ii,kk
+DO kk=1,mc
+  DO ii=1,n
+    col(ii,kk)=av(ielem(ii),kk)
+  END DO
+END DO
+END SUBROUTINE gather
+!> Add the rows of a block product to this thread's result
+SUBROUTINE scatter(ielem,n,row,acc)
+INTEGER(4), INTENT(in) :: ielem(:) !< Elements of the block
+INTEGER(4), INTENT(in) :: n !< Number of elements
+REAL(8), INTENT(in) :: row(:,:) !< Block product [np,mc]
+REAL(8), INTENT(inout) :: acc(:,:) !< This thread's result [np,mc]
+INTEGER(4) :: ii,kk
+DO kk=1,mc
+  DO ii=1,n
+    acc(ielem(ii),kk)=acc(ielem(ii),kk)+row(ii,kk)
+  END DO
+END DO
+END SUBROUTINE scatter
+END SUBROUTINE tw_hodlr_Lapply_multi
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 subroutine tw_hodlr_Bapply(self,a,bx,by,bz)
@@ -2708,26 +2850,234 @@ size_out=INT(i,8)*INT(M+N,8)
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
 END SUBROUTINE tw_lowrank_recompress
 !------------------------------------------------------------------------------
+!> Map the reduced unknowns of a junction model onto the diagonal blocks of the block preconditioners
+!!
+!! For each diagonal (leaf) block, and the hole/V-coil block (index `ndense+1`), stores the rows of the junction map P
+!! for its expanded elements with locally numbered columns (@ref tw_hodlr_jblock). A reduced unknown whose column of P
+!! has entries in more than one block is an interface unknown; these are listed in `jface`. The map is rebuilt if the
+!! element counts of the model change (e.g. V-coils added). Does nothing for models without junctions.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_junction_blocks(self)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
+INTEGER(4) :: i,j,k,c,e,n,nb,nexp,nred,ni,nf,nnz
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: nblk,mark,loc,fpos
+INTEGER(4), POINTER, DIMENSION(:) :: inds
+TYPE(tw_type), POINTER :: tw
+tw=>self%tw_obj
+IF(.NOT.ASSOCIATED(tw%junc))RETURN
+nexp=tw_nelems_exp(tw)
+nred=tw%nelems
+IF(ASSOCIATED(self%jblocks))THEN
+  IF((self%jblocks_nexp==nexp).AND.(self%jblocks_nred==nred))RETURN
+  DEALLOCATE(self%jblocks,self%jface)
+END IF
+nb=self%ndense+1
+ALLOCATE(self%jblocks(nb),nblk(nred),mark(nred),loc(nred),fpos(nred))
+!---Number of blocks each reduced unknown touches
+nblk=0
+mark=0
+DO i=1,nb
+  CALL block_elems(i,n,inds)
+  DO j=1,n
+    e=inds(j)
+    DO k=tw%junc%p_kr(e),tw%junc%p_kr(e+1)-1
+      IF(tw%junc%p_val(k)==0.d0)CYCLE
+      c=tw%junc%p_lc(k)
+      IF(mark(c)/=i)THEN
+        mark(c)=i
+        nblk(c)=nblk(c)+1
+      END IF
+    END DO
+  END DO
+  IF(i==nb)DEALLOCATE(inds)
+END DO
+IF(ANY(nblk==0))CALL oft_abort("Reduced unknown not covered by any block","tw_hodlr_junction_blocks",__FILE__)
+!---Interface unknowns
+self%jface_n=COUNT(nblk>1)
+ALLOCATE(self%jface(self%jface_n))
+fpos=0
+k=0
+DO c=1,nred
+  IF(nblk(c)>1)THEN
+    k=k+1
+    self%jface(k)=c
+    fpos(c)=k
+  END IF
+END DO
+!---Local columns and rows of P for each block
+mark=0
+DO i=1,nb
+  CALL block_elems(i,n,inds)
+  ni=0; nf=0; nnz=0
+  DO j=1,n
+    e=inds(j)
+    DO k=tw%junc%p_kr(e),tw%junc%p_kr(e+1)-1
+      IF(tw%junc%p_val(k)==0.d0)CYCLE
+      nnz=nnz+1
+      c=tw%junc%p_lc(k)
+      IF(mark(c)/=i)THEN
+        mark(c)=i
+        IF(nblk(c)>1)THEN
+          nf=nf+1
+        ELSE
+          ni=ni+1
+        END IF
+      END IF
+    END DO
+  END DO
+  self%jblocks(i)%nint=ni
+  self%jblocks(i)%nface=nf
+  ALLOCATE(self%jblocks(i)%cols(ni+nf),self%jblocks(i)%fidx(nf))
+  ALLOCATE(self%jblocks(i)%kr(n+1),self%jblocks(i)%lc(nnz),self%jblocks(i)%val(nnz))
+  ni=0; nf=0; nnz=0
+  self%jblocks(i)%kr(1)=1
+  DO j=1,n
+    e=inds(j)
+    DO k=tw%junc%p_kr(e),tw%junc%p_kr(e+1)-1
+      IF(tw%junc%p_val(k)==0.d0)CYCLE
+      c=tw%junc%p_lc(k)
+      IF(mark(c)/=-i)THEN
+        mark(c)=-i
+        IF(nblk(c)>1)THEN
+          nf=nf+1
+          loc(c)=self%jblocks(i)%nint+nf
+          self%jblocks(i)%fidx(nf)=fpos(c)
+        ELSE
+          ni=ni+1
+          loc(c)=ni
+        END IF
+        self%jblocks(i)%cols(loc(c))=c
+      END IF
+      nnz=nnz+1
+      self%jblocks(i)%lc(nnz)=loc(c)
+      self%jblocks(i)%val(nnz)=tw%junc%p_val(k)
+    END DO
+    self%jblocks(i)%kr(j+1)=nnz+1
+  END DO
+  IF(i==nb)DEALLOCATE(inds)
+END DO
+DEALLOCATE(nblk,mark,loc,fpos)
+self%jblocks_nexp=nexp
+self%jblocks_nred=nred
+WRITE(*,'(2A,I8,A)')oft_indent,'Junction block preconditioner: ',self%jface_n,' interface unknowns'
+CONTAINS
+!> Expanded elements of block i (the hole/V-coil block is allocated here and must be freed by the caller)
+SUBROUTINE block_elems(ib,nel,ielem)
+INTEGER(4), INTENT(in) :: ib !< Block index
+INTEGER(4), INTENT(out) :: nel !< Number of elements
+INTEGER(4), POINTER, INTENT(out) :: ielem(:) !< Elements of the block
+INTEGER(4) :: jj
+IF(ib<=self%ndense)THEN
+  nel=self%levels(self%dense_blocks(1,ib))%blocks(self%dense_blocks(2,ib))%nelems
+  ielem=>self%levels(self%dense_blocks(1,ib))%blocks(self%dense_blocks(2,ib))%ielem
+ELSE
+  nel=tw%nholes+tw%n_vcoils
+  ALLOCATE(ielem(nel))
+  ielem=[(tw%np_active+jj,jj=1,nel)]
+END IF
+END SUBROUTINE block_elems
+END SUBROUTINE tw_hodlr_junction_blocks
+!------------------------------------------------------------------------------
+!> Galerkin projection \f$ G = P_i^T B P_i \f$ of a real expanded block onto its reduced unknowns
+!------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_jblock_galerkin_r(jb,n,B,G)
+TYPE(tw_hodlr_jblock), INTENT(in) :: jb !< Reduced unknowns of the block
+INTEGER(4), INTENT(in) :: n !< Number of expanded elements in the block
+REAL(r8), INTENT(in) :: B(n,n) !< Expanded block
+REAL(r8), INTENT(out) :: G(jb%nint+jb%nface,jb%nint+jb%nface) !< Projected block
+INTEGER(4) :: i,j,k,l,m
+REAL(r8), ALLOCATABLE :: T(:,:)
+m=jb%nint+jb%nface
+ALLOCATE(T(n,m))
+T=0.d0
+DO j=1,n
+  DO k=jb%kr(j),jb%kr(j+1)-1
+    l=jb%lc(k)
+    DO i=1,n
+      T(i,l)=T(i,l)+jb%val(k)*B(i,j)
+    END DO
+  END DO
+END DO
+G=0.d0
+DO l=1,m
+  DO j=1,n
+    DO k=jb%kr(j),jb%kr(j+1)-1
+      G(jb%lc(k),l)=G(jb%lc(k),l)+jb%val(k)*T(j,l)
+    END DO
+  END DO
+END DO
+DEALLOCATE(T)
+END SUBROUTINE tw_hodlr_jblock_galerkin_r
+!------------------------------------------------------------------------------
+!> Galerkin projection \f$ G = P_i^T B P_i \f$ of a complex expanded block onto its reduced unknowns
+!------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_jblock_galerkin_c(jb,n,B,G)
+TYPE(tw_hodlr_jblock), INTENT(in) :: jb !< Reduced unknowns of the block
+INTEGER(4), INTENT(in) :: n !< Number of expanded elements in the block
+COMPLEX(c8), INTENT(in) :: B(n,n) !< Expanded block
+COMPLEX(c8), INTENT(out) :: G(jb%nint+jb%nface,jb%nint+jb%nface) !< Projected block
+INTEGER(4) :: i,j,k,l,m
+COMPLEX(c8), ALLOCATABLE :: T(:,:)
+m=jb%nint+jb%nface
+ALLOCATE(T(n,m))
+T=(0.d0,0.d0)
+DO j=1,n
+  DO k=jb%kr(j),jb%kr(j+1)-1
+    l=jb%lc(k)
+    DO i=1,n
+      T(i,l)=T(i,l)+jb%val(k)*B(i,j)
+    END DO
+  END DO
+END DO
+G=(0.d0,0.d0)
+DO l=1,m
+  DO j=1,n
+    DO k=jb%kr(j),jb%kr(j+1)-1
+      G(jb%lc(k),l)=G(jb%lc(k),l)+jb%val(k)*T(j,l)
+    END DO
+  END DO
+END DO
+DEALLOCATE(T)
+END SUBROUTINE tw_hodlr_jblock_galerkin_c
+!------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (complex)
 !!
 !! Each diagonal block is inverted explicitly using its LU factorization. If `pre_single`
 !! is set on the HODLR operator each block is rounded to single precision before
 !! factorization, and the inverse is computed, stored, and applied in single precision.
+!!
+!! For meshes split at junctions the preconditioner is the exact inverse of the Galerkin projection of the blocks,
+!! \f$ (P^T B P)^{-1} \f$, applied through a Schur complement on the interface unknowns, as described for
+!! @ref rbjprecond_apply (the transposes are not conjugated, as the operator is complex symmetric).
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
+INTEGER(4) :: i,j,k,l,n,level,iblock,max_size,info,nb,nface
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
 COMPLEX(8), POINTER, CONTIGUOUS, DIMENSION(:) :: utmp,gtmp
 COMPLEX(8), POINTER, DIMENSION(:) :: ue,ge
+COMPLEX(8), ALLOCATABLE, DIMENSION(:) :: gface,gface_loc,zface
 COMPLEX(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 COMPLEX(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
+LOGICAL :: junc
 DEBUG_STACK_PUSH
-IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
+nb=self%mf_obj%ndense+1
+junc=ASSOCIATED(self%mf_obj%tw_obj%junc)
+nface=0
+IF(junc)THEN
+  CALL tw_hodlr_junction_blocks(self%mf_obj)
+  nface=self%mf_obj%jface_n
+END IF
+IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(nb))
 IF(self%refactor)THEN
+  IF(junc)THEN
+    IF(ASSOCIATED(self%sinv))DEALLOCATE(self%sinv)
+    ALLOCATE(self%sinv(nface,nface))
+    self%sinv=(0.d0,0.d0)
+  END IF
   max_size = 0
   !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
@@ -2737,7 +3087,7 @@ IF(self%refactor)THEN
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
     max_size = MAX(max_size,n)
-    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
+    CALL alloc_block(self%inverse_mats(i),n)
     ! Explicit loop avoids array temporaries on (small) OpenMP thread stacks
     !$omp simd collapse(2)
     DO k=1,n
@@ -2758,7 +3108,11 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL invert_block(self%inverse_mats(i),n)
+    IF(junc)THEN
+      CALL junction_block(i,n,max_size)
+    ELSE
+      CALL invert_block(self%inverse_mats(i),n)
+    END IF
   END DO
   !$omp end do
   DEALLOCATE(imap)
@@ -2770,7 +3124,7 @@ IF(self%refactor)THEN
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
-    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
+    CALL alloc_block(self%inverse_mats(i),n)
     imap=0
     DO j=1,n
       DO k=1,n
@@ -2788,9 +3142,18 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL invert_block(self%inverse_mats(i),n)
+    IF(junc)THEN
+      CALL junction_block(i,n,self%max_block_size)
+    ELSE
+      CALL invert_block(self%inverse_mats(i),n)
+    END IF
   END IF
   DEALLOCATE(imap)
+  !---Interface Schur complement (junction models)
+  IF(nface>0)THEN
+    CALL lapack_matinv(nface,self%sinv,info)
+    IF(info/=0)CALL oft_abort("Junction interface inversion failed","bjprecond_apply",__FILE__)
+  END IF
   self%refactor=.FALSE.
 END IF
 !
@@ -2798,44 +3161,72 @@ NULLIFY(utmp,gtmp)
 CALL u%borrow_local(utmp,OFT_ACCESS_WRITE)
 CALL g%borrow_local(gtmp,OFT_ACCESS_READ)
 utmp=(0.d0,0.d0)
-IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
-  ALLOCATE(ue(tw_nelems_exp(self%mf_obj%tw_obj)),ge(tw_nelems_exp(self%mf_obj%tw_obj)))
-  CALL tw_junction_expand_c(self%mf_obj%tw_obj,gtmp,ge)
-  ue=(0.d0,0.d0)
-ELSE
-  ue=>utmp
-  ge=>gtmp
+!---Block solves act on the model vectors directly (the reduced vectors for junction models)
+ue=>utmp
+ge=>gtmp
+IF(nface>0)THEN
+  ALLOCATE(gface(nface))
+  DO j=1,nface
+    gface(j)=gtmp(self%mf_obj%jface(j))
+  END DO
 END IF
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 ALLOCATE(hole_inds(n))
 DO j=1,n
   hole_inds(j)=self%mf_obj%tw_obj%np_active+j
 END DO
-!$omp parallel private(vloc,vloc4,i,level,iblock,n)
+!$omp parallel private(vloc,vloc4,i,level,iblock,n,gface_loc)
 IF(self%mf_obj%pre_single)THEN
   ALLOCATE(vloc4(self%max_block_size,2))
 ELSE
   ALLOCATE(vloc(self%max_block_size,2))
 END IF
+IF(nface>0)THEN
+  ALLOCATE(gface_loc(nface))
+  gface_loc=(0.d0,0.d0)
+END IF
 DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
-  level=self%mf_obj%dense_blocks(1,i)
-  iblock=self%mf_obj%dense_blocks(2,i)
-  n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-  CALL apply_block(self%inverse_mats(i),n,self%mf_obj%levels(level)%blocks(iblock)%ielem,vloc,vloc4)
+  IF(junc)THEN
+    CALL apply_jblock(i,vloc,vloc4,gface_loc)
+  ELSE
+    level=self%mf_obj%dense_blocks(1,i)
+    iblock=self%mf_obj%dense_blocks(2,i)
+    n = self%mf_obj%levels(level)%blocks(iblock)%nelems
+    CALL apply_block(self%inverse_mats(i),n,self%mf_obj%levels(level)%blocks(iblock)%ielem,vloc,vloc4)
+  END IF
 END DO
 !$omp single
-n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-IF(n>0)CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
+IF(junc)THEN
+  CALL apply_jblock(nb,vloc,vloc4,gface_loc)
+ELSE
+  n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+  IF(n>0)CALL apply_block(self%inverse_mats(nb),n,hole_inds,vloc,vloc4)
+END IF
 !$omp end single
+IF(nface>0)THEN
+  !$omp critical (bjprecond_face)
+  gface=gface+gface_loc
+  !$omp end critical (bjprecond_face)
+  DEALLOCATE(gface_loc)
+END IF
 IF(self%mf_obj%pre_single)THEN
   DEALLOCATE(vloc4)
 ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
-IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
-  CALL tw_junction_reduce_vec_c(self%mf_obj%tw_obj,ue,utmp)
-  DEALLOCATE(ue,ge)
+!---Interface unknowns, then their contribution to the interior unknowns of each block (junction models)
+IF(nface>0)THEN
+  ALLOCATE(zface(nface))
+  CALL zgemv('N',nface,nface,(1.d0,0.d0),self%sinv,nface,gface,1,(0.d0,0.d0),zface,1)
+  DO j=1,nface
+    utmp(self%mf_obj%jface(j))=zface(j)
+  END DO
+  !$omp parallel do schedule(dynamic,1)
+  DO i=1,nb
+    CALL correct_jblock(i,zface)
+  END DO
+  DEALLOCATE(gface,zface)
 END IF
 CALL u%release_local(utmp,OFT_ACCESS_WRITE,sync=.TRUE.)
 CALL g%release_local(gtmp,OFT_ACCESS_READ,sync=.FALSE.)
@@ -2843,6 +3234,117 @@ CALL g%set((0.d0,0.d0))
 DEALLOCATE(hole_inds)
 DEBUG_STACK_POP
 CONTAINS
+!------------------------------------------------------------------------------
+!> Allocate storage for an assembled (expanded) block, replacing storage of a different size
+!------------------------------------------------------------------------------
+SUBROUTINE alloc_block(mat,nrows)
+TYPE(cmat_container), INTENT(inout) :: mat !< Block storage
+INTEGER(4), INTENT(in) :: nrows !< Size of block
+IF(ASSOCIATED(mat%M))THEN
+  IF(SIZE(mat%M,1)/=nrows)DEALLOCATE(mat%M)
+END IF
+IF(.NOT.ASSOCIATED(mat%M))ALLOCATE(mat%M(nrows,nrows))
+END SUBROUTINE alloc_block
+!------------------------------------------------------------------------------
+!> Project an assembled block onto its reduced unknowns, invert the interior part and add the block's contribution
+!! to the interface Schur complement (junction models)
+!------------------------------------------------------------------------------
+SUBROUTINE junction_block(ib,nrows,msize)
+INTEGER(4), INTENT(in) :: ib !< Block index
+INTEGER(4), INTENT(in) :: nrows !< Size of the assembled (expanded) block
+INTEGER(4), INTENT(inout) :: msize !< Maximum work array size
+INTEGER(4) :: ni,nf,m,error,jj,kk
+COMPLEX(8), ALLOCATABLE :: gmat(:,:),sloc(:,:)
+ni=self%mf_obj%jblocks(ib)%nint
+nf=self%mf_obj%jblocks(ib)%nface
+m=ni+nf
+msize=MAX(msize,m)
+ALLOCATE(gmat(m,m))
+CALL tw_hodlr_jblock_galerkin_c(self%mf_obj%jblocks(ib),nrows,self%inverse_mats(ib)%M,gmat)
+DEALLOCATE(self%inverse_mats(ib)%M)
+IF(ni>0)THEN
+  ALLOCATE(self%inverse_mats(ib)%M(ni,ni))
+  DO kk=1,ni
+    DO jj=1,ni
+      self%inverse_mats(ib)%M(jj,kk)=gmat(jj,kk)
+    END DO
+  END DO
+  CALL lapack_matinv(ni,self%inverse_mats(ib)%M,error)
+  IF(error/=0)CALL oft_abort("Block inversion failed","bjprecond_apply",__FILE__)
+END IF
+IF(nf>0)THEN
+  IF(ASSOCIATED(self%inverse_mats(ib)%W))DEALLOCATE(self%inverse_mats(ib)%W)
+  ALLOCATE(self%inverse_mats(ib)%W(ni,nf),sloc(nf,nf))
+  DO kk=1,nf
+    DO jj=1,nf
+      sloc(jj,kk)=gmat(ni+jj,ni+kk)
+    END DO
+  END DO
+  IF(ni>0)THEN
+    CALL zgemm('N','N',ni,nf,ni,(1.d0,0.d0),self%inverse_mats(ib)%M,ni,gmat(1,ni+1),m,(0.d0,0.d0), &
+      self%inverse_mats(ib)%W,ni)
+    CALL zgemm('T','N',nf,nf,ni,(-1.d0,0.d0),gmat(1,ni+1),m,self%inverse_mats(ib)%W,ni,(1.d0,0.d0),sloc,nf)
+  END IF
+  !$omp critical (bjprecond_schur)
+  DO kk=1,nf
+    DO jj=1,nf
+      self%sinv(self%mf_obj%jblocks(ib)%fidx(jj),self%mf_obj%jblocks(ib)%fidx(kk)) = &
+        self%sinv(self%mf_obj%jblocks(ib)%fidx(jj),self%mf_obj%jblocks(ib)%fidx(kk)) + sloc(jj,kk)
+    END DO
+  END DO
+  !$omp end critical (bjprecond_schur)
+  DEALLOCATE(sloc)
+END IF
+DEALLOCATE(gmat)
+!---Round the interior inverse to single precision if requested
+IF(self%mf_obj%pre_single.AND.(ni>0))THEN
+  IF(ASSOCIATED(self%inverse_mats(ib)%M4))THEN
+    IF(SIZE(self%inverse_mats(ib)%M4,1)/=ni)DEALLOCATE(self%inverse_mats(ib)%M4)
+  END IF
+  IF(.NOT.ASSOCIATED(self%inverse_mats(ib)%M4))ALLOCATE(self%inverse_mats(ib)%M4(ni,ni))
+  DO kk=1,ni
+    DO jj=1,ni
+      self%inverse_mats(ib)%M4(jj,kk)=CMPLX(self%inverse_mats(ib)%M(jj,kk),KIND=c4)
+    END DO
+  END DO
+  DEALLOCATE(self%inverse_mats(ib)%M)
+END IF
+END SUBROUTINE junction_block
+!------------------------------------------------------------------------------
+!> Apply the interior inverse of a block and subtract its coupling from the interface residual (junction models)
+!------------------------------------------------------------------------------
+SUBROUTINE apply_jblock(ib,vloc,vloc4,gfl)
+INTEGER(4), INTENT(in) :: ib !< Block index
+COMPLEX(8), ALLOCATABLE, INTENT(inout) :: vloc(:,:) !< Double precision work array [max_block_size,2]
+COMPLEX(4), ALLOCATABLE, INTENT(inout) :: vloc4(:,:) !< Single precision work array [max_block_size,2]
+COMPLEX(8), ALLOCATABLE, INTENT(inout) :: gfl(:) !< Interface residual (this thread's contributions) [jface_n]
+INTEGER(4) :: ni,jj,kk
+COMPLEX(8) :: tmp
+ni=self%mf_obj%jblocks(ib)%nint
+IF(ni==0)RETURN
+CALL apply_block(self%inverse_mats(ib),ni,self%mf_obj%jblocks(ib)%cols,vloc,vloc4)
+DO kk=1,self%mf_obj%jblocks(ib)%nface
+  tmp=(0.d0,0.d0)
+  DO jj=1,ni
+    tmp=tmp+self%inverse_mats(ib)%W(jj,kk)*gtmp(self%mf_obj%jblocks(ib)%cols(jj))
+  END DO
+  gfl(self%mf_obj%jblocks(ib)%fidx(kk))=gfl(self%mf_obj%jblocks(ib)%fidx(kk))-tmp
+END DO
+END SUBROUTINE apply_jblock
+!------------------------------------------------------------------------------
+!> Subtract the interface solution's contribution from the interior unknowns of a block (junction models)
+!------------------------------------------------------------------------------
+SUBROUTINE correct_jblock(ib,zf)
+INTEGER(4), INTENT(in) :: ib !< Block index
+COMPLEX(8), INTENT(in) :: zf(:) !< Interface solution [jface_n]
+INTEGER(4) :: jj,kk
+DO kk=1,self%mf_obj%jblocks(ib)%nface
+  DO jj=1,self%mf_obj%jblocks(ib)%nint
+    utmp(self%mf_obj%jblocks(ib)%cols(jj))=utmp(self%mf_obj%jblocks(ib)%cols(jj)) &
+      - self%inverse_mats(ib)%W(jj,kk)*zf(self%mf_obj%jblocks(ib)%fidx(kk))
+  END DO
+END DO
+END SUBROUTINE correct_jblock
 !------------------------------------------------------------------------------
 !> Invert assembled block, converting to single precision if requested
 !------------------------------------------------------------------------------
@@ -2917,9 +3419,11 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   DO i=1,SIZE(self%inverse_mats)
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
     IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
+    IF(ASSOCIATED(self%inverse_mats(i)%W))DEALLOCATE(self%inverse_mats(i)%W)
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
+IF(ASSOCIATED(self%sinv))DEALLOCATE(self%sinv)
 !---Reset
 self%max_block_size=0
 self%refactor=.TRUE.
@@ -2932,21 +3436,53 @@ end subroutine bjprecond_delete
 !! Each diagonal block is inverted explicitly using its Cholesky factorization. If `pre_single`
 !! is set on the HODLR operator each block is rounded to single precision before
 !! factorization, and the inverse is computed, stored, and applied in single precision.
+!!
+!! For meshes split at junctions the blocks \f$ B_i \f$ are assembled on the expanded elements, and the
+!! preconditioner is the exact inverse of their Galerkin projection, \f$ (P^T B P)^{-1} \f$ with
+!! \f$ B = diag(B_i) \f$. Applying \f$ P^T B^{-1} P \f$ instead is a poor approximation of the inverse of the
+!! reduced operator along reduced unknowns whose columns of P span many elements (e.g. junction lines), and converges
+!! much more slowly. \f$ P^T B P \f$ is block diagonal apart from the interface unknowns whose columns span several
+!! blocks (@ref tw_hodlr_junction_blocks). With each projected block \f$ G_i = P_i^T B_i P_i \f$ split into
+!! interior (I) and interface (F) unknowns, it is solved exactly by eliminating the interior unknowns of each block
+!! and solving the Schur complement \f$ S = \sum_i G_{i,FF} - G_{i,FI} G_{i,II}^{-1} G_{i,IF} \f$ on the interface
+!! unknowns. \f$ G_{i,II}^{-1} \f$ takes the place of the inverted diagonal block (computed in double precision,
+!! then rounded if `pre_single` is set), and \f$ W_i = G_{i,II}^{-1} G_{i,IF} \f$ and \f$ S^{-1} \f$ are stored
+!! in double precision.
+!!
+!! With `pre_coarse` the block preconditioner M is combined with the coarse space Z built by
+!! @ref rbjprecond_coarse_setup in the balancing (BNN) form
+!! \f$ (I - Q A) M (I - A Q) + Q \f$, with \f$ Q = Z (Z^T A Z)^{-1} Z^T \f$. This is symmetric positive definite
+!! for any coarse space, and unlike an additive correction \f$ M + Q \f$ it does not raise the largest eigenvalues
+!! of the preconditioned operator. It costs four products with the dense n x nz matrices Z and A Z per application.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock,max_size,info
+INTEGER(4) :: i,j,k,l,n,level,iblock,max_size,info,nb,nface
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
-REAL(8), POINTER, CONTIGUOUS, DIMENSION(:) :: utmp,gtmp
+REAL(8), POINTER, CONTIGUOUS, DIMENSION(:) :: utmp,gtmp,gb
 REAL(8), POINTER, DIMENSION(:) :: ue,ge
+REAL(8), ALLOCATABLE, DIMENSION(:) :: gface,gface_loc,zface,cw,cc
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 REAL(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
+LOGICAL :: junc
 DEBUG_STACK_PUSH
-IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
+nb=self%mf_obj%ndense+1
+junc=ASSOCIATED(self%mf_obj%tw_obj%junc)
+nface=0
+IF(junc)THEN
+  CALL tw_hodlr_junction_blocks(self%mf_obj)
+  nface=self%mf_obj%jface_n
+END IF
+IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(nb))
 IF(self%refactor)THEN
+  IF(junc)THEN
+    IF(ASSOCIATED(self%sinv))DEALLOCATE(self%sinv)
+    ALLOCATE(self%sinv(nface,nface))
+    self%sinv=0.d0
+  END IF
   max_size = 0
   !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
@@ -2956,7 +3492,7 @@ IF(self%refactor)THEN
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
     max_size = MAX(max_size,n)
-    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
+    CALL alloc_block(self%inverse_mats(i),n)
     ! Explicit loop avoids array temporaries on (small) OpenMP thread stacks
     !$omp simd collapse(2)
     DO k=1,n
@@ -2977,7 +3513,11 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL invert_block(self%inverse_mats(i),n)
+    IF(junc)THEN
+      CALL junction_block(i,n,max_size)
+    ELSE
+      CALL invert_block(self%inverse_mats(i),n)
+    END IF
   END DO
   !$omp end do
   DEALLOCATE(imap)
@@ -2989,7 +3529,7 @@ IF(self%refactor)THEN
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
-    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
+    CALL alloc_block(self%inverse_mats(i),n)
     imap=0
     DO j=1,n
       DO k=1,n
@@ -3007,18 +3547,24 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL invert_block(self%inverse_mats(i),n)
+    IF(junc)THEN
+      CALL junction_block(i,n,self%max_block_size)
+    ELSE
+      CALL invert_block(self%inverse_mats(i),n)
+    END IF
   END IF
   DEALLOCATE(imap)
-  !---Coarse correction: Z^T (alpha*L + beta*R) Z, from the stored Z^T L Z and Z^T R Z
+  !---Interface Schur complement (junction models)
+  IF(nface>0)THEN
+    CALL lapack_cholesky(nface,self%sinv,info)
+    IF(info/=0)CALL oft_abort("Junction interface factorization failed","rbjprecond_apply",__FILE__)
+  END IF
+  !---Two-level preconditioner: the coarse space is smoothed with the operator, so it is rebuilt when alpha or beta
+  !   change (the setup applies the block solves above, so they are marked as factored first)
   IF(self%mf_obj%pre_coarse)THEN
-    IF(.NOT.ASSOCIATED(self%zlz))CALL rbjprecond_coarse_setup(self)
-    IF(self%nz>0)THEN
-      IF(.NOT.ASSOCIATED(self%einv))ALLOCATE(self%einv(self%nz,self%nz))
-      self%einv=self%alpha*self%zlz+self%beta*self%zrz
-      CALL lapack_cholesky(self%nz,self%einv,info)
-      IF(info/=0)CALL oft_abort("coarse factorization failed","rbjprecond_apply",__FILE__)
-    END IF
+    self%refactor=.FALSE.
+    IF((.NOT.ASSOCIATED(self%z)).OR.(self%coarse_alpha/=self%alpha).OR.(self%coarse_beta/=self%beta)) &
+      CALL rbjprecond_coarse_setup(self)
   END IF
   self%refactor=.FALSE.
 END IF
@@ -3027,53 +3573,208 @@ NULLIFY(utmp,gtmp)
 CALL u%borrow_local(utmp,OFT_ACCESS_WRITE)
 CALL g%borrow_local(gtmp,OFT_ACCESS_READ)
 utmp=0.d0
-IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
-  ALLOCATE(ue(tw_nelems_exp(self%mf_obj%tw_obj)),ge(tw_nelems_exp(self%mf_obj%tw_obj)))
-  CALL tw_junction_expand(self%mf_obj%tw_obj,gtmp,ge)
-  ue=0.d0
+!---Balancing coarse correction, first half: c = E^-1 Z^T g, and the block solves act on the projected residual
+!   g - A Z c (a copy, as the borrowed residual is read-only)
+IF(self%nz>0)THEN
+  ALLOCATE(cw(self%nz),cc(self%nz),gb(SIZE(gtmp)))
+  CALL tw_dense_tmv(SIZE(gtmp),self%nz,self%z,gtmp,cw)
+  CALL dgemv('N',self%nz,self%nz,1.d0,self%einv,self%nz,cw,1,0.d0,cc,1)
+  gb=gtmp
+  CALL tw_dense_mv(SIZE(gb),self%nz,self%az,cc,-1.d0,gb)
 ELSE
-  ue=>utmp
-  ge=>gtmp
+  gb=>gtmp
+END IF
+!---Block solves act on the model vectors directly (the reduced vectors for junction models)
+ue=>utmp
+ge=>gb
+IF(nface>0)THEN
+  ALLOCATE(gface(nface))
+  DO j=1,nface
+    gface(j)=gb(self%mf_obj%jface(j))
+  END DO
 END IF
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 ALLOCATE(hole_inds(n))
 DO j=1,n
   hole_inds(j)=self%mf_obj%tw_obj%np_active+j
 END DO
-!$omp parallel private(vloc,vloc4,i,level,iblock,n)
+!$omp parallel private(vloc,vloc4,i,level,iblock,n,gface_loc)
 IF(self%mf_obj%pre_single)THEN
   ALLOCATE(vloc4(self%max_block_size,2))
 ELSE
   ALLOCATE(vloc(self%max_block_size,2))
 END IF
+IF(nface>0)THEN
+  ALLOCATE(gface_loc(nface))
+  gface_loc=0.d0
+END IF
 DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
-  level=self%mf_obj%dense_blocks(1,i)
-  iblock=self%mf_obj%dense_blocks(2,i)
-  n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-  CALL apply_block(self%inverse_mats(i),n,self%mf_obj%levels(level)%blocks(iblock)%ielem,vloc,vloc4)
+  IF(junc)THEN
+    CALL apply_jblock(i,vloc,vloc4,gface_loc)
+  ELSE
+    level=self%mf_obj%dense_blocks(1,i)
+    iblock=self%mf_obj%dense_blocks(2,i)
+    n = self%mf_obj%levels(level)%blocks(iblock)%nelems
+    CALL apply_block(self%inverse_mats(i),n,self%mf_obj%levels(level)%blocks(iblock)%ielem,vloc,vloc4)
+  END IF
 END DO
 !$omp single
-n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-IF(n>0)CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
+IF(junc)THEN
+  CALL apply_jblock(nb,vloc,vloc4,gface_loc)
+ELSE
+  n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+  IF(n>0)CALL apply_block(self%inverse_mats(nb),n,hole_inds,vloc,vloc4)
+END IF
 !$omp end single
+IF(nface>0)THEN
+  !$omp critical (rbjprecond_face)
+  gface=gface+gface_loc
+  !$omp end critical (rbjprecond_face)
+  DEALLOCATE(gface_loc)
+END IF
 IF(self%mf_obj%pre_single)THEN
   DEALLOCATE(vloc4)
 ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
-!---Coarse correction on the expanded residual/solution (same as gtmp/utmp without junctions)
-IF(self%mf_obj%pre_coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,ge,ue)
-IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
-  CALL tw_junction_reduce_vec(self%mf_obj%tw_obj,ue,utmp)
-  DEALLOCATE(ue,ge)
+!---Interface unknowns, then their contribution to the interior unknowns of each block (junction models)
+IF(nface>0)THEN
+  ALLOCATE(zface(nface))
+  CALL dgemv('N',nface,nface,1.d0,self%sinv,nface,gface,1,0.d0,zface,1)
+  DO j=1,nface
+    utmp(self%mf_obj%jface(j))=zface(j)
+  END DO
+  !$omp parallel do schedule(dynamic,1)
+  DO i=1,nb
+    CALL correct_jblock(i,zface)
+  END DO
+  DEALLOCATE(gface,zface)
 END IF
+!---Balancing coarse correction, second half: u <- y + Z (c - E^-1 (A Z)^T y) for the block solution y
+IF(self%nz>0)THEN
+  CALL tw_dense_tmv(SIZE(utmp),self%nz,self%az,utmp,cw)
+  CALL dgemv('N',self%nz,self%nz,-1.d0,self%einv,self%nz,cw,1,1.d0,cc,1)
+  CALL tw_dense_mv(SIZE(utmp),self%nz,self%z,cc,1.d0,utmp)
+  DEALLOCATE(cw,cc,gb)
+END IF
+NULLIFY(gb)
 CALL u%release_local(utmp,OFT_ACCESS_WRITE,sync=.TRUE.)
 CALL g%release_local(gtmp,OFT_ACCESS_READ,sync=.FALSE.)
 CALL g%set(0.d0)
 DEALLOCATE(hole_inds)
 DEBUG_STACK_POP
 CONTAINS
+!------------------------------------------------------------------------------
+!> Allocate storage for an assembled (expanded) block, replacing storage of a different size
+!------------------------------------------------------------------------------
+SUBROUTINE alloc_block(mat,nrows)
+TYPE(rmat_container), INTENT(inout) :: mat !< Block storage
+INTEGER(4), INTENT(in) :: nrows !< Size of block
+IF(ASSOCIATED(mat%M))THEN
+  IF(SIZE(mat%M,1)/=nrows)DEALLOCATE(mat%M)
+END IF
+IF(.NOT.ASSOCIATED(mat%M))ALLOCATE(mat%M(nrows,nrows))
+END SUBROUTINE alloc_block
+!------------------------------------------------------------------------------
+!> Project an assembled block onto its reduced unknowns, invert the interior part and add the block's contribution
+!! to the interface Schur complement (junction models)
+!------------------------------------------------------------------------------
+SUBROUTINE junction_block(ib,nrows,msize)
+INTEGER(4), INTENT(in) :: ib !< Block index
+INTEGER(4), INTENT(in) :: nrows !< Size of the assembled (expanded) block
+INTEGER(4), INTENT(inout) :: msize !< Maximum work array size
+INTEGER(4) :: ni,nf,m,error,jj,kk
+REAL(8), ALLOCATABLE :: gmat(:,:),sloc(:,:)
+ni=self%mf_obj%jblocks(ib)%nint
+nf=self%mf_obj%jblocks(ib)%nface
+m=ni+nf
+msize=MAX(msize,m)
+ALLOCATE(gmat(m,m))
+CALL tw_hodlr_jblock_galerkin_r(self%mf_obj%jblocks(ib),nrows,self%inverse_mats(ib)%M,gmat)
+DEALLOCATE(self%inverse_mats(ib)%M)
+IF(ni>0)THEN
+  ALLOCATE(self%inverse_mats(ib)%M(ni,ni))
+  DO kk=1,ni
+    DO jj=1,ni
+      self%inverse_mats(ib)%M(jj,kk)=gmat(jj,kk)
+    END DO
+  END DO
+  CALL lapack_cholesky(ni,self%inverse_mats(ib)%M,error)
+  IF(error/=0)CALL oft_abort("Block factorization failed","rbjprecond_apply",__FILE__)
+END IF
+IF(nf>0)THEN
+  IF(ASSOCIATED(self%inverse_mats(ib)%W))DEALLOCATE(self%inverse_mats(ib)%W)
+  ALLOCATE(self%inverse_mats(ib)%W(ni,nf),sloc(nf,nf))
+  DO kk=1,nf
+    DO jj=1,nf
+      sloc(jj,kk)=gmat(ni+jj,ni+kk)
+    END DO
+  END DO
+  IF(ni>0)THEN
+    CALL dgemm('N','N',ni,nf,ni,1.d0,self%inverse_mats(ib)%M,ni,gmat(1,ni+1),m,0.d0,self%inverse_mats(ib)%W,ni)
+    CALL dgemm('T','N',nf,nf,ni,-1.d0,gmat(1,ni+1),m,self%inverse_mats(ib)%W,ni,1.d0,sloc,nf)
+  END IF
+  !$omp critical (rbjprecond_schur)
+  DO kk=1,nf
+    DO jj=1,nf
+      self%sinv(self%mf_obj%jblocks(ib)%fidx(jj),self%mf_obj%jblocks(ib)%fidx(kk)) = &
+        self%sinv(self%mf_obj%jblocks(ib)%fidx(jj),self%mf_obj%jblocks(ib)%fidx(kk)) + sloc(jj,kk)
+    END DO
+  END DO
+  !$omp end critical (rbjprecond_schur)
+  DEALLOCATE(sloc)
+END IF
+DEALLOCATE(gmat)
+!---Round the interior inverse to single precision if requested
+IF(self%mf_obj%pre_single.AND.(ni>0))THEN
+  IF(ASSOCIATED(self%inverse_mats(ib)%M4))THEN
+    IF(SIZE(self%inverse_mats(ib)%M4,1)/=ni)DEALLOCATE(self%inverse_mats(ib)%M4)
+  END IF
+  IF(.NOT.ASSOCIATED(self%inverse_mats(ib)%M4))ALLOCATE(self%inverse_mats(ib)%M4(ni,ni))
+  DO kk=1,ni
+    DO jj=1,ni
+      self%inverse_mats(ib)%M4(jj,kk)=REAL(self%inverse_mats(ib)%M(jj,kk),r4)
+    END DO
+  END DO
+  DEALLOCATE(self%inverse_mats(ib)%M)
+END IF
+END SUBROUTINE junction_block
+!------------------------------------------------------------------------------
+!> Apply the interior inverse of a block and subtract its coupling from the interface residual (junction models)
+!------------------------------------------------------------------------------
+SUBROUTINE apply_jblock(ib,vloc,vloc4,gfl)
+INTEGER(4), INTENT(in) :: ib !< Block index
+REAL(8), ALLOCATABLE, INTENT(inout) :: vloc(:,:) !< Double precision work array [max_block_size,2]
+REAL(4), ALLOCATABLE, INTENT(inout) :: vloc4(:,:) !< Single precision work array [max_block_size,2]
+REAL(8), ALLOCATABLE, INTENT(inout) :: gfl(:) !< Interface residual (this thread's contributions) [jface_n]
+INTEGER(4) :: ni,jj,kk
+REAL(8) :: tmp
+ni=self%mf_obj%jblocks(ib)%nint
+IF(ni==0)RETURN
+CALL apply_block(self%inverse_mats(ib),ni,self%mf_obj%jblocks(ib)%cols,vloc,vloc4)
+DO kk=1,self%mf_obj%jblocks(ib)%nface
+  tmp=0.d0
+  DO jj=1,ni
+    tmp=tmp+self%inverse_mats(ib)%W(jj,kk)*gb(self%mf_obj%jblocks(ib)%cols(jj))
+  END DO
+  gfl(self%mf_obj%jblocks(ib)%fidx(kk))=gfl(self%mf_obj%jblocks(ib)%fidx(kk))-tmp
+END DO
+END SUBROUTINE apply_jblock
+!------------------------------------------------------------------------------
+!> Subtract the interface solution's contribution from the interior unknowns of a block (junction models)
+!------------------------------------------------------------------------------
+SUBROUTINE correct_jblock(ib,zf)
+INTEGER(4), INTENT(in) :: ib !< Block index
+REAL(8), INTENT(in) :: zf(:) !< Interface solution [jface_n]
+INTEGER(4) :: jj,kk
+DO kk=1,self%mf_obj%jblocks(ib)%nface
+  DO jj=1,self%mf_obj%jblocks(ib)%nint
+    utmp(self%mf_obj%jblocks(ib)%cols(jj))=utmp(self%mf_obj%jblocks(ib)%cols(jj)) &
+      - self%inverse_mats(ib)%W(jj,kk)*zf(self%mf_obj%jblocks(ib)%fidx(kk))
+  END DO
+END DO
+END SUBROUTINE correct_jblock
 !------------------------------------------------------------------------------
 !> Invert assembled block, converting to single precision if requested
 !------------------------------------------------------------------------------
@@ -3136,40 +3837,244 @@ END IF
 END SUBROUTINE apply_block
 END SUBROUTINE rbjprecond_apply
 !------------------------------------------------------------------------------
-!> Build the coarse space of the two-level preconditioner and its projections of L and R
+!> Apply the block preconditioner (without coarse correction) to several vectors at once, U = M G
 !!
-!! On each diagonal (leaf) block: a constant and the three coordinates of the element positions, orthonormalised
-!! on the block (directions the block does not span are dropped); and a unit vector for each hole and V-coil.
-!! These are the smooth, long-range current patterns block-Jacobi cannot represent. The global vectors in `z_glob`
-!! (e.g. the slowest L/R eigenmodes), if present, are added after orthonormalisation against the rest of the space.
+!! Equivalent to the block solves of @ref rbjprecond_apply on each column, using matrix-matrix products. The blocks
+!! must already be factored (`refactor` false). Vectors are on the model unknowns (reduced for junction models).
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_solve_multi(self,m,g,u)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+INTEGER(4), INTENT(in) :: m !< Number of vectors
+REAL(8), CONTIGUOUS, INTENT(in) :: g(:,:) !< Right-hand sides [nelems,m]
+REAL(8), CONTIGUOUS, INTENT(out) :: u(:,:) !< Preconditioned vectors [nelems,m]
+INTEGER(4) :: i,j,n,ni,nf,nb,nface,nh,level,iblock
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: hole_inds
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: gl,ul,fl,gface,gfl,zface
+LOGICAL :: junc
+junc=ASSOCIATED(self%mf_obj%tw_obj%junc)
+nb=self%mf_obj%ndense+1
+nh=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+u=0.d0
+IF(junc)THEN
+  nface=self%mf_obj%jface_n
+  ALLOCATE(gface(nface,m))
+  DO j=1,nface
+    gface(j,:)=g(self%mf_obj%jface(j),:)
+  END DO
+  !$omp parallel private(i,j,ni,nf,gl,ul,fl,gfl)
+  ALLOCATE(gl(self%max_block_size,m),ul(self%max_block_size,m),fl(MAX(nface,1),m),gfl(nface,m))
+  gfl=0.d0
+  !$omp do schedule(dynamic,1)
+  DO i=1,nb
+    ni=self%mf_obj%jblocks(i)%nint
+    nf=self%mf_obj%jblocks(i)%nface
+    IF(ni==0)CYCLE
+    DO j=1,ni
+      gl(j,:)=g(self%mf_obj%jblocks(i)%cols(j),:)
+    END DO
+    CALL block_mult(self%inverse_mats(i),ni,gl,ul)
+    !---Interior unknowns belong to this block only, so the rows written here are distinct between blocks
+    DO j=1,ni
+      u(self%mf_obj%jblocks(i)%cols(j),:)=ul(j,:)
+    END DO
+    IF(nf>0)THEN
+      CALL dgemm('T','N',nf,m,ni,1.d0,self%inverse_mats(i)%W,ni,gl,SIZE(gl,1),0.d0,fl,SIZE(fl,1))
+      DO j=1,nf
+        gfl(self%mf_obj%jblocks(i)%fidx(j),:)=gfl(self%mf_obj%jblocks(i)%fidx(j),:)-fl(j,:)
+      END DO
+    END IF
+  END DO
+  !$omp end do
+  !$omp critical (rbjprecond_multi_face)
+  gface=gface+gfl
+  !$omp end critical (rbjprecond_multi_face)
+  DEALLOCATE(gl,ul,fl,gfl)
+  !$omp end parallel
+  IF(nface>0)THEN
+    ALLOCATE(zface(nface,m))
+    CALL dgemm('N','N',nface,m,nface,1.d0,self%sinv,nface,gface,nface,0.d0,zface,nface)
+    DO j=1,nface
+      u(self%mf_obj%jface(j),:)=zface(j,:)
+    END DO
+    !$omp parallel private(i,j,ni,nf,fl,ul)
+    ALLOCATE(fl(nface,m),ul(self%max_block_size,m))
+    !$omp do schedule(dynamic,1)
+    DO i=1,nb
+      ni=self%mf_obj%jblocks(i)%nint
+      nf=self%mf_obj%jblocks(i)%nface
+      IF((ni==0).OR.(nf==0))CYCLE
+      DO j=1,nf
+        fl(j,:)=zface(self%mf_obj%jblocks(i)%fidx(j),:)
+      END DO
+      CALL dgemm('N','N',ni,m,nf,1.d0,self%inverse_mats(i)%W,ni,fl,nface,0.d0,ul,SIZE(ul,1))
+      DO j=1,ni
+        u(self%mf_obj%jblocks(i)%cols(j),:)=u(self%mf_obj%jblocks(i)%cols(j),:)-ul(j,:)
+      END DO
+    END DO
+    !$omp end do
+    DEALLOCATE(fl,ul)
+    !$omp end parallel
+    DEALLOCATE(zface)
+  END IF
+  DEALLOCATE(gface)
+ELSE
+  !$omp parallel private(i,j,n,level,iblock,gl,ul)
+  ALLOCATE(gl(self%max_block_size,m),ul(self%max_block_size,m))
+  !$omp do schedule(dynamic,1)
+  DO i=1,self%mf_obj%ndense
+    level=self%mf_obj%dense_blocks(1,i)
+    iblock=self%mf_obj%dense_blocks(2,i)
+    n=self%mf_obj%levels(level)%blocks(iblock)%nelems
+    DO j=1,n
+      gl(j,:)=g(self%mf_obj%levels(level)%blocks(iblock)%ielem(j),:)
+    END DO
+    CALL block_mult(self%inverse_mats(i),n,gl,ul)
+    DO j=1,n
+      u(self%mf_obj%levels(level)%blocks(iblock)%ielem(j),:)=ul(j,:)
+    END DO
+  END DO
+  !$omp end do
+  DEALLOCATE(gl,ul)
+  !$omp end parallel
+  IF(nh>0)THEN
+    ALLOCATE(hole_inds(nh),gl(nh,m),ul(nh,m))
+    DO j=1,nh
+      hole_inds(j)=self%mf_obj%tw_obj%np_active+j
+      gl(j,:)=g(hole_inds(j),:)
+    END DO
+    CALL block_mult(self%inverse_mats(nb),nh,gl,ul)
+    DO j=1,nh
+      u(hole_inds(j),:)=ul(j,:)
+    END DO
+    DEALLOCATE(hole_inds,gl,ul)
+  END IF
+END IF
+CONTAINS
+!> Multiply the gathered right-hand sides of a block by its inverse, in single precision if `pre_single` is set
+SUBROUTINE block_mult(mat,nrows,gb,ub)
+TYPE(rmat_container), INTENT(in) :: mat !< Inverted block
+INTEGER(4), INTENT(in) :: nrows !< Size of block
+REAL(8), INTENT(in) :: gb(:,:) !< Gathered right-hand sides [>=nrows,m]
+REAL(8), INTENT(inout) :: ub(:,:) !< Result [>=nrows,m]
+INTEGER(4) :: jj,kk
+REAL(8) :: scale
+REAL(4), ALLOCATABLE :: g4(:,:),u4(:,:)
+IF(self%mf_obj%pre_single)THEN
+  !---Scale each RHS to avoid underflow/overflow in single precision
+  ALLOCATE(g4(nrows,m),u4(nrows,m))
+  DO kk=1,m
+    scale=MAXVAL(ABS(gb(1:nrows,kk)))
+    IF(scale<=0.d0)scale=1.d0
+    DO jj=1,nrows
+      g4(jj,kk)=REAL(gb(jj,kk)/scale,r4)
+    END DO
+  END DO
+  CALL sgemm('N','N',nrows,m,nrows,1.0_r4,mat%M4,nrows,g4,nrows,0.0_r4,u4,nrows)
+  DO kk=1,m
+    scale=MAXVAL(ABS(gb(1:nrows,kk)))
+    IF(scale<=0.d0)scale=1.d0
+    DO jj=1,nrows
+      ub(jj,kk)=REAL(u4(jj,kk),r8)*scale
+    END DO
+  END DO
+  DEALLOCATE(g4,u4)
+ELSE
+  CALL dgemm('N','N',nrows,m,nrows,1.d0,mat%M,nrows,gb,SIZE(gb,1),0.d0,ub,SIZE(ub,1))
+END IF
+END SUBROUTINE block_mult
+END SUBROUTINE rbjprecond_solve_multi
+!------------------------------------------------------------------------------
+!> Product with the transpose of a tall dense matrix, y = A^T x, split over threads by rows
 !!
-!! The vectors are defined on the element indices of the blocks. For meshes split at junctions these are the
-!! expanded elements, and the coarse space is \f$ Z = P^T Z_{exp} \f$: each vector is reduced before the L and R
-!! products, and the products are expanded before the projection, so that \f$ Z^T A Z \f$ is exact. The global
-!! vectors are the exception: they are given on the model unknowns and expanded with the right inverse of \f$ P^T \f$.
+!! The coarse vectors of the two-level preconditioner are tall (model size by coarse size) and each product streams
+!! the whole matrix, so the rows are split explicitly between OpenMP threads instead of relying on a threaded BLAS.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_dense_tmv(n,k,a,x,y)
+INTEGER(4), INTENT(in) :: n !< Number of rows
+INTEGER(4), INTENT(in) :: k !< Number of columns
+REAL(r8), INTENT(in) :: a(n,k) !< Matrix
+REAL(r8), INTENT(in) :: x(n) !< Vector
+REAL(r8), INTENT(out) :: y(k) !< Result
+INTEGER(4) :: i0,i1
+REAL(r8), ALLOCATABLE :: yloc(:)
+y=0.d0
+!$omp parallel private(i0,i1,yloc)
+i0=INT(INT(n,8)*oft_tid/oft_env%nthreads,4)+1
+i1=INT(INT(n,8)*(oft_tid+1)/oft_env%nthreads,4)
+IF(i1>=i0)THEN
+  ALLOCATE(yloc(k))
+  CALL dgemv('T',i1-i0+1,k,1.d0,a(i0,1),n,x(i0),1,0.d0,yloc,1)
+  !$omp critical (tw_dense_tmv_sum)
+  y=y+yloc
+  !$omp end critical (tw_dense_tmv_sum)
+  DEALLOCATE(yloc)
+END IF
+!$omp end parallel
+END SUBROUTINE tw_dense_tmv
+!------------------------------------------------------------------------------
+!> Product with a tall dense matrix, y = y + alpha A x, split over threads by rows (see @ref tw_dense_tmv)
+!------------------------------------------------------------------------------
+SUBROUTINE tw_dense_mv(n,k,a,x,alpha,y)
+INTEGER(4), INTENT(in) :: n !< Number of rows
+INTEGER(4), INTENT(in) :: k !< Number of columns
+REAL(r8), INTENT(in) :: a(n,k) !< Matrix
+REAL(r8), INTENT(in) :: x(k) !< Vector
+REAL(r8), INTENT(in) :: alpha !< Scale factor
+REAL(r8), INTENT(inout) :: y(n) !< Result
+INTEGER(4) :: i0,i1
+!$omp parallel private(i0,i1)
+i0=INT(INT(n,8)*oft_tid/oft_env%nthreads,4)+1
+i1=INT(INT(n,8)*(oft_tid+1)/oft_env%nthreads,4)
+IF(i1>=i0)CALL dgemv('N',i1-i0+1,k,alpha,a(i0,1),n,x,1,1.d0,y(i0),1)
+!$omp end parallel
+END SUBROUTINE tw_dense_mv
+!------------------------------------------------------------------------------
+!> Build the coarse space of the two-level preconditioner
+!!
+!! The initial vectors are:
+!! - on each diagonal (leaf) block, a constant and the linear and quadratic functions of the element positions,
+!!   orthonormalised on the block (directions the block does not span are dropped);
+!! - a unit vector for each hole and V-coil;
+!! - the global vectors in `z_glob` (e.g. the slowest L/R eigenmodes), if present.
+!!
+!! On meshes split at junctions the block functions are defined on the expanded elements and reduced with
+!! \f$ P^T \f$.
+!!
+!! Functions confined to one block jump at its boundary, which gives them a large energy, so on their own they cannot
+!! represent the smooth, long-range current patterns that the block solves miss (the slow modes of the
+!! block-preconditioned operator). Each vector is therefore smoothed `pre_smooth` times with the block preconditioner
+!! M, \f$ Z \leftarrow (I - M A) Z \f$ (smoothed aggregation), and the result is orthonormalised, dropping
+!! directions that have become linearly dependent. The products use the multi-vector routines
+!! @ref tw_hodlr_Lapply_multi and @ref rbjprecond_solve_multi, so the blocks must already be factored.
+!!
+!! Z, A Z and \f$ (Z^T A Z)^{-1} \f$ are stored densely and used by the balancing correction in
+!! @ref rbjprecond_apply. They depend on \f$ A = \alpha L + \beta R \f$ and are rebuilt when it changes.
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_setup(self)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
-INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun,nglob
-REAL(r8) :: nrm,nrm0,cen(3),ext
-REAL(r8), ALLOCATABLE :: zb(:,:)
-REAL(8), POINTER, DIMENSION(:) :: vals,wvals
-REAL(8), ALLOCATABLE, DIMENSION(:) :: rvals,wexp
-CLASS(oft_vector), POINTER :: zvec,azvec
+INTEGER(4), PARAMETER :: nfun=10
+INTEGER(4) :: i,j,m,c,n,ne,nred,level,iblock,nmax,nunit,nglob,nz0,info,lwork
+REAL(r8) :: nrm,nrm0,cen(3),ext,elapsed
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: zexp,evals,work
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: zb,z0,w,v,gram
 TYPE(tw_type), POINTER :: tw
+TYPE(oft_timer) :: timer
+CALL timer%tick()
 tw=>self%mf_obj%tw_obj
+nred=tw%nelems
+ne=tw_nelems_exp(tw)
 nunit=tw%nholes+tw%n_vcoils
+nglob=0
+IF(ASSOCIATED(self%z_glob))nglob=SIZE(self%z_glob,DIM=2)
+IF(ASSOCIATED(self%z))DEALLOCATE(self%z)
+IF(ASSOCIATED(self%az))DEALLOCATE(self%az)
+IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
+self%nz=0
 nmax=0
 DO i=1,self%mf_obj%ndense
   nmax=MAX(nmax,self%mf_obj%levels(self%mf_obj%dense_blocks(1,i))%blocks(self%mf_obj%dense_blocks(2,i))%nelems)
 END DO
-nfun=4
-IF(self%coarse_order>1)nfun=10
-nglob=0
-IF(ASSOCIATED(self%z_glob))nglob=SIZE(self%z_glob,DIM=2)
-ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit+nglob),self%z_unit(nfun*self%mf_obj%ndense+nunit+nglob))
-ALLOCATE(self%z_vals(nmax,nfun*self%mf_obj%ndense+nunit),zb(nmax,nfun))
-self%z_vals=0.d0
+ALLOCATE(z0(nred,nfun*self%mf_obj%ndense+nunit+nglob),zb(nmax,nfun),zexp(ne))
 c=0
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
@@ -3187,23 +4092,23 @@ DO i=1,self%mf_obj%ndense
     ext=MAX(ext,MAXVAL(ABS(zb(j,2:4))))
   END DO
   zb(1:n,2:4)=zb(1:n,2:4)/ext
-  IF(nfun==10)THEN
-    zb(1:n,5)=zb(1:n,2)**2; zb(1:n,6)=zb(1:n,3)**2; zb(1:n,7)=zb(1:n,4)**2
-    zb(1:n,8)=zb(1:n,2)*zb(1:n,3); zb(1:n,9)=zb(1:n,2)*zb(1:n,4); zb(1:n,10)=zb(1:n,3)*zb(1:n,4)
-  END IF
+  zb(1:n,5)=zb(1:n,2)**2; zb(1:n,6)=zb(1:n,3)**2; zb(1:n,7)=zb(1:n,4)**2
+  zb(1:n,8)=zb(1:n,2)*zb(1:n,3); zb(1:n,9)=zb(1:n,2)*zb(1:n,4); zb(1:n,10)=zb(1:n,3)*zb(1:n,4)
   !---Modified Gram-Schmidt on the block, dropping directions the block does not span
   nrm0=SQRT(REAL(n,8))
   DO m=1,nfun
-    DO k=1,m-1
-      IF(SUM(zb(1:n,k)**2)>0.d0)zb(1:n,m)=zb(1:n,m)-DOT_PRODUCT(zb(1:n,k),zb(1:n,m))*zb(1:n,k)
+    DO j=1,m-1
+      IF(SUM(zb(1:n,j)**2)>0.d0)zb(1:n,m)=zb(1:n,m)-DOT_PRODUCT(zb(1:n,j),zb(1:n,m))*zb(1:n,j)
     END DO
     nrm=SQRT(SUM(zb(1:n,m)**2))
     IF(nrm>1.d-6*nrm0)THEN
       zb(1:n,m)=zb(1:n,m)/nrm
       c=c+1
-      self%z_block(c)=i
-      self%z_unit(c)=0
-      self%z_vals(1:n,c)=zb(1:n,m)
+      zexp=0.d0
+      DO j=1,n
+        zexp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=zb(j,m)
+      END DO
+      CALL to_model(zexp,z0(:,c))
     ELSE
       zb(1:n,m)=0.d0
     END IF
@@ -3211,182 +4116,86 @@ DO i=1,self%mf_obj%ndense
 END DO
 DO j=1,nunit
   c=c+1
-  self%z_block(c)=0
-  self%z_unit(c)=tw%np_active+j
+  zexp=0.d0
+  zexp(tw%np_active+j)=1.d0
+  CALL to_model(zexp,z0(:,c))
 END DO
-self%nz=c
-self%nzg=0
-DEALLOCATE(zb)
-!---Global vectors, orthonormalised against the block/unit vectors (orthonormal) and each other
-IF(nglob>0)THEN
-  ALLOCATE(self%z_gvals(tw_nelems_exp(tw),nglob),zb(self%nz+nglob,1))
-  k=0
-  DO m=1,nglob
-    !---Global vectors are given on the model unknowns; on junction meshes they are expanded with the right inverse
-    !   of P^T (z = P (P^T P)^-1 x), so that P^T z = x before orthonormalisation
-    IF(ASSOCIATED(tw%junc))THEN
-      CALL junction_right_inverse(self%z_glob(:,m),self%z_gvals(:,k+1))
-    ELSE
-      self%z_gvals(:,k+1)=self%z_glob(:,m)
-    END IF
-    nrm0=SQRT(SUM(self%z_gvals(:,k+1)**2))
-    IF(nrm0<=0.d0)CYCLE
-    DO j=1,2
-      CALL rbjprecond_coarse_restrict(self,self%z_gvals(:,k+1),zb(1:self%nz,1))
-      DO i=1,self%nz
-        CALL rbjprecond_coarse_expand(self,i,-zb(i,1),self%z_gvals(:,k+1))
-      END DO
-    END DO
-    nrm=SQRT(SUM(self%z_gvals(:,k+1)**2))
-    IF(nrm>1.d-6*nrm0)THEN
-      self%z_gvals(:,k+1)=self%z_gvals(:,k+1)/nrm
-      k=k+1
-      self%nz=self%nz+1
-      self%nzg=k
-      self%z_block(self%nz)=-k
-      self%z_unit(self%nz)=0
-    END IF
-  END DO
-  DEALLOCATE(zb)
-END IF
-!---Z^T L Z and Z^T R Z, one L and R product per coarse vector
-ALLOCATE(self%zlz(self%nz,self%nz),self%zrz(self%nz,self%nz))
-CALL tw%Uloc%new(zvec)
-CALL tw%Uloc%new(azvec)
-NULLIFY(vals,wvals)
-ALLOCATE(vals(tw_nelems_exp(tw)))
-IF(ASSOCIATED(tw%junc))ALLOCATE(rvals(tw%nelems),wexp(tw_nelems_exp(tw)))
-DO c=1,self%nz
-  vals=0.d0
-  CALL rbjprecond_coarse_expand(self,c,1.d0,vals)
-  IF(ASSOCIATED(tw%junc))THEN
-    CALL tw_junction_reduce_vec(tw,vals,rvals)
-    CALL zvec%restore_local(rvals)
-  ELSE
-    CALL zvec%restore_local(vals)
+DO j=1,nglob
+  c=c+1
+  z0(:,c)=self%z_glob(:,j)
+END DO
+nz0=c
+DEALLOCATE(zb,zexp)
+!---Smoothing, Z <- Z - M A Z
+ALLOCATE(w(nred,nz0),v(nred,nz0))
+DO i=1,self%mf_obj%pre_smooth
+  CALL apply_a(z0(:,1:nz0),w)
+  CALL rbjprecond_solve_multi(self,nz0,w,v)
+  z0(:,1:nz0)=z0(:,1:nz0)-v
+END DO
+DEALLOCATE(v)
+!---Orthonormalise with the eigendecomposition of the Gram matrix, dropping (nearly) dependent directions
+ALLOCATE(gram(nz0,nz0),evals(nz0),work(1))
+CALL dgemm('T','N',nz0,nz0,nred,1.d0,z0,nred,z0,nred,0.d0,gram,nz0)
+CALL dsyev('V','U',nz0,gram,nz0,evals,work,-1,info)
+lwork=INT(work(1),4)
+DEALLOCATE(work)
+ALLOCATE(work(lwork))
+CALL dsyev('V','U',nz0,gram,nz0,evals,work,lwork,info)
+IF(info/=0)CALL oft_abort("Coarse space orthonormalisation failed","rbjprecond_coarse_setup",__FILE__)
+DEALLOCATE(work)
+m=0
+DO i=1,nz0
+  IF(evals(i)>1.d-12*evals(nz0))THEN
+    m=m+1
+    gram(:,m)=gram(:,i)/SQRT(evals(i))
   END IF
-  !---L and R of the model (reduced for junction meshes; the preconditioner's own R is the expanded one)
-  CALL self%mf_obj%apply(zvec,azvec)
-  CALL azvec%get_local(wvals)
-  CALL coarse_project(self%zlz(:,c))
-  CALL tw%Rmat%apply(zvec,azvec)
-  CALL azvec%get_local(wvals)
-  CALL coarse_project(self%zrz(:,c))
 END DO
-DEALLOCATE(vals,wvals)
-IF(ASSOCIATED(tw%junc))DEALLOCATE(rvals,wexp)
-CALL zvec%delete(); CALL azvec%delete()
-DEALLOCATE(zvec,azvec)
-WRITE(*,'(2A,I6,A)')oft_indent,'Two-level preconditioner: ',self%nz,' coarse vectors'
+self%nz=m
+ALLOCATE(self%z(nred,m),self%az(nred,m),self%einv(m,m))
+CALL dgemm('N','N',nred,m,nz0,1.d0,z0,nred,gram,nz0,0.d0,self%z,nred)
+DEALLOCATE(z0,w,gram,evals)
+!---A Z and (Z^T A Z)^-1
+CALL apply_a(self%z,self%az)
+CALL dgemm('T','N',m,m,nred,1.d0,self%z,nred,self%az,nred,0.d0,self%einv,m)
+self%einv=(self%einv+TRANSPOSE(self%einv))/2.d0
+CALL lapack_cholesky(m,self%einv,info)
+IF(info/=0)CALL oft_abort("Coarse factorization failed","rbjprecond_coarse_setup",__FILE__)
+self%coarse_alpha=self%alpha
+self%coarse_beta=self%beta
+elapsed=timer%tock()
+WRITE(*,'(2A,I6,A,I3,A,F10.2,A)')oft_indent,'Two-level preconditioner: ',self%nz,' coarse vectors, ', &
+  self%mf_obj%pre_smooth,' smoothing steps (',elapsed,' s)'
 CONTAINS
-!> Z^T w for a product w of the model operator (expanded first for junction meshes)
-SUBROUTINE coarse_project(zw)
-REAL(r8), INTENT(out) :: zw(:)
+!> Vector on the model unknowns from an expanded vector (\f$ P^T \f$ for junction models)
+SUBROUTINE to_model(xe,x)
+REAL(r8), INTENT(in) :: xe(:) !< Expanded vector [nelems_exp]
+REAL(r8), INTENT(out) :: x(:) !< Model vector [nelems]
 IF(ASSOCIATED(tw%junc))THEN
-  CALL tw_junction_expand(tw,wvals,wexp)
-  CALL rbjprecond_coarse_restrict(self,wexp,zw)
+  CALL tw_junction_reduce_vec(tw,xe,x)
 ELSE
-  CALL rbjprecond_coarse_restrict(self,wvals,zw)
+  x=xe
 END IF
-END SUBROUTINE coarse_project
-!---Expanded vector z = P (P^T P)^-1 x, so that P^T z = x (Jacobi-preconditioned CG on P^T P, which is sparse and SPD;
-!   it is not diagonal, as hole and junction unknowns span many elements)
-SUBROUTINE junction_right_inverse(x,z)
-REAL(r8), INTENT(in) :: x(:) !< Vector on the model unknowns [nelems]
-REAL(r8), INTENT(out) :: z(:) !< Expanded vector [nelems_exp]
-INTEGER(4) :: it,kk
-REAL(r8) :: rz,rzold,alf,xnrm
-REAL(r8), ALLOCATABLE :: d(:),y(:),r(:),pv(:),ap(:),zr(:)
-ALLOCATE(d(tw%nelems),y(tw%nelems),r(tw%nelems),pv(tw%nelems),ap(tw%nelems),zr(tw%nelems))
-!---Jacobi preconditioner, diag(P^T P)
-d=0.d0
-DO kk=1,tw%junc%p_kr(tw%junc%nelems_exp+1)-1
-  d(tw%junc%p_lc(kk))=d(tw%junc%p_lc(kk))+tw%junc%p_val(kk)**2
-END DO
-WHERE(d<=0.d0)d=1.d0
-xnrm=SQRT(SUM(x**2))
-y=0.d0; r=x
-zr=r/d; pv=zr; rz=DOT_PRODUCT(r,zr)
-DO it=1,1000
-  IF(SQRT(SUM(r**2))<=1.d-12*xnrm)EXIT
-  CALL tw_junction_expand(tw,pv,z)
-  CALL tw_junction_reduce_vec(tw,z,ap)
-  alf=rz/DOT_PRODUCT(pv,ap)
-  y=y+alf*pv; r=r-alf*ap
-  zr=r/d; rzold=rz; rz=DOT_PRODUCT(r,zr)
-  pv=zr+(rz/rzold)*pv
-END DO
-IF(SQRT(SUM(r**2))>1.d-12*xnrm)CALL oft_warn('Junction expansion of a global coarse vector did not converge')
-CALL tw_junction_expand(tw,y,z)
-DEALLOCATE(d,y,r,pv,ap,zr)
-END SUBROUTINE junction_right_inverse
-END SUBROUTINE rbjprecond_coarse_setup
-!------------------------------------------------------------------------------
-!> Add a*z_c to an element vector
-!------------------------------------------------------------------------------
-SUBROUTINE rbjprecond_coarse_expand(self,c,a,vals)
-CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
-INTEGER(4), INTENT(in) :: c !< Index of the coarse vector
-REAL(r8), INTENT(in) :: a !< Coefficient
-REAL(r8), INTENT(inout) :: vals(:) !< Element vector [nelems_exp]
-INTEGER(4) :: j,level,iblock
-IF(self%z_block(c)<0)THEN
-  vals=vals+a*self%z_gvals(:,-self%z_block(c))
-ELSE IF(self%z_block(c)==0)THEN
-  vals(self%z_unit(c))=vals(self%z_unit(c))+a
-ELSE
-  level=self%mf_obj%dense_blocks(1,self%z_block(c))
-  iblock=self%mf_obj%dense_blocks(2,self%z_block(c))
-  DO j=1,self%mf_obj%levels(level)%blocks(iblock)%nelems
-    vals(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=vals(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) &
-      + a*self%z_vals(j,c)
-  END DO
-END IF
-END SUBROUTINE rbjprecond_coarse_expand
-!------------------------------------------------------------------------------
-!> Coarse projection w = Z^T v of an element vector
-!------------------------------------------------------------------------------
-SUBROUTINE rbjprecond_coarse_restrict(self,v,w)
-CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
-REAL(r8), CONTIGUOUS, INTENT(in) :: v(:) !< Element vector [nelems_exp]
-REAL(r8), CONTIGUOUS, INTENT(out) :: w(:) !< Coarse vector [nz]
-INTEGER(4) :: c,j,level,iblock
-DO c=1,self%nz-self%nzg
-  IF(self%z_block(c)==0)THEN
-    w(c)=v(self%z_unit(c))
-  ELSE
-    level=self%mf_obj%dense_blocks(1,self%z_block(c))
-    iblock=self%mf_obj%dense_blocks(2,self%z_block(c))
-    w(c)=0.d0
-    DO j=1,self%mf_obj%levels(level)%blocks(iblock)%nelems
-      w(c)=w(c)+self%z_vals(j,c)*v(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
+END SUBROUTINE to_model
+!> Products with the model operator, Y = (alpha*L + beta*R) X (the reduced R for junction models)
+SUBROUTINE apply_a(x,y)
+REAL(r8), CONTIGUOUS, INTENT(in) :: x(:,:) !< Vectors [nelems,k]
+REAL(r8), CONTIGUOUS, INTENT(out) :: y(:,:) !< Products [nelems,k]
+INTEGER(4) :: ii,ll,kk
+REAL(r8) :: tmp
+CALL tw_hodlr_Lapply_multi(self%mf_obj,SIZE(x,2),x,y)
+!$omp parallel do private(ii,ll,tmp) schedule(static)
+DO kk=1,SIZE(x,2)
+  DO ii=1,nred
+    tmp=0.d0
+    DO ll=tw%Rmat%kr(ii),tw%Rmat%kr(ii+1)-1
+      tmp=tmp+tw%Rmat%M(ll)*x(tw%Rmat%lc(ll),kk)
     END DO
-  END IF
+    y(ii,kk)=self%alpha*y(ii,kk)+self%beta*tmp
+  END DO
 END DO
-!---Global vectors together: w_g = Z_g^T v
-IF(self%nzg>0)CALL dgemv('T',SIZE(self%z_gvals,1),self%nzg,1.d0,self%z_gvals,SIZE(self%z_gvals,1), &
-  v,1,0.d0,w(self%nz-self%nzg+1),1)
-END SUBROUTINE rbjprecond_coarse_restrict
-!------------------------------------------------------------------------------
-!> Add the coarse correction u += Z (Z^T A Z)^-1 Z^T g
-!------------------------------------------------------------------------------
-SUBROUTINE rbjprecond_coarse_apply(self,g,u)
-CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
-REAL(r8), CONTIGUOUS, INTENT(in) :: g(:) !< Residual [nelems_exp]
-REAL(r8), CONTIGUOUS, INTENT(inout) :: u(:) !< Preconditioned residual [nelems_exp]
-INTEGER(4) :: c
-REAL(r8), ALLOCATABLE :: w(:),y(:)
-ALLOCATE(w(self%nz),y(self%nz))
-CALL rbjprecond_coarse_restrict(self,g,w)
-CALL dgemv('N',self%nz,self%nz,1.d0,self%einv,self%nz,w,1,0.d0,y,1)
-DO c=1,self%nz-self%nzg
-  CALL rbjprecond_coarse_expand(self,c,y(c),u)
-END DO
-!---Global vectors together: u += Z_g y_g
-IF(self%nzg>0)CALL dgemv('N',SIZE(self%z_gvals,1),self%nzg,1.d0,self%z_gvals,SIZE(self%z_gvals,1), &
-  y(self%nz-self%nzg+1),1,1.d0,u,1)
-DEALLOCATE(w,y)
-END SUBROUTINE rbjprecond_coarse_apply
+END SUBROUTINE apply_a
+END SUBROUTINE rbjprecond_coarse_setup
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
@@ -3400,15 +4209,18 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   DO i=1,SIZE(self%inverse_mats)
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
     IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
+    IF(ASSOCIATED(self%inverse_mats(i)%W))DEALLOCATE(self%inverse_mats(i)%W)
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
-IF(ASSOCIATED(self%z_block))DEALLOCATE(self%z_block,self%z_unit,self%z_vals)
+IF(ASSOCIATED(self%sinv))DEALLOCATE(self%sinv)
 NULLIFY(self%z_glob) ! Not owned
-IF(ASSOCIATED(self%z_gvals))DEALLOCATE(self%z_gvals)
-IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
+IF(ASSOCIATED(self%z))DEALLOCATE(self%z)
+IF(ASSOCIATED(self%az))DEALLOCATE(self%az)
 IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
 self%nz=0
+self%coarse_alpha=0.d0
+self%coarse_beta=0.d0
 !---Reset
 self%max_block_size=0
 self%refactor=.TRUE.
