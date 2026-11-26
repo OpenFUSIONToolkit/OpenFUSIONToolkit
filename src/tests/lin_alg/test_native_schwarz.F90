@@ -38,6 +38,9 @@
 #define SUB_LU_PACK 'mkl'
 #elif defined(HAVE_SUPERLU_DIST)
 #define SUB_LU_PACK 'superd'
+#else
+#define SUB_LU_PACK 'none'
+#define SUB_LU_MISSING
 #endif
 !------------------------------------------------------------------------------
 PROGRAM test_native_schwarz
@@ -74,7 +77,7 @@ IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
 END IF
-#if !defined(SUB_LU_PACK)
+#ifdef SUB_LU_MISSING
 WRITE(*,*)'SKIP TEST: no direct solver package for the subdomain solves'
 STOP
 #endif
