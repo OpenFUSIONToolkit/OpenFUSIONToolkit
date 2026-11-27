@@ -22,8 +22,8 @@ Runtime options referenced below are set in the `xmhd_options` group of the inpu
 | \f$ B \f$   | H(Curl) + \f$ \nabla H^1 \f$ | T | |
 | \f$ V \f$   | Vector Lagrange | m/s | Stored scaled by `vel_scale` |
 | \f$ n \f$   | Lagrange | m^-3 | Stored scaled by `den_scale` |
-| \f$ T_i \f$ | Lagrange | eV | Ion temperature |
-| \f$ T_e \f$ | Lagrange | eV | Electron temperature (two-temperature model only, enabled by passing `Te` in the initial fields to \ref xmhd::xmhd_run "xmhd_run") |
+| \f$ T_i \f$ | Lagrange | eV | Ion temperature, stored scaled by `temp_scale` |
+| \f$ T_e \f$ | Lagrange | eV | Electron temperature, stored scaled by `temp_scale` (two-temperature model only, enabled by passing `Te` in the initial fields to \ref xmhd::xmhd_run "xmhd_run") |
 | \f$ N_2 \f$ | Lagrange | m^-5 | Hyper-diffusion auxiliary field (`d2_dens>0` only) |
 | \f$ J_2 \f$ | H(Curl) | T/m^2 | Hyper-resistivity auxiliary field (`eta_hyper>0` only) |
 

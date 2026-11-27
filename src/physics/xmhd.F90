@@ -247,7 +247,7 @@ end type ml_xmhd_vecspace
 !------------------------------------------------------------------------------
 ! Global variables
 !------------------------------------------------------------------------------
-INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
+INTEGER(i4), PARAMETER :: xmhd_rst_version = 4 !< Restart file version number
 TYPE(xml_node) :: xmhd_root_node !< xMHD XML node
 TYPE(xml_node) :: xmhd_pre_node !< preconditioner XML node
 !---Equation control
@@ -306,8 +306,9 @@ REAL(r8) :: kappa_par(2) = 1.d0 !< Parallel thermal conductivity factor
 REAL(r8) :: kappa_perp(2) = 1.d0 !< Perpendicular thermal conductivity factor
 !> Lower limit on the electron perpendicular diffusivity [m^2/s] with Braginskii conduction (two temperatures)
 REAL(r8), PARAMETER :: chi_perp_e_min = 0.d0
-REAL(r8), PUBLIC :: vel_scale = 1.d3 !< Velocity scale factor
+REAL(r8), PUBLIC :: vel_scale = -1.d0 !< Velocity scale factor (<0 for automatic Alfven-balanced scaling)
 REAL(r8), PUBLIC :: den_scale = -1.d0 !< Density scale factor
+REAL(r8), PUBLIC :: temp_scale = -1.d0 !< Temperature scale factor (<0 for automatic acoustic-balanced scaling)
 REAL(r8), PUBLIC :: n2_scale = -1.d0 !< Hyper-diffusivity aux variable scale factor
 REAL(r8), PUBLIC :: j2_scale = -1.d0  !< Hyper-resistivity aux variable scale factor
 REAL(r8), PUBLIC :: den_floor = -1.d0 !< Density floor
@@ -437,6 +438,8 @@ CONTAINS
 !! | `xmhd_monitor_div=F` | Monitor divergence error | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
+!! | `vel_scale=-1`     | Velocity scaling factor (<0 for automatic Alfven-balanced scaling \f$ (\mu_0 n_0 m_i)^{-1/2} \f$) | real |
+!! | `temp_scale=-1`    | Temperature scaling factor (<0 for automatic acoustic-balanced scaling \f$ v_{\text{scale}} \sqrt{m_i T_0 / k_B} \f$) | real |
 !
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
@@ -458,7 +461,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,vel_scale,temp_scale
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -501,6 +504,10 @@ END IF
 !------------------------------------------------------------------------------
 m_ion=mu_ion*proton_mass ! Scale by proton mass
 IF(m_ion<0.d0)CALL oft_abort('Invalid Ion mass','xmhd_read_settings',__FILE__)
+IF(vel_scale==0.d0)CALL oft_abort('Velocity scale "vel_scale" must be non-zero (<0 for automatic)', &
+  'xmhd_read_settings',__FILE__)
+IF(temp_scale==0.d0)CALL oft_abort('Temperature scale "temp_scale" must be non-zero (<0 for automatic)', &
+  'xmhd_read_settings',__FILE__)
 !---Check viscosity type
 SELECT CASE(visc_type)
   CASE('kin')
@@ -573,7 +580,7 @@ integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dt,dthist(XMHD_ITCACHE)
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr,elapsed_time
 real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror
-real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,tmpint(2)
+real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,tmpint(2),temp_rms
 character(LEN=XMHD_RST_LEN) :: rst_char
 LOGICAL :: force_refactor,exists,rst
 TYPE(oft_h1_zeroi), TARGET :: h1_zeroi
@@ -602,6 +609,25 @@ IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
 CALL xmhd_check_settings
 IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(initial_fields%Ne%ng,8))
+IF(vel_scale<0.d0)THEN
+  IF((den_scale>0.d0).AND.(m_ion>0.d0))THEN
+    vel_scale=1.d0/SQRT(mu0*den_scale*m_ion)
+  ELSE
+    CALL oft_warn('Automatic vel_scale requires positive den_scale and m_ion; falling back to 1.E3')
+    vel_scale=1.d3
+  END IF
+END IF
+IF(temp_scale<0.d0)THEN
+  temp_rms=0.d0
+  IF(ASSOCIATED(initial_fields%Ti))temp_rms=SQRT(initial_fields%Ti%dot(initial_fields%Ti)/REAL(initial_fields%Ti%ng,r8))
+  IF(xmhd_two_temp.AND.ASSOCIATED(initial_fields%Te))temp_rms=MAX(temp_rms, &
+    SQRT(initial_fields%Te%dot(initial_fields%Te)/REAL(initial_fields%Te%ng,r8)))
+  IF((temp_rms>0.d0).AND.(vel_scale>0.d0).AND.(m_ion>0.d0).AND.(k_boltz>0.d0))THEN
+    temp_scale=vel_scale*SQRT(m_ion*temp_rms/k_boltz)
+  ELSE
+    temp_scale=1.d0
+  END IF
+END IF
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !------------------------------------------------------------------------------
@@ -680,6 +706,8 @@ ELSE
   IF(rst_ind>0)CALL oft_abort('Restart does not exist.','xmhd_run',__FILE__)
   CALL initial_fields%V%scale(1.d0/vel_scale)
   CALL initial_fields%Ne%scale(1.d0/den_scale)
+  IF(ASSOCIATED(initial_fields%Ti))CALL initial_fields%Ti%scale(1.d0/temp_scale)
+  IF(xmhd_two_temp.AND.ASSOCIATED(initial_fields%Te))CALL initial_fields%Te%scale(1.d0/temp_scale)
   CALL oft_xmhd_push(initial_fields,u)
   t=0.d0
   !---Create initial conditions restart file
@@ -807,6 +835,8 @@ IF(oft_env%head_proc)THEN
   IF(den_floor>0.d0)WRITE(*,102)'den_floor  = ',den_floor
   WRITE(*,102)'L-Tol      = ',lin_tol
   WRITE(*,102)'NL-Tol     = ',nl_tol
+  WRITE(*,102)'vel_scale  = ',vel_scale
+  WRITE(*,102)'temp_scale = ',temp_scale
   WRITE(*,102)'Mag Energy = ',mer
   WRITE(*,102)'Kin Energy = ',ver
   IF(xmhd_monitor_div)WRITE(*,'(2X,A,2ES11.3)')'Div Error  = ',derror,jump_error
@@ -1036,6 +1066,8 @@ DO i=1,nsteps
       CALL oft_xmhd_pop(up,initial_fields)
       CALL initial_fields%V%scale(vel_scale)
       CALL initial_fields%Ne%scale(den_scale)
+      IF(ASSOCIATED(initial_fields%Ti))CALL initial_fields%Ti%scale(temp_scale)
+      IF(xmhd_two_temp.AND.ASSOCIATED(initial_fields%Te))CALL initial_fields%Te%scale(temp_scale)
       CALL probes%apply(initial_fields,t)
     END IF
 !------------------------------------------------------------------------------
@@ -1071,6 +1103,8 @@ IF(oft_env%head_proc)CALL hist_file%close
 CALL oft_xmhd_pop(u,initial_fields)
 CALL initial_fields%V%scale(vel_scale)
 CALL initial_fields%Ne%scale(den_scale)
+IF(ASSOCIATED(initial_fields%Ti))CALL initial_fields%Ti%scale(temp_scale)
+IF(xmhd_two_temp.AND.ASSOCIATED(initial_fields%Te))CALL initial_fields%Te%scale(temp_scale)
 !---Clear up memory
 CALL nksolver%delete
 CALL solver%delete
@@ -1127,7 +1161,7 @@ integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dt,dthist(XMHD_ITCACHE)
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr,elapsed_time
 real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
-real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol
+real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,temp_rms
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
 character(LEN=OFT_SLEN) :: comm_line
@@ -1158,6 +1192,25 @@ IF(ASSOCIATED(equil_fields%Te).NEQV.ASSOCIATED(pert_fields%Te))CALL oft_abort( &
   "Te0 and dTe ICs are required for two temp.", "xmhd_lin_run", __FILE__)
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
 IF(den_scale<0.d0)den_scale=SQRT(equil_fields%Ne%dot(equil_fields%Ne)/REAL(equil_fields%Ne%ng,8))
+IF(vel_scale<0.d0)THEN
+  IF((den_scale>0.d0).AND.(m_ion>0.d0))THEN
+    vel_scale=1.d0/SQRT(mu0*den_scale*m_ion)
+  ELSE
+    CALL oft_warn('Automatic vel_scale requires positive den_scale and m_ion; falling back to 1.E3')
+    vel_scale=1.d3
+  END IF
+END IF
+IF(temp_scale<0.d0)THEN
+  temp_rms=0.d0
+  IF(ASSOCIATED(equil_fields%Ti))temp_rms=SQRT(equil_fields%Ti%dot(equil_fields%Ti)/REAL(equil_fields%Ti%ng,r8))
+  IF(xmhd_two_temp.AND.ASSOCIATED(equil_fields%Te))temp_rms=MAX(temp_rms, &
+    SQRT(equil_fields%Te%dot(equil_fields%Te)/REAL(equil_fields%Te%ng,r8)))
+  IF((temp_rms>0.d0).AND.(vel_scale>0.d0).AND.(m_ion>0.d0).AND.(k_boltz>0.d0))THEN
+    temp_scale=vel_scale*SQRT(m_ion*temp_rms/k_boltz)
+  ELSE
+    temp_scale=1.d0
+  END IF
+END IF
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !---Force heating and conduction terms to zero
@@ -1262,13 +1315,19 @@ ELSE
   ELSE
     CALL pert_fields%V%scale(1.d0/vel_scale)
     CALL pert_fields%Ne%scale(1.d0/den_scale)
+    IF(ASSOCIATED(pert_fields%Ti))CALL pert_fields%Ti%scale(1.d0/temp_scale)
+    IF(xmhd_two_temp.AND.ASSOCIATED(pert_fields%Te))CALL pert_fields%Te%scale(1.d0/temp_scale)
     CALL oft_xmhd_push(pert_fields,du)
   END IF
   CALL equil_fields%V%scale(1.d0/vel_scale)
   CALL equil_fields%Ne%scale(1.d0/den_scale)
+  IF(ASSOCIATED(equil_fields%Ti))CALL equil_fields%Ti%scale(1.d0/temp_scale)
+  IF(xmhd_two_temp.AND.ASSOCIATED(equil_fields%Te))CALL equil_fields%Te%scale(1.d0/temp_scale)
   CALL oft_xmhd_push(equil_fields,u0)
   CALL equil_fields%V%scale(vel_scale)
   CALL equil_fields%Ne%scale(den_scale)
+  IF(ASSOCIATED(equil_fields%Ti))CALL equil_fields%Ti%scale(temp_scale)
+  IF(xmhd_two_temp.AND.ASSOCIATED(equil_fields%Te))CALL equil_fields%Te%scale(temp_scale)
   t=0.d0
   !---Create initial conditions restart file
   WRITE(rst_char,105)0
@@ -1382,6 +1441,8 @@ IF(oft_env%head_proc)THEN
   END IF
   WRITE(*,102)'L-Tol      = ',lin_tol
   WRITE(*,102)'NL-Tol     = ',nl_tol
+  WRITE(*,102)'vel_scale  = ',vel_scale
+  WRITE(*,102)'temp_scale = ',temp_scale
   WRITE(*,102)'Mag Energy = ',mer
   WRITE(*,102)'Kin Energy = ',ver
   IF(xmhd_monitor_div)WRITE(*,'(2X,A,2ES11.3)')'Div Error  = ',derror,jump_error
@@ -1557,6 +1618,8 @@ IF(oft_env%head_proc)CALL hist_file%close
 CALL oft_xmhd_pop(du,pert_fields)
 CALL pert_fields%V%scale(vel_scale)
 CALL pert_fields%Ne%scale(den_scale)
+IF(ASSOCIATED(pert_fields%Ti))CALL pert_fields%Ti%scale(temp_scale)
+IF(xmhd_two_temp.AND.ASSOCIATED(pert_fields%Te))CALL pert_fields%Te%scale(temp_scale)
 !---Clear up memory
 CALL solver%delete
 CALL divout%delete
@@ -2498,6 +2561,12 @@ do ii=1,mesh%tloc_c(ip)%n
     IF(ASSOCIATED(mtmp(m,5)%m).AND.(m/=5))mtmp(m,5)%m = mtmp(m,5)%m*vel_scale
     IF(ASSOCIATED(mtmp(6,m)%m).AND.(m/=6))mtmp(6,m)%m = mtmp(6,m)%m/den_scale
     IF(ASSOCIATED(mtmp(m,6)%m).AND.(m/=6))mtmp(m,6)%m = mtmp(m,6)%m*den_scale
+    IF(ASSOCIATED(mtmp(7,m)%m).AND.(m/=7))mtmp(7,m)%m = mtmp(7,m)%m/temp_scale
+    IF(ASSOCIATED(mtmp(m,7)%m).AND.(m/=7))mtmp(m,7)%m = mtmp(m,7)%m*temp_scale
+    IF((te_ind>0).AND.(m/=te_ind))THEN
+      IF(ASSOCIATED(mtmp(te_ind,m)%m))mtmp(te_ind,m)%m = mtmp(te_ind,m)%m/temp_scale
+      IF(ASSOCIATED(mtmp(m,te_ind)%m))mtmp(m,te_ind)%m = mtmp(m,te_ind)%m*temp_scale
+    END IF
     IF((n2_ind>0).AND.(m/=n2_ind))THEN
       IF(ASSOCIATED(mtmp(n2_ind,m)%m))mtmp(n2_ind,m)%m = mtmp(n2_ind,m)%m/n2_scale
       IF(ASSOCIATED(mtmp(m,n2_ind)%m))mtmp(m,n2_ind)%m = mtmp(m,n2_ind)%m*n2_scale
@@ -3694,8 +3763,8 @@ do ii=1,mesh%tloc_c(ip)%n
       vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)/vel_scale
       IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)/den_scale
       IF(xmhd_adv_temp)THEN
-        tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)
-        IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)
+        tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)/temp_scale
+        IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)/temp_scale
       END IF
       IF(n2_ind>0)n2out(j_lag(jr)) = n2out(j_lag(jr)) + n2_loc(jr)/n2_scale
     END DO
@@ -3952,8 +4021,8 @@ do ii=1,mesh%tloc_c(ip)%n
   do jr=1,oft_lagrange%nce
     vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)/vel_scale
     IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)/den_scale
-    IF(xmhd_adv_temp)tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)
-    IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)
+    IF(xmhd_adv_temp)tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)/temp_scale
+    IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)/temp_scale
   end do
   !$omp end critical(xmhderr_red)
 end do
@@ -4511,10 +4580,10 @@ type(xmhd_loc_values), intent(out) :: vloc !< Unpacked fields
 vloc%V = vals(1:3)*vel_scale
 vloc%dV = RESHAPE(vals(6:14),(/3,3/))*vel_scale
 vloc%N = vals(4)*den_scale; vloc%dN = vals(15:17)*den_scale
-vloc%Ti = vals(5); vloc%dTi = vals(18:20)
+vloc%Ti = vals(5)*temp_scale; vloc%dTi = vals(18:20)*temp_scale
 vloc%B = vals(21:23); vloc%J = vals(24:26)
 IF(xmhd_two_temp)THEN
-  vloc%Te = vals(27); vloc%dTe = vals(28:30)
+  vloc%Te = vals(27)*temp_scale; vloc%dTe = vals(28:30)*temp_scale
 ELSE
   vloc%Te = te_factor*vloc%Ti; vloc%dTe = te_factor*vloc%dTi
 END IF
@@ -4640,6 +4709,7 @@ IF(oft_env%head_proc)THEN
   !---Save scales
   CALL hdf5_write(vel_scale,filename,'vel_scale')
   CALL hdf5_write(den_scale,filename,'den_scale')
+  CALL hdf5_write(temp_scale,filename,'temp_scale')
   IF(n2_ind>0)CALL hdf5_write(n2_scale,filename,'n2_scale')
   IF(j2_ind>0)CALL hdf5_write(j2_scale,filename,'j2_scale')
 END IF
@@ -4667,6 +4737,7 @@ IF(PRESENT(rst_version_out))rst_version_out=rst_version
 !---Rescale if necessary scales
 IF(rst_version>2)THEN
   CALL hdf5_read(scale_tmp,filename,'vel_scale')
+  IF(vel_scale<0.d0)vel_scale=scale_tmp
   IF(scale_tmp/=vel_scale)THEN
     NULLIFY(stmp)
     DO i=3,5
@@ -4677,11 +4748,30 @@ IF(rst_version>2)THEN
     DEALLOCATE(stmp)
   END IF
   CALL hdf5_read(scale_tmp,filename,'den_scale')
+  IF(den_scale<0.d0)den_scale=scale_tmp
   IF(scale_tmp/=den_scale)THEN
     NULLIFY(stmp)
     CALL u%get_local(stmp, 6)
     stmp=stmp*scale_tmp/den_scale
     CALL u%restore_local(stmp, 6)
+    DEALLOCATE(stmp)
+  END IF
+  IF(rst_version>3.OR.hdf5_field_exist(filename,'temp_scale'))THEN
+    CALL hdf5_read(scale_tmp,filename,'temp_scale')
+  ELSE
+    scale_tmp=1.d0
+  END IF
+  IF(temp_scale<0.d0)temp_scale=scale_tmp
+  IF(scale_tmp/=temp_scale)THEN
+    NULLIFY(stmp)
+    CALL u%get_local(stmp, 7)
+    stmp=stmp*scale_tmp/temp_scale
+    CALL u%restore_local(stmp, 7)
+    IF(xmhd_two_temp)THEN
+      CALL u%get_local(stmp, te_ind)
+      stmp=stmp*scale_tmp/temp_scale
+      CALL u%restore_local(stmp, te_ind)
+    END IF
     DEALLOCATE(stmp)
   END IF
   IF(n2_ind>0)THEN
@@ -4704,6 +4794,9 @@ IF(rst_version>2)THEN
       DEALLOCATE(stmp)
     END IF
   END IF
+ELSE
+  IF(vel_scale<0.d0)vel_scale=1.d3
+  IF(temp_scale<0.d0)temp_scale=1.d0
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_rst_load
@@ -5129,6 +5222,8 @@ IF(linear)THEN
   CALL oft_xmhd_pop(uc,sub_fields)
   CALL sub_fields%V%scale(vel_scale)
   CALL sub_fields%Ne%scale(den_scale)
+  CALL sub_fields%Ti%scale(temp_scale)
+  IF(xmhd_two_temp)CALL sub_fields%Te%scale(temp_scale)
 !------------------------------------------------------------------------------
 ! Extract density and plot
 !------------------------------------------------------------------------------
@@ -5299,6 +5394,8 @@ DO
       CALL oft_xmhd_pop(uc,sub_fields)
       CALL sub_fields%V%scale(vel_scale)
       CALL sub_fields%Ne%scale(den_scale)
+      CALL sub_fields%Ti%scale(temp_scale)
+      IF(xmhd_two_temp)CALL sub_fields%Te%scale(temp_scale)
       IF(n2_ind>0)CALL sub_fields%N2%scale(n2_scale)
       IF(j2_ind>0)CALL sub_fields%J2%scale(j2_scale)
 !------------------------------------------------------------------------------

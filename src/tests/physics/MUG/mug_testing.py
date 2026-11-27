@@ -265,13 +265,15 @@ def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp
 
 
 def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,
-                 bdf2=True):
+                 bdf2=True,vel_scale=None,temp_scale=None):
     '''Write the input for a traveling shear Alfven wave and run test_alfven (`representation` 'hcurl') or
     test_alfven_lag ('lagrange')
 
     `nu_mhd` gives the multigrid smoother iterations per level; `mf` selects the matrix-free Newton-Krylov solver
-    (nonlinear runs only); `bdf2=False` uses first-order backward Euler steps (linear runs only). Order 4 needs a tighter linear tolerance to reach the expected error, otherwise MPI
-    runs (with a different multigrid layout) do not reproduce the serial errors.
+    (nonlinear runs only); `bdf2=False` uses first-order backward Euler steps (linear runs only); `vel_scale` and
+    `temp_scale` set the optional scaling namelist options (`-1` for automatic balanced scaling). Order 4 needs a
+    tighter linear tolerance to reach the expected error, otherwise MPI runs (with a different multigrid layout) do
+    not reproduce the serial errors.
     '''
     exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n nu_visc=1.E-3\n", 4000),
                                  'lagrange': ('./test_alfven_lag', " bbc='bc'\n nu_visc=1.E-3\n k_db=1.\n", 2000)}[representation]
@@ -281,9 +283,13 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
             rep_options += " xmhd_lin_euler_start=T\n"
         else:
             rep_options += " xmhd_lin_bdf2=F\n"
-    lin_tol = '1.E-12'
+    if vel_scale is not None:
+        rep_options += " vel_scale={0}\n".format(vel_scale)
+    if temp_scale is not None:
+        rep_options += " temp_scale={0}\n".format(temp_scale)
+    lin_tol = '1.E-13'
     if order == 4:
-        lin_tol = '1.E-13'
+        lin_tol = '1.E-14'
     mfnk = False
     if not linear:
         mfnk = mf
@@ -302,3 +308,28 @@ def validate_alfven(berr_exp,verr_exp,steps_exp=11,linear=False):
     errors_ok = validate_errors('alfven.results', (('Magnetic', berr_exp), ('Velocity', verr_exp)), 1.01)
     output_ok = validate_mug_output(steps_exp, linear=linear)
     return errors_ok and output_ok
+
+
+def validate_alfven_auto_vel_scale(n0=1.e19, t0=None, mu_ion=2.0, rtol=1.e-6, rst_file='xMHD_00000.rst'):
+    '''Check that the saved restart `vel_scale` (and optionally `temp_scale`) match the automatic balanced formulas'''
+    mu0 = 4.e-7 * math.pi
+    proton_mass = 1.672621777e-27
+    elec_charge = 1.60217662e-19
+    m_ion = mu_ion * proton_mass
+    expected_vel = 1.0 / math.sqrt(mu0 * n0 * m_ion)
+    with h5py.File(rst_file, 'r') as h5_file:
+        actual_vel = float(h5_file['vel_scale'][()].item())
+        actual_temp = float(h5_file['temp_scale'][()].item()) if 'temp_scale' in h5_file else None
+    if not math.isfinite(actual_vel) or abs(actual_vel - expected_vel) > rtol * expected_vel:
+        print("FAILED: Auto vel_scale mismatch!")
+        print("  Expected = {0:.8E}".format(expected_vel))
+        print("  Actual =   {0:.8E}".format(actual_vel))
+        return False
+    if t0 is not None:
+        expected_temp = expected_vel * math.sqrt(m_ion * t0 / elec_charge) if t0 > 0.0 else 1.0
+        if actual_temp is None or not math.isfinite(actual_temp) or abs(actual_temp - expected_temp) > rtol * expected_temp:
+            print("FAILED: Auto temp_scale mismatch!")
+            print("  Expected = {0:.8E}".format(expected_temp))
+            print("  Actual =   {0}".format(actual_temp))
+            return False
+    return True
