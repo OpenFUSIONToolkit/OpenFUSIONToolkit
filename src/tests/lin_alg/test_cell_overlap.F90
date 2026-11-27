@@ -32,7 +32,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_stitching, ONLY: oft_global_stitch
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_overlap_dofs, overlap_dofs_delete, &
-  OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE, OFT_CELL_ADJ_FACE
+  OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
@@ -97,8 +97,8 @@ CONTAINS
 ! Global cell graph: all cells with their global point ids, neighbours sharing >=1 point
 ! (with the number of shared points)
 SUBROUTINE build_cell_graph()
-INTEGER(i4) :: i,j,k,l,c,c2,ierr,npair,nup,nn
-INTEGER(i4), ALLOCATABLE :: counts(:),displs(:),iperm(:),upos(:),kp(:),lp(:),cnt(:),tl(:),cperm(:)
+INTEGER(i4) :: i,j,k,l,c,c2,npair,nup,nn
+INTEGER(i4), ALLOCATABLE :: iperm(:),upos(:),kp(:),lp(:),cnt(:),tl(:),cperm(:)
 INTEGER(i8), ALLOCATABLE :: lbuf(:),gbuf(:),pk(:),gpts(:,:),gc(:)
 ALLOCATE(lbuf((1+ncp)*mesh%nc))
 DO i=1,mesh%nc
@@ -185,7 +185,6 @@ DO l=1,2
   IF(l==1)ALLOCATE(lnbr(knbr(ncg+1)-1),cshare(knbr(ncg+1)-1))
 END DO
 DEALLOCATE(lbuf,gbuf,gc,cperm,gpts,pk,iperm,upos,kp,lp,cnt,tl)
-IF(oft_env%head_proc)WRITE(*,'(A,I8,A,I8)')'Global cells: ',ncg,' neighbour pairs: ',knbr(ncg+1)-1
 END SUBROUTINE build_cell_graph
 ! Local row data (global id, owner) and global DoFs of every cell
 SUBROUTINE setup_rows()
@@ -271,7 +270,7 @@ INTEGER(i4), INTENT(in) :: nparts
 TYPE(oft_fem_cell_overlap) :: ovl
 TYPE(oft_overlap_dofs) :: dofs
 TYPE(set8), ALLOCATABLE :: res(:,:,:)
-INTEGER(i4) :: lay,ia,b,i,nb,nh,nhu,nbmax
+INTEGER(i4) :: lay,ia,b,i,nb
 INTEGER(i4), ALLOCATABLE :: dcolor(:)
 CHARACTER(LEN=64) :: tag
 ALLOCATE(dcolor(mat%nr))
@@ -289,11 +288,6 @@ DO lay=0,2
     WRITE(tag,'(A,L1,A,I1,A,I1,A,I1)')'comp=',comp,' nparts=',nparts,' layers=',lay,' adj=',ia
     CALL ovl%build(mat,u,lay,ia,-1,dofs)
     CALL check_build(ovl,dofs,lay,ia,TRIM(tag))
-    nh=oft_mpi_sum(ovl%nhalo)
-    nhu=oft_mpi_sum(ovl%nhalo_used)
-    nbmax=oft_mpi_max(MAXVAL(ovl%blk_cells(:)%n))
-    IF(oft_env%head_proc)WRITE(*,'(2A,4(A,I8))')TRIM(tag),':',' halo=',nh,' used=',nhu, &
-      ' max block cells=',nbmax,' of',ncg
     DO b=1,nb
       res(b,lay,ia)%n=dofs%blk(b)%n
       ALLOCATE(res(b,lay,ia)%v(dofs%blk(b)%n))

@@ -48,7 +48,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_overlap_dofs, overlap_dofs_delete, OFT_ACCESS_READ, &
-  OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE, OFT_CELL_ADJ_FACE
+  OFT_CELL_ADJ_POINT
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_delete
 USE oft_native_solvers, ONLY: oft_schwarz_precond, oft_native_gmres_solver
@@ -101,7 +101,6 @@ CALL u%set(1.d0)
 CALL mop%apply(u,g)
 CALL lag_zerob%apply(g)
 CALL g0%copy(g) ! Solvers overwrite the right-hand side with the residual
-IF(oft_env%head_proc)WRITE(*,'(A,I10,A,I10)')'Global DoFs: ',lop%nrg,' cells: ',mg_mesh%mesh%global%nc
 nfail=0
 its=0
 psig=0_i8
@@ -112,7 +111,6 @@ IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='cell_schwarz.results')
   WRITE(io_unit,'(I0)')nfail
   DO ip=1,2
-    WRITE(*,'(A,I2,A,21I5)')'nparts=',nparts_list(ip),' results: ',its(:,ip)
     WRITE(io_unit,'(*(I0,1X))')its(:,ip)
   END DO
   WRITE(io_unit,'(*(I0,1X))')psig
@@ -132,11 +130,10 @@ INTEGER(i4), INTENT(in) :: nparts
 INTEGER(i4), INTENT(out) :: res(nres)
 INTEGER(i8), INTENT(out) :: sig(4) !< Hashes of the cell partition, DoF colors, graph blocks and cell ranks
 INTEGER(i4) :: kfull,ia,k,nb
-REAL(r8) :: rnorm,t0
+REAL(r8) :: rnorm
 TYPE(oft_overlap_dofs) :: dofs
 CHARACTER(LEN=16) :: tag
 WRITE(tag,'(A,I1)')' nparts=',nparts
-t0=omp_get_wtime()
 CALL fem_cell_overlap_create(cbld,mg_mesh,ML_oft_lagrange%current_level,nparts)
 lop%cell_ovl=>cbld
 nb=cbld%nblocks()
@@ -156,7 +153,6 @@ END DO
 CALL overlap_dofs_delete(dofs)
 IF(kfull<0)CALL oft_abort('Blocks do not cover the mesh','run_cases',__FILE__)
 res(1)=kfull
-CALL timing('Covering layers',tag,t0)
 !---Reference solution (graph overlap, converged tightly)
 res(13)=solve(nparts,1,.FALSE.,OFT_CELL_ADJ_POINT,.FALSE.,x,rnorm,rtol=1.d-12)
 !---Exactness: restricted converges in one iteration to the reference solution
@@ -180,7 +176,6 @@ IF(nparts==1)THEN
   CALL check_tol('Exact graph subdomains, additive: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-6)
   kfull=res(1)
 END IF
-CALL timing('Exactness',tag,t0)
 !---Iteration counts: (point, edge, face) x layers 0-2, graph overlap 0-2
 DO ia=1,3
   DO k=0,2
@@ -192,16 +187,13 @@ END DO
 res(21)=solve(nparts,1,.TRUE.,OFT_CELL_ADJ_POINT,.TRUE.,v,rnorm,weighted=.TRUE.)
 CALL check_tol('Cell mode weighted converged'//tag,rnorm,1.d-9)
 CALL check_tol('Cell mode weighted solution'//tag,maxdiff(v,x)/maxabs(x),1.d-5)
-CALL timing('Cell mode counts',tag,t0)
 gsig=0_i8
 DO k=0,2
   res(13+k)=solve(nparts,k,.FALSE.,OFT_CELL_ADJ_POINT,.FALSE.,v,rnorm)
 END DO
 sig(3)=gsig
-CALL timing('Graph mode counts',tag,t0)
 !---Numeric update and delete/re-setup
 CALL check_update(nparts,res(16:19))
-CALL timing('Update and re-setup',tag,t0)
 NULLIFY(lop%cell_ovl)
 CALL cbld%delete
 END SUBROUTINE run_cases
@@ -224,15 +216,7 @@ DO k=0,128
   IF(kg>=0)EXIT
 END DO
 IF(kg<0)CALL oft_abort('Graph subdomains do not cover the mesh','graph_cover',__FILE__)
-IF(oft_env%head_proc)WRITE(*,'(A,I4)')'Graph layers covering the mesh: ',kg
 END FUNCTION graph_cover
-! Print the wall time since the last call (or `t0` set by the caller)
-SUBROUTINE timing(label,tag,t0)
-CHARACTER(LEN=*), INTENT(in) :: label,tag
-REAL(r8), INTENT(inout) :: t0
-IF(oft_env%head_proc)WRITE(*,'(3A,F10.2,A)')'Time: ',label,tag,omp_get_wtime()-t0,' s'
-t0=omp_get_wtime()
-END SUBROUTINE timing
 ! Solve the Laplace problem with GMRES preconditioned by Schwarz (cell or graph mode)
 ! with direct sub-solves, returning the iteration count and relative residual
 ! (weighted: partition of unity additive)

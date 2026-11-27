@@ -229,7 +229,7 @@ SUBROUTINE run_case(plan,rep,weighted,rev,mode,masked,noloc,split)
 TYPE(oft_scatter_plan), INTENT(inout) :: plan
 LOGICAL, INTENT(in) :: rep,weighted,rev,masked,noloc,split
 INTEGER(i4), INTENT(in) :: mode
-INTEGER(i4) :: i,np
+INTEGER(i4) :: i
 LOGICAL :: mask(m)
 REAL(r8) :: xr(m),yr(m)
 COMPLEX(c8) :: xc(m),yc(m),yref(m)
