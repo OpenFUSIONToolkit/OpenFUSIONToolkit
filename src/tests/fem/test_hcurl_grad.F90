@@ -66,7 +66,7 @@ USE oft_h1_operators, ONLY: h1_setup_interp
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop, hcurl_grad_setup_interp, hcurl_grad_getmop_pre, hcurl_grad_mloptions, &
-  oft_hcurl_grad_rinterp, oft_hcurl_grad_gzerop, oft_hcurl_grad_zerob, oft_hcurl_grad_project
+  oft_hcurl_grad_rinterp, oft_hcurl_grad_gzerop, oft_hcurl_grad_zerob, oft_hcurl_grad_project, oft_ml_hcurl_grad_vecspace
 USE test_hcurl_grad_helpers, ONLY: tang_zero_field
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit,minlev
@@ -76,13 +76,14 @@ TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
 TYPE(oft_hcurl_grad_zerob), TARGET :: hcurl_grad_zerob
-LOGICAL :: mg_test,zerob_test
-NAMELIST/test_hcurl_grad_options/order,mg_test,zerob_test
+LOGICAL :: mg_test,zerob_test,adjoint_test
+NAMELIST/test_hcurl_grad_options/order,mg_test,zerob_test,adjoint_test
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
 mg_test=.FALSE.
 zerob_test=.FALSE.
+adjoint_test=.FALSE.
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_hcurl_grad_options,IOSTAT=ierr)
 CLOSE(io_unit)
@@ -97,21 +98,23 @@ IF(oft_env%nprocs>1)minlev=mg_mesh%nbase+1
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgdim
 !--- Grad(H^1) subspace
 CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=minlev)
-IF(mg_test)CALL h1_setup_interp(ML_oft_h1)
+IF(mg_test.OR.adjoint_test)CALL h1_setup_interp(ML_oft_h1)
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
-IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
+IF(mg_test.OR.adjoint_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 !--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,minlev=minlev)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 hcurl_grad_zerob%ML_hcurl_grad_rep=>ML_hcurl_grad
-IF(mg_test)THEN
+IF(mg_test.OR.adjoint_test)THEN
   CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1,create_full=.TRUE.)
   CALL hcurl_grad_mloptions
 END IF
 !---Run tests
 oft_env%pm=.FALSE.
-IF(zerob_test)THEN
+IF(adjoint_test)THEN
+  CALL test_mg_adjoint
+ELSE IF(zerob_test)THEN
   CALL test_mop_zerob
 ELSE IF(mg_test)THEN
   CALL test_mopmg
@@ -292,4 +295,54 @@ CALL v%delete
 CALL w%delete
 CALL rhs%delete
 END SUBROUTINE test_mop_zerob
+!---------------------------------------------------------------------------------
+! Verify exact adjointness <y_f, P x_c> == <R y_f, x_c> across geometric MG level
+!---------------------------------------------------------------------------------
+SUBROUTINE test_mg_adjoint
+TYPE(oft_ml_hcurl_grad_vecspace) :: ml_vs
+CLASS(oft_vector), POINTER :: xc,yc,xf,yf
+REAL(r8) :: lhs,rhs,rel_err
+REAL(r8), POINTER :: vals(:) => NULL()
+INTEGER(i4) :: i
+ml_vs%ML_FE_rep=>ML_hcurl_grad
+!---Create coarse and fine test vectors across the top geometric level
+CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels-1,propogate=.TRUE.)
+CALL ML_hcurl_grad%vec_create(xc)
+CALL ML_hcurl_grad%vec_create(yc)
+CALL xc%get_local(vals)
+DO i=1,SIZE(vals)
+  vals(i)=SIN(REAL(i,r8)*0.37d0 + 0.1d0)
+END DO
+CALL xc%restore_local(vals,add=.TRUE.)
+DEALLOCATE(vals)
+CALL hcurl_grad_gzerop%apply(xc)
+!---Fine level vectors
+CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
+CALL ML_hcurl_grad%vec_create(xf)
+CALL ML_hcurl_grad%vec_create(yf)
+CALL yf%get_local(vals)
+DO i=1,SIZE(vals)
+  vals(i)=COS(REAL(i,r8)*0.53d0 + 0.2d0)
+END DO
+CALL yf%restore_local(vals,add=.TRUE.)
+DEALLOCATE(vals)
+!---Compute <y_f, interp(x_c)>
+CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels-1,propogate=.TRUE.)
+CALL ml_vs%interp(xc,xf)
+lhs=yf%dot(xf)
+!---Compute <inject(y_f), x_c>
+CALL ml_vs%inject(yf,yc)
+rhs=yc%dot(xc)
+rel_err=ABS(lhs-rhs)/MAX(ABS(lhs),ABS(rhs),1.d-30)
+IF(oft_env%head_proc)THEN
+  OPEN(NEWUNIT=io_unit,FILE='hcurl_grad.results')
+  WRITE(io_unit,*)rel_err
+  CLOSE(io_unit)
+END IF
+CALL xc%delete
+CALL yc%delete
+CALL xf%delete
+CALL yf%delete
+DEALLOCATE(xc,yc,xf,yf)
+END SUBROUTINE test_mg_adjoint
 end program test_hcurl_grad

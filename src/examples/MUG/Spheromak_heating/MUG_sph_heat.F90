@@ -80,7 +80,7 @@ REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: plot_run=.FALSE.
 LOGICAL :: pm=.FALSE.
-NAMELIST/sph_heat_options/order,b0_scale,n0,t0,plot_run,pm
+NAMELIST/sph_heat_options/order,minlev,b0_scale,n0,t0,plot_run,pm
 !!\subsection doc_mug_sph_ex2_code_setup OFT Initialization
 !! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
@@ -92,7 +92,6 @@ CLOSE(io_unit)
 ! Setup grid
 !------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
-IF((minlev<mg_mesh%mgdim).AND.(minlev/=-1))CALL oft_abort("Only polynomial MG currently supported for xMHD","main",__FILE__)
 !------------------------------------------------------------------------------
 ! Build FE structures
 !------------------------------------------------------------------------------

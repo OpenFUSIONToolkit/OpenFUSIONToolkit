@@ -1741,17 +1741,78 @@ subroutine ml_vecspace_inject(self,afine,acors)
 class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+INTEGER(i4) :: i,j,k
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: owned
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: agrad,acurl,tmp
+CLASS(oft_mesh), POINTER :: mesh
+CLASS(oft_ml_fem_type), POINTER :: ML_curl
+CLASS(oft_fem_type), POINTER :: curl_rep
+CLASS(oft_vector), POINTER :: ftmp
 DEBUG_STACK_PUSH
-! Step down level down
-call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
-call acors%set(0.d0)
-if(self%ML_FE_rep%level==self%ML_FE_rep%blevel)then
+!---Check for base transfer
+IF(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)THEN
+  CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
+  CALL acors%set(0.d0)
   IF(.NOT.ASSOCIATED(self%base_push))CALL oft_abort("Base transfer not defined","ml_vecspace_inject",__FILE__)
-  call self%base_push(afine,acors)
+  CALL self%base_push(afine,acors)
   DEBUG_STACK_POP
-  return
-end if
-CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
+  RETURN
+END IF
+!---Apply transpose of geometric gradient subspace correction on fine level
+ML_curl=>self%ML_FE_rep%ml_fields(1)%ml
+IF(ML_curl%current_level%order==1)THEN
+  SELECT TYPE(this=>ML_curl%current_level)
+    CLASS IS(oft_fem_type)
+      curl_rep=>this
+      mesh=>this%mesh
+    CLASS DEFAULT
+      CALL oft_abort("Invalid FE type","ml_vecspace_inject",__FILE__)
+  END SELECT
+  CALL afine%new(ftmp)
+  CALL ftmp%copy(afine)
+  NULLIFY(acurl,agrad,tmp)
+  CALL ftmp%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
+  !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    agrad(i)=0.d0
+  END DO
+  !---Every process zeroes all vertex entries consistently, so no sync is needed
+  CALL ftmp%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+  !---Count each edge once across MPI seams and periodic boundaries
+  ALLOCATE(owned(mesh%ne))
+  owned=.TRUE.
+  DO i=1,curl_rep%linkage%nbe
+    owned(curl_rep%linkage%lbe(i))=curl_rep%linkage%leo(i)
+  END DO
+  CALL afine%borrow_local(acurl,OFT_ACCESS_READ,1)
+  CALL ftmp%borrow_local(tmp,OFT_ACCESS_ACCUMULATE,2)
+  !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    DO j=mesh%kpe(i),mesh%kpe(i+1)-1
+      k=mesh%lpe(j)
+      IF(.NOT.owned(k))CYCLE
+      IF(mesh%global%le(k)<0)THEN
+        tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      ELSE
+        tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      END IF
+    END DO
+  END DO
+  CALL afine%release_local(acurl,OFT_ACCESS_READ,sync=.FALSE.,iblock=1)
+  CALL ftmp%release_local(tmp,OFT_ACCESS_ACCUMULATE,sync=.TRUE.,iblock=2)
+  DEALLOCATE(owned)
+  !---Step one level down and restrict
+  CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
+  CALL acors%set(0.d0)
+  CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(ftmp,acors)
+  CALL ftmp%delete
+  DEALLOCATE(ftmp)
+ELSE
+  !---Step one level down and restrict
+  CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
+  CALL acors%set(0.d0)
+  CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
+END IF
 DEBUG_STACK_POP
 end subroutine ml_vecspace_inject
 !------------------------------------------------------------------------------

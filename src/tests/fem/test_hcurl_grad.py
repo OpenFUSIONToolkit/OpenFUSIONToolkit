@@ -35,21 +35,23 @@ oft_in_template = """
  order={2}
  mg_test={4}
  zerob_test={8}
+ adjoint_test={9}
 /
 """
 
 # Common setup function and process handling
-def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=False, zerob=False):
+def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=False, zerob=False, adjoint=False):
     petsc_flag=('T' if petsc else 'F')
     mg_flag=('T' if mg else 'F')
     zerob_flag=('T' if zerob else 'F')
+    adjoint_flag=('T' if adjoint else 'F')
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag, zerob_flag))
+        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag, zerob_flag, adjoint_flag))
     return run_OFT("./test_hcurl_grad", nproc, 120)
 
 def validate_result(iteration_count,converged_error):
@@ -222,3 +224,17 @@ def test_zerob_proj(order, exp_error, mpi, petsc_flag):
 def test_hex_zerob_proj(order, exp_error, mpi, petsc_flag):
     """Same as test_zerob_proj on a hex cube, exercising the hex vertex/boundary DOF layout."""
     zerob_projection(3, order, exp_error, grid_type=2, mpi=mpi, petsc=petsc_flag)
+
+#============================================================================
+# Geometric MG prolongation/restriction adjointness test (<y, P x> == <R y, x>)
+@pytest.mark.parametrize("mpi", (False, True))
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_mg_adjoint(mpi, petsc_flag):
+    """Verify exact transpose relationship between geometric interp and inject for H(curl)+Grad(H^1)."""
+    if mpi:
+        assert hcurl_grad_setup(1, 3, 1, 1, petsc=petsc_flag, adjoint=True)
+    else:
+        assert hcurl_grad_setup(3, 3, 1, 1, petsc=petsc_flag, adjoint=True)
+    with open('hcurl_grad.results', 'r') as fid:
+        rel_err = float(fid.readline())
+    assert rel_err < 1.E-12
