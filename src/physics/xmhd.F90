@@ -1687,6 +1687,9 @@ allocate(mtmp(xmhd_rep%nfields,xmhd_rep%nfields),mtmp_solid(xmhd_rep%nfields,xmh
 CALL xmhd_rep%mat_setup_local(mtmp, xmhd_mat_mask)
 mtmp_solid(1,1)%m=>mtmp(1,1)%m; mtmp_solid(1,2)%m=>mtmp(1,2)%m
 mtmp_solid(2,1)%m=>mtmp(2,1)%m; mtmp_solid(2,2)%m=>mtmp(2,2)%m
+!---Share entry-position tables (reset by mat_zero_local(mtmp))
+mtmp_solid(1,1)%ind=>mtmp(1,1)%ind; mtmp_solid(1,2)%ind=>mtmp(1,2)%ind
+mtmp_solid(2,1)%ind=>mtmp(2,1)%ind; mtmp_solid(2,2)%ind=>mtmp(2,2)%ind
 allocate(iloc(xmhd_rep%nfields))
 iloc(1)%v=>j_hcurl
 iloc(2)%v=>j_hgrad

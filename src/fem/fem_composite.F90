@@ -433,76 +433,93 @@ DEALLOCATE(graphs,tmp_vec)
 DEBUG_STACK_POP
 end subroutine fem_mat_create
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Allocate local (cell) matrix blocks for use with @ref fem_mat_add_local
+!!
+!! Each unmasked block `mloc(i,j)` gets a value array `m` and an entry-position
+!! table `ind`, used as `loc_cache` by `add_values` (see
+!! @ref oft_native_la::native_locate "native_locate"). Blocks with the same pair
+!! of FE types share one table, owned by the first unmasked block (in loop order)
+!! with that pair; the other blocks point to it. This relies on blocks with the
+!! same pair of FE types sharing one matrix graph, as in @ref fem_graph_create.
+!!
+!! @note The tables are only valid for one set of row/column indices, so
+!! @ref fem_mat_zero_local must be called for each new cell, and `mloc` must be
+!! private to each thread.
 !------------------------------------------------------------------------------
 subroutine fem_mat_setup_local(self,mloc,mask)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
-TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:)
-INTEGER(i4), OPTIONAL, INTENT(in) :: mask(:,:)
+TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:) !< Local matrix blocks [nfields,nfields]
+INTEGER(i4), OPTIONAL, INTENT(in) :: mask(:,:) !< Block mask (only blocks with `mask==1` are allocated) [nfields,nfields]
 INTEGER(i4) :: i,j,k,nknown_graphs
-INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: mat_mask,graph_ids,known_graphs
+INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: mat_mask,graph_ids,graph_owners
 DEBUG_STACK_PUSH
 ALLOCATE(mat_mask(self%nfields,self%nfields))
 mat_mask=1
 IF(PRESENT(mask))mat_mask=mask
-!---Populate known graphs
-ALLOCATE(known_graphs(2,self%nfields*self%nfields))
 ALLOCATE(graph_ids(2,self%nfields*self%nfields))
-graph_ids=0
+ALLOCATE(graph_owners(2,self%nfields*self%nfields))
 nknown_graphs=0
 DO i=1,self%nfields
   DO j=1,self%nfields
+    IF(mat_mask(i,j)/=1)CYCLE
+    ALLOCATE(mloc(i,j)%m(self%fields(i)%fe%nce,self%fields(j)%fe%nce))
     DO k=1,nknown_graphs
       IF(ALL(graph_ids(:,k)==(/self%fields(i)%fe%type,self%fields(j)%fe%type/)))EXIT
     END DO
-    IF(k<=nknown_graphs)CYCLE
-    nknown_graphs=nknown_graphs+1
-    graph_ids(:,nknown_graphs)=(/self%fields(i)%fe%type,self%fields(j)%fe%type/)
-    known_graphs(:,nknown_graphs)=(/i,j/)
-  END DO
-END DO
-!---
-DO i=1,self%nfields
-  DO j=1,self%nfields
-    IF(mat_mask(i,j)==1)THEN
-      ALLOCATE(mloc(i,j)%m(self%fields(i)%fe%nce,self%fields(j)%fe%nce))
-      DO k=1,nknown_graphs
-        IF(ALL(graph_ids(:,k)==(/self%fields(i)%fe%type,self%fields(j)%fe%type/)))EXIT
-      END DO
-      IF(k<=nknown_graphs)THEN
-        mloc(i,j)%ind=>mloc(known_graphs(1,k),known_graphs(2,k))%ind
-      ELSE
-        ALLOCATE(mloc(i,j)%ind(self%fields(i)%fe%nce,self%fields(j)%fe%nce))
-      END IF
+    IF(k<=nknown_graphs)THEN
+      !---Share table of first unmasked block with this graph
+      mloc(i,j)%ind=>mloc(graph_owners(1,k),graph_owners(2,k))%ind
+    ELSE
+      !---First unmasked block with this graph owns the table
+      nknown_graphs=nknown_graphs+1
+      graph_ids(:,nknown_graphs)=(/self%fields(i)%fe%type,self%fields(j)%fe%type/)
+      graph_owners(:,nknown_graphs)=(/i,j/)
+      ALLOCATE(mloc(i,j)%ind(self%fields(i)%fe%nce,self%fields(j)%fe%nce))
+      mloc(i,j)%ind=0
     END IF
   END DO
 END DO
-DEALLOCATE(mat_mask,known_graphs,graph_ids)
+DEALLOCATE(mat_mask,graph_ids,graph_owners)
 DEBUG_STACK_POP
 end subroutine fem_mat_setup_local
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Deallocate local (cell) matrix blocks created by @ref fem_mat_setup_local
+!!
+!! Entry-position tables shared by several blocks are deallocated once, and all
+!! blocks pointing to them are nullified.
 !------------------------------------------------------------------------------
 subroutine fem_mat_destroy_local(self,mloc)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
-TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:)
-INTEGER(i4) :: i,j
+TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:) !< Local matrix blocks [nfields,nfields]
+INTEGER(i4) :: i,j,k,l
+INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:,:) :: ind_tmp
 DEBUG_STACK_PUSH
 !---
 DO i=1,self%nfields
   DO j=1,self%nfields
-    IF(ASSOCIATED(mloc(i,j)%m))deallocate(mloc(i,j)%m)
-    IF(ASSOCIATED(mloc(i,j)%ind))deallocate(mloc(i,j)%ind)
+    IF(ASSOCIATED(mloc(i,j)%m))DEALLOCATE(mloc(i,j)%m)
+    IF(ASSOCIATED(mloc(i,j)%ind))THEN
+      ind_tmp=>mloc(i,j)%ind
+      DO k=1,self%nfields
+        DO l=1,self%nfields
+          IF(ASSOCIATED(mloc(k,l)%ind,ind_tmp))NULLIFY(mloc(k,l)%ind)
+        END DO
+      END DO
+      DEALLOCATE(ind_tmp)
+    END IF
   END DO
 END DO
 DEBUG_STACK_POP
 end subroutine fem_mat_destroy_local
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero local (cell) matrix blocks and invalidate their entry-position tables
+!!
+!! Must be called for each new cell before @ref fem_mat_add_local, as the
+!! entry-position tables are only valid for one set of row/column indices.
 !------------------------------------------------------------------------------
 subroutine fem_mat_zero_local(self,mloc)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
-TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:)
+TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:) !< Local matrix blocks [nfields,nfields]
 INTEGER(i4) :: i,j
 DEBUG_STACK_PUSH
 !---

@@ -1562,6 +1562,7 @@ CALL xmhd_rep%mat_setup_local(mtmp, xmhd_mat_mask)
 DO li=1,3
   DO lj=1,3
     mtmp_solid(li,lj)%m=>mtmp(li,lj)%m
+    mtmp_solid(li,lj)%ind=>mtmp(li,lj)%ind ! Share entry-position tables (reset by mat_zero_local(mtmp))
   END DO
 END DO
 allocate(iloc(xmhd_rep%nfields))
