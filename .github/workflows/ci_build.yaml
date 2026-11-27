@@ -190,7 +190,7 @@ jobs:
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
-      timeout-minutes: 30
+      timeout-minutes: 45
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
@@ -199,7 +199,7 @@ jobs:
     - name: Build external (MPICH+OpenMP)
       if: startsWith(matrix.parallel, 'mpich')
       shell: bash
-      timeout-minutes: 60
+      timeout-minutes: 90
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh

@@ -137,9 +137,9 @@ def test_ITER_stability(order):
         'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [18.421737542246518, 27.49498837155886][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),'stab',1.0))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab',1.0),timeout=90)
     assert validate_dict(results,exp_dict)
-    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep',1.0))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep',1.0),timeout=90)
     assert validate_dict(results,exp_dict)
 
 

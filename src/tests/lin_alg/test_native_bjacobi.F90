@@ -12,7 +12,13 @@
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
 !! - Solve the same system with a direct solve of the full distributed system (`dist_lu`),
 !!   then check refactorization against a fresh factorization after small and large changes
-!!   in matrix values (same pattern) and, for distributed runs, after changing the sparsity pattern
+!!   in matrix values (same pattern), and after changing the sparsity pattern (distributed runs)
+!!   or requesting a full refactorization (serial runs)
+!! - Solve the same system using the LU or ILU solver directly as the preconditioner
+!!   (`direct_pre`, without block-Jacobi)
+!! - Serial runs of the above on a grid with periodic directions (set by `ref_per` in
+!!   `cube_options`), where the local matrix contains redundant rows for periodic images.
+!!   This requires `grnd_dir` to place the grounding point on a non-periodic face.
 !!
 !! @authors Chris Hansen
 !! @date May 2014
@@ -37,6 +43,7 @@ USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 INTEGER(i4), PARAMETER :: order=3
+REAL(r8) :: grnd_pt(3)
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
@@ -44,7 +51,9 @@ INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1
 LOGICAL :: use_ilu = .FALSE.
 LOGICAL :: dist_lu = .FALSE.
-NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu
+LOGICAL :: direct_pre = .FALSE. ! Use LU/ILU solver directly as preconditioner (implied by `dist_lu`)
+INTEGER(i4) :: grnd_dir = 0 ! Direction of grounding reference point (0 -> mesh default)
+NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu,direct_pre,grnd_dir
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -55,6 +64,8 @@ CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_bj_options,IOSTAT=ierr)
 CLOSE(io_unit)
+IF((grnd_dir<0).OR.(grnd_dir>3))CALL oft_abort('"grnd_dir" must be in the range [0,3]','main',__FILE__)
+IF(dist_lu.AND.use_ilu)CALL oft_abort('"dist_lu" cannot be used with "use_ilu"','main',__FILE__)
 !---Check available solvers
 #if !defined( HAVE_SUPERLU )
 IF(sol_type==1)THEN
@@ -98,7 +109,13 @@ IF((sol_type==6).AND.dist_lu.AND.(oft_env%nprocs>1))THEN
 END IF
 #endif
 !---Setup grid
-CALL multigrid_construct(mg_mesh)
+IF(grnd_dir>0)THEN
+  grnd_pt=0.d0
+  grnd_pt(grnd_dir)=2.d0
+  CALL multigrid_construct(mg_mesh,grnd_pt)
+ELSE
+  CALL multigrid_construct(mg_mesh)
+END IF
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)
@@ -154,7 +171,13 @@ linv%its=-3
 linv%itplot=1
 linv%nrits=20
 linv%pre=>linv_pre
-IF(dist_lu)linv%pre=>linv_pre_lu
+IF(dist_lu.OR.direct_pre)THEN
+  IF(use_ilu)THEN
+    linv%pre=>linv_pre_ilu
+  ELSE
+    linv%pre=>linv_pre_lu
+  END IF
+END IF
 !---Setup preconditioner
 IF(nlocal>0)THEN
   linv_pre%nlocal=nlocal
@@ -219,6 +242,13 @@ IF(dist_lu)THEN
   CALL scale_entries(lag_rep,lop_native,7,20.d0)
   CALL linv_pre_lu%update(sol_type==6)
   CALL check_lu(linv_pre_lu,lop,v)
+  !---Full refactorization requested (serial only), which reinitializes the solver package
+  !---state (and the locally-owned submatrix on periodic grids)
+  IF(oft_env%nprocs==1)THEN
+    CALL scale_entries(lag_rep,lop_native,13,0.9d0)
+    CALL linv_pre_lu%update(.TRUE.)
+    CALL check_lu(linv_pre_lu,lop,v)
+  END IF
   !---New pattern: drop a symmetric subset of off-diagonal entries (distributed only), which
   !---must be detected automatically as local factorizations require `update(.TRUE.)`
   IF(oft_env%nprocs>1)THEN

@@ -105,6 +105,7 @@ foreach(LIB_NAME amd btf camd ccolamd cholmod colamd klu spqr suitesparseconfig 
 endforeach()
 find_path(UMFPACK_INCLUDE_DIR
   NAMES umfpack.h
+  PATH_SUFFIXES suitesparse
 )
 if( UMFPACK_TMP_LIBRARIES AND UMFPACK_INCLUDE_DIR )
   set(OFT_UMFPACK_FOUND TRUE)
