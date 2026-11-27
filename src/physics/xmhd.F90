@@ -373,27 +373,6 @@ LOGICAL :: xmhd_diss_centered = .FALSE. !< Time-center dissipation terms
 LOGICAL :: xmhd_lin_bdf2 = .TRUE. !< Use BDF2 time integration for linear runs (otherwise backward Euler)
 LOGICAL :: xmhd_lin_euler_start = .FALSE. !< Start linear BDF2 runs with one backward Euler step
 LOGICAL :: xmhd_skip_update = .FALSE. !< Internal flag for skipping Jac update
-!---Profiling counters (timing and memory only; reported by \ref xmhd_prof_report, never affect results)
-INTEGER(i4), PARAMETER :: xmhd_prof_maxlev = 20 !< Max levels tracked by profiling counters
-REAL(r8) :: xmhd_prof_tbuild(xmhd_prof_maxlev) = 0.d0 !< Accumulated Jacobian build time per level [s]
-INTEGER(i4) :: xmhd_prof_nbuild(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level
-INTEGER(i4) :: xmhd_prof_nbuild_qc(xmhd_prof_maxlev) = 0 !< Number of Jacobian builds per level on the quadrature cache
-LOGICAL :: xmhd_prof_finemesh(xmhd_prof_maxlev) = .FALSE. !< Level built on finest mesh (full field interpolation)?
-INTEGER(i4) :: xmhd_prof_order(xmhd_prof_maxlev) = 0 !< Lagrange order of each level
-INTEGER(i8) :: xmhd_prof_posmap_mem(xmhd_prof_maxlev) = 0 !< Memory of the CSR position map per level [bytes]
-REAL(r8) :: xmhd_prof_posmap_time(xmhd_prof_maxlev) = 0.d0 !< Accumulated setup time of the CSR position map per level [s]
-REAL(r8) :: xmhd_prof_tsetops = 0.d0 !< Accumulated time in xmhd_set_ops [s]
-INTEGER(i4) :: xmhd_prof_nsetops = 0 !< Number of calls to xmhd_set_ops (excluding skipped updates)
-REAL(r8) :: xmhd_prof_tnlop = 0.d0 !< Accumulated time in xmhd_errmatrix_apply [s]
-INTEGER(i4) :: xmhd_prof_nnlop = 0 !< Number of calls to xmhd_errmatrix_apply
-REAL(r8) :: xmhd_prof_tpre = 0.d0 !< Accumulated time in preconditioner updates (eg. factorization) [s]
-INTEGER(i4) :: xmhd_prof_npre = 0 !< Number of preconditioner updates
-REAL(r8) :: xmhd_prof_tqcache = 0.d0 !< Accumulated quadrature-cache setup time [s]
-INTEGER(i8) :: xmhd_prof_qcache_mem = 0 !< Memory of the most recently built finest-level quadrature cache [bytes]
-INTEGER(i8) :: xmhd_prof_jcache_mem = 0 !< Accumulated memory of the coarse-level Jacobian quadrature caches built [bytes]
-!> Repetition counts used by profile mode (Jacobian builds, NL applies per build, matvecs per NL apply);
-!! 0 skips NL applies/matvecs
-INTEGER(i4), PUBLIC :: xmhd_prof_reps(3) = [10,10,10]
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
 INTEGER(i4) :: n2_ind = -1 !< Index of hyper-diff aux field
 INTEGER(i4) :: j2_ind = -1 !< Index of hyper-res aux field
@@ -523,7 +502,6 @@ CLASS(oft_h1_fem), POINTER :: oft_hgrad => NULL()
 !------------------------------------------------------------------------------
 PUBLIC xmhd_run, oft_xmhd_push, oft_xmhd_pop, xmhd_driver_apply, xmhd_minlev
 PUBLIC xmhd_taxis, xmhd_plot, xmhd_probe_apply, xmhd_lin_run, xmhd_bnorm_force
-PUBLIC xmhd_prof_report
 CONTAINS
 !------------------------------------------------------------------------------
 !> Read settings for extended MHD model from input files
@@ -730,7 +708,7 @@ class(oft_vector), pointer :: u,v,up
 type(xmhd_sub_fields) :: sub_fields
 type(oft_hcurl_grad_rinterp), target :: Bfield
 type(oft_hcurl_grad_dinterp) :: divfield
-type(oft_timer) :: mytimer,prof_timer
+type(oft_timer) :: mytimer
 real(r8), pointer :: vals(:)
 integer(i4) :: i,j,k,ierr,io_unit,io_stat,rst_version,rst_tmp,baseit,nredo,nl_update
 integer(i4) :: itcount(XMHD_ITCACHE)
@@ -1118,10 +1096,7 @@ DO i=1,nsteps
       CALL xmhd_set_ops(u)
       xmhd_skip_update=.TRUE.
       IF(rst_ind==0.AND.i<3*xmhd_prefreq)force_refactor=.TRUE.
-      CALL prof_timer%tick
       CALL xmhd_pre%update(force_refactor)
-      xmhd_prof_tpre=xmhd_prof_tpre+prof_timer%tock()
-      xmhd_prof_npre=xmhd_prof_npre+1
       force_refactor=.FALSE.
       xmhd_opdt=dt
       xmhd_opcount=0
@@ -1170,10 +1145,7 @@ DO i=1,nsteps
         xmhd_skip_update=.FALSE.
         CALL xmhd_set_ops(u)
         xmhd_skip_update=.TRUE.
-        CALL prof_timer%tick
         CALL xmhd_pre%update(force_refactor)
-        xmhd_prof_tpre=xmhd_prof_tpre+prof_timer%tock()
-        xmhd_prof_npre=xmhd_prof_npre+1
         force_refactor=.FALSE.
         xmhd_opdt=dt
         xmhd_opcount=0
@@ -2798,10 +2770,6 @@ CLASS IS(oft_native_matrix)
   pm%lc_ref=>Jac%lc
   pm%mem=4_i8*SIZE(pm%rel,KIND=i8)
   pm%setup_time=mytimer%tock()
-  IF(xmhd_level<=xmhd_prof_maxlev)THEN
-    xmhd_prof_posmap_mem(xmhd_level)=pm%mem
-    xmhd_prof_posmap_time(xmhd_level)=xmhd_prof_posmap_time(xmhd_level)+pm%setup_time
-  END IF
   IF(oft_env%head_proc.AND.(oft_env%pm.OR.oft_debug_print(1)))THEN
     WRITE(*,'(2X,A,I3,A,F10.4,A,F12.3,A)')'xMHD Jacobian position map (level ',xmhd_level,'): setup ', &
       pm%setup_time,' s, ',REAL(pm%mem,8)/1.d6,' MB (rank 0)'
@@ -3057,7 +3025,6 @@ ELSE
   CALL xmhd_jac_posmap_delete(oft_xmhd_ops)
 END IF
 IF(use_qc)THEN
-  IF(xmhd_level<=xmhd_prof_maxlev)xmhd_prof_nbuild_qc(xmhd_level)=xmhd_prof_nbuild_qc(xmhd_level)+1
   SELECT TYPE(fullin)
   CLASS IS(xmhd_interp)
     CALL xmhd_jac_qcache(plan,jqc,fqc,fullin,Jac,jac_nolock,tlocks)
@@ -4594,8 +4561,6 @@ qc%mem=qc%geom%mem()+qc%lag%mem()+qc%hgrad%mem()+qc%hcurl%mem() &
   + 4_i8*(SIZE(qc%dofs_lag,KIND=i8)+SIZE(qc%dofs_hgrad,KIND=i8)+SIZE(qc%dofs_hcurl,KIND=i8)) &
   + 8_i8*SIZE(qc%he,KIND=i8)
 qc%setup_time=mytimer%tock()
-xmhd_prof_tqcache=xmhd_prof_tqcache+qc%setup_time
-xmhd_prof_qcache_mem=qc%mem
 IF(oft_env%head_proc.AND.(oft_env%pm.OR.oft_debug_print(1)))THEN
   WRITE(*,'(2X,A,F10.4,A,F12.3,A)')'xMHD quadrature cache: setup ', &
     qc%setup_time,' s, ',REAL(qc%mem,8)/1.d6,' MB (rank 0)'
@@ -4662,8 +4627,6 @@ qc%mem=qc%mem+qc%lag%mem()+qc%hgrad%mem()+qc%hcurl%mem() &
   + 4_i8*(SIZE(qc%dofs_lag,KIND=i8)+SIZE(qc%dofs_hgrad,KIND=i8)+SIZE(qc%dofs_hcurl,KIND=i8)) &
   + 8_i8*SIZE(qc%he,KIND=i8)
 qc%setup_time=mytimer%tock()
-xmhd_prof_tqcache=xmhd_prof_tqcache+qc%setup_time
-xmhd_prof_jcache_mem=xmhd_prof_jcache_mem+qc%mem
 IF(oft_env%head_proc.AND.(oft_env%pm.OR.oft_debug_print(1)))THEN
   WRITE(*,'(2X,A,I3,A,F10.4,A,F12.3,A)')'xMHD Jacobian quadrature cache (level ',xmhd_level,'): setup ', &
     qc%setup_time,' s, ',REAL(qc%mem,8)/1.d6,' MB (rank 0)'
@@ -5026,10 +4989,8 @@ logical :: curved,back_step,need_pt,use_qc,act(10),act_fluid(10),act_solid(10)
 type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
-type(oft_timer) :: prof_timer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
-CALL prof_timer%tick
 quad=>oft_hcurl%quad
 neg_vols=0.d0
 !------------------------------------------------------------------------------
@@ -5338,8 +5299,6 @@ IF(neg_vols(2)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Ti volume 
 IF(xmhd_two_temp)THEN
   IF(neg_vols(3)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Te volume   = ',REAL(neg_vols(3),4)
 END IF
-xmhd_prof_tnlop=xmhd_prof_tnlop+prof_timer%tock()
-xmhd_prof_nnlop=xmhd_prof_nnlop+1
 DEBUG_STACK_POP
 end subroutine xmhd_errmatrix_apply
 !------------------------------------------------------------------------------
@@ -6096,16 +6055,14 @@ TYPE(xmhd_interp) :: full_interp
 TYPE(cc_interp) :: fullcc_interp
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: fullcc,fullcctmp
 integer(i4) :: i,l,k,levelin,minlev,qorder,nfields
-real(r8) :: tlev
 logical :: use_qc,jqc_ok
 TYPE(xmhd_qcache_data), POINTER :: fqc
-type(oft_timer) :: mytimer,lev_timer
+type(oft_timer) :: mytimer
 IF(xmhd_skip_update)THEN
   xmhd_skip_update=.FALSE.
   RETURN
 END IF
 IF(oft_debug_print(1))write(*,'(2X,A)')'Update xMHD Jacobians'
-CALL mytimer%tick
 !------------------------------------------------------------------------------
 ! Setup interpolators
 !------------------------------------------------------------------------------
@@ -6131,7 +6088,6 @@ IF(n2_ind>0)nfields=34
 IF(j2_ind>0)nfields=40
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
-  CALL lev_timer%tick
 !------------------------------------------------------------------------------
 ! Level is on finest mesh, use full field representations
 !------------------------------------------------------------------------------
@@ -6184,15 +6140,6 @@ do i=levelin,minlev,-1
     !---Construct Jacobian
     call xmhd_build_ops(fullcc_interp)
   end if
-  !---Record timing for this level (profiling only)
-  tlev=lev_timer%tock()
-  IF(i<=xmhd_prof_maxlev)THEN
-    xmhd_prof_tbuild(i)=xmhd_prof_tbuild(i)+tlev
-    xmhd_prof_nbuild(i)=xmhd_prof_nbuild(i)+1
-    xmhd_prof_finemesh(i)=(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)
-    xmhd_prof_order(i)=oft_lagrange%order
-  END IF
-  IF(oft_debug_print(1).AND.oft_env%head_proc)WRITE(*,'(4X,A,I4,A,ES11.3)')'Jacobian build: level',i,' time',tlev
 end do
 !------------------------------------------------------------------------------
 ! Cleanup temporary storage
@@ -6201,8 +6148,6 @@ if(ASSOCIATED(fullcc))deallocate(fullcc)
 if(ASSOCIATED(fullcctmp))deallocate(fullcctmp)
 call full_interp%delete()
 call xmhd_set_level(levelin)
-xmhd_prof_tsetops=xmhd_prof_tsetops+mytimer%tock()
-xmhd_prof_nsetops=xmhd_prof_nsetops+1
 end subroutine xmhd_set_ops
 !------------------------------------------------------------------------------
 !> Create new xMHD solution vector
@@ -7054,35 +6999,28 @@ end subroutine xmhd_plot
 !------------------------------------------------------------------------------
 subroutine xmhd_profile(u)
 class(oft_vector), intent(inout) :: u
-INTEGER(4) :: i,j,k,nb,nn,nm
+INTEGER(4) :: i,j,k
 REAL(8) :: elapsed_time,matvec_time,nlop_time,build_optime,dot_time
 class(oft_vector), pointer :: v
 type(oft_timer) :: mytimer
 CALL xmhd_rep%vec_create(v)
-nb=MAX(1,xmhd_prof_reps(1))
-nn=MAX(0,xmhd_prof_reps(2))
-nm=MAX(0,xmhd_prof_reps(3))
 matvec_time=0.d0
 nlop_time=0.d0
 build_optime=0.d0
 dot_time=0.d0
-IF(oft_env%head_proc)WRITE(*,'(A,3I4)')'Starting profiling: reps = ',nb,nn,nm
+IF(oft_env%head_proc)WRITE(*,'(A)')'Starting profiling'
 comm_times=0
-!---Reset profiling counters (exclude setup calls)
-xmhd_prof_tbuild=0.d0; xmhd_prof_nbuild=0; xmhd_prof_nbuild_qc=0
-xmhd_prof_tsetops=0.d0; xmhd_prof_nsetops=0
-xmhd_prof_tnlop=0.d0; xmhd_prof_nnlop=0
-DO i=1,nb
+DO i=1,10
   IF(oft_env%head_proc)CALL mytimer%tick
   CALL xmhd_set_ops(u)
   IF(oft_env%head_proc)build_optime=build_optime+mytimer%tock()
-  DO j=1,nn
+  DO j=1,10
     IF(oft_env%head_proc)CALL mytimer%tick
     CALL oft_xmhd_ops%A%apply(u, v)
     IF(oft_env%head_proc)nlop_time=nlop_time+mytimer%tock()
     !
     IF(oft_env%head_proc)CALL mytimer%tick
-    DO k=1,nm
+    DO k=1,10
       CALL oft_xmhd_ops%J%apply(u, v)
     END DO
     IF(oft_env%head_proc)matvec_time=matvec_time+mytimer%tock()
@@ -7094,61 +7032,12 @@ DO i=1,nb
   END DO
 END DO
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(MAX(1,nb*nn*100),8)
-  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(MAX(1,nb*nn*nm),8)
-  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(MAX(1,nb*nn),8)
-  WRITE(*,'(A,ES11.3)')'  Build  = ',build_optime/REAL(nb,8)
+  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
+  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
+  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
+  WRITE(*,'(A,ES11.3)')'  Build  = ',build_optime/REAL(10,8)
 END IF
-!---Checksums of the NL residual and the Jacobian action (to compare runs with different options or builds)
-CALL oft_xmhd_ops%A%apply(u, v)
-elapsed_time=SQRT(v%dot(v))
-IF(oft_env%head_proc)WRITE(*,'(A,ES24.15)')'XMHD_PROF nlop_norm ',elapsed_time
-CALL oft_xmhd_ops%J%apply(u, v)
-elapsed_time=SQRT(v%dot(v))
-IF(oft_env%head_proc)WRITE(*,'(A,ES24.15)')'XMHD_PROF matvec_norm ',elapsed_time
-CALL xmhd_prof_report
 CALL xmhd_qcache_free
 CALL oft_finalize()
 end subroutine xmhd_profile
-!------------------------------------------------------------------------------
-!> Print accumulated xMHD profiling counters (timing and Jacobian sizes)
-!!
-!! Output lines are prefixed with `XMHD_PROF` for machine parsing. This routine
-!! only reports counters and has no effect on the solution.
-!------------------------------------------------------------------------------
-subroutine xmhd_prof_report
-INTEGER(4) :: i
-INTEGER(8) :: nnz,nr
-REAL(8) :: tavg
-IF(.NOT.oft_env%head_proc)RETURN
-WRITE(*,'(A)')'XMHD_PROF begin'
-WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF setops ncalls,total_s ',xmhd_prof_nsetops,xmhd_prof_tsetops
-WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF nlop ncalls,total_s ',xmhd_prof_nnlop,xmhd_prof_tnlop
-WRITE(*,'(A,I4,ES12.4,F14.3)')'XMHD_PROF qcache mode,setup_s,mem_mb ',xmhd_qcache,xmhd_prof_tqcache, &
-  REAL(xmhd_prof_qcache_mem,8)/1.d6
-WRITE(*,'(A,I8,ES12.4)')'XMHD_PROF preupdate ncalls,total_s ',xmhd_prof_npre,xmhd_prof_tpre
-WRITE(*,'(A,F14.3,I3)')'XMHD_PROF jcache coarse_mem_mb,posmap ',REAL(xmhd_prof_jcache_mem,8)/1.d6, &
-  xmhd_jac_posmap
-DO i=1,MIN(xmhd_nlevels,xmhd_prof_maxlev)
-  IF(xmhd_prof_nbuild(i)==0)CYCLE
-  tavg=xmhd_prof_tbuild(i)/REAL(xmhd_prof_nbuild(i),8)
-  nnz=-1; nr=-1
-  IF(ASSOCIATED(ml_J))THEN
-    IF(i>=xmhd_minlev.AND.i-xmhd_minlev+1<=SIZE(ml_J))THEN
-      IF(ASSOCIATED(ml_J(i-xmhd_minlev+1)%m))THEN
-        nr=ml_J(i-xmhd_minlev+1)%m%nr
-        SELECT TYPE(this=>ml_J(i-xmhd_minlev+1)%m)
-        CLASS IS(oft_native_matrix)
-          nnz=this%nnz
-        END SELECT
-      END IF
-    END IF
-  END IF
-  WRITE(*,'(A,I4,I4,L2,I8,2ES12.4,2I14)')'XMHD_PROF build level,order,finemesh,ncalls,total_s,avg_s,nrows,nnz ', &
-    i,xmhd_prof_order(i),xmhd_prof_finemesh(i),xmhd_prof_nbuild(i),xmhd_prof_tbuild(i),tavg,nr,nnz
-  WRITE(*,'(A,I4,I8,F14.3,ES12.4)')'XMHD_PROF jac level,qc_builds,posmap_mb,posmap_setup_s ', &
-    i,xmhd_prof_nbuild_qc(i),REAL(xmhd_prof_posmap_mem(i),8)/1.d6,xmhd_prof_posmap_time(i)
-END DO
-WRITE(*,'(A)')'XMHD_PROF end'
-end subroutine xmhd_prof_report
 end module xmhd

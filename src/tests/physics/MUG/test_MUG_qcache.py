@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
 # MUG tests: equivalence of the xMHD nonlinear residual and Jacobian implementations (xmhd_qcache=0: direct
-# basis evaluation, 1: quadrature-point cache). The xmhd_bench driver (mode='qcheck') evaluates the residual of
+# basis evaluation, 1: quadrature-point cache). The test program (test_MUG_qcache.F90) evaluates the residual of
 # the same nonlinear state with both implementations for dt>0, dt>0 with fields at the start of the step
 # (back_step), and the dt<0 diagnostics call, and reports the differences of every field block, the diagnostic
 # values and the floor flags. It then builds the Jacobian of every level with xmhd_qcache=0 (searching the CSR
@@ -33,12 +33,11 @@ oft_in_template = """
 {mesh}/
 
 {mesh_groups}
-&xmhd_bench_options
+&test_qcache_options
  order={order}
  minlev={minlev}
- mode='qcheck'
  lam={lam}
-{bench}/
+{opts}/
 
 &xmhd_options
  xmhd_jcb=T
@@ -189,7 +188,7 @@ def parse_qcheck(output):
     return blocks, diags, flags, max_rel
 
 
-def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False, xml=oft_in_xml,
+def qcheck_case(mesh, order, xmhd='', opts='', minlev=-1, nproc=1, nlevels=1, jac=True, petsc=False, xml=oft_in_xml,
                 threads=None):
     '''Write the input, run the equivalence check, and validate the reported differences
 
@@ -199,10 +198,10 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
     with random vectors only; xml is the XML input (preconditioner and regions); threads sets the number of
     OpenMP threads for this run (default: inherited from the environment)'''
     if not jac:
-        bench += " jac_check=F\n"
+        opts += " jac_check=F\n"
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(order=order, minlev=minlev, xmhd=xmhd, bench=bench,
+        fid.write(oft_in_template.format(order=order, minlev=minlev, xmhd=xmhd, opts=opts,
                                          petsc='T' if petsc else 'F', **mesh))
     with open('oft_in_qcache.xml', 'w+') as fid:
         fid.write(xml)
@@ -210,7 +209,7 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
     if threads is not None:
         os.environ['OMP_NUM_THREADS'] = str(threads)
     try:
-        status, output = run_OFT("./xmhd_bench oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
+        status, output = run_OFT("./test_MUG_qcache oft.in oft_in_qcache.xml", nproc, 300, return_stdout=True)
     finally:
         if threads_save is None:
             os.environ.pop('OMP_NUM_THREADS', None)
@@ -218,7 +217,7 @@ def qcheck_case(mesh, order, xmhd='', bench='', minlev=-1, nproc=1, nlevels=1, j
             os.environ['OMP_NUM_THREADS'] = threads_save
     assert status
     if threads is not None:
-        assert re.search(r'XMHD_BENCH nthreads=\s*{0}\b'.format(threads), output)
+        assert re.search(r'XMHD_QCHECK nthreads=\s*{0}\b'.format(threads), output)
     blocks, diags, flags, max_rel = parse_qcheck(output)
     # 3 cases for every field block, 7 diagnostics (dt<0 case), 3 flag comparisons
     assert max_rel is not None
@@ -292,29 +291,29 @@ physics_cases = {
 @pytest.mark.parametrize("physics", list(physics_cases.keys()))
 def test_qcache_physics_tet_p2(physics):
     '''Residual implementations agree on straight tets (p=2) for each physics option set'''
-    xmhd, bench = physics_cases[physics]
-    assert qcheck_case(cube_mesh(2), 2, xmhd=xmhd, bench=bench)
+    xmhd, opts = physics_cases[physics]
+    assert qcheck_case(cube_mesh(2), 2, xmhd=xmhd, opts=opts)
 
 
 @pytest.mark.parametrize("physics", ['base', 'single_temp_hall', 'hyper', 'shaping_eta_temp', 'floors_solid'])
 def test_qcache_physics_tet_p3(physics):
     '''Residual implementations agree on straight tets (p=3) for a subset of the physics option sets'''
-    xmhd, bench = physics_cases[physics]
-    assert qcheck_case(cube_mesh(2), 3, xmhd=xmhd, bench=bench)
+    xmhd, opts = physics_cases[physics]
+    assert qcheck_case(cube_mesh(2), 3, xmhd=xmhd, opts=opts)
 
 
 @pytest.mark.parametrize("order", [2, 3, 4])
 def test_qcache_tet(order):
     '''Residual implementations agree on straight tets with Hall, hyper-resistivity/diffusivity and shaping'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n nu_gyro=1.0\n"
-    assert qcheck_case(cube_mesh(1 if order == 4 else 2), order, xmhd=xmhd, bench=" shaping=T\n")
+    assert qcheck_case(cube_mesh(1 if order == 4 else 2), order, xmhd=xmhd, opts=" shaping=T\n")
 
 
 @pytest.mark.parametrize("order", [2, 3])
 def test_qcache_hex(order):
     '''Residual implementations agree on hexes with Hall, hyper-resistivity/diffusivity and shaping'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n nu_gyro=1.0\n"
-    assert qcheck_case(cube_mesh(2, hex_mesh=True), order, xmhd=xmhd, bench=" shaping=T\n")
+    assert qcheck_case(cube_mesh(2, hex_mesh=True), order, xmhd=xmhd, opts=" shaping=T\n")
 
 
 def test_qcache_curved_p3():
@@ -322,20 +321,20 @@ def test_qcache_curved_p3():
 
     The Jacobian comparison is skipped here (the p=3 Jacobian of this mesh needs ~8 GB for the check), see
     test_qcache_curved_p2'''
-    bench = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
-    assert qcheck_case(curved_mesh(), 3, xmhd=" xmhd_hall=T\n", bench=bench, jac=False)
+    opts = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
+    assert qcheck_case(curved_mesh(), 3, xmhd=" xmhd_hall=T\n", opts=opts, jac=False)
 
 
 def test_qcache_curved_p2():
     '''Residual and Jacobian implementations agree on a curved (quadratic) tet mesh with shaping, floors and solid cells'''
-    bench = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
-    assert qcheck_case(curved_mesh(), 2, xmhd=" xmhd_hall=T\n", bench=bench)
+    opts = " shaping=T\n den_floor=1.02E19\n temp_floor=20.4\n qcheck_solid=T\n qcheck_negsrc=T\n"
+    assert qcheck_case(curved_mesh(), 2, xmhd=" xmhd_hall=T\n", opts=opts)
 
 
 def test_qcache_posmap_threads():
     '''Position map setup and assembly with 4 OpenMP threads: Jacobians of a p-multigrid hierarchy (p=3, 2) built
     with the precomputed CSR positions agree entrywise with column-search assembly (both threaded)'''
-    assert qcheck_case(cube_mesh(2), 3, xmhd=" xmhd_hall=T\n", bench=" shaping=T\n qcheck_solid=T\n", minlev=2,
+    assert qcheck_case(cube_mesh(2), 3, xmhd=" xmhd_hall=T\n", opts=" shaping=T\n qcheck_solid=T\n", minlev=2,
                        nlevels=2, threads=4)
 
 
@@ -343,7 +342,7 @@ def test_qcache_posmap_threads():
 def test_qcache_solid_region(petsc_flag):
     '''Residual and Jacobian implementations agree on a curved tet mesh with a solid (resistive wall) region,
     where the solid flags come from the region type on every level (reg_solid)'''
-    assert qcheck_case(solid_region_mesh(), 2, xmhd=" xmhd_hall=T\n", bench=" shaping=T\n", petsc=petsc_flag,
+    assert qcheck_case(solid_region_mesh(), 2, xmhd=" xmhd_hall=T\n", opts=" shaping=T\n", petsc=petsc_flag,
                        xml=solid_region_xml)
 
 
@@ -368,12 +367,12 @@ def test_qcache_pmg():
 def test_qcache_pmg_p4():
     '''Jacobians agree on all levels of a p-multigrid hierarchy (p=4, 3, 2) with Hall, hyper terms and shaping'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
-    assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3)
+    assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, opts=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3)
 
 
 def test_qcache_pmg_coarse_quad():
     '''Jacobians agree on all levels of a p-multigrid hierarchy with the experimental coarse-level quadrature'''
-    assert qcheck_case(cube_mesh(2), 3, xmhd=" xmhd_coarse_quad=T\n xmhd_hall=T\n", bench=" shaping=T\n",
+    assert qcheck_case(cube_mesh(2), 3, xmhd=" xmhd_coarse_quad=T\n xmhd_hall=T\n", opts=" shaping=T\n",
                        minlev=2, nlevels=2)
 
 
@@ -381,7 +380,7 @@ def test_qcache_pmg_coarse_quad_p1():
     '''Jacobians agree on all levels of a p-multigrid hierarchy down to p=1 (p=4, 3, 2, 1) with the experimental
     coarse-level quadrature, whose low-order rules on the p=1 level have fewer samples than DOFs for some
     orientation transform fits (these fall back to per-orientation tables)'''
-    assert qcheck_case(cube_mesh(1), 4, xmhd=" xmhd_coarse_quad=T\n xmhd_hall=T\n", bench=" shaping=T\n", minlev=1,
+    assert qcheck_case(cube_mesh(1), 4, xmhd=" xmhd_coarse_quad=T\n xmhd_hall=T\n", opts=" shaping=T\n", minlev=1,
                        nlevels=4)
 
 
@@ -389,7 +388,7 @@ def test_qcache_pmg_coarse_quad_p1():
 def test_qcache_mpi2():
     '''Residual implementations agree on a mesh distributed over 2 MPI ranks'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
-    assert qcheck_case(cube_mesh(2, nlevels=2), 3, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", nproc=2)
+    assert qcheck_case(cube_mesh(2, nlevels=2), 3, xmhd=xmhd, opts=" shaping=T\n qcheck_solid=T\n", nproc=2)
 
 
 #============================================================================
@@ -400,14 +399,14 @@ def test_qcache_mpi2():
                                      'floors_solid'])
 def test_qcache_petsc_tet_p2(physics):
     '''Residual and Jacobian implementations agree on straight tets (p=2) with PETSc'''
-    xmhd, bench = physics_cases[physics]
-    assert qcheck_case(cube_mesh(2), 2, xmhd=xmhd, bench=bench, petsc=True)
+    xmhd, opts = physics_cases[physics]
+    assert qcheck_case(cube_mesh(2), 2, xmhd=xmhd, opts=opts, petsc=True)
 
 
 def test_qcache_petsc_hex_p2():
     '''Residual and Jacobian implementations agree on hexes (p=2) with Hall, hyper terms and shaping with PETSc'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n nu_gyro=1.0\n"
-    assert qcheck_case(cube_mesh(2, hex_mesh=True), 2, xmhd=xmhd, bench=" shaping=T\n", petsc=True)
+    assert qcheck_case(cube_mesh(2, hex_mesh=True), 2, xmhd=xmhd, opts=" shaping=T\n", petsc=True)
 
 
 @pytest.mark.parametrize("cell_type", ['tet', 'hex'])
@@ -425,7 +424,7 @@ def test_qcache_petsc_pmg_p4():
     '''Jacobians agree on all levels of a p-multigrid hierarchy (p=4, 3, 2) with Hall, hyper terms, shaping and
     solid cells with PETSc'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
-    assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3,
+    assert qcheck_case(cube_mesh(1), 4, xmhd=xmhd, opts=" shaping=T\n qcheck_solid=T\n", minlev=2, nlevels=3,
                        petsc=True)
 
 
@@ -436,5 +435,5 @@ def test_qcache_petsc_mpi2(pmg):
     level (p=3) or on all levels of a p-multigrid hierarchy (p=3, 2)'''
     xmhd = " xmhd_hall=T\n eta_hyper=1.E-3\n d2_dens=1.E-3\n"
     minlev, nlevels = (3, 2) if pmg else (-1, 1)
-    assert qcheck_case(cube_mesh(2, nlevels=2), 3, xmhd=xmhd, bench=" shaping=T\n qcheck_solid=T\n", nproc=2,
+    assert qcheck_case(cube_mesh(2, nlevels=2), 3, xmhd=xmhd, opts=" shaping=T\n qcheck_solid=T\n", nproc=2,
                        minlev=minlev, nlevels=nlevels, petsc=True)
