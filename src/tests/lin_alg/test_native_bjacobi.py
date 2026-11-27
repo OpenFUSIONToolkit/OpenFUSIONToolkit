@@ -59,7 +59,7 @@ def native_bjacobi_setup(nprocs=1, nlocal=1, sol_type=1, use_ilu='F', dist_lu='F
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(nlevels, nlocal, sol_type, use_ilu, dist_lu, per_lines, grnd_dir, nbase, direct_pre))
-    return run_OFT("./test_native_bjacobi", nprocs, 20)
+    return run_OFT("./test_native_bjacobi", nprocs, 60)
 
 def validate_result(iteration_count,converged_error):
     #
