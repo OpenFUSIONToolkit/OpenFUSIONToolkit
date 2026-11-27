@@ -167,7 +167,7 @@ an existing environment; otherwise ask before installing system packages or crea
 apt-get update
 apt-get install -y --no-install-recommends gfortran libopenmpi-dev openmpi-bin \
   libarpack2-dev libparpack2-dev libsuperlu-dev libhdf5-dev libxml2-dev \
-  libopenblas-dev liblapack-dev libmetis-dev
+  libopenblas-openmp-dev liblapack-dev libmetis-dev
 
 # From the repository root: Python venv for tests
 python3 -m venv oft_venv
@@ -206,6 +206,7 @@ cd build_release && make -j$(getconf _NPROCESSORS_ONLN)
 On a 4-core sandbox, configuring takes about 15 s and compiling about 4 minutes.
 
 Notes for this configuration:
+- `libopenblas-openmp-dev` selects the OpenMP build of OpenBLAS (Ubuntu's `libopenblas-dev` defaults to the pthreads build, `libopenblas0-pthread`). OFT calls BLAS from inside OpenMP parallel regions (eg. the MUG Jacobian's per-cell `dgemm` calls); a pthreads OpenBLAS threads each of those small calls itself, so threaded runs stop scaling and timings no longer match OFT's own `build_libs.py` builds, whose OpenBLAS runs single-threaded inside OpenMP regions (`USE_THREAD=0` by default, `USE_OPENMP=1` with `--oblas_threads`). If the pthreads variant is already installed, either switch the alternatives (`update-alternatives --config libopenblas.so.0-x86_64-linux-gnu`, and likewise `libblas.so.3`/`liblapack.so.3`) or run with `OPENBLAS_NUM_THREADS=1`. `readlink -f /usr/lib/x86_64-linux-gnu/libopenblas.so.0` shows which variant is active.
 - Optional libraries are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set it to `/usr` for system packages. SuperLU (`libsuperlu-dev`) is the baseline and is included above; SuperLU-DIST and UMFPACK are not. Install `libsuperlu-dist-dev` or `libsuitesparse-dev` and add `-DOFT_SUPERLU_DIST_ROOT=/usr` or `-DOFT_UMFPACK_ROOT=/usr` only if a specific test requires them.
 - Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.

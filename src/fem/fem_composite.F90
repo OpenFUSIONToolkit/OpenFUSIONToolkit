@@ -536,18 +536,21 @@ DEBUG_STACK_POP
 end subroutine fem_mat_zero_local_rows
 !------------------------------------------------------------------------------
 !> Add local contributions to full matrix in a thread-safe way
+!!
+!! If `tlocks` is not present no locking is performed, which is only safe if no
+!! other thread can add to the same matrix entries concurrently.
 !------------------------------------------------------------------------------
 subroutine fem_mat_add_local(self,mat,mloc,iloc,tlocks)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
 CLASS(oft_matrix), INTENT(inout) :: mat !< Full matrix
 TYPE(oft_local_mat), INTENT(in) :: mloc(:,:) !< Local matrix
 TYPE(oft_1d_int), INTENT(IN) :: iloc(:) !< Local FE entries
-INTEGER(KIND=omp_lock_kind), INTENT(INOUT) :: tlocks(:) !< OpenMP row thread locks
+INTEGER(KIND=omp_lock_kind), OPTIONAL, INTENT(INOUT) :: tlocks(:) !< OpenMP row thread locks
 INTEGER(i4) :: i,j
 DEBUG_STACK_PUSH
 !---Add matrix components
 DO i=1,self%nfields
-  CALL omp_set_lock(tlocks(i))
+  IF(PRESENT(tlocks))CALL omp_set_lock(tlocks(i))
   DO j=1,self%nfields
     IF(ASSOCIATED(mloc(i,j)%m))THEN
       IF(ASSOCIATED(mloc(i,j)%ind))THEN
@@ -559,7 +562,7 @@ DO i=1,self%nfields
       END IF
     END IF
   END DO
-  CALL omp_unset_lock(tlocks(i))
+  IF(PRESENT(tlocks))CALL omp_unset_lock(tlocks(i))
 END DO
 DEBUG_STACK_POP
 end subroutine fem_mat_add_local
