@@ -11,11 +11,11 @@
 !!
 !! Every build is checked exactly against a brute force reference computed from all
 !! cells of the mesh gathered on every process:
-!! - Block cells equal the core cells grown by k layers on the global cell graph, and
-!!   the cores follow their definition (cell part, plus cells holding a DoF of the
-!!   block's color)
-!! - Block DoFs are the DoFs of the block cells, the union is the union of the blocks
-!!   and the owners match the owners of the row space
+!! - Block DoFs are the DoFs of the core cells grown by k layers on the global cell
+!!   graph, with the cores following their definition (cell part, plus cells holding
+!!   a DoF of the block's color)
+!! - The union is the union of the blocks and the owners match the owners of the row
+!!   space
 !! - Every owned DoF is assigned to exactly one block, within the block, by color
 !! - Face <= edge <= point and layer k <= k+1 (as DoF sets), and with no overlap and
 !!   one block the union is exactly the local rows
@@ -323,7 +323,7 @@ DO b=1,nb
 END DO
 CALL overlap_dofs_delete(dofs)
 CALL ovl%delete
-CALL check('delete',(.NOT.ALLOCATED(ovl%cpart)).AND.(.NOT.ALLOCATED(ovl%blk_cells)))
+CALL check('delete',(.NOT.ALLOCATED(ovl%cpart)).AND.(.NOT.ALLOCATED(ovl%dcolor)))
 DEALLOCATE(res,dcolor)
 END SUBROUTINE run_cases
 ! Exact checks of one build against the brute force reference
@@ -376,8 +376,6 @@ DO b=1,ovl%nparts
       cref(nn)=mesh%global%lc(c)
     END IF
   END DO
-  IF(nn>0)CALL sort_array(cref,INT(nn,i8))
-  CALL check('core cells '//tag,same8(ovl%core_cells(b)%v,ovl%core_cells(b)%n,cref,nn))
   IF(ovl%nparts==1)CALL check('core = all cells '//tag,nn==mesh%nc)
   !---Reference BFS on the global cell graph
   m=0
@@ -404,16 +402,13 @@ DO b=1,ovl%nparts
     k=nf+1
   END DO
   DEALLOCATE(cref)
-  ALLOCATE(cref(m),dref(m*nce_tot))
+  ALLOCATE(dref(m*nce_tot))
   DO i=1,m
-    cref(i)=gcell(list(i))
     lvl(list(i))=-1
     DO j=1,nce_tot
       dref((i-1)*nce_tot+j)=gdofs(j,list(i))
     END DO
   END DO
-  CALL sort_array(cref,INT(m,i8))
-  CALL check('block cells '//tag,same8(ovl%blk_cells(b)%v,ovl%blk_cells(b)%n,cref,m))
   !---Block DoFs = DoFs of the block cells
   nn=unique8(dref,m*nce_tot)
   ALLOCATE(dk(dofs%blk(b)%n))
@@ -427,7 +422,7 @@ DO b=1,ovl%nparts
   CALL check('block positions sorted '//tag,ok)
   CALL check('block DoFs '//tag,same8(dk,dofs%blk(b)%n,dref,nn))
   un=[un,dref(1:nn)]
-  DEALLOCATE(cref,dref,dk)
+  DEALLOCATE(dref,dk)
 END DO
 !---Union = union of blocks
 nn=unique8(un,SIZE(un))

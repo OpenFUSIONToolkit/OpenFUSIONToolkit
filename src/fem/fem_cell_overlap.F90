@@ -67,13 +67,6 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 !---------------------------------------------------------------------------------
-!> Sorted list of global cell ids
-!---------------------------------------------------------------------------------
-TYPE, PUBLIC :: oft_cell_gid_set
-  INTEGER(i4) :: n = 0 !< Number of cells
-  INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: v !< Global cell ids (sorted) [n]
-END TYPE oft_cell_gid_set
-!---------------------------------------------------------------------------------
 !> Integer list (setup work storage)
 !---------------------------------------------------------------------------------
 TYPE :: ilist
@@ -84,8 +77,7 @@ END TYPE ilist
 !> Cell-adjacency overlap builder for a single or composite FE representation
 !!
 !! Created with @ref fem_cell_overlap_create. The FE representation, mesh and
-!! multi-level mesh are referenced, not owned. `core_cells` and `blk_cells` hold the
-!! result of the last @ref fem_cell_overlap_build "build" for diagnostics.
+!! multi-level mesh are referenced, not owned.
 !---------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_cell_overlap_builder) :: oft_fem_cell_overlap
   INTEGER(i4) :: nparts = 0 !< Number of blocks on this process
@@ -100,8 +92,6 @@ TYPE, PUBLIC, EXTENDS(oft_cell_overlap_builder) :: oft_fem_cell_overlap
   TYPE(oft_fem_ptr), ALLOCATABLE, DIMENSION(:) :: fields !< FE representation of each field [nfields]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart !< Block (part) of each local cell [mesh%nc]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dcolor !< Block (color) of each local DoF [ndofs]
-  TYPE(oft_cell_gid_set), ALLOCATABLE, DIMENSION(:) :: core_cells !< Global ids of each block's core cells [nparts]
-  TYPE(oft_cell_gid_set), ALLOCATABLE, DIMENSION(:) :: blk_cells !< Global ids of each block's cells [nparts]
 CONTAINS
   !> Build the overlapping DoF sets (collective)
   PROCEDURE :: build => fem_cell_overlap_build
@@ -259,7 +249,6 @@ END FUNCTION fem_cell_overlap_nblocks
 SUBROUTINE fem_cell_overlap_delete(self)
 CLASS(oft_fem_cell_overlap), INTENT(inout) :: self !< Builder object
 DEBUG_STACK_PUSH
-CALL clear_cell_sets(self)
 IF(ALLOCATED(self%fields))DEALLOCATE(self%fields)
 IF(ALLOCATED(self%cpart))DEALLOCATE(self%cpart)
 IF(ALLOCATED(self%dcolor))DEALLOCATE(self%dcolor)
@@ -270,14 +259,6 @@ self%ndofs=0
 self%level=0
 DEBUG_STACK_POP
 END SUBROUTINE fem_cell_overlap_delete
-!---------------------------------------------------------------------------------
-!> Release the diagnostic cell sets of the last build
-!---------------------------------------------------------------------------------
-SUBROUTINE clear_cell_sets(self)
-CLASS(oft_fem_cell_overlap), INTENT(inout) :: self !< Builder object
-IF(ALLOCATED(self%core_cells))DEALLOCATE(self%core_cells)
-IF(ALLOCATED(self%blk_cells))DEALLOCATE(self%blk_cells)
-END SUBROUTINE clear_cell_sets
 !---------------------------------------------------------------------------------
 !> Build the overlapping DoF sets of the blocks of this process (collective)
 !!
@@ -335,7 +316,6 @@ CASE DEFAULT
   CALL oft_abort('Invalid cell adjacency type','fem_cell_overlap_build',__FILE__)
 END SELECT
 CALL overlap_dofs_delete(dofs)
-CALL clear_cell_sets(self)
 mesh=>self%mesh
 np=oft_env%nprocs
 me=oft_env%rank
@@ -681,24 +661,6 @@ DO b=1,nb
   DO i=1,bx(b)%n
     needed(bx(b)%v(i))=.TRUE.
   END DO
-END DO
-!---Diagnostic cell sets (global cell ids)
-ALLOCATE(self%core_cells(nb),self%blk_cells(nb))
-DO b=1,nb
-  self%core_cells(b)%n=core(b)%n
-  ALLOCATE(self%core_cells(b)%v(core(b)%n))
-  DO i=1,core(b)%n
-    self%core_cells(b)%v(i)=egid(core(b)%v(i))
-  END DO
-  n8=INT(core(b)%n,i8)
-  CALL sort_array(self%core_cells(b)%v,n8)
-  self%blk_cells(b)%n=bx(b)%n
-  ALLOCATE(self%blk_cells(b)%v(bx(b)%n))
-  DO i=1,bx(b)%n
-    self%blk_cells(b)%v(i)=egid(bx(b)%v(i))
-  END DO
-  n8=INT(bx(b)%n,i8)
-  CALL sort_array(self%blk_cells(b)%v,n8)
 END DO
 !---------------------------------------------------------------------------------
 ! Step D: DoFs (global id and owner) of the used halo cells from their owners
