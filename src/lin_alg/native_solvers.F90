@@ -143,6 +143,7 @@ end type oft_native_cg_eigsolver
 !------------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_nksolver
   LOGICAL :: backtrack = .TRUE. !< Perform backtracking?
+  LOGICAL :: ew_forcing = .FALSE. !< Use Eisenstat-Walker adaptive linear tolerance forcing?
   INTEGER(i4) :: its = -1 !< Maximum iteration count
   INTEGER(i4) :: cits = 0 !< Number of iteractions to convergence
   INTEGER(i4) :: lits = 0 !< Number of linear solver iteractions
@@ -150,6 +151,10 @@ TYPE, PUBLIC :: oft_nksolver
   INTEGER(i4) :: up_freq = 1 !< Frequency of jacobian updates
   REAL(r8) :: atol = 1.d-14 !< Absolute convergence tolerance \f$ |res| < atol \f$
   REAL(r8) :: rtol = 1.d-14 !< Relative convergence tolerance \f$ |res|/|res_0| < rtol \f$
+  REAL(r8) :: ew_gamma = 0.9d0 !< Eisenstat-Walker forcing scaling factor \f$ \gamma \in (0,1] \f$
+  REAL(r8) :: ew_alpha = 1.5d0 !< Eisenstat-Walker forcing exponent \f$ \alpha \in (1,2] \f$
+  REAL(r8) :: ew_eta0 = 0.5d0 !< Eisenstat-Walker initial forcing term \f$ \eta_0 \f$
+  REAL(r8) :: ew_eta_max = 0.8d0 !< Eisenstat-Walker maximum forcing term \f$ \eta_{\max} < 1 \f$
   CLASS(oft_vector), POINTER :: du => NULL() !< Storage for non-linear corrections
   CLASS(oft_matrix), POINTER :: A => NULL() !< Metric matrix
   CLASS(oft_solver), POINTER :: J_inv => NULL() !< Jacobian inverse solver
@@ -1383,6 +1388,7 @@ class(oft_vector), pointer :: v
 logical :: pm_save
 integer(i4) :: i,its
 real(r8) :: res,resp,uu,sback
+REAL(r8) :: rtol_save,atol_save,res_norm,res_prev,eta,eta_prev,eta_a,eta_s,tol_target
 real(r8) :: met_time,up_time,inv_time
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -1390,6 +1396,14 @@ DEBUG_STACK_PUSH
 met_time=0.d0
 up_time=0.d0
 inv_time=0.d0
+rtol_save=0.d0
+atol_save=0.d0
+res_prev=0.d0
+eta_prev=self%ew_eta0
+IF(self%ew_forcing)THEN
+  rtol_save=self%J_inv%rtol
+  atol_save=self%J_inv%atol
+END IF
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,'(A)')'Starting Newton solver'
 IF(.NOT.ASSOCIATED(self%du))THEN
   CALL u%new(self%du)
@@ -1441,6 +1455,33 @@ outer: do i=0,its
     CALL self%J_update(u)
     if(oft_env%head_proc)up_time=up_time+mytimer%tock()
   END IF
+  !---Compute adaptive forcing tolerance (Eisenstat-Walker Choice 2)
+  IF(self%ew_forcing)THEN
+    res_norm=SQRT(res)
+    IF(i==0)THEN
+      eta=MIN(self%ew_eta0,self%ew_eta_max)
+    ELSE
+      IF(res_prev>0.d0)THEN
+        eta_a=self%ew_gamma*(res_norm/res_prev)**self%ew_alpha
+      ELSE
+        eta_a=self%ew_eta_max
+      END IF
+      eta_s=self%ew_gamma*(eta_prev**self%ew_alpha)
+      IF(eta_s>0.1d0)THEN
+        eta=MAX(eta_a,eta_s)
+      ELSE
+        eta=eta_a
+      END IF
+      tol_target=MAX(self%atol,self%rtol*SQRT(uu))
+      IF(res_norm>0.d0)eta=MAX(eta,0.5d0*tol_target/res_norm)
+      eta=MIN(eta,self%ew_eta_max)
+    END IF
+    IF(rtol_save>0.d0)eta=MIN(self%ew_eta_max,MAX(eta,rtol_save))
+    self%J_inv%rtol=eta
+    self%J_inv%atol=0.d0
+    eta_prev=eta
+    res_prev=res_norm
+  END IF
   !---Solve jacobian for new search direction
   if(oft_env%head_proc)CALL mytimer%tick
   call self%du%set(0.d0)
@@ -1456,6 +1497,10 @@ outer: do i=0,its
   call u%add(1.d0,-1.d0,self%du)
   if(oft_env%head_proc)inv_time=inv_time+mytimer%tock()
 end do outer ! End of Newton loop
+IF(self%ew_forcing)THEN
+  self%J_inv%rtol=rtol_save
+  self%J_inv%atol=atol_save
+END IF
 IF((oft_env%pm.AND.oft_env%head_proc))THEN
   WRITE(*,'(2X,A)')'Timing:'
   WRITE(*,'(4X,A,ES11.3)')'Metric = ',met_time
