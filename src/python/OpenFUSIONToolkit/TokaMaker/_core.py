@@ -224,6 +224,10 @@ class tokamaker_settings:
         self.dipole_mode = False
         ## Use mirror mode (symmetry about z=0 plane, only upper half of mesh used)
         self.mirror_mode = False
+        ## Integrate the plasma source and the plasma integrals over the part of each mesh cell inside the LCFS
+        ## (cut-cell quadrature) instead of testing each quadrature point; makes the discrete equations continuous in
+        ## \f$ \psi \f$ when the pressure gradient or current is finite at the LCFS
+        self.lcfs_cut_cells = False
         ## Maximum NL iteration count for G-S solver
         self.maxits = 40
         ## Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
@@ -269,6 +273,7 @@ class tokamaker_settings:
         c_struct_instance.limited_only = self.limited_only
         c_struct_instance.dipole_mode = self.dipole_mode
         c_struct_instance.mirror_mode = self.mirror_mode
+        c_struct_instance.lcfs_cut_cells = self.lcfs_cut_cells
         c_struct_instance.maxits = self.maxits
         c_struct_instance.mode = self.mode
         c_struct_instance.trace_type = self.trace_type

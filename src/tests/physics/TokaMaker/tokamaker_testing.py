@@ -244,9 +244,9 @@ ITER_eq_dict = {
 }
 
 
-def create_ITER_mesh(mesh_resolution=1.0):
-    '''Build the ITER mesh and save it to `ITER_mesh.h5`, unless that file already exists'''
-    if os.path.exists('ITER_mesh.h5'):
+def create_ITER_mesh(mesh_resolution=1.0,filename='ITER_mesh.h5'):
+    '''Build the ITER mesh and save it to `filename`, unless that file already exists'''
+    if os.path.exists(filename):
         return
     with open('ITER_geom.json','r') as fid:
         ITER_geom = json.load(fid)
@@ -277,13 +277,13 @@ def create_ITER_mesh(mesh_resolution=1.0):
     mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
-    save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+    save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,filename)
 
 
-def setup_ITER_gs(myOFT,fe_order,F0=5.3*6.2,maxits=None):
+def setup_ITER_gs(myOFT,fe_order,F0=5.3*6.2,maxits=None,mesh_file='ITER_mesh.h5'):
     '''Create a TokaMaker object on the ITER mesh (see `create_ITER_mesh`); F0 = B0*R0 with B0 = 5.3 T at R0 = 6.2 m'''
     mygs = TokaMaker(myOFT)
-    mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh(mesh_file)
     if maxits is not None:
         mygs.settings.maxits = maxits
     mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=F0)

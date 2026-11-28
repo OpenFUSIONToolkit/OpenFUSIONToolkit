@@ -238,6 +238,7 @@ TYPE :: gs_factory
   LOGICAL :: full_domain = .FALSE. !< Solve across full domain (for Solov'ev test cases)
   LOGICAL :: dipole_mode = .FALSE. !< Include modifications for Dipole geometry
   LOGICAL :: mirror_mode = .FALSE. !< Include modifications for Mirror/FRC geometry
+  LOGICAL :: lcfs_cut_cells = .FALSE. !< Integrate plasma terms over the part of each cell inside the LCFS (see @ref gs_plasma_cell_rule)
   LOGICAL :: save_visit = .TRUE. !< Save information for plotting?
   CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none' !< File containing coil definitions
   CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none' !< File non-node limiter points
@@ -1852,9 +1853,12 @@ real(8), intent(out) :: itor !< Plasma toroidal current
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp(1),goptmp(3,3),det,pt(3),v,t1,b_tmp,itor_loc,pani(2),bcross_kappa(1),gpsitmp(3)
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
-integer(4) :: j,m,l,k
+real(8), allocatable, target :: cut_pts(:,:),cut_wts(:)
+real(8), pointer, dimension(:,:) :: qpts
+real(8), pointer, dimension(:) :: qwts
+integer(4) :: j,m,l,k,nq,ncut_max
 integer(4), allocatable :: j_lag(:)
-logical :: curved
+logical :: curved,cut_cells
 type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
 type(gs_factory), pointer :: device
@@ -1876,21 +1880,27 @@ END IF
 !---
 mutual=0.d0
 itor=0.d0
+cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+ncut_max=0
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc,pani,bcross_kappa,gpsitmp) reduction(+:mutual) &
-!$omp reduction(+:itor)
+!$omp private(cut_pts,cut_wts,qpts,qwts,nq) reduction(+:itor)
 allocate(rop(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
+allocate(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
 !$omp do schedule(static)
 DO j=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE
   call device%fe_rep%ncdofs(j,j_lag)
   curved=cell_is_curved(device%fe_rep%mesh,j)
-  do m=1,device%fe_rep%quad%np
-    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(j,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
-    pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
+  CALL gs_plasma_cell_quad(self,j,cut_cells,psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
+  do m=1,nq
+    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,qpts(:,m),goptmp,v)
+    call psi_eval%interp(j,qpts(:,m),goptmp,psitmp)
+    pt=device%fe_rep%mesh%log2phys(j,qpts(:,m))
+    IF(cut_cells)psitmp(1)=MAX(psitmp(1),self%plasma_bounds(1))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
+    IF(cut_cells.OR.(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1)))THEN
       IF(self%mode==0)THEN
         itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
@@ -1898,24 +1908,24 @@ DO j=1,device%fe_rep%mesh%nc
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
-        CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
-        CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        CALL self%P_ani%interp(j,qpts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(j,qpts(:,m),goptmp,bcross_kappa)
         itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
         itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
       b_tmp=0.d0
       DO l=1,device%fe_rep%nce
-        CALL oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop(l))
+        CALL oft_blag_eval(device%fe_rep,j,l,qpts(:,m),rop(l))
         b_tmp=b_tmp+btmp(j_lag(l))*rop(l)
       END DO
-      det = v*device%fe_rep%quad%wts(m)
+      det = v*qwts(m)
       itor = itor + itor_loc*det
       mutual = mutual + b_tmp*itor_loc*det
     END IF
   end do
 end do
-deallocate(j_lag,rop)
+deallocate(j_lag,rop,cut_pts,cut_wts)
 !$omp end parallel
 mutual=mu0*2.d0*pi*mutual/itor
 IF(ASSOCIATED(bcross_kappa_fun%u))THEN
@@ -3508,14 +3518,17 @@ REAL(8), INTENT(out) :: itor_ffp,itor_press,estore,dflux_ffp
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
 real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2),fpsi(2),ppsi(2)
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
-integer(4) :: j,m,l
+real(8), allocatable, target :: cut_pts(:,:),cut_wts(:)
+real(8), pointer, dimension(:,:) :: qpts
+real(8), pointer, dimension(:) :: qwts
+integer(4) :: j,m,l,nq,ncut_max
 integer(4), allocatable :: j_lag(:)
-logical :: curved
+logical :: curved,cut_cells,in_plasma
 type(oft_lag_brinterp) :: bcross_kappa_fun
 type(gs_factory), pointer :: device
 t1=omp_get_wtime()
 !---
-NULLIFY(atmp,btmp,b2tmp,b3tmp)
+NULLIFY(atmp,btmp,b2tmp,b3tmp,qpts,qwts)
 call b%set(0.d0)
 call b2%set(0.d0)
 call b3%set(0.d0)
@@ -3537,11 +3550,17 @@ itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
 dflux_ffp=0.d0
+!---Cut-cell quadrature at the LCFS (see gs_plasma_cell_rule)
+cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+ncut_max=0
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
 !$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp,fpsi,ppsi) &
+!$omp private(cut_pts,cut_wts,qpts,qwts,nq,in_plasma) &
 !$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
+allocate(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
 !$omp do schedule(static)
 do j=1,device%fe_rep%mesh%nc
   ! IF(self%cflag(j)==3)CYCLE ! Vacuum region (no source)
@@ -3552,42 +3571,55 @@ do j=1,device%fe_rep%mesh%nc
     vcache(l) = atmp(j_lag(l))
   END DO
   curved=cell_is_curved(device%fe_rep%mesh,j)
-  do m=1,device%fe_rep%quad%np
-    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,device%fe_rep%quad%pts(:,m),goptmp,v)
-    det=v*device%fe_rep%quad%wts(m)
-    CALL oft_blag_eval_all(device%fe_rep,j,device%fe_rep%quad%pts(:,m),rop)
+  CALL gs_plasma_cell_quad(self,j,cut_cells,atmp,cut_pts,cut_wts,nq,qpts,qwts)
+  IF(nq==0)CYCLE ! No plasma in this cell
+  do m=1,nq
+    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,qpts(:,m),goptmp,v)
+    det=v*qwts(m)
+    CALL oft_blag_eval_all(device%fe_rep,j,qpts(:,m),rop)
     ffp=0.d0
-    pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
-    IF(gs_test_bounds(self,pt))THEN
+    pt=device%fe_rep%mesh%log2phys(j,qpts(:,m))
+    IF(cut_cells)THEN
+      in_plasma=.TRUE. ! Points of the plasma part of the cell
+    ELSE
+      in_plasma=gs_test_bounds(self,pt)
+    END IF
+    IF(in_plasma)THEN
       psitmp=0.d0
       !$omp simd reduction(+:psitmp)
       DO l=1,device%fe_rep%nce
         psitmp=psitmp+vcache(l)*rop(l)
       END DO
-      IF(psitmp>self%plasma_bounds(1))THEN
+      IF(cut_cells)THEN
+        psitmp=MAX(psitmp,self%plasma_bounds(1)) ! Linearized boundary: flux functions held at their LCFS values
+        in_plasma=.TRUE.
+      ELSE
+        in_plasma=(psitmp>self%plasma_bounds(1))
+      END IF
+      IF(in_plasma)THEN
         fpsi=[self%I%f(psitmp),self%I%fp(psitmp)]
         ppsi=[self%P%f(psitmp),self%P%fp(psitmp)]
         IF(self%mode==0)THEN
           ffp(1:2)=((self%ffp_scale**2)*fpsi(1)+self%ffp_scale*self%I%f_offset)*fpsi(2)
-          itor_ffp = itor_ffp + fpsi(2)*(fpsi(1)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
-          dflux_ffp = dflux_ffp + (self%ffp_scale*fpsi(1))/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          itor_ffp = itor_ffp + fpsi(2)*(fpsi(1)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*qwts(m)
+          dflux_ffp = dflux_ffp + (self%ffp_scale*fpsi(1))/(pt(1)+gs_epsilon)*v*qwts(m)
         ELSE
           ffp(1:2)=0.5d0*self%ffp_scale*fpsi(2)
-          itor_ffp = itor_ffp + 0.5d0*fpsi(2)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          itor_ffp = itor_ffp + 0.5d0*fpsi(2)/(pt(1)+gs_epsilon)*v*qwts(m)
           dflux_ffp = dflux_ffp + (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi(1) + self%I%f_offset**2) &
-            - self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+            - self%I%f_offset)/(pt(1)+gs_epsilon)*v*qwts(m)
         END IF
         ! Handle anisotropic pressure
         IF(ASSOCIATED(self%P_ani))THEN
-          CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
-          CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+          CALL self%P_ani%interp(j,qpts(:,m),goptmp,pani)
+          CALL bcross_kappa_fun%interp(j,qpts(:,m),goptmp,bcross_kappa)
           ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*(ppsi(2)*pani(2)+ppsi(1)*(pani(1)-pani(2))*bcross_kappa(1))*(pt(1)**2)
         ELSE
           ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*ppsi(2)*(pt(1)**2)
         END IF
         !
-        estore = estore + ppsi(1)*v*device%fe_rep%quad%wts(m)*pt(1)
-        itor_press = itor_press + pt(1)*ppsi(2)*v*device%fe_rep%quad%wts(m)
+        estore = estore + ppsi(1)*v*qwts(m)*pt(1)
+        itor_press = itor_press + pt(1)*ppsi(2)*v*qwts(m)
       END IF
     END IF
     pt(1) = MAX(pt(1),gs_epsilon)
@@ -3608,7 +3640,7 @@ do j=1,device%fe_rep%mesh%nc
     b3tmp(m)=b3tmp(m)+rhs_loc(l,3)
   end do
 end do
-deallocate(rhs_loc,j_lag,rop,vcache)
+deallocate(rhs_loc,j_lag,rop,vcache,cut_pts,cut_wts)
 !$omp end parallel
 CALL b%restore_local(btmp,add=.TRUE.)
 CALL b2%restore_local(b2tmp,add=.TRUE.)
@@ -3625,6 +3657,249 @@ itor_press = itor_press*self%psiscale
 dflux_ffp = dflux_ffp*self%psiscale
 device%timing(2)=device%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_source
+!------------------------------------------------------------------------------
+!> Quadrature rule for the plasma part of a cell (cut-cell quadrature, setting `lcfs_cut_cells`)
+!!
+!! The plasma part of a plasma-region cell is the part where the linear interpolant of
+!! \f$ \psi - \psi_{LCFS} \f$ on the cell's vertices is positive, restricted to the plasma side of the
+!! X-point half-planes of @ref gs_test_bounds, including the second cut at the active X-point when it is set
+!! (all functions are interpolated linearly from the vertices; the spatial bounds of that test enclose every
+!! plasma-region vertex and never cut a cell). Point arrays are sized for `nx_points+1` half-planes.
+!! Points and weights are those of @ref gs_cut_cell_rule, so integrals over the plasma part are continuous
+!! functions of the nodal \f$ \psi \f$, of \f$ \psi_{LCFS} \f$ and of the X-point locations. Integrands
+!! are evaluated at \f$ \max(\psi,\psi_{LCFS}) \f$ (the linear boundary differs from the contour by
+!! \f$ O(h^2) \f$). Cells wholly inside use the cell's standard rule (`whole = .TRUE.`, no points returned).
+!------------------------------------------------------------------------------
+SUBROUTINE gs_plasma_cell_rule(self,cell,psi_verts,npts,pts,wts,whole)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+INTEGER(i4), INTENT(in) :: cell !< Cell index (plasma region)
+REAL(r8), INTENT(in) :: psi_verts(3) !< \f$ \psi \f$ at the cell's vertices
+INTEGER(i4), INTENT(out) :: npts !< Number of points (0 if the cell has no plasma)
+REAL(r8), INTENT(inout) :: pts(:,:) !< Points in logical coordinates [3,:] (size from @ref gs_cut_cell_maxpts)
+REAL(r8), INTENT(inout) :: wts(:) !< Weights, as fractions of the cell (may be negative in cells cut by a half-plane)
+LOGICAL, INTENT(out) :: whole !< Whole cell is plasma: use the cell's standard rule
+INTEGER(i4) :: i,k,nplanes
+REAL(r8) :: dv(3),hv(3,max_xpoints+1),htmp(3)
+CLASS(oft_bmesh), POINTER :: smesh
+smesh=>self%device%fe_rep%mesh
+npts=0
+whole=.FALSE.
+dv=psi_verts-self%plasma_bounds(1)
+IF(ALL(dv<=0.d0))RETURN
+!---X-point half-planes crossing the cell
+nplanes=0
+DO i=1,self%nx_points
+  DO k=1,3
+    htmp(k)=DOT_PRODUCT(smesh%r(1:2,smesh%lc(k,cell))-self%x_points(:,i),self%x_vecs(:,i))
+  END DO
+  IF(ALL(htmp<=0.d0))RETURN ! Cell on the excluded side
+  IF(ALL(htmp>0.d0))CYCLE
+  nplanes=nplanes+1
+  hv(:,nplanes)=htmp
+END DO
+!---Second cut at the active X-point (same condition as in gs_test_bounds)
+IF((self%nx_points>0).AND.ANY(self%x_cut/=0.d0))THEN
+  DO k=1,3
+    htmp(k)=DOT_PRODUCT(smesh%r(1:2,smesh%lc(k,cell))-self%x_points(:,self%nx_points),self%x_cut)
+  END DO
+  IF(ALL(htmp<=0.d0))RETURN ! Cell on the excluded side
+  IF(.NOT.ALL(htmp>0.d0))THEN
+    nplanes=nplanes+1
+    hv(:,nplanes)=htmp
+  END IF
+END IF
+IF(ALL(dv>0.d0).AND.(nplanes==0))THEN
+  whole=.TRUE.
+  RETURN
+END IF
+CALL gs_cut_cell_rule(self%device%fe_rep%quad%np,self%device%fe_rep%quad%pts,self%device%fe_rep%quad%wts, &
+  dv,nplanes,hv,npts,pts,wts)
+END SUBROUTINE gs_plasma_cell_rule
+!------------------------------------------------------------------------------
+!> Points and weights for an integral over the plasma part of a plasma-region cell
+!!
+!! Without cut cells (`cut_cells = .FALSE.`) these are the cell's standard rule and the caller tests each point
+!! (@ref gs_test_bounds and \f$ \psi > \psi_{LCFS} \f$); with cut cells they are those of @ref gs_plasma_cell_rule
+!! (the standard rule for cells wholly inside) and every point is in the plasma.
+!------------------------------------------------------------------------------
+SUBROUTINE gs_plasma_cell_quad(self,cell,cut_cells,psi_vals,cut_pts,cut_wts,nq,qpts,qwts)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+INTEGER(i4), INTENT(in) :: cell !< Cell index (plasma region)
+LOGICAL, INTENT(in) :: cut_cells !< Use the cut-cell rule?
+REAL(r8), INTENT(in) :: psi_vals(:) !< \f$ \psi \f$ at all nodes (vertices first)
+REAL(r8), TARGET, INTENT(inout) :: cut_pts(:,:) !< Storage for cut-cell points [3,:]
+REAL(r8), TARGET, INTENT(inout) :: cut_wts(:) !< Storage for cut-cell weights [:]
+INTEGER(i4), INTENT(out) :: nq !< Number of points (0 if the cell has no plasma)
+REAL(r8), POINTER, INTENT(out) :: qpts(:,:) !< Points in logical coordinates [3,nq]
+REAL(r8), POINTER, INTENT(out) :: qwts(:) !< Weights (fractions of the cell) [nq]
+LOGICAL :: whole
+nq=self%device%fe_rep%quad%np
+qpts=>self%device%fe_rep%quad%pts
+qwts=>self%device%fe_rep%quad%wts
+IF(.NOT.cut_cells)RETURN
+CALL gs_plasma_cell_rule(self,cell,psi_vals(self%device%fe_rep%mesh%lc(:,cell)),nq,cut_pts,cut_wts,whole)
+IF(whole)THEN
+  nq=self%device%fe_rep%quad%np
+ELSE
+  qpts=>cut_pts
+  qwts=>cut_wts
+END IF
+END SUBROUTINE gs_plasma_cell_quad
+!------------------------------------------------------------------------------
+!> Size of the point arrays needed by @ref gs_cut_cell_rule
+!------------------------------------------------------------------------------
+PURE FUNCTION gs_cut_cell_maxpts(nq,nplanes) RESULT(maxpts)
+INTEGER(i4), INTENT(in) :: nq !< Number of points in the cell rule
+INTEGER(i4), INTENT(in) :: nplanes !< Maximum number of half-planes
+INTEGER(i4) :: maxpts
+! Two triangles after the first cut; the j-th half-plane adds two polygons of at most 4+j edges
+maxpts=nq*(2+8*nplanes+nplanes*(nplanes+1))
+END FUNCTION gs_cut_cell_maxpts
+!------------------------------------------------------------------------------
+!> Quadrature rule for the part of a triangle where a linear function is positive (cut-cell rule)
+!!
+!! The region is the part of the cell where the linear function with vertex values `dv` is positive,
+!! restricted to where each of the `nplanes` linear functions with vertex values `hv` is positive.
+!! The cell's rule (`qpts`, `qwts`; fully symmetric, as all OFT triangle rules) is mapped onto triangles
+!! covering the region, and the construction makes every point and weight a continuous function of `dv`
+!! and `hv`, also when the region changes shape:
+!! - Clip by `dv` (vertices visited in cell order) and triangulate from the first vertex of the kept
+!!   polygon. When the region is the whole cell this is the cell itself, so the result is the cell's rule
+!!   exactly; when a vertex value crosses zero the triangles change only by members of zero area or by a
+!!   cyclic relabeling of one triangle, which leaves a fully symmetric rule unchanged. A cell entering or
+!!   leaving the region therefore changes the integral continuously, from zero to the standard rule.
+!! - A half-plane splits the current region \f$ K \f$ into a kept part \f$ K' \f$ and a removed part
+!!   \f$ R \f$. The integral over \f$ K' \f$ is taken as \f$ w (I_K - C_R) + (1-w) C_{K'} \f$, with
+!!   \f$ w = |K'|/|K| \f$ and \f$ C \f$ the rule on the triangles joining a polygon's area centroid to
+!!   its edges (unchanged by relabeling or repeated vertices). It is continuous as \f$ R \f$ vanishes
+!!   (\f$ w \to 1 \f$) and as \f$ K' \f$ vanishes (\f$ w \to 0 \f$); weights may then be negative.
+!!
+!! Weights are fractions of the cell (the cell's rule sums to one).
+!------------------------------------------------------------------------------
+SUBROUTINE gs_cut_cell_rule(nq,qpts,qwts,dv,nplanes,hv,npts,pts,wts)
+INTEGER(i4), INTENT(in) :: nq !< Number of points in the cell rule
+REAL(r8), INTENT(in) :: qpts(:,:) !< Cell rule points in logical (barycentric) coordinates [3,nq]
+REAL(r8), INTENT(in) :: qwts(:) !< Cell rule weights [nq]
+REAL(r8), INTENT(in) :: dv(3) !< Values at the cell's vertices of the function whose positive part is integrated
+INTEGER(i4), INTENT(in) :: nplanes !< Number of half-plane functions
+REAL(r8), INTENT(in) :: hv(:,:) !< Half-plane function values at the cell's vertices [3,nplanes]
+INTEGER(i4), INTENT(out) :: npts !< Number of points (0 if the region is empty)
+REAL(r8), INTENT(inout) :: pts(:,:) !< Points in logical coordinates [3,:]
+REAL(r8), INTENT(inout) :: wts(:) !< Weights, fractions of the cell [:]
+INTEGER(i4), PARAMETER :: maxv=32
+REAL(r8), PARAMETER :: area_tol=1.d-14
+INTEGER(i4) :: i,j,k,np,nk,nr
+REAL(r8) :: poly(3,maxv),kept(3,maxv),rem(3,maxv),pv(maxv),area_old,area_new,w
+npts=0
+!---Clip the cell by dv and triangulate from the first kept vertex
+np=3
+poly=0.d0
+DO i=1,3
+  poly(i,i)=1.d0
+END DO
+pv(1:3)=dv
+CALL clip_poly(np,poly,pv,nk,kept)
+IF(nk<3)RETURN
+np=nk
+poly(:,1:np)=kept(:,1:np)
+DO k=2,np-1
+  CALL add_tri(poly(:,1),poly(:,k),poly(:,k+1),1.d0)
+END DO
+!---Half-planes
+DO j=1,nplanes
+  DO i=1,np
+    pv(i)=DOT_PRODUCT(poly(:,i),hv(:,j))
+  END DO
+  IF(ALL(pv(1:np)>0.d0))CYCLE
+  area_old=poly_area(np,poly)
+  CALL clip_poly(np,poly,pv,nk,kept)
+  area_new=0.d0
+  IF(nk>=3)area_new=poly_area(nk,kept)
+  IF((area_old<=area_tol).OR.(area_new<=0.d0))THEN
+    npts=0 ! Nothing left (continuous: w and C_K' vanish together)
+    RETURN
+  END IF
+  pv(1:np)=-pv(1:np)
+  CALL clip_poly(np,poly,pv,nr,rem)
+  w=area_new/area_old
+  wts(1:npts)=w*wts(1:npts)
+  IF(nr>=3)CALL add_centroid_fan(nr,rem,-w)
+  CALL add_centroid_fan(nk,kept,1.d0-w)
+  np=nk
+  poly(:,1:np)=kept(:,1:np)
+END DO
+CONTAINS
+!> Keep the part of a convex polygon where a linear function (vertex values `fv`) is positive
+SUBROUTINE clip_poly(n,p,fv,nout,pout)
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: p(:,:),fv(:)
+INTEGER(i4), INTENT(out) :: nout
+REAL(r8), INTENT(out) :: pout(:,:)
+INTEGER(i4) :: ii,i2
+REAL(r8) :: s
+nout=0
+DO ii=1,n
+  i2=MOD(ii,n)+1
+  IF(fv(ii)>0.d0)THEN
+    nout=nout+1
+    pout(:,nout)=p(:,ii)
+  END IF
+  IF((fv(ii)>0.d0).NEQV.(fv(i2)>0.d0))THEN
+    s=fv(ii)/(fv(ii)-fv(i2))
+    nout=nout+1
+    pout(:,nout)=p(:,ii)+s*(p(:,i2)-p(:,ii))
+  END IF
+END DO
+IF(nout>=maxv)CALL oft_abort('Polygon size exceeded','gs_cut_cell_rule',__FILE__)
+END SUBROUTINE clip_poly
+!> Twice the signed area of a polygon in the first two logical coordinates (1 for the whole cell)
+FUNCTION poly_area(n,p) RESULT(a)
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: p(:,:)
+REAL(r8) :: a
+INTEGER(i4) :: ii,i2
+a=0.d0
+DO ii=2,n-1
+  i2=ii+1
+  a=a+(p(1,ii)-p(1,1))*(p(2,i2)-p(2,1))-(p(2,ii)-p(2,1))*(p(1,i2)-p(1,1))
+END DO
+END FUNCTION poly_area
+!> Map the cell rule onto triangle (a,b,c), weights scaled by `scale`
+SUBROUTINE add_tri(a,b,c,scale)
+REAL(r8), INTENT(in) :: a(3),b(3),c(3),scale
+REAL(r8) :: frac
+INTEGER(i4) :: m
+frac=(b(1)-a(1))*(c(2)-a(2))-(b(2)-a(2))*(c(1)-a(1))
+IF(frac==0.d0)RETURN
+IF(npts+nq>SIZE(wts))CALL oft_abort('Point arrays too small','gs_cut_cell_rule',__FILE__)
+DO m=1,nq
+  npts=npts+1
+  pts(:,npts)=a*qpts(1,m)+b*qpts(2,m)+c*qpts(3,m)
+  wts(npts)=scale*frac*qwts(m)
+END DO
+END SUBROUTINE add_tri
+!> Map the cell rule onto the triangles joining the area centroid of a convex polygon to its edges
+SUBROUTINE add_centroid_fan(n,p,scale)
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: p(:,:),scale
+REAL(r8) :: cen(3),a,cr
+INTEGER(i4) :: ii,i2
+a=0.d0
+cen=0.d0
+DO ii=2,n-1 ! Centroid relative to the first vertex
+  i2=ii+1
+  cr=(p(1,ii)-p(1,1))*(p(2,i2)-p(2,1))-(p(2,ii)-p(2,1))*(p(1,i2)-p(1,1))
+  a=a+cr
+  cen=cen+cr*(p(:,ii)+p(:,i2)-2.d0*p(:,1))
+END DO
+IF(ABS(a)<=area_tol)RETURN
+cen=p(:,1)+cen/(3.d0*a)
+DO ii=1,n
+  i2=MOD(ii,n)+1
+  CALL add_tri(cen,p(:,ii),p(:,i2),scale)
+END DO
+END SUBROUTINE add_centroid_fan
+END SUBROUTINE gs_cut_cell_rule
 !------------------------------------------------------------------------------
 !> Compute toroidal flux potential from Grad-Shafranov solution
 !------------------------------------------------------------------------------
@@ -3741,7 +4016,11 @@ type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),bcross_kappa(1),H,ani_fac,pani(2)
 real(8) :: pt(3),curr_cent(2)
-integer(4) :: i,m
+real(8), allocatable, target :: cut_pts(:,:),cut_wts(:)
+real(8), pointer, dimension(:,:) :: qpts
+real(8), pointer, dimension(:) :: qwts
+integer(4) :: i,m,nq
+logical :: cut_cells
 type(gs_factory), pointer :: device
 IF(.NOT.self%has_plasma)THEN
   IF(PRESENT(centroid))centroid = 0.d0
@@ -3763,15 +4042,21 @@ END IF
 !---
 itor=0.d0
 curr_cent=0.d0
+cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+nq=0
+IF(cut_cells)nq=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
+ALLOCATE(cut_pts(3,nq),cut_wts(nq)) ! Empty without cut cells
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
-  do m=1,device%fe_rep%quad%np
-    call device%fe_rep%mesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  CALL gs_plasma_cell_quad(self,i,cut_cells,psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
+  do m=1,nq
+    call device%fe_rep%mesh%jacobian(i,qpts(:,m),goptmp,v)
+    call psi_eval%interp(i,qpts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
-    pt=device%fe_rep%mesh%log2phys(i,device%fe_rep%quad%pts(:,m))
+    pt=device%fe_rep%mesh%log2phys(i,qpts(:,m))
+    IF(cut_cells)psitmp(1)=MAX(psitmp(1),self%plasma_bounds(1))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
+    IF(cut_cells.OR.(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1)))THEN
       IF(self%mode==0)THEN
         itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
@@ -3779,17 +4064,18 @@ do i=1,device%fe_rep%mesh%nc
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
-        CALL self%P_ani%interp(i,device%fe_rep%quad%pts(:,m),goptmp,pani)
-        CALL bcross_kappa_fun%interp(i,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        CALL self%P_ani%interp(i,qpts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(i,qpts(:,m),goptmp,bcross_kappa)
         itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
         itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
-      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
-      curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      itor = itor + itor_loc*v*qwts(m)
+      curr_cent = curr_cent + itor_loc*pt(1:2)*v*qwts(m)
     END IF
   end do
 end do
+DEALLOCATE(cut_pts,cut_wts)
 IF(PRESENT(centroid))centroid = curr_cent/itor
 itor=itor*self%psiscale
 IF(ASSOCIATED(bcross_kappa_fun%u))THEN
@@ -4470,22 +4756,33 @@ real(8) :: dflux !< Toroidal flux increment due to plasma
 type(oft_lag_brinterp), target :: psi_eval
 real(8) :: goptmp(3,3),v,psitmp(1),pt(3)
 real(8) :: Btor
-integer(4) :: i,m
+real(8), allocatable, target :: cut_pts(:,:),cut_wts(:)
+real(8), pointer, dimension(:,:) :: qpts
+real(8), pointer, dimension(:) :: qwts
+integer(4) :: i,m,nq,ncut_max
+logical :: cut_cells
 type(gs_factory), pointer :: device
 device=>self%device
 !---
 psi_eval%u=>self%psi
 CALL psi_eval%setup(device%fe_rep)
 dflux=0.d0
-!$omp parallel do private(m,pt,goptmp,v,psitmp,Btor) reduction(+:dflux)
+cut_cells=device%lcfs_cut_cells.AND.(self%plasma_bounds(1)>-1.d98)
+ncut_max=0
+IF(cut_cells)ncut_max=gs_cut_cell_maxpts(device%fe_rep%quad%np,self%nx_points+1)
+!$omp parallel private(m,pt,goptmp,v,psitmp,Btor,cut_pts,cut_wts,qpts,qwts,nq) reduction(+:dflux)
+allocate(cut_pts(3,ncut_max),cut_wts(ncut_max)) ! Empty without cut cells
+!$omp do
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
-  do m=1,device%fe_rep%quad%np
-    call device%fe_rep%mesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  CALL gs_plasma_cell_quad(self,i,cut_cells,psi_eval%vals,cut_pts,cut_wts,nq,qpts,qwts)
+  do m=1,nq
+    call device%fe_rep%mesh%jacobian(i,qpts(:,m),goptmp,v)
+    call psi_eval%interp(i,qpts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
-    pt=device%fe_rep%mesh%log2phys(i,device%fe_rep%quad%pts(:,m))
-    IF(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1)))THEN
+    pt=device%fe_rep%mesh%log2phys(i,qpts(:,m))
+    IF(cut_cells)psitmp(1)=MAX(psitmp(1),self%plasma_bounds(1))
+    IF(cut_cells.OR.(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1))))THEN
       pt(1)=MAX(pt(1),gs_epsilon)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
@@ -4495,10 +4792,12 @@ do i=1,device%fe_rep%mesh%nc
         - self%I%f_offset)/pt(1)
       END IF
       !---Update integrand
-      dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
+      dflux = dflux + Btor*v*qwts(m)
     END IF
   end do
 end do
+deallocate(cut_pts,cut_wts)
+!$omp end parallel
 dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
