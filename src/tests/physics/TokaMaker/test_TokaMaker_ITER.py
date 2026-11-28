@@ -87,6 +87,9 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         for key in ('q', 'F', 'dV/dPsi', '<|grad psi|>', '<|grad psi|^2>', '<Bp^2>',
                     '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax'):
             eq_info['fsa_' + key] = fsa[key].tolist()
+        strike_pts, strike_angles = EQ_obj.get_strike_points()
+        eq_info['strike_pts'] = strike_pts.flatten().tolist()
+        eq_info['strike_angles'] = strike_angles.flatten().tolist()
     # Deleting the previous object exercises TokaMaker cleanup while another instance is live
     if mygs_last is not None:
         del mygs_last
