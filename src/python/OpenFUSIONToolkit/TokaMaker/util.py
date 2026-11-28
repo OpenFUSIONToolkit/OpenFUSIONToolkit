@@ -455,6 +455,34 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
         return J_cond, B_cond, mask, tMaker_obj.r
 
 
+def compute_coil_forces(tMaker_obj):
+    r'''! Compute net radial and vertical force on each coil for the current equilibrium
+
+    Forces are integrated over the full torus, \f$ F_r = 2 \pi \int J_\phi B_z R dA \f$
+    and \f$ F_z = -2 \pi \int J_\phi B_r R dA \f$, with uniform current density in each coil.
+
+    @param tMaker_obj TokaMaker object
+    @result Forces [N] for each coil, `{coil_name: [F_r, F_z]}`
+    '''
+    if tMaker_obj.settings.mirror_mode or (len(tMaker_obj.dist_coils) > 0):
+        raise NotImplementedError('Coil forces are not supported in mirror mode or with coil current distributions')
+    _, reg_currents = tMaker_obj.get_coil_currents()
+    # Evaluate B at the vertices of all coil regions
+    coil_cells = numpy.isin(tMaker_obj.reg, [coil['reg_id'] for coil in tMaker_obj._coil_dict.values()])
+    pt_mask = numpy.zeros((tMaker_obj.np,), dtype=bool)
+    pt_mask[tMaker_obj.lc[coil_cells,:]] = True
+    B = numpy.zeros((tMaker_obj.np,3))
+    B[pt_mask,:] = tMaker_obj.get_field_eval('B').eval(tMaker_obj.r[pt_mask,:2])
+    RB = 2.0*numpy.pi*tMaker_obj.r[:,0,None]*B
+    forces = {}
+    for name, coil in tMaker_obj._coil_dict.items():
+        reg_id = coil['reg_id']
+        J_phi = reg_currents[reg_id-1]/tMaker_obj.compute_area_integral(numpy.ones((tMaker_obj.np,)),reg_mask=reg_id)
+        forces[name] = [J_phi*tMaker_obj.compute_area_integral(RB[:,2],reg_mask=reg_id),
+                        -J_phi*tMaker_obj.compute_area_integral(RB[:,0],reg_mask=reg_id)]
+    return forces
+
+
 def read_mhdin(path, e_coil_names=None, f_coil_names=None):
     r'''Read mhdin.dat file.
 

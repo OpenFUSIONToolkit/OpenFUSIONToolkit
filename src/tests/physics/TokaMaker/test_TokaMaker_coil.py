@@ -12,7 +12,7 @@ from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain
-from OpenFUSIONToolkit.TokaMaker.util import eval_green
+from OpenFUSIONToolkit.TokaMaker.util import eval_green, compute_coil_forces
 
 
 def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
@@ -144,3 +144,48 @@ def test_coil_h3(order,dist_coil):
         mutual_errs = np.r_[3.31022E-04, 2.88318E-07, 2.19675E-07]
         results = mp_run(run_coil_case,(0.1/4.0,order,None))
     assert validate_coil(results,errs[order-2],mutual_errs[order-2])
+
+
+def run_coil_forces_case(mp_q):
+    # 5-turn coil C5, and coil set P with +1 (PU) and -2 (PL) turns
+    gs_mesh = gs_Domain(rextent=8.0,zextents=[-5.0,5.0])
+    gs_mesh.define_region('air',0.4,'boundary')
+    gs_mesh.define_region('plasma',0.2,'plasma')
+    gs_mesh.define_region('C5',0.05,'coil',nTurns=5.0)
+    gs_mesh.define_region('PU',0.05,'coil',coil_set='P',nTurns=1.0)
+    gs_mesh.define_region('PL',0.05,'coil',coil_set='P',nTurns=-2.0)
+    gs_mesh.add_rectangle(4.0,0.0,1.5,2.0,'plasma')
+    gs_mesh.add_rectangle(3.0,3.5,0.6,0.6,'C5')
+    gs_mesh.add_rectangle(1.5,1.0,0.4,0.8,'PU')
+    gs_mesh.add_rectangle(1.5,-1.0,0.4,0.8,'PL')
+    mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mygs.setup_model(mesh_pts,mesh_lc,reg=mesh_reg,cond_dict=gs_mesh.get_conductors(),coil_dict=gs_mesh.get_coils(),order=2)
+    results = []
+    for currents in ({'C5': 2.E5}, {'P': 1.E6}):
+        mygs.set_coil_currents(currents)
+        mygs.replace_eq(mygs.vac_solve())
+        results.append(compute_coil_forces(mygs))
+    # Coil current distributions are not supported
+    mygs.set_coil_current_dist('C5',2.0*np.ones((mygs.np,)))
+    try:
+        compute_coil_forces(mygs)
+        results.append(False)
+    except NotImplementedError:
+        results.append(True)
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+def test_coil_forces():
+    '''Coil forces from vacuum fields: hoop force of a single coil and repulsion of oppositely wound coils'''
+    results = mp_run(run_coil_forces_case,())
+    assert results is not None
+    # Thin ring hoop force F_r = mu0 (NI)^2/2 (ln(8R/g) - 1), with geometric mean distance g ~ 0.2235(w+h)
+    hoop = 0.5*4.E-7*np.pi*(5*2.E5)**2*(np.log(8.0*3.0/(0.2235*1.2))-1.0)
+    assert abs(results[0]['C5'][0]/hoop-1.0) < 1.E-2
+    # Opposite currents repel with equal and opposite vertical forces
+    assert results[1]['PU'][1] > 0.0
+    assert abs(results[1]['PL'][1]/results[1]['PU'][1]+1.0) < 1.E-2
+    assert results[2]
