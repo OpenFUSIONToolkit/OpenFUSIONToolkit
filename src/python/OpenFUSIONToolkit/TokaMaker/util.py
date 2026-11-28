@@ -423,6 +423,18 @@ def eval_green(x,xc):
         return vals*mu0
 
 
+def incidence_angles(B,tangent):
+    '''! Angles between a magnetic field and an axisymmetric wall
+
+    @param B Magnetic field (B_R, B_phi, B_Z) [T]
+    @param tangent Wall direction in the poloidal plane (R, Z)
+    @result Poloidal and total field-line incidence angles [deg]
+    '''
+    normal = numpy.r_[tangent[1], -tangent[0]]/numpy.linalg.norm(tangent)
+    Bn = abs(B[0]*normal[0] + B[2]*normal[1])
+    return numpy.degrees(numpy.arcsin(Bn/numpy.hypot(B[0],B[2]))), numpy.degrees(numpy.arcsin(Bn/numpy.linalg.norm(B)))
+
+
 def compute_forces_components(tMaker_obj,psi,cell_centered=False):
     r'''! Compute terms needed for evaluating forces in passively conducting regions
 

@@ -1810,6 +1810,15 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_xpoints()
 
+    def get_strike_points(self):
+        '''! Get points where the separatrix crosses the limiter
+
+        @result Strike points [n,2], poloidal and total field-line incidence angles [n,2] [deg]
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_strike_points()
+
     def set_coil_currents(self, currents=None):
         '''! Set coil currents
 
@@ -3671,6 +3680,32 @@ class TokaMaker_equilibrium():
                 if self._x_points[i,0] < 0.0:
                     break
             return self._x_points[:i,:], self.diverted
+
+    def get_strike_points(self):
+        '''! Get points where the separatrix crosses the limiter
+
+        @result Strike points [n,2], poloidal and total field-line incidence angles [n,2] [deg]
+        '''
+        from scipy.optimize import brentq
+        from .util import incidence_angles
+        if not self.diverted:
+            raise ValueError('Strike points require a diverted equilibrium')
+        psi_eval = self.get_field_eval('PSI')
+        B_eval = self.get_field_eval('B')
+        pts = []
+        angles = []
+        for contour in self._tMaker.lim_contours:
+            for i in range(contour.shape[0]-1):
+                pt0 = contour[i,:]
+                seg = contour[i+1,:]-pt0
+                # Sample along each segment to catch crossings between limiter points
+                s = numpy.linspace(0.0,1.0,5)
+                dpsi = psi_eval.eval(pt0+s[:,None]*seg)[:,0]-self.psi_bounds[0]
+                for j in numpy.flatnonzero(dpsi[:-1]*dpsi[1:] < 0.0):
+                    s0 = brentq(lambda x,p,d: psi_eval.eval(p+x*d)[0]-self.psi_bounds[0],s[j],s[j+1],args=(pt0,seg))
+                    pts.append(pt0+s0*seg)
+                    angles.append(incidence_angles(B_eval.eval(pts[-1]),seg))
+        return numpy.array(pts), numpy.array(angles)
 
     def get_field_eval(self,field_type):
         r'''! Create field interpolator for vector potential
