@@ -148,6 +148,9 @@ end type oft_petsc_asprecond
 type, abstract, public, extends(oft_solver) :: oft_petsc_solver
   TYPE(tksp) :: solver !< PETSc solver object
   LOGICAL :: dist = .FALSE. !< Matrix/Vector are distributed
+  INTEGER(i4), PRIVATE :: its_ksp = -1 !< Cached maximum iteration count set on KSP
+  REAL(r8), PRIVATE :: atol_ksp = -1.d0 !< Cached absolute tolerance set on KSP
+  REAL(r8), PRIVATE :: rtol_ksp = -1.d0 !< Cached relative tolerance set on KSP
 CONTAINS
   !> Update solver with new settings/operators
   PROCEDURE :: update => petsc_solver_update
@@ -235,7 +238,7 @@ contains
   !> Setup PETSc solver object
   PROCEDURE :: setup_ksp => direct_setup_ksp
 end type oft_petsc_direct_solver
-PRIVATE asm_set_local_subdomains, gasm_set_subdomains
+PRIVATE asm_set_local_subdomains, gasm_set_subdomains, petsc_solver_sync_tol, petsc_ksp_diverged
 !---Start subroutines
 contains
 !------------------------------------------------------------------------------
@@ -348,10 +351,59 @@ integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
 NULLIFY(self%A)
+self%its_ksp=-1
+self%atol_ksp=-1.d0
+self%rtol_ksp=-1.d0
 self%initialized=.FALSE.
 CALL solver_delete(self,propogate)
 DEBUG_STACK_POP
 end subroutine petsc_solver_delete
+!------------------------------------------------------------------------------
+!> Synchronize KSP tolerances when solver settings change between applies
+!------------------------------------------------------------------------------
+SUBROUTINE petsc_solver_sync_tol(self)
+CLASS(oft_petsc_solver), INTENT(inout) :: self !< Solver object
+INTEGER(i4) :: its,ierr
+DEBUG_STACK_PUSH
+IF(self%rtol/=self%rtol_ksp.OR.self%atol/=self%atol_ksp.OR.self%its/=self%its_ksp)THEN
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+  its=10000
+  IF(self%its>0)its=self%its
+  CALL KSPSetTolerances(self%solver,self%rtol,self%atol, &
+    PETSC_DEFAULT_REAL,its,ierr)
+#else
+  its=PETSC_DETERMINE_INTEGER
+  IF(self%its>0)its=self%its
+  CALL KSPSetTolerances(self%solver,self%rtol,self%atol, &
+    PETSC_CURRENT_REAL,its,ierr)
+#endif
+  self%rtol_ksp=self%rtol
+  self%atol_ksp=self%atol
+  self%its_ksp=self%its
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE petsc_solver_sync_tol
+!------------------------------------------------------------------------------
+!> Check whether a PETSc KSP solve stopped with a diverged reason
+!------------------------------------------------------------------------------
+FUNCTION petsc_ksp_diverged(ksp) RESULT(diverged)
+TYPE(tksp), INTENT(inout) :: ksp !< PETSc KSP object
+LOGICAL :: diverged !< True if KSP stopped with a diverged reason
+INTEGER(i4) :: ierr
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+INTEGER(i4) :: reason
+#else
+TYPE(eKSPConvergedReason) :: reason
+#endif
+DEBUG_STACK_PUSH
+CALL KSPGetConvergedReason(ksp,reason,ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+diverged=(reason<0)
+#else
+diverged=(reason%v<0)
+#endif
+DEBUG_STACK_POP
+END FUNCTION petsc_ksp_diverged
 !------------------------------------------------------------------------------
 !> Setup performance monitor for PETSc solver
 !------------------------------------------------------------------------------
@@ -404,13 +456,19 @@ self%cits=0
 IF(.NOT.self%initialized)THEN
   CALL petsc_solver_setup(self)
   CALL self%setup_ksp(self%solver)
+  self%rtol_ksp=self%rtol
+  self%atol_ksp=self%atol
+  self%its_ksp=self%its
   self%initialized=.TRUE.
+ELSE
+  CALL petsc_solver_sync_tol(self)
 END IF
 !---Apply solver
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc CG solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
+IF(petsc_ksp_diverged(self%solver))self%cits=-1
 CALL KSPSetReusePreconditioner(self%solver,PETSC_TRUE,ierr)
 uv%loc_current=.FALSE.
 gv%loc_current=.FALSE.
@@ -584,13 +642,19 @@ END IF
 IF(.NOT.self%initialized)THEN
   CALL petsc_solver_setup(self)
   CALL self%setup_ksp(self%solver)
+  self%rtol_ksp=self%rtol
+  self%atol_ksp=self%atol
+  self%its_ksp=self%its
   self%initialized=.TRUE.
+ELSE
+  CALL petsc_solver_sync_tol(self)
 END IF
 !---
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc GMRES solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
+IF(petsc_ksp_diverged(self%solver))self%cits=-1
 IF(oft_env%pm.AND.oft_env%head_proc)CALL KSPConvergedReasonView(self%solver,PETSC_VIEWER_STDOUT_SELF,ierr)
 CALL KSPSetReusePreconditioner(self%solver,PETSC_TRUE,ierr)
 uv%loc_current=.FALSE.
@@ -826,13 +890,19 @@ IF(.NOT.self%initialized)THEN
   IF(self%its>0)its=self%its
   CALL KSPSetTolerances(self%solver,self%rtol,self%atol, &
   PETSC_DEFAULT_REAL,its,ierr)
+  self%rtol_ksp=self%rtol
+  self%atol_ksp=self%atol
+  self%its_ksp=self%its
   self%initialized=.TRUE.
+ELSE
+  CALL petsc_solver_sync_tol(self)
 END IF
 !---
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc Jacobi solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
+IF(petsc_ksp_diverged(self%solver))self%cits=-1
 uv%loc_current=.FALSE.
 gv%loc_current=.FALSE.
 DEBUG_STACK_POP
