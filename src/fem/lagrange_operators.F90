@@ -1999,7 +1999,7 @@ DO i=1,mesh%nc
     dof = mesh%cell_np + lag_fine%gstruct(2)*mesh%cell_ne &
           + lag_fine%gstruct(3)*mesh%cell_nf &
           + j
-    CALL oft_lag_npos(lag_fine,cell,dof,f)
+    CALL oft_lag_npos(lag_fine,i,dof,f)
     DO k=1,lag_cors%nce
       CALL oft_lag_eval(lag_cors,i,k,f,val)
       i_ind=ifine

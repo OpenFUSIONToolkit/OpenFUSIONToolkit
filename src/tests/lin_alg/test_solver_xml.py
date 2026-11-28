@@ -204,3 +204,22 @@ def test_gmres_petsc_gasm_node_mpi(nlocal, overlap, iteration_count):
     converged_error = 0.6394036978170452
     assert xml_setup(xml_file,petsc=True,nprocs=2,ppn=2)
     assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# PETSc ASM/BJ with <solver type="ilu"> omitting <package> must default to petsc ILU
+def test_gmres_petsc_ilu_default_package():
+    '''PETSc GMRES with block-Jacobi ILU preconditioning when the <package> element is
+    omitted, verifying that ILU defaults to the PETSc factorization package.'''
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <solver type="ilu"></solver>
+        </pre>
+    </solver>
+    """
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=True)
+    assert validate_result(None,converged_error)

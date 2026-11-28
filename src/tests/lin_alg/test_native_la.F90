@@ -39,8 +39,14 @@
 MODULE test_wrap_vectors
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_vector_ptr, oft_cvector_ptr
+USE oft_deriv_matrices, ONLY: oft_noop_matrix
 IMPLICIT NONE
 PRIVATE
+! Quadratic nonlinear test operator F(u) = u^2 (componentwise) for testing oft_mf_matrix
+TYPE, PUBLIC, EXTENDS(oft_noop_matrix) :: quad_test_op
+CONTAINS
+  PROCEDURE :: apply_real => quad_op_apply
+END TYPE quad_test_op
 !> Real vector that is not a native vector
 TYPE, PUBLIC, EXTENDS(oft_vector) :: wrap_vector
   CLASS(oft_vector), POINTER :: inner => NULL() !< Wrapped vector
@@ -349,6 +355,14 @@ CLASS(wrap_cvector), INTENT(inout) :: self
 INTEGER(i4), INTENT(in) :: up_method
 CALL self%inner%stitch(up_method)
 END SUBROUTINE wc_stitch
+! Componentwise square F(u) = u^2 for matrix-free Jacobian verification
+SUBROUTINE quad_op_apply(self,a,b)
+CLASS(quad_test_op), INTENT(inout) :: self
+CLASS(oft_vector), TARGET, INTENT(inout) :: a
+CLASS(oft_vector), INTENT(inout) :: b
+CALL b%copy(a)
+CALL b%mult(a)
+END SUBROUTINE quad_op_apply
 END MODULE test_wrap_vectors
 PROGRAM test_native_la
 USE oft_base
@@ -362,10 +376,11 @@ USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_cvecto
   oft_native_cmatrix, oft_native_pattern, native_matrix_share, native_matrix_setup_full, &
   native_pattern_live
 USE oft_la_base, ONLY: oft_cmatrix, oft_graph_ptr
+USE oft_deriv_matrices, ONLY: oft_mf_matrix
 USE oft_la_utils, ONLY: create_matrix
 USE oft_stitching, ONLY: oft_seam, oft_global_stitch, seam_free_plan
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
-USE test_wrap_vectors, ONLY: wrap_vector_create, wrap_cvector_create
+USE test_wrap_vectors, ONLY: wrap_vector_create, wrap_cvector_create, quad_test_op
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob, oft_vlag_zerob
@@ -393,6 +408,7 @@ CALL test_stitch_owner()
 CALL test_accumulate()
 CALL test_pattern()
 CALL test_zero()
+CALL test_mf_matrix()
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='native_la.results')
   WRITE(io_unit,*)nfail
@@ -1491,6 +1507,55 @@ DO i=1,nr
   END DO
 END DO
 END FUNCTION zero_errs
+! Matrix-free Jacobian apply without utyp (Pernice-Walker step size scaling)
+SUBROUTINE test_mf_matrix()
+INTEGER(i4) :: k
+REAL(r8) :: rel_err
+REAL(r8), PARAMETER :: scales(2) = [1.d-6, 1.d8]
+REAL(r8), PARAMETER :: mf_tol = 1.d-4
+CLASS(oft_vector), POINTER :: u0,v,b,ref,utyp_save
+TYPE(quad_test_op), TARGET :: fop
+TYPE(oft_mf_matrix) :: mfmat
+CALL ML_oft_lagrange%vec_create(u0)
+CALL ML_oft_lagrange%vec_create(v)
+CALL ML_oft_lagrange%vec_create(b)
+CALL ML_oft_lagrange%vec_create(ref)
+CALL mfmat%setup(u0,fop)
+! Exercise the unassociated-utyp branch while keeping utyp for cleanup
+utyp_save=>mfmat%utyp
+NULLIFY(mfmat%utyp)
+CALL fill(u0,0.37d0,1.5d0)
+CALL mfmat%update(u0)
+! Zero perturbation must return zero
+CALL v%set(0.d0)
+CALL b%set(1.d0)
+CALL mfmat%apply(v,b)
+CALL check_exact('mf_matrix zero perturbation',b%norm(3),0.d0)
+! Perturbation norm ||eps*v|| must be invariant to ||v||_2 for small and large v
+DO k=1,2
+  CALL fill(v,0.11d0,0.2d0)
+  CALL v%scale(scales(k)/v%norm(2))
+  CALL mfmat%apply(v,b)
+  CALL ref%copy(u0)
+  CALL ref%mult(v)
+  CALL ref%scale(2.d0)
+  CALL b%add(1.d0,-1.d0,ref)
+  rel_err=b%norm(2)/ref%norm(2)
+  IF(.NOT.(rel_err<mf_tol))THEN
+    nfail=nfail+1
+    IF(oft_env%head_proc)WRITE(*,'(A,I1,2ES25.16)')'FAILED: mf_matrix no-utyp scale ',k,rel_err,mf_tol
+  ELSE
+    IF(oft_env%head_proc)WRITE(*,'(A,I1,ES25.16)')'PASSED: mf_matrix no-utyp scale ',k,rel_err
+  END IF
+END DO
+mfmat%utyp=>utyp_save
+CALL mfmat%delete()
+CALL u0%delete()
+CALL v%delete()
+CALL b%delete()
+CALL ref%delete()
+DEALLOCATE(u0,v,b,ref)
+END SUBROUTINE test_mf_matrix
 ! Cast a matrix to a native CRS matrix pointer (aborts otherwise)
 FUNCTION native_cast(mat) RESULT(nmat)
 CLASS(oft_matrix), POINTER, INTENT(in) :: mat

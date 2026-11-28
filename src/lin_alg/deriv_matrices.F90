@@ -887,7 +887,7 @@ ELSE
     eps=self%b0*MAX(ABS(bb),a1)*SIGN(1.d0,bb)/aa
   ELSE
     bb=SQRT(clamp_nonneg(self%u0%dot(self%u0)))
-    eps=self%b0*SQRT(1.d0+bb)/aa
+    eps=self%b0*SQRT(1.d0+bb)/SQRT(aa)
   END IF
 END IF
 !---

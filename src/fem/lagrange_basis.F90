@@ -1568,7 +1568,7 @@ ELSE
     case(4)
       f(1)=self%xnodes(self%inodesc(1,self%cmap(dof)%ind)+1)
       f(2)=self%xnodes(self%inodesc(2,self%cmap(dof)%ind)+1)
-      f(3)=self%xnodes(self%inodesc(2,self%cmap(dof)%ind)+1)
+      f(3)=self%xnodes(self%inodesc(3,self%cmap(dof)%ind)+1)
       f(4)=1.d0-SUM(f(1:3))
   end select
 END IF

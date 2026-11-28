@@ -1807,6 +1807,8 @@ IF(ierr==0)THEN
     self%package=factor_package
     DEALLOCATE(factor_package)
   END IF
+ELSE IF(TRIM(self%type)=='ilu')THEN
+  self%package='petsc'
 END IF
 DEBUG_STACK_POP
 end subroutine lu_pc_load_xml
