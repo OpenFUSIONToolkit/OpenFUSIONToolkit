@@ -73,6 +73,7 @@ Thanks! :sunny: :heart:
 The Open FUSION Toolkit Team
 
 ## Contributors
+Eleanor Adams (@GitLostintheSauce)\
 Matt Adams (@mattsgit)\
 Stuart Benjamin (@StuartBenjamin)\
 Anson Braun (@ansonbraun)\
@@ -87,6 +88,7 @@ Francois Logak\
 Oak Nelson (@nelsonand)\
 Matthew Parsons\
 Matthew Pharr (@matt-pharr)\
+Kevin Rajan (@kvnloo)\
 Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\
 Thomas Wang (@ThomasWangAPAM)\

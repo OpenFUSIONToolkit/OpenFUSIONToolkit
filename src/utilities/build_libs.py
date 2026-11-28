@@ -12,6 +12,7 @@ import time
 import subprocess
 import tarfile
 import re
+import shlex
 import argparse
 import math
 import hashlib
@@ -106,6 +107,15 @@ def extract_archive(file):
             tar.extractall()
     except Exception as e:
         error_exit('Extraction failed for file: "{0}"'.format(file), exception=e)
+
+
+def resolve_abspath(command):
+    result, errcode = run_command("which {0}".format(command))
+    if errcode != 0:
+        print('WARNING: Could not resolve path for command "{0}"'.format(command))
+        return command
+    else:
+        return result.strip()
 
 
 def run_command(command, timeout=10, env_vars={}):
@@ -271,7 +281,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     for key in ('CC', 'CXX', 'FC', 'LD', 'CMAKE'):
         temp = os.environ.get(key)
         if temp is not None:
-            config_dict[key] = temp
+            config_dict[key] = resolve_abspath(temp)
     if config_dict["LD"] is None:
         config_dict["LD"] = config_dict["FC"]
     # Get build location
@@ -481,11 +491,6 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DOFT_MPI_HEADER:BOOL={0}".format(bool_to_string(mydict.get("MPI_USE_HEADERS",False))))
     else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
-    if "PETSC_ROOT" in mydict:
-        cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
-    else:
-        if "METIS_ROOT" in mydict:
-            cmake_lines.append("-DOFT_METIS_ROOT:PATH={0}".format(mydict["METIS_ROOT"]))
     if "HDF5_ROOT" in mydict:
         cmake_lines.append("-DHDF5_ROOT:PATH={0}".format(mydict["HDF5_ROOT"]))
     if mydict.get("HDF5_HAS_HL",False):
@@ -496,6 +501,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
     elif "MKL_FLAGS" in mydict:
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
+    elif mydict.get("BLAS_ACCELERATE",False):
+        cmake_lines.append("-DOFT_LAPACK_LIBRARIES:STRING={0}".format(mydict["LAPACK_LIB_PATH"]))
     if "ARPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
@@ -503,6 +510,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     if "PETSC_ROOT" in mydict:
         cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
     else:
+        if "METIS_ROOT" in mydict:
+            cmake_lines.append("-DOFT_METIS_ROOT:PATH={0}".format(mydict["METIS_ROOT"]))
         if "SUPERLU_ROOT" in mydict:
             cmake_lines.append("-DOFT_SUPERLU_ROOT:PATH={0}".format(mydict["SUPERLU_ROOT"]))
             if "SUPERLU_VER_MAJOR" in mydict:
@@ -511,6 +520,12 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DOFT_SUPERLU_DIST_ROOT:PATH={0}".format(mydict["SUPERLU_DIST_ROOT"]))
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
+            if mydict.get("UMFPACK_LONG",False):
+                cmake_lines.append("-DOFT_UMFPACK_LONG:BOOL=TRUE")
+    if "STRUMPACK_ROOT" in mydict:
+        cmake_lines.append("-DOFT_STRUMPACK_ROOT:PATH={0}".format(mydict["STRUMPACK_ROOT"]))
+        if "SCALAPACK_ROOT" in mydict:
+            cmake_lines.append("-DOFT_SCALAPACK_ROOT:PATH={0}".format(mydict["SCALAPACK_ROOT"]))
     if tmp_dict['OS_TYPE'] == 'Darwin':
         linker_test_source = """
 program test_program
@@ -948,6 +963,13 @@ class MPICH(package):
             "--without-hip",
             "--without-cuda"
         ]
+        if self.config_dict['OS_TYPE'] == 'Darwin' and self.config_dict['CC_VENDOR'] == 'llvm':
+            # Libtool cannot build shared Fortran libraries with LLVM Flang on macOS (silently falls back
+            # to static), so request static libraries explicitly to ensure dependencies (eg. hwloc) are
+            # included in the compiler wrappers
+            if self.shared_libs:
+                print("  Warning: Shared MPICH libraries are not supported with LLVM on macOS, building static libraries instead")
+            self.shared_libs = False
         if self.shared_libs:
             config_options += [
                 "--enable-shared=yes",
@@ -1340,6 +1362,76 @@ class MKL(package):
         return self.config_dict
 
 
+class ACCELERATE(package):
+    """! BLAS/LAPACK from the macOS Accelerate framework
+
+    Accelerate's legacy Fortran interface (eg. "dgemm_") is not compatible with gfortran, so a small
+    shim library mapping the standard Fortran symbols to Accelerate's modern "$NEWLAPACK" interface is
+    generated and built by "accelerate_shim.py" from the routines listed in "accelerate_symbols.txt"
+    (see that script for details).
+    """
+
+    def __init__(self):
+        self.name = "ACCELERATE"
+        self.display_name = "Accelerate (BLAS/LAPACK shim)"
+        self.build_dir = "accelerate_shim"
+        self.install_dir = "accelerate_shim"
+
+    def install(self, config_dict, keep_build_dirs=False, force=False):
+        # Nothing to download, so set paths that would normally be set from the URL
+        self.root_path = config_dict['base_dir']
+        self.root_build_path = config_dict['build_dir']
+        return super().install(config_dict, keep_build_dirs, force)
+
+    def fetch(self, force=False, nretry=2):
+        return
+
+    def extract(self):
+        if not os.path.isdir(self.build_dir):
+            os.mkdir(self.build_dir)
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        if self.config_dict['OS_TYPE'] != 'Darwin':
+            error_exit('Accelerate BLAS/LAPACK is only available on macOS')
+        if ver_lt(self.config_dict['OS_VER'], '14.0'):
+            error_exit('Accelerate BLAS/LAPACK requires macOS >= 14.0 (found {0})'.format(self.config_dict['OS_VER']))
+        if ver_lt(self.config_dict.get('MACOSX_DEPLOYMENT_TARGET', '14.0'), '14.0'):
+            error_exit('Accelerate BLAS/LAPACK requires MACOSX_DEPLOYMENT_TARGET >= 14.0')
+        if self.config_dict['TARGET_ARCH'] not in ('arm64', 'x86_64'):
+            error_exit('Unsupported architecture for Accelerate BLAS/LAPACK: {0}'.format(self.config_dict['TARGET_ARCH']))
+        self.setup_root_struct()
+        # BLAS_VENDOR is intentionally not set: FindBLAS's "Apple" vendor links Accelerate's legacy
+        # (f2c) interface directly, so packages must use the shim through BLAS_LIB_PATH/LAPACK_LIB_PATH
+        self.config_dict['BLAS_ACCELERATE'] = True
+        self.config_dict['LAPACK_LIB'] = self.config_dict['ACCELERATE_LIB']
+        self.config_dict['LAPACK_LIBS'] = "-loftaccelerate"
+        self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'liboftaccelerate.a')
+        self.config_dict['LAPACK_LIB_PATH'] = self.config_dict['BLAS_LIB_PATH']
+        # Installation check files
+        self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
+        return self.config_dict
+
+    def setup_build(self):
+        # Shim is generated by a helper script from a fixed symbol list; hash of both forces a rebuild if either changes
+        shim_script = os.path.join(script_dir, 'accelerate_shim.py')
+        hasher = hashlib.sha256()
+        for shim_file in (shim_script, os.path.join(script_dir, 'accelerate_symbols.txt')):
+            with open(shim_file, 'rb') as fid:
+                hasher.update(fid.read())
+        script_hash = hasher.hexdigest()
+        shim_cmd = [sys.executable, shim_script, '--output', self.config_dict['BLAS_LIB_PATH'],
+                    '--cc', self.config_dict['CC'], '--arch', self.config_dict['TARGET_ARCH']]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            shim_cmd += ['--sdk_path', self.config_dict['MACOS_SDK_PATH']]
+        build_lines = [
+            'export OFT_ACCELERATE_SHIM_HASH={0}'.format(script_hash),
+            # Command is quoted and escaped here, as it is not a format string
+            ' '.join(shlex.quote(arg) for arg in shim_cmd).replace('{', '{{').replace('}', '}}')
+        ]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
@@ -1645,8 +1737,9 @@ class SUPERLU_DIST(package):
 
 
 class UMFPACK(package):
-    def __init__(self, comp_wrapper=False, shared_libs=False):
+    def __init__(self, use_long=False, comp_wrapper=False, shared_libs=False):
         self.name = "UMFPACK"
+        self.use_long = use_long
         self.url = "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v7.10.1.tar.gz"
         self.build_dir = "SuiteSparse-7.10.1"
         self.install_dir = "UMFPACK-6_3_5"
@@ -1661,6 +1754,8 @@ class UMFPACK(package):
             return self.config_dict
         self.setup_root_struct()
         self.config_dict['UMFPACK_LIBS'] = "-lumfpack -lamd -lsuitesparseconfig"
+        if self.use_long:
+            self.config_dict['UMFPACK_LONG'] = True
         # Installation check files
         if self.shared_libs:
             self.install_chk_files = [os.path.join(self.config_dict['UMFPACK_LIB'], 'libumfpack'+self.config_dict['DYN_EXT'])]
@@ -1696,6 +1791,11 @@ class UMFPACK(package):
             config_CMAKE_options = AMD_CMAKE_options.copy() + [
                 "-DBLAS_ROOT:PATH={BLAS_ROOT}",
                 "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
+            ]
+        elif self.config_dict.get('BLAS_ACCELERATE',False):
+            config_CMAKE_options = AMD_CMAKE_options.copy() + [
+                "-DBLAS_LIBRARIES:FILEPATH={BLAS_LIB_PATH}",
+                "-DLAPACK_LIBRARIES:FILEPATH={LAPACK_LIB_PATH}"
             ]
         else:
             config_CMAKE_options = AMD_CMAKE_options.copy()
@@ -1734,6 +1834,162 @@ class UMFPACK(package):
                 build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.dylib*"]
             else:
                 build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.so*"]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
+class SCALAPACK(package):
+    def __init__(self, shared_libs=False):
+        self.name = "SCALAPACK"
+        self.url = "https://github.com/Reference-ScaLAPACK/scalapack/archive/refs/tags/v2.2.2.tar.gz"
+        self.build_dir = "scalapack-2.2.2"
+        self.shared_libs = shared_libs
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        self.config_dict['SCALAPACK_LIBS'] = "-lscalapack"
+        # Installation check files
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['SCALAPACK_LIB'], 'libscalapack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['SCALAPACK_LIB'], 'libscalapack.a')]
+        return self.config_dict
+
+    def setup_build(self):
+        if 'MPI_CC' not in self.config_dict:
+            error_exit('ScaLAPACK requires MPI compilers')
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={SCALAPACK_ROOT}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DSCALAPACK_BUILD_TESTS:BOOL=OFF",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON"
+        ]
+        if self.shared_libs:
+            cmake_options.append('-DBUILD_SHARED_LIBS:BOOL=ON')
+        else:
+            cmake_options.append('-DBUILD_SHARED_LIBS:BOOL=OFF')
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options += [
+                "-DBLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+                "-DLAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}"
+            ]
+        if self.config_dict['CC_VENDOR'] == 'gnu':
+            # Legacy (K&R style) C sources (C23 is the default in GCC 15+) and Fortran argument mismatches
+            cmake_options.append('-DCMAKE_C_FLAGS="-std=gnu17 -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-implicit-int"')
+            if int(self.config_dict['CC_VERSION'].split(".")[0]) > 9:
+                cmake_options.append('-DCMAKE_Fortran_FLAGS="-fallow-argument-mismatch"')
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+        build_lines = [
+            "rm -rf build_dir",
+            "mkdir build_dir",
+            "cd build_dir",
+            "export CC={MPI_CC}",
+            "export FC={MPI_FC}",
+            # Allow configure with CMake 4+ (also needed by the nested BLACS configure step)
+            "export CMAKE_POLICY_VERSION_MINIMUM=3.5",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
+class STRUMPACK(package):
+    def __init__(self, build_openmp, with_mpi=False, comp_wrapper=False, shared_libs=False):
+        self.name = "STRUMPACK"
+        self.url = "https://github.com/pghysels/STRUMPACK/archive/refs/tags/v8.1.0.tar.gz"
+        self.build_dir = "STRUMPACK-8.1.0"
+        self.build_openmp = build_openmp
+        self.with_mpi = with_mpi
+        self.comp_wrapper = comp_wrapper
+        self.shared_libs = shared_libs
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        if self.comp_wrapper:
+            self.skip = True
+            print("STRUMPACK provided by compiler wrappers: Skipping build")
+            return self.config_dict
+        self.setup_root_struct()
+        self.config_dict['STRUMPACK_LIBS'] = "-lstrumpack"
+        # Installation check files
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['STRUMPACK_LIB'], 'libstrumpack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['STRUMPACK_LIB'], 'libstrumpack.a')]
+        #
+        return self.config_dict
+
+    def setup_build(self):
+        if ver_lt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.21"):
+            error_exit('CMAKE >= 3.21 required for STRUMPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
+        # Local build (optionally with MPI using ScaLAPACK), all GPU and optional TPLs disabled
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={STRUMPACK_ROOT}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DSTRUMPACK_USE_CUDA:BOOL=OFF",
+            "-DSTRUMPACK_USE_HIP:BOOL=OFF",
+            "-DSTRUMPACK_USE_SYCL:BOOL=OFF",
+            "-DTPL_ENABLE_SLATE:BOOL=OFF",
+            "-DTPL_ENABLE_PARMETIS:BOOL=OFF",
+            "-DTPL_ENABLE_SCOTCH:BOOL=OFF",
+            "-DTPL_ENABLE_PTSCOTCH:BOOL=OFF",
+            "-DTPL_ENABLE_COMBBLAS:BOOL=OFF",
+            "-DTPL_ENABLE_BPACK:BOOL=OFF",
+            "-DTPL_ENABLE_ZFP:BOOL=OFF",
+            "-DTPL_ENABLE_SZ3:BOOL=OFF",
+            "-DTPL_ENABLE_MAGMA:BOOL=OFF",
+            "-DTPL_ENABLE_KBLAS:BOOL=OFF",
+            "-DTPL_ENABLE_MATLAB:BOOL=OFF"
+        ]
+        if self.build_openmp:
+            cmake_options.append("-DSTRUMPACK_USE_OPENMP:BOOL=ON")
+        else:
+            cmake_options.append("-DSTRUMPACK_USE_OPENMP:BOOL=OFF")
+        compilers = {'CC': '{CC}', 'CXX': '{CXX}', 'FC': '{FC}'}
+        if self.with_mpi:
+            if ('MPI_CXX' not in self.config_dict) or ('SCALAPACK_LIB' not in self.config_dict):
+                error_exit('STRUMPACK with MPI requires an MPI C++ compiler and ScaLAPACK')
+            cmake_options += [
+                "-DSTRUMPACK_USE_MPI:BOOL=ON",
+                "-DTPL_SCALAPACK_LIBRARIES:PATH={0}".format(os.path.join(self.config_dict['SCALAPACK_LIB'], 'libscalapack.a'))
+            ]
+            compilers = {'CC': '{MPI_CC}', 'CXX': '{MPI_CXX}', 'FC': '{MPI_FC}'}
+        else:
+            cmake_options.append("-DSTRUMPACK_USE_MPI:BOOL=OFF")
+        if self.shared_libs:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON'
+            ]
+        else:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=OFF'
+            ]
+        if "METIS_ROOT" in self.config_dict:
+            cmake_options.append("-DTPL_METIS_PREFIX:PATH={METIS_ROOT}")
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options += [
+                "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+                "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}"
+            ]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+        build_lines = [
+            "rm -rf build_dir",
+            "mkdir build_dir",
+            "cd build_dir",
+            "export CC={0}".format(compilers['CC']),
+            "export CXX={0}".format(compilers['CXX']),
+            "export FC={0}".format(compilers['FC']),
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
+            "make -j{MAKE_THREADS} strumpack",  # Skip tests and examples
+            "make install/fast"
+        ]
         self.setup_build_script(build_lines, self.config_dict)
 
 
@@ -1802,9 +2058,11 @@ class PETSC(package):
         elif self.version == '3.23':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.23.7/petsc-v3.23.7.tar.gz"
         elif self.version == '3.24':
-            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.24.3/petsc-v3.24.3.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.24.6/petsc-v3.24.6.tar.gz"
+        elif self.version == '3.25':
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.25.2/petsc-v3.25.2.tar.gz"
         else:
-            error_exit('Invalid PETSc version requested (3.20 <= version <= 3.24)')
+            error_exit('Invalid PETSc version requested (3.20 <= version <= 3.25)')
         self.debug = debug
         self.with_openmp = with_openmp
         self.with_superlu = with_superlu
@@ -1814,6 +2072,8 @@ class PETSC(package):
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
         self.mpi_f08 = mpi_f08
+        # Building PETSc with external solvers (eg. MUMPS, SuperLU-DIST) can exceed the default timeout
+        self.build_timeout = 30
 
     def detect_version(self):
         print("  Testing PETSc version")
@@ -1850,6 +2110,11 @@ class PETSC(package):
                 sys.exit(1)
             return self.config_dict
         self.setup_root_struct()
+        # PETSc < 3.25 always builds its Fortran interface on the "mpi" module (integer handles)
+        if self.mpi_f08 and ver_lt(self.version, "3.25"):
+            print("  Note: PETSc {0} does not support the MPI Fortran 2008 interface, header-based interface will be used".format(self.version))
+            self.mpi_f08 = False
+            self.config_dict["MPI_USE_HEADERS"] = True
         # Setup library build type
         if self.shared_libs is None:
             if self.config_dict['OS_TYPE'] == 'Darwin':
@@ -1923,6 +2188,10 @@ class PETSC(package):
             options += ['--download-suitesparse']
         if self.with_mumps:
             options += ['--download-mumps', '--download-scalapack', '--download-blacs']
+            if config_dict['CC_VENDOR'] == 'llvm':
+                # ScaLAPACK detection of Fortran name mangling fails with LLVM Flang (STOP message is captured)
+                print('  Warning: Setting ScaLAPACK Fortran name mangling to "Add_" for LLVM, as automatic detection fails with LLVM Flang')
+                options += ['--download-scalapack-cmake-arguments="-DCDEFS=Add_"']
         #
         if 'MKL_ROOT' in self.config_dict:
             options += ['--with-blas-lapack-dir={MKL_ROOT}']
@@ -1940,7 +2209,11 @@ class PETSC(package):
         else:
             options += ['--with-debugging=no']
             if config_dict['CC_VENDOR'] == 'gnu':
-                options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
+                # GCC 15+ defaults to C23, which breaks K&R-style declarations in some PETSc dependencies (eg. SuperLU-DIST)
+                if int(config_dict['CC_VERSION'].split(".")[0]) >= 15:
+                    options += ['--COPTFLAGS="-O2 -std=gnu17"', '--FOPTFLAGS=-O2']
+                else:
+                    options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
             elif config_dict['CC_VENDOR'] == 'intel':
                 options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
@@ -2021,6 +2294,7 @@ group.add_argument("--ref_blas", action="store_true", default=False, help="Use r
 group.add_argument("--blas_lapack_wrapper", action="store_true", default=False, help="BLAS/LAPACK included in compilers")
 group.add_argument("--use_mkl", action="store_true", default=False, help="Use MKL BLAS/LAPACK instead of OpenBLAS")
 group.add_argument("--mkl_root", default=None, type=str, help="MKL root directory path (required for MKL)")
+group.add_argument("--use_accelerate", action="store_true", default=False, help="Use macOS Accelerate BLAS/LAPACK instead of OpenBLAS (macOS >= 14.0)")
 group.add_argument("--blas_lib_path", default=None, type=str, help="Path to pre-built BLAS library")
 group.add_argument("--lapack_lib_path", default=None, type=str, help="Path to pre-built LAPACK library")
 #
@@ -2035,16 +2309,26 @@ group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="B
 #
 group = parser.add_argument_group("SuperLU", "SuperLU package options")
 group.add_argument("--build_superlu", default=0, type=int, choices=(0,1), help="Build SuperLU library? (default: 0)")
-group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
 #
 group = parser.add_argument_group("SuperLU-DIST", "SuperLU-DIST package options")
 group.add_argument("--build_superlu_dist", default=0, type=int, choices=(0,1), help="Build SuperLU-DIST library? (default: 0)")
 group.add_argument("--superlu_dist_threads", action="store_true", default=False, help="Build SuperLU-DIST with thread support (OpenMP)")
-group.add_argument("--superlu_dist_wrapper", action="store_true", default=False, help="SuperLU-DIST included in compilers")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--superlu_dist_wrapper", action="store_true", default=False, help="SuperLU-DIST included in compilers")
 #
 group = parser.add_argument_group("UMFPACK", "UMFPACK package options")
 group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library? (default: 0)")
-group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
+group.add_argument("--umfpack_long", action="store_true", default=False, help="Use 64-bit integer UMFPACK interface (umfpack_dl), needed for factors larger than ~16 GB")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
+#
+group = parser.add_argument_group("STRUMPACK", "STRUMPACK package options")
+group.add_argument("--build_strumpack", default=0, type=int, choices=(0,1), help="Build STRUMPACK library? (default: 0)")
+group.add_argument("--strumpack_mpi", default=0, type=int, choices=(0,1), help="Build STRUMPACK with MPI support (and ScaLAPACK) for distributed factorization? (default: 0)")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--strumpack_wrapper", action="store_true", default=False, help="STRUMPACK included in compilers")
 #
 group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
@@ -2055,8 +2339,9 @@ group.add_argument("--petsc_superlu_dist", default=1, type=int, choices=(0,1), h
 group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
 group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
 group.add_argument("--petsc_version", default="3.23", type=str,
-    help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.23)")
-group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
+    help="Use different version of PETSc [3.20,3.21,3.22,3.23,3.24,3.25] (default: 3.23)")
+# Disabled: no install root is passed to CMake, so the library is never enabled
+# group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
 fetch_progress = options.no_dl_progress
@@ -2089,10 +2374,10 @@ if config_dict['OS_TYPE'] == 'Darwin':
 # Building with MPI?
 use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
-    config_dict['MPI_CC'] = options.mpi_cc
-    config_dict['MPI_FC'] = options.mpi_fc
+    config_dict['MPI_CC'] = resolve_abspath(options.mpi_cc)
+    config_dict['MPI_FC'] = resolve_abspath(options.mpi_fc)
     if options.mpi_cxx is not None:
-        config_dict['MPI_CXX'] = options.mpi_cxx
+        config_dict['MPI_CXX'] = resolve_abspath(options.mpi_cxx)
     use_mpi = True
 else:
     if options.mpi_lib_dir is not None:
@@ -2116,8 +2401,15 @@ packages = []
 if options.build_cmake == 1:
     packages.append(CMAKE())
 # BLAS/LAPACK
+if options.use_accelerate:
+    if options.use_mkl or options.ref_blas or options.blas_lapack_wrapper:
+        parser.exit(-1, '"--use_accelerate" cannot be combined with "--use_mkl", "--ref_blas", or "--blas_lapack_wrapper"\n')
+    if (options.blas_lib_path is not None) or (options.lapack_lib_path is not None):
+        parser.exit(-1, '"--use_accelerate" cannot be combined with "--blas_lib_path" or "--lapack_lib_path"\n')
 if options.use_mkl:
     packages.append(MKL(options.mkl_root))
+elif options.use_accelerate:
+    packages.append(ACCELERATE())
 else:
     if (options.blas_lib_path is not None) or (options.lapack_lib_path is not None):
         if (options.blas_lib_path is None) or (options.lapack_lib_path is None):
@@ -2141,7 +2433,7 @@ if use_mpi:
 else:
     if options.hdf5_parallel:
         print('Warning: Reverting to serial HDF5 library without MPI')
-    if (options.build_petsc == 1) or options.petsc_wrapper:
+    if options.build_petsc == 1:
         parser.exit(-1, 'PETSc requires MPI\n')
 # HDF5
 HDF5_HL_required = False
@@ -2156,22 +2448,36 @@ packages.append(LIBXML2(not options.libxml2_shared))
 # Are we building ARPACK?
 if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
+# The 64-bit UMFPACK interface needs UMFPACK built here (not through PETSc)
+if options.umfpack_long:
+    if options.build_petsc == 1:
+        parser.exit(-1, '--umfpack_long is not supported with PETSc\n')
+    if options.build_umfpack != 1:
+        parser.exit(-1, '--umfpack_long requires --build_umfpack=1\n')
 # Are we building PETSc?
-if (options.build_petsc == 1) or options.petsc_wrapper:
+if options.build_petsc == 1:
+    if options.build_strumpack == 1:
+        parser.exit(-1, 'STRUMPACK is not currently supported with PETSc\n')
     packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,
                           with_superlu_dist=options.petsc_superlu_dist, with_umfpack=options.petsc_umfpack,
-                          with_mumps=options.petsc_mumps, version=options.petsc_version, comp_wrapper=options.petsc_wrapper,
+                          with_mumps=options.petsc_mumps, version=options.petsc_version,
                           mpi_f08=(not options.mpi_use_headers)))
 else:
     packages.append(METIS(options.metis_wrapper))
-    if (options.build_superlu == 1) or options.superlu_wrapper:
-        packages.append(SUPERLU(options.superlu_wrapper))
-    if (options.build_superlu_dist == 1) or options.superlu_dist_wrapper:
+    if options.build_superlu == 1:
+        packages.append(SUPERLU())
+    if options.build_superlu_dist == 1:
         if not use_mpi:
             parser.exit(-1, 'SuperLU-DIST requires MPI\n')
-        packages.append(SUPERLU_DIST(options.superlu_dist_threads, options.superlu_dist_wrapper))
-    if (options.build_umfpack == 1) or options.umfpack_wrapper:
-        packages.append(UMFPACK(options.umfpack_wrapper))
+        packages.append(SUPERLU_DIST(options.superlu_dist_threads))
+    if options.build_umfpack == 1:
+        packages.append(UMFPACK(options.umfpack_long))
+    if options.build_strumpack == 1:
+        if options.strumpack_mpi == 1:
+            if not use_mpi:
+                parser.exit(-1, 'STRUMPACK with MPI requires MPI\n')
+            packages.append(SCALAPACK())
+        packages.append(STRUMPACK(options.oft_use_openmp == 1, with_mpi=(options.strumpack_mpi == 1)))
 #
 for package in packages:
     config_dict = package.install(config_dict, keep_build_dirs=options.keep_build_dirs)

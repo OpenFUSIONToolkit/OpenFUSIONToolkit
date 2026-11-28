@@ -26,6 +26,7 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh, oft_init_seam
 USE oft_mesh_local, ONLY: mesh_local_init, mesh_local_init, oft_metis_partmesh, &
   bmesh_local_init
 USE oft_stitching, ONLY: oft_seam, oft_stitch_check
+USE oft_mesh_global_util, ONLY: bmesh_global_copy_ho
 IMPLICIT NONE
 #include "local.h"
 contains
@@ -142,29 +143,9 @@ END DO
 DEALLOCATE(lptmp)
 !---
 CALL bmesh_local_init(self%bmesh,self)
-!---Copy high-order mapping if available
-IF(ASSOCIATED(self%ho_info%r))THEN
-  self%bmesh%order=1
-  self%bmesh%ho_info%nep=self%ho_info%nep
-  self%bmesh%ho_info%ncp=self%ho_info%nfp
-  ALLOCATE(self%bmesh%ho_info%r(3,self%bmesh%ne+self%bmesh%nc))
-  ALLOCATE(self%bmesh%ho_info%lep(self%bmesh%ho_info%nep,self%bmesh%ne))
-  ALLOCATE(self%bmesh%ho_info%lcp(self%bmesh%ho_info%ncp,self%bmesh%nc))
-  !!$omp parallel do private(j)
-  do i=1,self%bmesh%ne
-    self%bmesh%ho_info%lep(1,i)=i
-    j=INT(ABS(self%bmesh%parent%le(i)),4)
-    self%bmesh%ho_info%r(:,i)=self%ho_info%r(:,self%ho_info%lep(1,j))
-  enddo
-  IF(self%bmesh%ho_info%ncp==1)THEN
-    !!$omp parallel do private(j)
-    do i=1,self%bmesh%nc
-      j=INT(ABS(self%bmesh%parent%lf(i)),4)
-      self%bmesh%ho_info%lcp(1,i)=i+self%bmesh%ne
-      self%bmesh%ho_info%r(:,i+self%bmesh%ne)=self%ho_info%r(:,self%ho_info%lfp(1,j))
-    enddo
-  END IF
-END IF
+!---Copy high-order nodes if available (boundary mapping stays linear)
+self%bmesh%order=1
+CALL bmesh_global_copy_ho(self)
 DEBUG_STACK_POP
 end subroutine bmesh_global_init
 !---------------------------------------------------------------------------------
@@ -299,13 +280,13 @@ end subroutine mesh_global_sync
 !! Supported partition methods are:
 !! - `part_meth==1`: Partition using METIS library
 !! - `2 <= part_meth <= 4`: Axial spatial partitioning along coordinate `part_meth-1`
-!! - `part_meth==5`: Cylindrical spatial partitioning in azimuthal direction
+!! - `5 <= part_meth <= 7`: Cylindrical spatial partitioning in azimuthal direction (axis of rotation is `part_meth-4`)
 !---------------------------------------------------------------------------------
 subroutine mesh_global_partition(self,meshpart,part_meth)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), intent(inout) :: meshpart(:) !< Partition flag [self%nc]
 integer(i4), intent(in) :: part_meth !< Method to use for partitioning
-integer(i4) :: i,k,m,nctmp,nptmp,ierr
+integer(i4) :: i,ipt,k,m,nctmp,nptmp,ierr
 integer(i4), allocatable, dimension(:) :: lptmp,lctmp,pflag,ncells,cpart,isort
 integer(i4), allocatable, dimension(:,:) :: lcctmp
 real(r8) :: pt(3),zmin,zmax,zrange
@@ -319,58 +300,68 @@ if(oft_env%rank==0)then
   allocate(cpart(self%nc))
   cpart=0
   if(part_meth==1)THEN ! Metis partitioning
-    CALL oft_metis_partMesh(self%nc,self%np,self%cell_np,self%lc,oft_env%nnodes,cpart,ierr)
+    allocate(lcctmp(self%cell_np,self%nc))
+    DO i=1,self%nc
+      DO k=1,self%cell_np
+        lcctmp(k,i)=INT(self%global%lp(self%lc(k,i)),4)
+      END DO
+    END DO
+    CALL oft_metis_partMesh(self%nc,INT(self%global%np,4),self%cell_np,lcctmp,oft_env%nnodes,cpart,ierr)
     IF(ierr<0)CALL oft_abort('Mesh partitioning failed','mesh_global_partition',__FILE__)
-  elseif((part_meth>1).AND.(part_meth<5))THEN ! Axial spatial partitioning
+    deallocate(lcctmp)
+  elseif((part_meth>=2).AND.(part_meth<=4))THEN ! Axial spatial partitioning
     zmin = MINVAL(self%r(part_meth-1,:))
     zmax = MAXVAL(self%r(part_meth-1,:))
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
     ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
     !   "Partition count invalid for spatial partitioning",'mesh_global_partition',__FILE__)
-    ALLOCATE(pflag(self%np),part_sort(self%np),isort(self%np))
-    pflag=oft_env%nnodes+1
-    isort=[(i,i=1,self%np)]
-    part_sort=self%r(part_meth-1,:)
-    CALL sort_array(part_sort,isort,self%np)
-    k=1
-    DO i=1,self%np
-      IF(i>REAL(k*self%np,8)/REAL(oft_env%nnodes,8))THEN
-        k=k+1
-      END IF
-      pflag(isort(i))=k
-    END DO
+    ALLOCATE(part_sort(self%nc),isort(self%nc))
+    isort=[(i,i=1,self%nc)]
+    !$omp parallel do private(k)
     DO i=1,self%nc
-      cpart(i)=oft_env%nnodes+1
+      part_sort(i)=0.d0
       DO k=1,self%cell_np
-        cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
+        part_sort(i)=part_sort(i)+self%r(part_meth-1,self%lc(k,i))
       END DO
-      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+      part_sort(i)=part_sort(i)/REAL(self%cell_np,8)
     END DO
-  elseif(part_meth==5)THEN ! Toroidal spatial partitioning
+    CALL sort_array(part_sort,isort,self%nc)
+    k=1
+    DO i=1,self%nc
+      IF(i>REAL(self%nc,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
+      cpart(isort(i))=k
+    END DO
+    DEALLOCATE(part_sort,isort)
+  elseif((part_meth>=5).AND.(part_meth<=7))THEN ! Toroidal spatial partitioning
     zmin = -pi
     zmax = pi
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
     ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
     ! 'Partition count invalid for spatial partitioning','mesh_global_partition',__FILE__)
-    ALLOCATE(pflag(self%np),part_sort(self%np),isort(self%np))
-    pflag=oft_env%nnodes+1
-    isort=[(i,i=1,self%np)]
-    part_sort=ATAN2(self%r(2,:),self%r(1,:))
-    CALL sort_array(part_sort,isort,self%np)
-    k=1
-    DO i=1,self%np
-      IF(i>REAL(k*self%np,8)/REAL(oft_env%nnodes,8))THEN
-        k=k+1
-      END IF
-      pflag(isort(i))=k
-    END DO
+    ALLOCATE(part_sort(self%nc),isort(self%nc))
+    isort=[(i,i=1,self%nc)]
+    !$omp parallel do private(k,pt)
     DO i=1,self%nc
-      cpart(i)=oft_env%nnodes+1
+      pt=0.d0
       DO k=1,self%cell_np
-        cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
+        pt=pt+self%r(:,self%lc(k,i))
       END DO
-      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+      pt=pt/REAL(self%cell_np,8)
+      IF(part_meth==5)THEN ! X-axis rotation
+        part_sort(i)=ATAN2(pt(3),pt(2))
+      ELSE IF(part_meth==6)THEN ! Y-axis rotation
+        part_sort(i)=ATAN2(pt(1),pt(3))
+      ELSE IF(part_meth==7)THEN ! Z-axis rotation
+        part_sort(i)=ATAN2(pt(2),pt(1))
+      END IF
     END DO
+    CALL sort_array(part_sort,isort,self%nc)
+    k=1
+    DO i=1,self%nc
+      IF(i>REAL(self%nc,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
+      cpart(isort(i))=k
+    END DO
+    DEALLOCATE(part_sort,isort)
   else
     CALL oft_abort('Invalid partitioning method', 'mesh_global_partition', __FILE__)
   endif
@@ -395,13 +386,14 @@ if(oft_env%rank==0)then
           nctmp = nctmp + 1 ! Increment cell counter
           lctmp(nctmp) = i ! Link cell to global index
           do k=1,self%cell_np ! Loop over points
-            if(pflag(self%lc(k,i))==0)then ! Point is not claimed yet
+            ipt = INT(self%global%lp(self%lc(k,i)),4)
+            if(pflag(ipt)==0)then ! Point is not claimed yet
               nptmp=nptmp+1 ! Increment point counter
-              pflag(self%lc(k,i))=nptmp ! Link global point to new index
-              lptmp(nptmp)=self%lc(k,i) ! Link point to global index
+              pflag(ipt)=nptmp ! Link global point to new index
+              lptmp(nptmp)=ipt ! Link point to global index
               lcctmp(k,nctmp)=nptmp ! Insert local point index into local cell list
             else ! Already have this point
-              lcctmp(k,nctmp)=pflag(self%lc(k,i)) ! Insert local point index into local cell list
+              lcctmp(k,nctmp)=pflag(ipt) ! Insert local point index into local cell list
             endif
           enddo
         endif
@@ -825,7 +817,6 @@ ALLOCATE(self%pstitch%lle(2,self%pstitch%nle))
 self%pstitch%full=self%fullmesh
 self%pstitch%nbe=self%nbp
 self%pstitch%lbe=>self%lbp
-ALLOCATE(self%pstitch%send(0:self%pstitch%nproc_con),self%pstitch%recv(0:self%pstitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
@@ -850,11 +841,6 @@ DO i=0,self%pstitch%nproc_con
     self%pstitch%lle(:,m+self%pstitch%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Create preallocated send/recv arrays
-  self%pstitch%send(i)%n=ncon(i)
-  ALLOCATE(self%pstitch%send(i)%v(self%pstitch%send(i)%n))
-  self%pstitch%recv(i)%n=ncon(i)
-  ALLOCATE(self%pstitch%recv(i)%v(self%pstitch%recv(i)%n))
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -972,7 +958,7 @@ DO i=1,self%nbe
     DO j=1,2
       etest=etest.AND.ANY(self%pstitch%lle(1,js:jn)==ll(j))
     END DO
-    IF(etest)echeck(m,i)=.TRUE.
+    IF(etest.OR.self%periodic%revolved)echeck(m,i)=.TRUE.
   END DO
 END DO
 DEALLOCATE(bpi)
@@ -1144,7 +1130,6 @@ ALLOCATE(self%estitch%lle(2,self%estitch%nle))
 self%estitch%full=self%fullmesh
 self%estitch%nbe=self%nbe
 self%estitch%lbe=>self%lbe
-ALLOCATE(self%estitch%send(0:self%estitch%nproc_con),self%estitch%recv(0:self%estitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
@@ -1169,11 +1154,6 @@ DO i=0,self%estitch%nproc_con
     self%estitch%lle(:,m+self%estitch%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Allocate permanent stitching arrays
-  self%estitch%send(i)%n=ncon(i)
-  ALLOCATE(self%estitch%send(i)%v(self%estitch%send(i)%n))
-  self%estitch%recv(i)%n=ncon(i)
-  ALLOCATE(self%estitch%recv(i)%v(self%estitch%recv(i)%n))
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -1286,7 +1266,7 @@ DO i=1,self%nbf
     DO j=1,self%face_np
       ftest=ftest.AND.ANY(self%pstitch%lle(1,js:jn)==ll(j))
     END DO
-    IF(ftest)fcheck(m,i)=.TRUE.
+    IF(ftest.OR.self%periodic%revolved)fcheck(m,i)=.TRUE.
   END DO
 END DO
 DEALLOCATE(bpi)
@@ -1436,7 +1416,6 @@ self%fstitch%lbe=>self%lbf
 ! mesh%fstitch%kle=>mesh%linkage%klf
 ! mesh%fstitch%lle=>mesh%linkage%llf
 ! mesh%fstitch%leo=>mesh%linkage%lfo
-ALLOCATE(self%fstitch%send(0:self%fstitch%nproc_con),self%fstitch%recv(0:self%fstitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
@@ -1461,11 +1440,6 @@ DO i=0,self%fstitch%nproc_con
     self%fstitch%lle(:,m+self%fstitch%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Allocate permanent stitching arrays
-  self%fstitch%send(i)%n=ncon(i)
-  ALLOCATE(self%fstitch%send(i)%v(self%fstitch%send(i)%n))
-  self%fstitch%recv(i)%n=ncon(i)
-  ALLOCATE(self%fstitch%recv(i)%v(self%fstitch%recv(i)%n))
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -1517,7 +1491,7 @@ ALLOCATE(lploc(parent%np))
 CALL get_inverse_map(self%parent%lp,self%np,lploc,self%parent%np)
 !---
 CALL oft_init_seam(self,self%pstitch)
-ALLOCATE(self%pstitch%kle(self%pstitch%nproc_con+1))
+ALLOCATE(self%pstitch%kle(0:self%pstitch%nproc_con+1))
 self%pstitch%kle=0
 DO i=1,self%pstitch%nproc_con
   m=0
@@ -1535,14 +1509,13 @@ END DO
 self%pstitch%nle=SUM(self%pstitch%kle)
 self%pstitch%kle(self%pstitch%nproc_con+1)=self%pstitch%nle+1
 !---Cumulative unique point linkage count
-DO i=self%pstitch%nproc_con,1,-1
+DO i=self%pstitch%nproc_con,0,-1
   self%pstitch%kle(i)=self%pstitch%kle(i+1)-self%pstitch%kle(i)
 END DO
 !---
 IF(self%pstitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%pstitch%lle(2,self%pstitch%nle),self%pstitch%leo(parent%nbp))
-ALLOCATE(self%pstitch%send(0:self%pstitch%nproc_con),self%pstitch%recv(0:self%pstitch%nproc_con))
 !---
 !!$omp do
 DO i=1,self%pstitch%nproc_con
@@ -1555,10 +1528,6 @@ DO i=1,self%pstitch%nproc_con
       m=m+1
     END IF
   END DO
-  !---Allocate permanent stitching arrays
-  self%pstitch%send(i)%n=m; self%pstitch%recv(i)%n=m
-  ALLOCATE(self%pstitch%send(i)%v(self%pstitch%send(i)%n))
-  ALLOCATE(self%pstitch%recv(i)%v(self%pstitch%recv(i)%n))
 END DO
 !!$omp end parallel
 !------------------------------------------------------------------------------
@@ -1600,7 +1569,7 @@ ALLOCATE(leloc(parent%ne))
 CALL get_inverse_map(self%parent%le,self%ne,leloc,self%parent%ne)
 !---
 CALL oft_init_seam(self,self%estitch)
-ALLOCATE(self%estitch%kle(self%estitch%nproc_con+1))
+ALLOCATE(self%estitch%kle(0:self%estitch%nproc_con+1))
 self%estitch%kle=0
 DO i=1,self%estitch%nproc_con
   m=0
@@ -1618,14 +1587,13 @@ END DO
 self%estitch%nle=SUM(self%estitch%kle)
 self%estitch%kle(self%estitch%nproc_con+1)=self%estitch%nle+1
 !---Cumulative unique point linkage count
-DO i=self%estitch%nproc_con,1,-1
+DO i=self%estitch%nproc_con,0,-1
   self%estitch%kle(i)=self%estitch%kle(i+1)-self%estitch%kle(i)
 END DO
 !---
 IF(self%estitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%estitch%lle(2,self%estitch%nle),self%estitch%leo(parent%nbe))
-ALLOCATE(self%estitch%send(0:self%estitch%nproc_con),self%estitch%recv(0:self%estitch%nproc_con))
 !---
 !!$omp do
 DO i=1,self%estitch%nproc_con
@@ -1638,10 +1606,6 @@ DO i=1,self%estitch%nproc_con
       m=m+1
     END IF
   END DO
-  !---Allocate permanent stitching arrays
-  self%estitch%send(i)%n=m; self%estitch%recv(i)%n=m
-  ALLOCATE(self%estitch%send(i)%v(self%estitch%send(i)%n))
-  ALLOCATE(self%estitch%recv(i)%v(self%estitch%recv(i)%n))
 END DO
 !!$omp end parallel
 !------------------------------------------------------------------------------

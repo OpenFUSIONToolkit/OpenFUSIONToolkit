@@ -169,6 +169,7 @@ DEALLOCATE(gtmp)
 if(oft_debug_print(1))then
   CALL oft_increase_indent
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',mesh%periodic%nper
+  WRITE(*,'(2A,L)') oft_indent,'  Non-planar periodicity? ',mesh%periodic%revolved
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Faces      =',nfp
@@ -289,6 +290,10 @@ subroutine mesh_global_set_curved(self,flag)
 CLASS(oft_amesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: flag !< How to set curvature (1 -> all cells, 2 -> contains boundary edge)
 INTEGER(i4) :: i,k
+SELECT TYPE(this=>self)
+CLASS IS(oft_bmesh)
+  IF(this%skip)RETURN
+END SELECT
 SELECT CASE(flag)
 CASE(1)
   self%ho_info%is_curved=.TRUE.
@@ -303,6 +308,121 @@ CASE DEFAULT
   CALL oft_abort("Unknown setup flag","mesh_global_set_curved",__FILE__)
 END SELECT
 end subroutine mesh_global_set_curved
+!---------------------------------------------------------------------------------
+!> Copy high-order node points from a volume mesh to its boundary mesh
+!!
+!! Boundary edge nodes are copied from the matching volume edges
+!! (`bmesh%parent%le`) and boundary cell nodes from the matching volume faces
+!! (`bmesh%parent%lf`). Any existing high-order arrays on the boundary mesh are
+!! replaced, or removed if the volume mesh has no high-order nodes.
+!!
+!! The order and curved-cell flags of the boundary mesh are intentionally not
+!! changed. Coarse levels keep high-order nodes so that refinement can follow the
+!! curved geometry while their own spatial mapping stays linear, so callers that
+!! need a quadratic boundary mapping must set the order and curved flags themselves.
+!!
+!! @note Only quadratic meshes (at most one node per edge and face) are supported
+!---------------------------------------------------------------------------------
+SUBROUTINE bmesh_global_copy_ho(self)
+CLASS(oft_mesh), INTENT(inout) :: self !< Volume mesh whose boundary mesh is updated
+INTEGER(i4) :: i,j
+CLASS(oft_bmesh), POINTER :: bmesh
+DEBUG_STACK_PUSH
+bmesh=>self%bmesh
+IF(ASSOCIATED(bmesh%ho_info%r))DEALLOCATE(bmesh%ho_info%r)
+IF(ASSOCIATED(bmesh%ho_info%lep))DEALLOCATE(bmesh%ho_info%lep)
+IF(ASSOCIATED(bmesh%ho_info%lcp))DEALLOCATE(bmesh%ho_info%lcp)
+bmesh%ho_info%nep=0
+bmesh%ho_info%ncp=0
+IF(.NOT.ASSOCIATED(self%ho_info%r))THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
+IF(self%ho_info%nep>1.OR.self%ho_info%nfp>1)CALL oft_abort('Only quadratic meshes are supported', &
+  'bmesh_global_copy_ho',__FILE__)
+bmesh%ho_info%nep=self%ho_info%nep
+bmesh%ho_info%ncp=self%ho_info%nfp
+ALLOCATE(bmesh%ho_info%r(3,bmesh%ne*bmesh%ho_info%nep+bmesh%nc*bmesh%ho_info%ncp))
+!---Edge centers
+IF(bmesh%ho_info%nep==1)THEN
+  ALLOCATE(bmesh%ho_info%lep(1,bmesh%ne))
+  DO i=1,bmesh%ne
+    j=ABS(bmesh%parent%le(i))
+    bmesh%ho_info%lep(1,i)=i
+    bmesh%ho_info%r(:,i)=self%ho_info%r(:,self%ho_info%lep(1,j))
+  END DO
+END IF
+!---Face centers
+IF(bmesh%ho_info%ncp==1)THEN
+  ALLOCATE(bmesh%ho_info%lcp(1,bmesh%nc))
+  DO i=1,bmesh%nc
+    j=ABS(bmesh%parent%lf(i))
+    bmesh%ho_info%lcp(1,i)=i+bmesh%ne*bmesh%ho_info%nep
+    bmesh%ho_info%r(:,bmesh%ho_info%lcp(1,i))=self%ho_info%r(:,self%ho_info%lfp(1,j))
+  END DO
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE bmesh_global_copy_ho
+!---------------------------------------------------------------------------------
+!> Copy high-order node points from the last shared level to the transfer level
+!!
+!! On the transfer level (the first distributed level) each local edge, face and
+!! cell takes the node of the matching parent-level entity, found through
+!! `self%base%le`, `self%base%lf` and `self%base%lc` and the parent's `lep`, `lfp`
+!! and `lcp` lists. Nodes are stored edges first, then faces, then cells. Works for
+!! volume and surface meshes (surface meshes have no face nodes).
+!!
+!! @note Only quadratic meshes (at most one node per edge, face and cell) are supported
+!---------------------------------------------------------------------------------
+SUBROUTINE mesh_global_transfer_ho(self,parent)
+CLASS(oft_amesh), INTENT(inout) :: self !< Transfer-level mesh to fill
+CLASS(oft_amesh), INTENT(in) :: parent !< Last shared (parent) level
+INTEGER(i4) :: i,nf,offset
+DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(parent%ho_info%r))THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
+IF(parent%ho_info%nep>1.OR.parent%ho_info%nfp>1.OR.parent%ho_info%ncp>1) &
+  CALL oft_abort('Only quadratic meshes are supported','mesh_global_transfer_ho',__FILE__)
+nf=0
+SELECT TYPE(self)
+CLASS IS(oft_mesh)
+  nf=self%nf
+END SELECT
+self%ho_info%nep=parent%ho_info%nep
+self%ho_info%nfp=parent%ho_info%nfp
+self%ho_info%ncp=parent%ho_info%ncp
+ALLOCATE(self%ho_info%r(3,self%ne*self%ho_info%nep+nf*self%ho_info%nfp+self%nc*self%ho_info%ncp))
+offset=0
+!---Edge centers
+IF(self%ho_info%nep==1)THEN
+  ALLOCATE(self%ho_info%lep(1,self%ne))
+  DO i=1,self%ne
+    self%ho_info%lep(1,i)=i+offset
+    self%ho_info%r(:,i+offset)=parent%ho_info%r(:,parent%ho_info%lep(1,ABS(self%base%le(i))))
+  END DO
+  offset=offset+self%ne
+END IF
+!---Face centers
+IF(self%ho_info%nfp==1)THEN
+  ALLOCATE(self%ho_info%lfp(1,nf))
+  DO i=1,nf
+    self%ho_info%lfp(1,i)=i+offset
+    self%ho_info%r(:,i+offset)=parent%ho_info%r(:,parent%ho_info%lfp(1,ABS(self%base%lf(i))))
+  END DO
+  offset=offset+nf
+END IF
+!---Cell centers
+IF(self%ho_info%ncp==1)THEN
+  ALLOCATE(self%ho_info%lcp(1,self%nc))
+  DO i=1,self%nc
+    self%ho_info%lcp(1,i)=i+offset
+    self%ho_info%r(:,i+offset)=parent%ho_info%r(:,parent%ho_info%lcp(1,ABS(self%base%lc(i))))
+  END DO
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE mesh_global_transfer_ho
 !---------------------------------------------------------------------------------
 !> Get I/O scope for current mesh
 !! - Element offsets for each geometric type
@@ -802,6 +922,7 @@ DEALLOCATE(gtmp)
 if(oft_debug_print(1))then
   CALL oft_increase_indent
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',self%periodic%nper
+  WRITE(*,'(2A,L)') oft_indent,'  Non-planar periodicity? ',self%periodic%revolved
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
   WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
   CALL oft_decrease_indent

@@ -8,16 +8,30 @@
 #ifdef HAVE_UMFPACK
 #include "umfpack.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 
-/* kind of integer to hold a pointer.  Use int.
-   This might need to be changed on 64-bit systems. */
+/* Integer interface: umfpack_di_* (32-bit, default) or umfpack_dl_* (64-bit).
+   The 32-bit interface indexes UMFPACK's internal workspace with int, which
+   limits the factors to roughly 16 GB (2^31 8-byte units); larger problems fail
+   with UMFPACK_ERROR_out_of_memory. With OFT_UMFPACK_LONG the CSR graph passed
+   from Fortran (always 32-bit) is copied to 64-bit arrays at each full
+   factorization. */
+#ifdef OFT_UMFPACK_LONG
+typedef SuiteSparse_long umf_int;
+#define UMF_FUN(name) umfpack_dl_##name
+#else
+typedef int umf_int;
+#define UMF_FUN(name) umfpack_di_##name
+#endif
 
 typedef struct {
   void *Symbolic;
   void *Numeric;
-  int *Wi;
+  umf_int *Wi;
   double *W;
+  umf_int *Ap; /* 64-bit copy of rowptr (OFT_UMFPACK_LONG only) */
+  umf_int *Ai; /* 64-bit copy of colind (OFT_UMFPACK_LONG only) */
   double Control [UMFPACK_CONTROL];
 } factors_t;
 
@@ -48,6 +62,7 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
   int status = 0;
   double Info [UMFPACK_INFO];
   factors_t *LUfactors;
+  umf_int *Ap, *Ai;
   bool refactor;
 
     if ( iopt == 1 || iopt == 3 ) { /* Perform full factorization */
@@ -60,14 +75,31 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
           return;
         }
         LUfactors = (factors_t*) malloc(sizeof(factors_t));
-        LUfactors->Wi = (int *) malloc(n * sizeof(int));
+        if ( !LUfactors ) {
+          printf("UMFPACK: Unable to allocate factor structure\n");
+          *info = UMFPACK_ERROR_out_of_memory;
+          return;
+        }
+        LUfactors->Symbolic = NULL;
+        LUfactors->Numeric = NULL;
+        LUfactors->Ap = NULL;
+        LUfactors->Ai = NULL;
+        LUfactors->Wi = (umf_int *) malloc(n * sizeof(umf_int));
         /* Set the default input options. */
-        umfpack_di_defaults( LUfactors->Control);
+        UMF_FUN(defaults)( LUfactors->Control);
         if (iter_refine) {
           LUfactors->W  = (double *) malloc(5*n * sizeof(double));
         } else {
           LUfactors->Control[UMFPACK_IRSTEP] = 0;
           LUfactors->W  = (double *) malloc(n * sizeof(double));
+        }
+        if ( !LUfactors->Wi || !LUfactors->W ) {
+          printf("UMFPACK: Unable to allocate work arrays\n");
+          free(LUfactors->Wi);
+          free(LUfactors->W);
+          free(LUfactors);
+          *info = UMFPACK_ERROR_out_of_memory;
+          return;
         }
         *f_factors = LUfactors;
         refactor = false;
@@ -76,12 +108,38 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
         refactor = true;
       }
 
+#ifdef OFT_UMFPACK_LONG
+      // Copy (possibly updated) graph to 64-bit arrays
+      if ( iopt == 1 ) {
+        free(LUfactors->Ap);
+        free(LUfactors->Ai);
+        LUfactors->Ap = (umf_int *) malloc((n+1) * sizeof(umf_int));
+        LUfactors->Ai = (umf_int *) malloc(nnz * sizeof(umf_int));
+        if ( !LUfactors->Ap || !LUfactors->Ai ) {
+          printf("UMFPACK: Unable to allocate 64-bit index arrays\n");
+          free(LUfactors->Ap);
+          free(LUfactors->Ai);
+          LUfactors->Ap = NULL;
+          LUfactors->Ai = NULL;
+          *info = UMFPACK_ERROR_out_of_memory;
+          return;
+        }
+        for (i = 0; i <= n; i++) LUfactors->Ap[i] = rowptr[i];
+        for (i = 0; i < nnz; i++) LUfactors->Ai[i] = colind[i];
+      }
+      Ap = LUfactors->Ap;
+      Ai = LUfactors->Ai;
+#else
+      Ap = rowptr;
+      Ai = colind;
+#endif
+
       // Perform factorization
       if ( iopt == 1 ) {
         if (refactor) {
-          umfpack_di_free_symbolic( &LUfactors->Symbolic);
+          UMF_FUN(free_symbolic)( &LUfactors->Symbolic);
         }
-        status = umfpack_di_symbolic( n, n, rowptr, colind, values, &LUfactors->Symbolic, LUfactors->Control, Info);
+        status = UMF_FUN(symbolic)( n, n, Ap, Ai, values, &LUfactors->Symbolic, LUfactors->Control, Info);
         if ( status != 0 ){
           printf("UMFPACK: Symbolic factorization failed %d\n", status);
           *info = status;
@@ -89,9 +147,9 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
         }
       }
       if (refactor) {
-        umfpack_di_free_numeric( &LUfactors->Numeric);
+        UMF_FUN(free_numeric)( &LUfactors->Numeric);
       }
-      status = umfpack_di_numeric( rowptr, colind, values, LUfactors->Symbolic, &LUfactors->Numeric, LUfactors->Control, Info);
+      status = UMF_FUN(numeric)( Ap, Ai, values, LUfactors->Symbolic, &LUfactors->Numeric, LUfactors->Control, Info);
       *info = status;
       if ( status != UMFPACK_OK) {
         if ( status == UMFPACK_ERROR_out_of_memory) {
@@ -104,17 +162,24 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
           printf("UMFPACK: Determinant overflow detected in factorization\n");
         }
       }
-      // umfpack_di_report_info(LUfactors->Control, Info);
+      // UMF_FUN(report_info)(LUfactors->Control, Info);
 
     } else if ( iopt == 2 ) { /* Perform solve */
 
       LUfactors = *f_factors;
+#ifdef OFT_UMFPACK_LONG
+      Ap = LUfactors->Ap;
+      Ai = LUfactors->Ai;
+#else
+      Ap = rowptr;
+      Ai = colind;
+#endif
       double *x;
       x  = (double *) malloc(n * sizeof(double));
       for (j = 0; j < nrhs; j++)  {
         for (i = 0; i < n; i++) x[i] = b[i + j*n];
         // Reversed order of x -> b
-        status = umfpack_di_wsolve( UMFPACK_At, rowptr, colind, values, b+j*n, x, LUfactors->Numeric, LUfactors->Control, Info, LUfactors->Wi, LUfactors->W);
+        status = UMF_FUN(wsolve)( UMFPACK_At, Ap, Ai, values, b+j*n, x, LUfactors->Numeric, LUfactors->Control, Info, LUfactors->Wi, LUfactors->W);
         if ( status != 0 ) break;
       }
       free(x);
@@ -123,8 +188,10 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
     } else if ( iopt == 4 ) { /* free storage */
 
       LUfactors = *f_factors;
-      umfpack_di_free_symbolic( &LUfactors->Symbolic);
-      umfpack_di_free_numeric( &LUfactors->Numeric);
+      UMF_FUN(free_symbolic)( &LUfactors->Symbolic);
+      UMF_FUN(free_numeric)( &LUfactors->Numeric);
+      free(LUfactors->Ap);
+      free(LUfactors->Ai);
       free(LUfactors->Wi);
       free(LUfactors->W);
       free(LUfactors);

@@ -1001,7 +1001,7 @@ IF(ASSOCIATED(self%D))THEN
 END IF
 CALL ISLocalToGlobalMappingDestroy(self%r_lis,ierr)
 CALL ISLocalToGlobalMappingDestroy(self%c_lis,ierr)
-NULLIFY(self%i_map,self%j_map)
+NULLIFY(self%i_map,self%j_map,self%cell_ovl)
 DEBUG_STACK_POP
 end subroutine mat_delete
 #endif

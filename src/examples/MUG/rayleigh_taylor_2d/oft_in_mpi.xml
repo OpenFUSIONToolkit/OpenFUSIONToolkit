@@ -1,0 +1,13 @@
+<oft>
+  <xmhd2d>
+    <pre type="gmres">
+      <its>5</its>
+      <nrits>5</nrits>
+      <pre type="block_jacobi">
+        <nlocal>1</nlocal>
+        <boverlap>T</boverlap>
+        <solver type="lu"></solver>
+      </pre>
+    </pre>
+  </xmhd2d>
+</oft>

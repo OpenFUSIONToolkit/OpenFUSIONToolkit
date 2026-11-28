@@ -26,6 +26,7 @@ set( TM_CAD_OBJS
 set( MG_OBJS
   multigrid.F90
   multigrid_build.F90
+  mesh_overlap.F90
 )
 
 add_library( oftgrid

@@ -20,7 +20,7 @@ USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph_ptr, &
   oft_matrix, oft_matrix_ptr, oft_local_mat, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
-  native_vector_slice_push, native_vector_slice_pop
+  native_vector_slice_push, native_vector_slice_pop, oft_native_pattern, native_pattern_release
 USE oft_la_utils, ONLY: create_vector, combine_matrices, create_matrix, &
   create_identity_graph
 !---
@@ -39,6 +39,9 @@ TYPE, PUBLIC :: oft_fem_comp_type
   TYPE(oft_map), POINTER :: map(:) => NULL() !< Linear algebra mapping
   CLASS(oft_vector), POINTER :: cache_PETSc => NULL() !< PETSc vector cache
   CLASS(oft_vector), POINTER :: cache_native => NULL() !< Native vector cache
+  !> Non-zero pattern shared by all native matrices created with `mat_create` without
+  !! a mask or user graphs (one reference is held until the representation is deleted)
+  TYPE(oft_native_pattern), POINTER :: mat_pattern => NULL()
 CONTAINS
   !> Create vector for FE representation
   PROCEDURE :: vec_create => fem_vec_create
@@ -391,6 +394,9 @@ end subroutine fem_graph_create
 
 !------------------------------------------------------------------------------
 !> Generate composite FE matrix from user-provided (or default) graph structure
+!!
+!! Native matrices created with the default graph structure (no `mask` or
+!! `graphs_in`) share one non-zero pattern, which is cached on the representation.
 !------------------------------------------------------------------------------
 subroutine fem_mat_create(self,new,mask, graphs_in)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
@@ -411,7 +417,11 @@ ELSE
 END IF
 !---
 CALL self%vec_create(tmp_vec)
-CALL create_matrix(new,graphs,tmp_vec,tmp_vec)
+IF(PRESENT(mask).OR.PRESENT(graphs_in))THEN
+  CALL create_matrix(new,graphs,tmp_vec,tmp_vec)
+ELSE
+  CALL create_matrix(new,graphs,tmp_vec,tmp_vec,pattern=self%mat_pattern)
+END IF
 CALL tmp_vec%delete
 IF (.NOT. PRESENT(graphs_in)) THEN
   DO i=1,nknown_graphs
@@ -580,6 +590,7 @@ IF(ASSOCIATED(self%cache_native))THEN
   CALL self%cache_native%delete()
   DEALLOCATE(self%cache_native)
 END IF
+CALL native_pattern_release(self%mat_pattern)
 end subroutine fem_comp_delete
 !------------------------------------------------------------------------------
 !> Needs docs

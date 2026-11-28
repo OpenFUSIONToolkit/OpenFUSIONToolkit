@@ -620,9 +620,9 @@ def redl_bootstrap(
     use_sign_q=False,
     ion_collisionality_model='Zeff',
     formula_form='jB',
-    Zeff_override=None,          # ← add this back
-    nu_e_star_override=None,      # ← NEW
-    nu_i_star_override=None,      # ← NEW
+    Zeff_override=None,          # <- add this back
+    nu_e_star_override=None,      # <- NEW
+    nu_i_star_override=None,      # <- NEW
 ):
     r'''! Bootstrap current via Redl et al., Phys. Plasmas 28, 022502 (2021)
 
@@ -1191,7 +1191,7 @@ def solve_with_bootstrap(mygs,
                     dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
                     dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
                     ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
-                    # No Zeff_override — OMFIT preserves input Zeff
+                    # No Zeff_override -- OMFIT preserves input Zeff
                     nu_e_star_override=nu_e_star,
                     nu_i_star_override=nu_i_star,
                     use_legacy_L34=False, # L34 = L31 (correct Redl 2021)

@@ -213,6 +213,7 @@ class MUGToksim():
         @param coil_currents Coil currents as a dict of name->[A]
                              (if `None`, the equilibrium's present currents are used)
         @result new time, new dt, # nonlinear iterations, # linear iterations, # retries
+        (# retries is -4 if every attempt failed)
         '''
         c_time = ctypes.c_double(time)
         c_dt = ctypes.c_double(dt)

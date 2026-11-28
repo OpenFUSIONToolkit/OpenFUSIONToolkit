@@ -20,6 +20,13 @@ oft_metis_partMesh(int *nc, int *np, int *ncp, int *lc, int *npart, int *cpart, 
 	idx_t options[METIS_NOPTIONS];
 	idx_t objval;
 	idx_t ncommon=3;
+	int i = 0;
+	// Trivial partitioning (METIS_PartMeshDual divides by zero for a single part)
+	if (*npart <= 1) {
+		for (i = 0; i < *nc; i++) { cpart[i] = 1; }
+		*info = METIS_OK;
+		return;
+	}
 	if (*ncp == 8) { ncommon=4; }
 	// Allocate temporary partitioning variables
 	vwgt = (idx_t *) malloc(*nc * sizeof(idx_t));
@@ -30,7 +37,6 @@ oft_metis_partMesh(int *nc, int *np, int *ncp, int *lc, int *npart, int *cpart, 
 	tpwgts = (real_t *) malloc(*npart * sizeof(real_t));
 	// Initialize constraints and sizes for partitioning
 	real_t tmp_wgt = 1.0f / *npart;
-	int i = 0;
 	for (i = 0; i < *npart; i++) { tpwgts[i] = tmp_wgt; }
 	for (i = 0; i < *nc; i++) {
 		vwgt[i] = 1;
