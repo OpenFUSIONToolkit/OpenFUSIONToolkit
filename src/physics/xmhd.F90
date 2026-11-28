@@ -38,8 +38,7 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
-  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, &
-  OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ, OFT_ACCESS_READWRITE
+  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ
 USE oft_deriv_matrices, ONLY: oft_mf_matrix, oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -66,7 +65,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
 USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_geval_all, oft_3D_h1_cast
 USE oft_h1_operators, ONLY: oft_h1_zeroi
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp, oft_hcurl_grad_dinterp, &
-  oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div
+  oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div, hcurl_grad_gcorr_applyT
 !---
 USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy, scal_energy, &
   scal_int, field_probe
@@ -4880,64 +4879,18 @@ class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
 real(r8), pointer, dimension(:) :: vtmp
-REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: acurl,agrad,tmp
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: owned
-INTEGER(i4) :: i,j,k
-CLASS(oft_vector), POINTER :: ftmp
+INTEGER(i4) :: i
+CLASS(oft_fem_type), POINTER :: curl_rep
+CLASS(oft_matrix), POINTER :: interp_mat
 DEBUG_STACK_PUSH
-!---Apply transpose of geometric gradient subspace correction on fine level
-IF(oft_hcurl%order==1)THEN
-  CALL afine%new(ftmp)
-  CALL ftmp%copy(afine)
-  NULLIFY(acurl,agrad,tmp)
-  CALL ftmp%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
-  IF(bbc(1:2)=='bc')THEN
-    !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
-    DO i=1,mesh%np
-      agrad(i)=0.d0
-    END DO
-  ELSE IF(bbc(1:2)=='ic')THEN
-    !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
-    DO i=1,mesh%np
-      IF(.NOT.mesh%global%gbp(i))agrad(i)=0.d0
-    END DO
-  END IF
-  !---Every process zeroes constrained vertex entries consistently, so no sync is needed
-  CALL ftmp%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
-  IF((bbc(1:2)=='bc').OR.(bbc(1:2)=='ic'))THEN
-    !---Count each edge once across MPI seams and periodic boundaries
-    ALLOCATE(owned(mesh%ne))
-    owned=.TRUE.
-    DO i=1,oft_hcurl%linkage%nbe
-      owned(oft_hcurl%linkage%lbe(i))=oft_hcurl%linkage%leo(i)
-    END DO
-    CALL afine%borrow_local(acurl,OFT_ACCESS_READ,1)
-    CALL ftmp%borrow_local(tmp,OFT_ACCESS_ACCUMULATE,2)
-    !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
-    DO i=1,mesh%np
-      IF((bbc(1:2)=='ic').AND.mesh%global%gbp(i))CYCLE
-      DO j=mesh%kpe(i),mesh%kpe(i+1)-1
-        k=mesh%lpe(j)
-        IF(.NOT.owned(k))CYCLE
-        IF(mesh%global%le(k)<0)THEN
-          tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
-        ELSE
-          tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
-        END IF
-      END DO
-    END DO
-    CALL afine%release_local(acurl,OFT_ACCESS_READ,sync=.FALSE.,iblock=1)
-    CALL ftmp%release_local(tmp,OFT_ACCESS_ACCUMULATE,sync=.TRUE.,iblock=2)
-    DEALLOCATE(owned)
-  END IF
+!---Restrict (with transpose of geometric gradient subspace correction on order-1 fine levels)
+IF((oft_hcurl%order==1).AND.((bbc(1:2)=='bc').OR.(bbc(1:2)=='ic')))THEN
+  curl_rep=>oft_hcurl
+  interp_mat=>oft_xmhd_ops%interp
   CALL xmhd_set_level(xmhd_level-1) ! Step one level down
-  !---Restrict
-  CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(ftmp,acors)
-  CALL ftmp%delete
-  DEALLOCATE(ftmp)
+  CALL hcurl_grad_gcorr_applyT(curl_rep,interp_mat,afine,acors,keep_boundary=(bbc(1:2)=='ic'))
 ELSE
   CALL xmhd_set_level(xmhd_level-1) ! Step one level down
-  !---Restrict
   CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
 END IF
 !---Apply boundary conditions

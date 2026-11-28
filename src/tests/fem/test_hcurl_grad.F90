@@ -108,8 +108,8 @@ hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 hcurl_grad_zerob%ML_hcurl_grad_rep=>ML_hcurl_grad
 IF(mg_test.OR.adjoint_test)THEN
   CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1,create_full=.TRUE.)
-  CALL hcurl_grad_mloptions
 END IF
+IF(mg_test)CALL hcurl_grad_mloptions
 !---Run tests
 oft_env%pm=.FALSE.
 IF(adjoint_test)THEN
@@ -300,8 +300,8 @@ END SUBROUTINE test_mop_zerob
 !---------------------------------------------------------------------------------
 SUBROUTINE test_mg_adjoint
 TYPE(oft_ml_hcurl_grad_vecspace) :: ml_vs
-CLASS(oft_vector), POINTER :: xc,yc,xf,yf
-REAL(r8) :: lhs,rhs,rel_err
+CLASS(oft_vector), POINTER :: xc,yc,xf,yf,yf_ref
+REAL(r8) :: lhs,rhs,rel_err,yf_err
 REAL(r8), POINTER :: vals(:) => NULL()
 INTEGER(i4) :: i
 ml_vs%ML_FE_rep=>ML_hcurl_grad
@@ -320,20 +320,25 @@ CALL hcurl_grad_gzerop%apply(xc)
 CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 CALL ML_hcurl_grad%vec_create(xf)
 CALL ML_hcurl_grad%vec_create(yf)
+CALL ML_hcurl_grad%vec_create(yf_ref)
 CALL yf%get_local(vals)
 DO i=1,SIZE(vals)
   vals(i)=COS(REAL(i,r8)*0.53d0 + 0.2d0)
 END DO
 CALL yf%restore_local(vals,add=.TRUE.)
 DEALLOCATE(vals)
+CALL yf_ref%copy(yf)
 !---Compute <y_f, interp(x_c)>
 CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels-1,propogate=.TRUE.)
 CALL ml_vs%interp(xc,xf)
 lhs=yf%dot(xf)
-!---Compute <inject(y_f), x_c>
+!---Compute <inject(y_f), x_c> and verify y_f is unchanged
 CALL ml_vs%inject(yf,yc)
 rhs=yc%dot(xc)
 rel_err=ABS(lhs-rhs)/MAX(ABS(lhs),ABS(rhs),1.d-30)
+CALL yf_ref%add(1.d0,-1.d0,yf)
+yf_err=yf_ref%norm(2)/MAX(yf%norm(2),1.d-30)
+rel_err=MAX(rel_err,yf_err)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='hcurl_grad.results')
   WRITE(io_unit,*)rel_err
@@ -343,6 +348,7 @@ CALL xc%delete
 CALL yc%delete
 CALL xf%delete
 CALL yf%delete
-DEALLOCATE(xc,yc,xf,yf)
+CALL yf_ref%delete
+DEALLOCATE(xc,yc,xf,yf,yf_ref)
 END SUBROUTINE test_mg_adjoint
 end program test_hcurl_grad

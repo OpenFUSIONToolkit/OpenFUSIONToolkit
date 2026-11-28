@@ -11,7 +11,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
- use_petsc={7}
+ use_petsc={8}
 /
 
 &mesh_options
@@ -27,15 +27,13 @@ oft_in_template = """
 /
 
 &hcurl_grad_op_options
- df_mop={5}
- nu_mop={6}
-/
+{5}/
 
 &test_hcurl_grad_options
  order={2}
  mg_test={4}
- zerob_test={8}
- adjoint_test={9}
+ zerob_test={6}
+ adjoint_test={7}
 /
 """
 
@@ -45,13 +43,18 @@ def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', p
     mg_flag=('T' if mg else 'F')
     zerob_flag=('T' if zerob else 'F')
     adjoint_flag=('T' if adjoint else 'F')
+    op_opts = ''
+    if df:
+        op_opts += ' df_mop={0}\n'.format(df)
+    if nu:
+        op_opts += ' nu_mop={0}\n'.format(nu)
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag, zerob_flag, adjoint_flag))
+        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, op_opts, zerob_flag, adjoint_flag, petsc_flag))
     return run_OFT("./test_hcurl_grad", nproc, 120)
 
 def validate_result(iteration_count,converged_error):

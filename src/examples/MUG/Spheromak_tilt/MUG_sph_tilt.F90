@@ -90,6 +90,8 @@ CLOSE(io_unit)
 ! Setup grid
 !------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
+IF((minlev/=-1).AND.(oft_env%nprocs>1).AND.(minlev<=mg_mesh%nbase))CALL oft_abort( &
+  "Base transfer not supported for xMHD (minlev must be > nbase with MPI)","main",__FILE__)
 !------------------------------------------------------------------------------
 ! Build FE structures
 !------------------------------------------------------------------------------

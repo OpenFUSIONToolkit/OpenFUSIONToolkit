@@ -25,8 +25,10 @@
 !! @ingroup doxy_oft_hcurl
 !------------------------------------------------------------------------------
 MODULE oft_hcurl_grad_operators
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int8_t
 USE oft_base
 USE oft_sort, ONLY: sort_array
+USE oft_stitching, ONLY: oft_global_stitch, seam_build_own
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_trimesh_type, ONLY: oft_trimesh
@@ -1733,21 +1735,109 @@ CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.,iblock=2)
 DEBUG_STACK_POP
 end subroutine base_pop
 !------------------------------------------------------------------------------
-!> Interpolate a coarse level Lagrange scalar field to the next finest level
+!> Apply the transpose of the order-1 geometric gradient subspace correction
+!! followed by the raw restriction operator \f$ P_{\text{raw}}^T \f$
 !!
-!! @note The global Lagrange level in incremented by one in this subroutine
+!! Modifies only the vertex entries (`1:mesh%np`) of block 2 of `afine` in place
+!! and restores them before returning, avoiding full-vector copies and full-vector
+!! accumulation buffers. Edge ownership weights are cached on `curl_rep%linkage%own`.
+!------------------------------------------------------------------------------
+SUBROUTINE hcurl_grad_gcorr_applyT(curl_rep,interp_mat,afine,acors,keep_boundary)
+CLASS(oft_fem_type), INTENT(inout) :: curl_rep !< Order-1 H(Curl) FE representation on the fine level
+CLASS(oft_matrix), INTENT(inout) :: interp_mat !< Raw prolongation matrix (fine <- coarse)
+CLASS(oft_vector), INTENT(inout) :: afine !< Fine-level vector (restored on exit)
+CLASS(oft_vector), INTENT(inout) :: acors !< Coarse-level restricted vector
+LOGICAL, OPTIONAL, INTENT(in) :: keep_boundary !< Preserve global boundary vertex DOFs (default: `.FALSE.`)
+INTEGER(i4) :: i,j,k
+LOGICAL :: keep_bc
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: tmp,saved
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: acurl,agrad
+CLASS(oft_mesh), POINTER :: mesh
+DEBUG_STACK_PUSH
+keep_bc=.FALSE.
+IF(PRESENT(keep_boundary))keep_bc=keep_boundary
+mesh=>curl_rep%mesh
+ALLOCATE(tmp(mesh%np),saved(mesh%np))
+tmp=0.d0
+NULLIFY(acurl,agrad)
+CALL afine%borrow_local(acurl,OFT_ACCESS_READ,1)
+!---Count each edge once across MPI seams and periodic boundaries
+IF(curl_rep%linkage%nbe>0)THEN
+  IF(curl_rep%linkage%nown/=mesh%ne)CALL seam_build_own(curl_rep%linkage,mesh%ne)
+  !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    IF(keep_bc.AND.mesh%global%gbp(i))CYCLE
+    DO j=mesh%kpe(i),mesh%kpe(i+1)-1
+      k=mesh%lpe(j)
+      IF(curl_rep%linkage%own(k)==0_c_int8_t)CYCLE
+      IF(mesh%global%le(k)<0)THEN
+        tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      ELSE
+        tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      END IF
+    END DO
+  END DO
+ELSE
+  !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    IF(keep_bc.AND.mesh%global%gbp(i))CYCLE
+    DO j=mesh%kpe(i),mesh%kpe(i+1)-1
+      k=mesh%lpe(j)
+      IF(mesh%global%le(k)<0)THEN
+        tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      ELSE
+        tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      END IF
+    END DO
+  END DO
+END IF
+CALL afine%release_local(acurl,OFT_ACCESS_READ,sync=.FALSE.,iblock=1)
+!---Sum vertex contributions across MPI seams and periodic boundaries
+CALL oft_global_stitch(mesh%pstitch,tmp,1)
+!---Swap vertex gradient DOFs in place for raw restriction, then restore
+CALL afine%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
+IF(keep_bc)THEN
+  !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    saved(i)=agrad(i)
+    IF(.NOT.mesh%global%gbp(i))agrad(i)=tmp(i)
+  END DO
+ELSE
+  !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    saved(i)=agrad(i)
+    agrad(i)=tmp(i)
+  END DO
+END IF
+!---Every copy received the same stitched value (or kept its consistent boundary value)
+CALL afine%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+CALL interp_mat%applyT(afine,acors)
+!---Restore original vertex entries of block 2
+CALL afine%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
+!$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+DO i=1,mesh%np
+  agrad(i)=saved(i)
+END DO
+CALL afine%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+DEALLOCATE(tmp,saved)
+DEBUG_STACK_POP
+END SUBROUTINE hcurl_grad_gcorr_applyT
+!------------------------------------------------------------------------------
+!> Restrict a fine level H(Curl) + Grad(H^1) field to the next coarsest level
+!!
+!! Applies the transpose of the prolongation operator (\f$ P^T \f$), including
+!! the transpose of the order-1 geometric gradient subspace correction when
+!! restricting from a linear geometric level.
+!!
+!! @note The composite FE level is decremented by one in this subroutine
 !------------------------------------------------------------------------------
 subroutine ml_vecspace_inject(self,afine,acors)
 class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
-class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
-class(oft_vector), intent(inout) :: acors !< Vector to interpolate
-INTEGER(i4) :: i,j,k
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: owned
-REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: agrad,acurl,tmp
-CLASS(oft_mesh), POINTER :: mesh
+class(oft_vector), intent(inout) :: afine !< Fine-level vector to restrict
+class(oft_vector), intent(inout) :: acors !< Coarse-level vector from restriction
 CLASS(oft_ml_fem_type), POINTER :: ML_curl
 CLASS(oft_fem_type), POINTER :: curl_rep
-CLASS(oft_vector), POINTER :: ftmp
+CLASS(oft_matrix), POINTER :: interp_mat
 DEBUG_STACK_PUSH
 !---Check for base transfer
 IF(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)THEN
@@ -1758,57 +1848,21 @@ IF(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)THEN
   DEBUG_STACK_POP
   RETURN
 END IF
-!---Apply transpose of geometric gradient subspace correction on fine level
+!---Propagate current level to sub-fields before inspecting fine-level order
+CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level,propogate=.TRUE.)
 ML_curl=>self%ML_FE_rep%ml_fields(1)%ml
 IF(ML_curl%current_level%order==1)THEN
   SELECT TYPE(this=>ML_curl%current_level)
     CLASS IS(oft_fem_type)
       curl_rep=>this
-      mesh=>this%mesh
     CLASS DEFAULT
       CALL oft_abort("Invalid FE type","ml_vecspace_inject",__FILE__)
   END SELECT
-  CALL afine%new(ftmp)
-  CALL ftmp%copy(afine)
-  NULLIFY(acurl,agrad,tmp)
-  CALL ftmp%borrow_local(agrad,OFT_ACCESS_READWRITE,2)
-  !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
-  DO i=1,mesh%np
-    agrad(i)=0.d0
-  END DO
-  !---Every process zeroes all vertex entries consistently, so no sync is needed
-  CALL ftmp%release_local(agrad,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
-  !---Count each edge once across MPI seams and periodic boundaries
-  ALLOCATE(owned(mesh%ne))
-  owned=.TRUE.
-  DO i=1,curl_rep%linkage%nbe
-    owned(curl_rep%linkage%lbe(i))=curl_rep%linkage%leo(i)
-  END DO
-  CALL afine%borrow_local(acurl,OFT_ACCESS_READ,1)
-  CALL ftmp%borrow_local(tmp,OFT_ACCESS_ACCUMULATE,2)
-  !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
-  DO i=1,mesh%np
-    DO j=mesh%kpe(i),mesh%kpe(i+1)-1
-      k=mesh%lpe(j)
-      IF(.NOT.owned(k))CYCLE
-      IF(mesh%global%le(k)<0)THEN
-        tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
-      ELSE
-        tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
-      END IF
-    END DO
-  END DO
-  CALL afine%release_local(acurl,OFT_ACCESS_READ,sync=.FALSE.,iblock=1)
-  CALL ftmp%release_local(tmp,OFT_ACCESS_ACCUMULATE,sync=.TRUE.,iblock=2)
-  DEALLOCATE(owned)
-  !---Step one level down and restrict
+  interp_mat=>self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level)%m
   CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
   CALL acors%set(0.d0)
-  CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(ftmp,acors)
-  CALL ftmp%delete
-  DEALLOCATE(ftmp)
+  CALL hcurl_grad_gcorr_applyT(curl_rep,interp_mat,afine,acors)
 ELSE
-  !---Step one level down and restrict
   CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
   CALL acors%set(0.d0)
   CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
