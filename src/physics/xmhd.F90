@@ -66,7 +66,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
 USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_geval_all, oft_3D_h1_cast
 USE oft_h1_operators, ONLY: oft_h1_zeroi
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp, oft_hcurl_grad_dinterp, &
-  oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div
+  oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div, hcurl_grad_gcorr_applyT
 !---
 USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy, scal_energy, &
   scal_int, field_probe
@@ -4892,11 +4892,20 @@ class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
 real(r8), pointer, dimension(:) :: vtmp
-integer(i4) :: i
+INTEGER(i4) :: i
+CLASS(oft_fem_type), POINTER :: curl_rep
+CLASS(oft_matrix), POINTER :: interp_mat
 DEBUG_STACK_PUSH
-call xmhd_set_level(xmhd_level-1) ! Step one level down
-!---Restrict
-CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
+!---Restrict (with transpose of geometric gradient subspace correction on order-1 fine levels)
+IF((oft_hcurl%order==1).AND.((bbc(1:2)=='bc').OR.(bbc(1:2)=='ic')))THEN
+  curl_rep=>oft_hcurl
+  interp_mat=>oft_xmhd_ops%interp
+  CALL xmhd_set_level(xmhd_level-1) ! Step one level down
+  CALL hcurl_grad_gcorr_applyT(curl_rep,interp_mat,afine,acors,keep_boundary=(bbc(1:2)=='ic'))
+ELSE
+  CALL xmhd_set_level(xmhd_level-1) ! Step one level down
+  CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
+END IF
 !---Apply boundary conditions
 NULLIFY(vtmp)
 CALL acors%get_local(vtmp,iblock=1)
