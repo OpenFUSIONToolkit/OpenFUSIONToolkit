@@ -34,13 +34,17 @@ USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
 USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_delete, scatter_local, &
-  OFT_SCATTER_INSERT, OFT_SCATTER_ADD
+  OFT_SCATTER_INSERT, OFT_SCATTER_ADD, oft_index_set, index_set_create, index_set_grow, index_set_delete
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
-  OFT_ACCESS_READWRITE
+  OFT_ACCESS_READWRITE, oft_overlap_dofs, overlap_dofs_delete, OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE, &
+  OFT_CELL_ADJ_FACE
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
+USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_update, &
+  native_overlap_gather, native_overlap_scatter, native_overlap_delete, native_overlap_setup_dofs, &
+  native_overlap_index, native_overlap_pu_setup
 USE oft_native_kernels, ONLY: nk_jacobi_start, nk_jacobi_sweep, nk_jacobi_restart, nk_copy, nk_axpby
 USE oft_lu, ONLY: lapack_matinv
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
@@ -266,9 +270,22 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   TYPE(oft_native_vector), POINTER, DIMENSION(:) :: glocs => NULL() !< Local RHS vector for each block
   TYPE(oft_solver_ptr), pointer, dimension(:) :: solvers => NULL() !< Local block solvers
   TYPE(oft_1d_int), pointer, dimension(:) :: parts => NULL() !< Local partition indices
-  !> Gather/scatter plan of each block (rows `parts(i)%v`; with `loverlap`, weights 1 on
-  !! rows assigned to the block and 0 on overlap rows, which are read but not written back)
+  !> Gather/scatter plan of each block (rows `parts(i)%v`; with overlap, weights 1 on
+  !! rows assigned to the block and 0 on overlap rows, which are read but not written back,
+  !! unless `additive`; partition of unity weights if `additive` and `weighted`)
   TYPE(oft_scatter_plan), POINTER, DIMENSION(:) :: bplans => NULL()
+  !> Number of overlap layers added to each block within a process (-1: one layer if
+  !! `loverlap`, none otherwise). Set by @ref oft_schwarz_precond.
+  INTEGER(i4) :: overlap_levels = -1
+  !> Combine overlapping blocks additively (sum of block solutions) instead of
+  !! restricting the write-back to the rows assigned to each block. Set by
+  !! @ref oft_schwarz_precond.
+  LOGICAL :: additive = .FALSE.
+  !> Weight the additive combination by a partition of unity: each block solution is
+  !! scaled on each row by one over the number of blocks containing the row. Only used
+  !! with `additive`. Set by @ref oft_schwarz_precond.
+  LOGICAL :: weighted = .FALSE.
+  INTEGER(i4), POINTER, DIMENSION(:) :: lunion => NULL() !< Rows covered by any block (additive combination)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => bjprecond_apply
@@ -279,6 +296,58 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
+!------------------------------------------------------------------------------
+!> Overlapping Schwarz preconditioner (restricted, additive or weighted additive)
+!!
+!! Subdomain problems are solved with the sub-solver `pre` (as for
+!! @ref oft_bjprecond) on subdomains grown from a non-overlapping partition by
+!! `overlap` layers along the matrix graph, and combined either restricted (each row
+!! is taken from the subdomain it was assigned to; default), additively (sum of
+!! the subdomain solutions, symmetric for symmetric sub-solves) or weighted additively
+!! (`additive` and `weighted`: sum of the subdomain solutions scaled on each row by
+!! one over the number of subdomains containing the row, a partition of unity).
+!! - `nlocal=1` (default): one subdomain per process made of its owned rows, grown
+!!   across processes (rows held only by other processes are transferred, see
+!!   @ref oft_native_overlap_mod::native_overlap_setup "native_overlap_setup").
+!!   `overlap=0` is block-Jacobi on the owned rows.
+!! - `nlocal>1` (or negative for slice groups, as for @ref oft_bjprecond): blocks
+!!   within each process, grown within the owned rows of the process (`overlap=1`
+!!   restricted is the `loverlap` option of @ref oft_bjprecond).
+!!
+!! With `cell_mode` the blocks are instead grown by `overlap` layers of mesh cells
+!! (adjacent by `adjacency`) by the cell overlap builder attached to the matrix
+!! (`oft_matrix::cell_ovl`), which also sets the number of blocks per process. Blocks
+!! may cross process boundaries for any number of blocks; their union on each process
+!! is one cross-process subdomain (@ref oft_native_overlap_mod::native_overlap_setup_dofs
+!! "native_overlap_setup_dofs") and each block is a submatrix of it (see
+!! @ref schwarz_cell_apply). In this mode the block-Jacobi storage is reused per block:
+!! `parts(i)%v` holds the (sorted) subdomain rows of block `i`, `alocals(i)` its
+!! submatrix of `ovl%amat`, `bplans(i)` its plan between the subdomain and block
+!! vectors (`ulocs(i)`, `glocs(i)`), `solvers(i)` its sub-solver and `nlocal` the
+!! number of blocks.
+!------------------------------------------------------------------------------
+TYPE, PUBLIC, EXTENDS(oft_bjprecond) :: oft_schwarz_precond
+  INTEGER(i4) :: overlap = 1 !< Number of overlap layers
+  LOGICAL :: cell_mode = .FALSE. !< Grow blocks by layers of cells (requires `A%cell_ovl`) instead of the matrix graph
+  INTEGER(i4) :: adjacency = OFT_CELL_ADJ_POINT !< Cell adjacency used to grow blocks in cell mode (`OFT_CELL_ADJ_*`)
+  INTEGER(i4) :: base_layers = -1 !< Base mesh layers bounding the halo in cell mode (<0: builder default)
+  INTEGER(i4) :: nlocal_req = 1 !< Number of local blocks requested in graph mode (setup may replace `nlocal`; restored when rebuilding for a new pattern)
+  TYPE(oft_native_overlap), POINTER :: ovl => NULL() !< Subdomain across processes (`nlocal=1`, `overlap>0`; union of blocks in cell mode)
+  TYPE(oft_seam), POINTER :: sub_seam => NULL() !< Seam of subdomain vectors (no stitching)
+  TYPE(oft_native_vector), POINTER :: usub => NULL() !< Subdomain solution vector (initial guess in cell mode)
+  TYPE(oft_native_vector), POINTER :: gsub => NULL() !< Subdomain right-hand side vector
+  TYPE(oft_native_vector), POINTER :: usol => NULL() !< Combined block solutions on the subdomain (cell mode)
+  TYPE(oft_overlap_dofs), POINTER :: cdofs => NULL() !< Block DoF sets from the cell overlap builder (cell mode)
+CONTAINS
+  !> Solve system
+  PROCEDURE :: apply => schwarz_apply
+  !> Update solver with new settings/operators
+  PROCEDURE :: update => schwarz_update
+  !> Setup solver from XML node
+  PROCEDURE :: setup_from_xml => schwarz_setup_xml
+  !> Clean-up internal storage
+  PROCEDURE :: delete => schwarz_delete
+END TYPE oft_schwarz_precond
 !------------------------------------------------------------------------------
 !> Inverted diagonal block for @ref oft_native_dense_cbjprecond
 !------------------------------------------------------------------------------
@@ -2016,17 +2085,19 @@ CLASS(oft_bjprecond), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
 CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
 !---
-LOGICAL :: thread_safe,color_avail
-LOGICAL, POINTER, DIMENSION(:) :: eflag
-INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
+LOGICAL :: thread_safe,color_avail,lcopy
+INTEGER(i4) :: i,j,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals,uinit
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nblk
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: allowed
+INTEGER(i4) :: nlev
+TYPE(oft_index_set) :: bset
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
-TYPE(oft_1d_int), pointer, dimension(:) :: parts_tmp => NULL()
 DEBUG_STACK_PUSH
 !---
 IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
@@ -2179,43 +2250,37 @@ IF(.NOT.self%initialized)THEN
       self%parts(part(i))%n=self%parts(part(i))%n+1
       self%parts(part(i))%v(self%parts(part(i))%n) = i
     END DO
-    IF(self%loverlap.AND.self%nlocal>1)THEN
-      ALLOCATE(sflag(A_native%nr))
+    nlev=0
+    IF(self%loverlap)nlev=1
+    IF(self%overlap_levels>=0)nlev=self%overlap_levels
+    IF(nlev>0.AND.self%nlocal>1)THEN
+      !---Grow each block along the matrix graph, within rows of the same slice group
+      ALLOCATE(sflag(A_native%nr),allowed(A_native%nr))
+      sflag=-1
       DO i=1,self%A%ni
-        DO k=1,self%A%i_map(i)%nslice
-          j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
-          sflag(j)=self%slice_group(i)
-        END DO
-      END DO
-      parts_tmp=>self%parts
-      ALLOCATE(self%parts(self%nlocal))
-      !$omp parallel private(j,jr,k,eflag)
-      ALLOCATE(eflag(A_native%nr))
-      !$omp do
-      DO i=1,self%nlocal
-        eflag=(part==i)
-        DO j=1,parts_tmp(i)%n
-          jr=parts_tmp(i)%v(j)
-          DO k=A_native%kr(jr),A_native%kr(jr+1)-1
-            IF(sflag(A_native%lc(k))==sflag(jr))eflag(A_native%lc(k))=.TRUE.
+        IF(self%boundary_overlap)THEN
+          DO k=1,self%A%i_map(i)%n
+            sflag(self%A%i_map(i)%offset+k)=self%slice_group(i)
           END DO
-        END DO
-        DO j=1,A_native%nr
-          IF(part(j)<0)eflag(j)=.FALSE.
-        END DO
-        self%parts(i)%n=COUNT(eflag)
-        ALLOCATE(self%parts(i)%v(self%parts(i)%n))
-        k=0
-        DO j=1,A_native%nr
-          IF(.NOT.eflag(j))CYCLE
-          k=k+1
-          self%parts(i)%v(k)=j
-        END DO
-        DEALLOCATE(parts_tmp(i)%v)
+        ELSE
+          DO k=1,self%A%i_map(i)%nslice
+            j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
+            sflag(j)=self%slice_group(i)
+          END DO
+        END IF
       END DO
-      DEALLOCATE(eflag)
-      !$omp end parallel
-      DEALLOCATE(parts_tmp,sflag)
+      allowed=(part>=0)
+      !$omp parallel do private(bset)
+      DO i=1,self%nlocal
+        CALL index_set_create(bset,self%parts(i)%n,self%parts(i)%v)
+        CALL index_set_grow(bset,A_native%nr,A_native%kr,A_native%lc,nlev,allowed=allowed,same=sflag)
+        DEALLOCATE(self%parts(i)%v)
+        self%parts(i)%n=bset%n
+        ALLOCATE(self%parts(i)%v(bset%n))
+        IF(bset%n>0)self%parts(i)%v=bset%ind
+        CALL index_set_delete(bset)
+      END DO
+      DEALLOCATE(sflag,allowed)
     END IF
     !---Create dummy local vector
     uloc%n=A_native%nr
@@ -2230,7 +2295,7 @@ IF(.NOT.self%initialized)THEN
     END DO
     !---Block gather/scatter plans (restricted write-back on overlap rows)
     ALLOCATE(self%bplans(self%nlocal))
-    IF(self%loverlap.AND.self%nlocal>1)THEN
+    IF(nlev>0.AND.self%nlocal>1.AND.(.NOT.self%additive))THEN
       !$omp parallel do private(j,wt)
       DO i=1,self%nlocal
         ALLOCATE(wt(self%parts(i)%n))
@@ -2240,9 +2305,38 @@ IF(.NOT.self%initialized)THEN
         CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
         DEALLOCATE(wt)
       END DO
+    ELSE IF(nlev>0.AND.self%nlocal>1.AND.self%weighted)THEN
+      !---Partition of unity: one over the number of blocks containing each row
+      ALLOCATE(nblk(A_native%nr))
+      nblk=0
+      DO i=1,self%nlocal
+        DO j=1,self%parts(i)%n
+          nblk(self%parts(i)%v(j))=nblk(self%parts(i)%v(j))+1
+        END DO
+      END DO
+      !$omp parallel do private(j,wt)
+      DO i=1,self%nlocal
+        ALLOCATE(wt(self%parts(i)%n))
+        DO j=1,self%parts(i)%n
+          wt(j)=1.d0/REAL(nblk(self%parts(i)%v(j)),r8)
+        END DO
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
+        DEALLOCATE(wt)
+      END DO
+      DEALLOCATE(nblk)
     ELSE
       DO i=1,self%nlocal
         CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v)
+      END DO
+    END IF
+    !---Rows covered by the blocks (zeroed before an additive combination)
+    IF(self%additive)THEN
+      ALLOCATE(self%lunion(COUNT(part>=0)))
+      j=0
+      DO i=1,A_native%nr
+        IF(part(i)<0)CYCLE
+        j=j+1
+        self%lunion(j)=i
       END DO
     END IF
     DEALLOCATE(part)
@@ -2279,9 +2373,10 @@ IF(self%nlocal>1)THEN
   NULLIFY(uvals,gvals)
   CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
   CALL g%borrow_local(gvals,OFT_ACCESS_READ)
-  !---With overlap, blocks read rows assigned to other blocks. Take initial guesses
-  !   from a copy so they do not depend on the order blocks are solved in.
-  IF(self%loverlap)THEN
+  !---With overlap (restricted), blocks read rows written back by other blocks. Take
+  !   initial guesses from a copy so they do not depend on the order blocks are solved in.
+  lcopy=(.NOT.self%additive).AND.(self%overlap_levels>0.OR.(self%overlap_levels<0.AND.self%loverlap))
+  IF(lcopy)THEN
     ALLOCATE(uinit(SIZE(uvals)))
     uinit=uvals
   ELSE
@@ -2304,7 +2399,16 @@ IF(self%nlocal>1)THEN
       CALL apply_block(i)
     END DO
   END IF
-  IF(self%loverlap)DEALLOCATE(uinit)
+  IF(lcopy)DEALLOCATE(uinit)
+  !---Additive combination: sum of the (weighted) block solutions (blocks in order)
+  IF(self%additive)THEN
+    DO j=1,SIZE(self%lunion)
+      uvals(self%lunion(j))=0.d0
+    END DO
+    DO i=1,self%nlocal
+      CALL scatter_local(self%bplans(i),self%ulocs(i)%v,uvals,OFT_SCATTER_ADD,reverse=.TRUE.)
+    END DO
+  END IF
   !---Local solves on shared rows differ between processes, so synchronize from owner
   CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=.TRUE.)
   CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
@@ -2363,8 +2467,9 @@ CALL scatter_local(self%bplans(ii),uinit,self%ulocs(ii)%v,OFT_SCATTER_INSERT)
 !---Solve sub-system
 self%solvers(ii)%s%A=>self%alocals(ii)
 CALL self%solvers(ii)%s%apply(self%ulocs(ii),self%glocs(ii))
-!---Replace local slice into solution (rows with non-zero weight only)
-CALL scatter_local(self%bplans(ii),self%ulocs(ii)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
+!---Replace local slice into solution (rows with non-zero weight only); additive
+!   combination is done after all blocks are solved
+IF(.NOT.self%additive)CALL scatter_local(self%bplans(ii),self%ulocs(ii)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
 END SUBROUTINE apply_block
 END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
@@ -2489,6 +2594,7 @@ IF(ASSOCIATED(self%alocals))THEN
   END DO
   DEALLOCATE(self%alocals)
 END IF
+IF(ASSOCIATED(self%lunion))DEALLOCATE(self%lunion)
 !---Destroy block plans
 IF(ASSOCIATED(self%bplans))THEN
   DO i=1,SIZE(self%bplans)
@@ -2523,6 +2629,483 @@ self%nlocal=1
 self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
+!------------------------------------------------------------------------------
+!> Precondition a linear system using an overlapping Schwarz method
+!!
+!! With several blocks per process (`nlocal/=1`) or no overlap this is the
+!! block-Jacobi method of @ref oft_bjprecond with blocks grown by `overlap` layers
+!! within each process. Otherwise the subdomain of each process (owned rows plus
+!! `overlap` layers, across processes) is solved with the sub-solver and combined
+!! restricted (owned rows taken from the local subdomain, then synchronized) or
+!! additively (sum over subdomains).
+!!
+!! The subdomains are set up on the first application and refreshed after an update,
+!! here, without a thread-safe lazy-initialization guard: setup and application both
+!! exchange data between processes, so this must be called by all processes from
+!! serial code (never inside an OpenMP parallel region).
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE schwarz_apply(self,u,g)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
+CLASS(oft_native_matrix), POINTER :: A_native
+CLASS(oft_solver), POINTER :: pretmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+DEBUG_STACK_PUSH
+IF(self%overlap<0)CALL oft_abort('Negative overlap','schwarz_apply',__FILE__)
+!---Requested number of blocks (graph mode setup may replace nlocal)
+IF(.NOT.self%initialized)self%nlocal_req=self%nlocal
+!---Blocks grown by layers of cells (may cross processes)
+IF(self%cell_mode)THEN
+  IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
+    'schwarz_apply',__FILE__)
+  CALL schwarz_cell_apply(self,A_native,u,g)
+  DEBUG_STACK_POP
+  RETURN
+END IF
+!---Blocks within each process (or no overlap): block-Jacobi with grown blocks
+IF((self%nlocal/=1).OR.(self%overlap==0).OR.self%boundary_overlap)THEN
+  self%overlap_levels=self%overlap
+  CALL bjprecond_apply(self,u,g)
+  DEBUG_STACK_POP
+  RETURN
+END IF
+!---One subdomain per process, overlapping across processes
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
+  'schwarz_apply',__FILE__)
+IF(.NOT.self%initialized)THEN
+  IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
+    'schwarz_apply',__FILE__)
+  CALL solver_setup(self)
+  ALLOCATE(self%ovl)
+  CALL native_overlap_setup(self%ovl,A_native,u,self%overlap)
+  pretmp=>self%pre
+  ALLOCATE(self%solvers(1))
+  ALLOCATE(self%solvers(1)%s, source=pretmp)
+  IF(ASSOCIATED(pretmp%pre))ALLOCATE(self%solvers(1)%s%pre, source=pretmp%pre)
+  ALLOCATE(self%sub_seam,self%usub,self%gsub)
+  self%sub_seam%skip=.TRUE.
+  CALL bjprecond_local_vec(self%usub,self%ovl%n,self%sub_seam)
+  CALL bjprecond_local_vec(self%gsub,self%ovl%n,self%sub_seam)
+  self%update_slice=.FALSE.
+ELSE IF(self%update_slice)THEN
+  CALL native_overlap_update(self%ovl)
+  self%update_slice=.FALSE.
+END IF
+!---Gather subdomain values, solve, combine
+NULLIFY(uvals,gvals)
+CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
+CALL g%borrow_local(gvals,OFT_ACCESS_READ)
+CALL native_overlap_gather(self%ovl,gvals,self%gsub%v)
+CALL native_overlap_gather(self%ovl,uvals,self%usub%v)
+self%solvers(1)%s%A=>self%ovl%amat
+CALL self%solvers(1)%s%apply(self%usub,self%gsub)
+CALL native_overlap_scatter(self%ovl,self%usub%v,uvals,self%additive,weighted=self%weighted)
+!---Restricted: copies of owned rows are synchronized; additive: already consistent
+CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=(.NOT.self%additive))
+CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
+DEBUG_STACK_POP
+END SUBROUTINE schwarz_apply
+!------------------------------------------------------------------------------
+!> Set up the blocks of the Schwarz preconditioner in cell mode (collective)
+!!
+!! The cell overlap builder attached to the matrix (`A%cell_ovl`) gives the DoFs of
+!! each block (core cells grown by `overlap` layers of cells adjacent by `adjacency`)
+!! and the DoFs assigned to each block for the restricted write-back. Their union on
+!! this process is set up as one subdomain across processes
+!! (@ref oft_native_overlap_mod::native_overlap_setup_dofs "native_overlap_setup_dofs",
+!! one row request round) and each block is the submatrix of the subdomain matrix
+!! on its rows, with a copy of the sub-solver `pre` and a local plan between the
+!! subdomain and block vectors. Plan weights are 1 on the rows assigned to the block
+!! and 0 elsewhere (restricted) or 1 everywhere (additive). For the weighted additive
+!! combination the partition of unity weights count the blocks containing each DoF
+!! over all processes (@ref oft_native_overlap_mod::native_overlap_pu_setup
+!! "native_overlap_pu_setup").
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_cell_setup(self,A_native,u)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+CLASS(oft_native_matrix), POINTER, INTENT(in) :: A_native !< Matrix (`self%A` as native matrix)
+CLASS(oft_vector), INTENT(inout) :: u !< Vector of the matrix row space
+INTEGER(i4) :: i,j,nb,n
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,basg
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt,mult
+TYPE(oft_native_vector) :: uskip
+CLASS(oft_solver), POINTER :: pretmp
+DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
+  'schwarz_cell_setup',__FILE__)
+IF(.NOT.ASSOCIATED(self%A%cell_ovl))CALL oft_abort('Cell mode requires a cell overlap builder '// &
+  'attached to the matrix ("cell_ovl")','schwarz_cell_setup',__FILE__)
+IF(self%boundary_overlap)CALL oft_abort('"boverlap" is not supported in cell mode', &
+  'schwarz_cell_setup',__FILE__)
+IF(self%nlocal<0)CALL oft_abort('Field based blocks (nlocal<0) are not supported in cell mode: '// &
+  'the cell overlap builder defines the blocks','schwarz_cell_setup',__FILE__)
+IF((self%adjacency<OFT_CELL_ADJ_POINT).OR.(self%adjacency>OFT_CELL_ADJ_FACE))CALL oft_abort( &
+  'Invalid cell adjacency','schwarz_cell_setup',__FILE__)
+CALL solver_setup(self)
+!---Number of blocks is set by the builder
+nb=self%A%cell_ovl%nblocks()
+IF(nb<1)CALL oft_abort('Cell overlap builder has no blocks','schwarz_cell_setup',__FILE__)
+IF(oft_env%head_proc.AND.(self%nlocal>1).AND.(self%nlocal/=nb))WRITE(*,'(A,X,I4)') &
+  ' Updating number of local parts to match cell overlap blocks',nb
+self%nlocal=nb
+!---Block DoF sets and their union as one subdomain across processes
+ALLOCATE(self%cdofs)
+CALL self%A%cell_ovl%build(self%A,u,self%overlap,self%adjacency,self%base_layers,self%cdofs)
+IF(self%cdofs%nblocks/=nb)CALL oft_abort('Block count mismatch with cell overlap builder', &
+  'schwarz_cell_setup',__FILE__)
+ALLOCATE(self%ovl)
+CALL native_overlap_setup_dofs(self%ovl,A_native,u,self%cdofs%n,self%cdofs%gdof,self%cdofs%odof)
+IF(self%ovl%n/=self%cdofs%n)CALL oft_abort('Subdomain size mismatch','schwarz_cell_setup',__FILE__)
+!---Subdomain index of each union DoF and block assigned to each subdomain DoF (0: none)
+ALLOCATE(pmap(self%cdofs%n),basg(self%ovl%n))
+CALL native_overlap_index(self%ovl,self%cdofs%n,self%cdofs%gdof,pmap)
+IF(ANY(pmap<1))CALL oft_abort('Union DoF missing from subdomain','schwarz_cell_setup',__FILE__)
+basg=0
+DO i=1,nb
+  DO j=1,self%cdofs%asg(i)%n
+    IF(basg(pmap(self%cdofs%asg(i)%v(j)))/=0)CALL oft_abort('DoF assigned to several blocks', &
+      'schwarz_cell_setup',__FILE__)
+    basg(pmap(self%cdofs%asg(i)%v(j)))=i
+  END DO
+END DO
+!---Subdomain vectors (no stitching)
+ALLOCATE(self%sub_seam,self%usub,self%gsub,self%usol)
+self%sub_seam%skip=.TRUE.
+CALL bjprecond_local_vec(self%usub,self%ovl%n,self%sub_seam)
+CALL bjprecond_local_vec(self%gsub,self%ovl%n,self%sub_seam)
+CALL bjprecond_local_vec(self%usol,self%ovl%n,self%sub_seam)
+uskip%n=self%ovl%n
+uskip%stitch_info=>self%sub_seam
+!---Blocks: subdomain rows, submatrix, sub-solver, plan and local vectors
+ALLOCATE(self%local_stitch(1))
+self%local_stitch(1)%skip=.TRUE.
+ALLOCATE(self%parts(nb),self%alocals(nb),self%solvers(nb),self%bplans(nb))
+ALLOCATE(self%ulocs(nb),self%glocs(nb))
+pretmp=>self%pre
+DO i=1,nb
+  n=self%cdofs%blk(i)%n
+  self%parts(i)%n=n
+  ALLOCATE(self%parts(i)%v(n))
+  DO j=1,n
+    self%parts(i)%v(j)=pmap(self%cdofs%blk(i)%v(j))
+  END DO
+  CALL sort_array(self%parts(i)%v,n)
+  ALLOCATE(self%solvers(i)%s, source=pretmp)
+  IF(ASSOCIATED(pretmp%pre))ALLOCATE(self%solvers(i)%s%pre, source=pretmp%pre)
+  CALL bjprecond_local_vec(self%ulocs(i),n,self%local_stitch(1))
+  CALL bjprecond_local_vec(self%glocs(i),n,self%local_stitch(1))
+  IF(n==0)CYCLE ! Empty block (no cells): skipped in apply
+  CALL self%alocals(i)%setup(self%ovl%amat,uskip,rows=self%parts(i)%v)
+  ALLOCATE(wt(n))
+  IF(self%additive)THEN
+    wt=1.d0
+  ELSE
+    DO j=1,n
+      wt(j)=MERGE(1.d0,0.d0,basg(self%parts(i)%v(j))==i)
+    END DO
+  END IF
+  CALL scatter_plan_setup_local(self%bplans(i),n,self%parts(i)%v,wt=wt)
+  DEALLOCATE(wt)
+END DO
+DEALLOCATE(pmap,basg)
+!---Partition of unity weights: blocks containing each DoF, over all processes
+IF(self%additive.AND.self%weighted)THEN
+  ALLOCATE(mult(MAX(1,self%ovl%n)))
+  mult=0.d0
+  DO i=1,nb
+    DO j=1,self%parts(i)%n
+      mult(self%parts(i)%v(j))=mult(self%parts(i)%v(j))+1.d0
+    END DO
+  END DO
+  CALL native_overlap_pu_setup(self%ovl,mult)
+  DEALLOCATE(mult)
+END IF
+self%update_slice=.FALSE.
+DEBUG_STACK_POP
+END SUBROUTINE schwarz_cell_setup
+!------------------------------------------------------------------------------
+!> Precondition a linear system using the Schwarz method with cell-grown blocks
+!!
+!! Blocks are set up on first use (@ref schwarz_cell_setup) and their matrices
+!! refreshed after an update (subdomain matrix, then block submatrices). Each
+!! application gathers the right-hand side and guess on the subdomain (union of the
+!! blocks of this process), solves every block from the subdomain values and
+!! combines the block solutions on the subdomain:
+!! - restricted: each block writes only the rows assigned to it (0/1 plan weights).
+!!   These are disjoint between blocks, so blocks may be solved concurrently; other
+!!   rows keep the gathered guess. Owned rows are then written back and copies
+!!   synchronized from their owners.
+!! - additive: block solutions are summed on the subdomain (serially, in block order,
+!!   as blocks overlap), then summed over subdomains of all processes.
+!!
+!! As for @ref schwarz_apply, setup and update are collective and not guarded for
+!! concurrent callers: call from serial code on all processes.
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE schwarz_cell_apply(self,A_native,u,g)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+CLASS(oft_native_matrix), POINTER, INTENT(in) :: A_native !< Matrix (`self%A` as native matrix)
+CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
+LOGICAL :: thread_safe
+INTEGER(i4) :: i
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+DEBUG_STACK_PUSH
+IF(.NOT.self%initialized)THEN
+  CALL schwarz_cell_setup(self,A_native,u)
+ELSE IF(self%update_slice)THEN
+  !---Subdomain matrix (and its full local matrix) first, so block updates only copy values
+  CALL native_overlap_update(self%ovl)
+  !$omp parallel do schedule(dynamic,1)
+  DO i=1,self%nlocal
+    IF(self%parts(i)%n>0)CALL self%alocals(i)%update_slice
+  END DO
+  self%update_slice=.FALSE.
+END IF
+!---Block solves run concurrently only for thread safe sub-solvers outside parallel regions
+thread_safe=self%pre%check_thread()
+!---Gather subdomain values (borrowed local values, no copy for native vectors)
+NULLIFY(uvals,gvals)
+CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
+CALL g%borrow_local(gvals,OFT_ACCESS_READ)
+CALL native_overlap_gather(self%ovl,gvals,self%gsub%v)
+CALL native_overlap_gather(self%ovl,uvals,self%usub%v)
+IF(self%additive)THEN
+  IF(self%ovl%n>0)self%usol%v=0.d0
+ELSE
+  IF(self%ovl%n>0)self%usol%v=self%usub%v
+END IF
+!---Blocks only read the gathered subdomain values and write disjoint rows of `usol`
+!   (restricted), so the result does not depend on the order blocks are solved in.
+!   Only open a parallel region if the sub-solver is thread safe and we are not already
+!   in an active parallel region (see @ref bjprecond_apply). Each block (and its local
+!   vectors) is only accessed by one thread.
+IF(thread_safe.AND.(.NOT.omp_in_parallel()))THEN
+  !$omp parallel do schedule(dynamic,1)
+  DO i=1,self%nlocal
+    CALL apply_cell_block(i)
+  END DO
+ELSE
+  DO i=1,self%nlocal
+    CALL apply_cell_block(i)
+  END DO
+END IF
+!---Additive combination: sum of the block solutions (blocks in order)
+IF(self%additive)THEN
+  DO i=1,self%nlocal
+    IF(self%parts(i)%n==0)CYCLE
+    CALL scatter_local(self%bplans(i),self%ulocs(i)%v,self%usol%v,OFT_SCATTER_ADD,reverse=.TRUE.)
+  END DO
+END IF
+CALL native_overlap_scatter(self%ovl,self%usol%v,uvals,self%additive,weighted=self%weighted)
+!---Restricted: copies of owned rows are synchronized; additive: already consistent
+CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=(.NOT.self%additive))
+CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
+DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Solve the local sub-system of a single cell block
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE apply_cell_block(ii)
+INTEGER(i4), INTENT(in) :: ii !< Index of block to solve
+IF(self%parts(ii)%n==0)RETURN
+CALL scatter_local(self%bplans(ii),self%gsub%v,self%glocs(ii)%v,OFT_SCATTER_INSERT)
+CALL scatter_local(self%bplans(ii),self%usub%v,self%ulocs(ii)%v,OFT_SCATTER_INSERT)
+self%solvers(ii)%s%A=>self%alocals(ii)
+CALL self%solvers(ii)%s%apply(self%ulocs(ii),self%glocs(ii))
+IF(.NOT.self%additive)CALL scatter_local(self%bplans(ii),self%ulocs(ii)%v,self%usol%v, &
+  OFT_SCATTER_INSERT,reverse=.TRUE.)
+END SUBROUTINE apply_cell_block
+END SUBROUTINE schwarz_cell_apply
+!------------------------------------------------------------------------------
+!> Update Schwarz preconditioner after changing settings/operators
+!!
+!! As @ref bjprecond_update (numeric update on next application), except that a new
+!! matrix pattern (`new_pattern=.TRUE.`) frees the subdomains and blocks built from the
+!! old one (their gather plans and submatrix extractions refer to the old pattern), which
+!! are rebuilt on the next application: the blocks and subdomain in cell mode, and in
+!! graph mode the subdomain of each process or the blocks within each process (with the
+!! number of blocks originally requested).
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE schwarz_update(self,new_pattern)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+LOGICAL, OPTIONAL, INTENT(in) :: new_pattern !< Update matrix non-zero pattern (optional)
+LOGICAL :: rebuild
+INTEGER(i4) :: nl
+DEBUG_STACK_PUSH
+rebuild=.FALSE.
+IF(PRESENT(new_pattern))rebuild=new_pattern
+!---With a new pattern, subdomains and blocks built from the old one are rebuilt on the
+!   next application (cell mode: blocks and subdomain; graph mode: the subdomain across
+!   processes or the blocks within each process, with the requested number of blocks)
+IF(rebuild.AND.self%cell_mode.AND.ASSOCIATED(self%cdofs))THEN
+  CALL schwarz_delete(self)
+ELSE IF(rebuild.AND.(.NOT.self%cell_mode).AND.self%initialized)THEN
+  nl=self%nlocal_req
+  CALL schwarz_delete(self)
+  self%nlocal=nl
+ELSE
+  CALL bjprecond_update(self,new_pattern)
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE schwarz_update
+!------------------------------------------------------------------------------
+!> Setup Schwarz preconditioner from XML definition
+!!
+!! Reads the block-Jacobi options (`nlocal`, `groups`; see @ref bjprecond_setup_xml),
+!! `overlap` (number of overlap layers, default 1), `type` (`restricted`, default,
+!! `additive`, or `weighted` for additive with partition of unity weights),
+!! `overlap_mode` (`graph`, default, or `cell`), and for cell mode `adjacency`
+!! (`point`, default, `edge` or `face`) and `base_layers` (default -1, builder
+!! default). `overlap` and `base_layers` take one value or one per level.
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_setup_xml(self,solver_node,level)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
+TYPE(xml_node) :: current_node
+INTEGER(i4) :: ierr,val_level
+INTEGER(i4), POINTER, DIMENSION(:) :: read_tmp
+CHARACTER(LEN=:), ALLOCATABLE :: stype
+DEBUG_STACK_PUSH
+val_level=1
+IF(PRESENT(level))val_level=level
+CALL bjprecond_setup_xml(self,solver_node,level)
+IF(self%loverlap)CALL oft_abort('Use "overlap" instead of "loverlap" for the Schwarz preconditioner', &
+  'schwarz_setup_xml',__FILE__)
+!---Number of overlap layers (one value, or one per level)
+CALL xml_get_element(solver_node,"overlap",current_node,ierr)
+IF(ierr==0)THEN
+  NULLIFY(read_tmp)
+  CALL xml_read_content(current_node,read_tmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `overlap` node","schwarz_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_tmp))THEN
+    IF(SIZE(read_tmp)>1)THEN
+      IF(SIZE(read_tmp)<val_level)CALL oft_abort("Not enough overlap values specified", &
+        "schwarz_setup_xml",__FILE__)
+      self%overlap=read_tmp(val_level)
+    ELSE
+      self%overlap=read_tmp(1)
+    END IF
+    DEALLOCATE(read_tmp)
+  END IF
+END IF
+!---Combination type
+CALL xml_get_element(solver_node,"type",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,stype,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `type` node","schwarz_setup_xml",__FILE__)
+  SELECT CASE(TRIM(stype))
+  CASE("restricted")
+    self%additive=.FALSE.
+    self%weighted=.FALSE.
+  CASE("additive")
+    self%additive=.TRUE.
+    self%weighted=.FALSE.
+  CASE("weighted")
+    self%additive=.TRUE.
+    self%weighted=.TRUE.
+  CASE DEFAULT
+    CALL oft_abort('Unknown Schwarz type "'//TRIM(stype)//'"','schwarz_setup_xml',__FILE__)
+  END SELECT
+END IF
+!---Overlap mode (graph or cell layers)
+CALL xml_get_element(solver_node,"overlap_mode",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,stype,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `overlap_mode` node","schwarz_setup_xml",__FILE__)
+  SELECT CASE(TRIM(stype))
+  CASE("graph")
+    self%cell_mode=.FALSE.
+  CASE("cell")
+    self%cell_mode=.TRUE.
+  CASE DEFAULT
+    CALL oft_abort('Unknown overlap mode "'//TRIM(stype)//'"','schwarz_setup_xml',__FILE__)
+  END SELECT
+END IF
+!---Cell adjacency (cell mode)
+CALL xml_get_element(solver_node,"adjacency",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,stype,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `adjacency` node","schwarz_setup_xml",__FILE__)
+  SELECT CASE(TRIM(stype))
+  CASE("point")
+    self%adjacency=OFT_CELL_ADJ_POINT
+  CASE("edge")
+    self%adjacency=OFT_CELL_ADJ_EDGE
+  CASE("face")
+    self%adjacency=OFT_CELL_ADJ_FACE
+  CASE DEFAULT
+    CALL oft_abort('Unknown cell adjacency "'//TRIM(stype)//'"','schwarz_setup_xml',__FILE__)
+  END SELECT
+END IF
+!---Base mesh layers bounding the halo (cell mode; one value, or one per level)
+CALL xml_get_element(solver_node,"base_layers",current_node,ierr)
+IF(ierr==0)THEN
+  NULLIFY(read_tmp)
+  CALL xml_read_content(current_node,read_tmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `base_layers` node","schwarz_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_tmp))THEN
+    IF(SIZE(read_tmp)>1)THEN
+      IF(SIZE(read_tmp)<val_level)CALL oft_abort("Not enough base_layers values specified", &
+        "schwarz_setup_xml",__FILE__)
+      self%base_layers=read_tmp(val_level)
+    ELSE
+      self%base_layers=read_tmp(1)
+    END IF
+    DEALLOCATE(read_tmp)
+  END IF
+END IF
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(A)')'Schwarz solver setup:'
+  WRITE(*,'(2X,A,I4)')  '- Overlap:   ',self%overlap
+  WRITE(*,'(2X,A,3X,L1)')'- Additive:  ',self%additive
+  WRITE(*,'(2X,A,3X,L1)')'- Weighted:  ',self%weighted
+  WRITE(*,'(2X,A,3X,L1)')'- Cell mode: ',self%cell_mode
+  IF(self%cell_mode)THEN
+    WRITE(*,'(2X,A,I4)')  '- Adjacency: ',self%adjacency
+    WRITE(*,'(2X,A,I4)')  '- Base lays: ',self%base_layers
+  END IF
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE schwarz_setup_xml
+!------------------------------------------------------------------------------
+!> Destroy Schwarz preconditioner and deallocate all internal storage
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_delete(self,propogate)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Update matrix non-zero pattern? (optional)
+DEBUG_STACK_PUSH
+!---Cell mode: blocks (submatrices of the subdomain matrix) before the subdomain
+IF(ASSOCIATED(self%cdofs))THEN
+  CALL bjprecond_delete(self,propogate)
+  CALL overlap_dofs_delete(self%cdofs)
+  DEALLOCATE(self%cdofs)
+END IF
+IF(ASSOCIATED(self%usol))THEN
+  IF(ASSOCIATED(self%usol%v))DEALLOCATE(self%usol%v)
+  DEALLOCATE(self%usol)
+END IF
+IF(ASSOCIATED(self%ovl))THEN
+  !---Single sub-solver of the cross-process subdomain, before the subdomain matrix it
+  !   points to (as for the blocks in bjprecond_delete)
+  IF(ASSOCIATED(self%solvers))THEN
+    CALL self%solvers(1)%s%delete(propogate)
+    DEALLOCATE(self%solvers(1)%s)
+    DEALLOCATE(self%solvers)
+  END IF
+  CALL native_overlap_delete(self%ovl)
+  DEALLOCATE(self%ovl)
+END IF
+IF(ASSOCIATED(self%usub))THEN
+  IF(ASSOCIATED(self%usub%v))DEALLOCATE(self%usub%v)
+  IF(ASSOCIATED(self%gsub%v))DEALLOCATE(self%gsub%v)
+  DEALLOCATE(self%usub,self%gsub,self%sub_seam)
+END IF
+CALL bjprecond_delete(self,propogate)
+self%overlap_levels=-1
+DEBUG_STACK_POP
+END SUBROUTINE schwarz_delete
 !------------------------------------------------------------------------------
 !> Setup Block-Jacobi preconditioner for a native dense complex matrix
 !!

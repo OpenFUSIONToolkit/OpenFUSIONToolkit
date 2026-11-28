@@ -34,7 +34,7 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc=False, nprocs=1, ppn=1):
+def xml_setup(xml_file, petsc=False, nprocs=1, ppn=1, cell_parts=0):
     os.chdir(test_dir)
     petsc_flag=('T' if petsc else 'F')
     nbase = 3
@@ -42,6 +42,8 @@ def xml_setup(xml_file, petsc=False, nprocs=1, ppn=1):
         nbase = 2 # Distribute finest level for MPI runs
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(petsc_flag,nbase,ppn))
+        if cell_parts > 0:
+            fid.write("\n&test_solver_xml_options\n cell_parts={0}\n/\n".format(cell_parts))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
     return run_OFT("./test_solver_xml oft.in oft_in.xml", nprocs, 60)
@@ -203,4 +205,75 @@ def test_gmres_petsc_gasm_node_mpi(nlocal, overlap, iteration_count):
     """.format(nlocal, overlap)
     converged_error = 0.6394036978170452
     assert xml_setup(xml_file,petsc=True,nprocs=2,ppn=2)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native overlapping Schwarz selected from XML: blocks within the process grown by one layer
+# (plain additive combination counts overlap rows twice, hence more iterations; partition of
+# unity weights avoid this)
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
+def test_gmres_schwarz(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>4</nlocal>
+            <overlap>1</overlap>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 58, "additive": 102, "weighted": 59}[schwarz_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native overlapping Schwarz selected from XML: one subdomain per process grown by one layer
+# across processes
+@pytest.mark.mpi
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
+def test_gmres_schwarz_mpi2(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>1</nlocal>
+            <overlap>1</overlap>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 30, "additive": 42, "weighted": 31}[schwarz_type]
+    converged_error = 0.6394036978170452
+    assert xml_setup(xml_file,petsc=False,nprocs=2)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native Schwarz in cell mode selected from XML: 4 blocks (from the cell overlap builder
+# attached to the matrix) grown by one layer of face-adjacent cells (with ILU sub-solves the
+# counts are close to graph mode; the overlap trends are checked in test_cell_schwarz)
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
+def test_gmres_schwarz_cell(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <overlap>1</overlap>
+            <overlap_mode>cell</overlap_mode>
+            <adjacency>face</adjacency>
+            <base_layers>2</base_layers>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 58, "additive": 100, "weighted": 60}[schwarz_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False,cell_parts=4)
     assert validate_result(iteration_count,converged_error)

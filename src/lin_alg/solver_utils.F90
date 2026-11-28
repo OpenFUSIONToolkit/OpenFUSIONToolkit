@@ -22,7 +22,7 @@ USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
   oft_native_gmres_solver, native_gmres_solver_cast, oft_jblock_precond, &
   oft_ml_precond, jblock_precond_cast, &
-  ml_precond_cast, oft_diag_scale, diag_scale_cast, oft_bjprecond
+  ml_precond_cast, oft_diag_scale, diag_scale_cast, oft_bjprecond, oft_schwarz_precond
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, oft_petsc_matrix_cast
@@ -545,7 +545,8 @@ SELECT CASE(solver_type)
     IF(use_petsc)THEN
       CALL create_petsc_pre(solver,"add_schwarz")
     ELSE
-      CALL oft_abort("Additive-Schwarz precon requires PETSc interface","create_solver_xml",__FILE__)
+      CALL create_native_pre(solver,"add_schwarz")
+      native_solver=.TRUE.
     END IF
   CASE("lu")
     IF(use_petsc)THEN
@@ -591,6 +592,8 @@ SELECT CASE(TRIM(pre_type))
     ALLOCATE(oft_diag_scale::pre)
   CASE("block_jacobi")
     ALLOCATE(oft_bjprecond::pre)
+  CASE("add_schwarz")
+    ALLOCATE(oft_schwarz_precond::pre)
   CASE("lu")
     ALLOCATE(oft_lusolver::pre)
   CASE("ilu")
@@ -725,7 +728,7 @@ SELECT CASE(pre_type)
     IF(use_petsc)THEN
       CALL create_petsc_pre(pre,"add_schwarz")
     ELSE
-      CALL oft_abort("Additive-Schwarz precon requires PETSc interface","create_pre_xml",__FILE__)
+      CALL create_native_pre(pre,"add_schwarz")
     END IF
   CASE("lu")
     IF(use_petsc)THEN

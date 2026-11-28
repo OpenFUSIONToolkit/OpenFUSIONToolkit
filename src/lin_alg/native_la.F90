@@ -206,7 +206,29 @@ TYPE, PUBLIC :: oft_native_pattern
   TYPE(oft_seam), POINTER :: linkage => NULL() !< Seam for full local matrices (built by @ref native_matrix_setup_full)
   TYPE(native_csc_index), PRIVATE :: csc !< Transposed index (built by transpose products)
   TYPE(native_diag_index), PRIVATE :: diag_index !< Diagonal locations (built by assembly)
+  TYPE(native_extraction), POINTER :: extracts => NULL() !< Cached submatrix extractions (see @ref native_extraction_get)
 END TYPE oft_native_pattern
+!---------------------------------------------------------------------------------
+!> Extraction of a submatrix (row set by column set) from a native CRS pattern
+!!
+!! Holds the symbolic part of the extraction: the non-zero pattern of the submatrix
+!! (an @ref oft_native_pattern, shared by every submatrix using this extraction) and
+!! the location in the parent's value array of each submatrix entry, as a local
+!! scatter plan. Extractions are cached in a list held by the parent pattern (see
+!! @ref native_extraction_get), so submatrices of matrices sharing a pattern, or
+!! rebuilt for new values, reuse the symbolic work; they are freed with the parent
+!! pattern.
+!---------------------------------------------------------------------------------
+TYPE, PUBLIC :: native_extraction
+  INTEGER(i4) :: nr = 0 !< Number of rows of the submatrix
+  INTEGER(i4) :: nc = 0 !< Number of columns of the submatrix
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: rows => NULL() !< Parent row of each submatrix row [nr]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: cols => NULL() !< Parent column of each submatrix column [nc]
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lcmap => NULL() !< Parent value location of each submatrix entry [nnz]
+  TYPE(oft_native_pattern), POINTER :: pattern => NULL() !< Pattern of the submatrix (one reference held)
+  TYPE(oft_scatter_plan) :: vplan !< Value gather plan (parent values to submatrix values)
+  TYPE(native_extraction), POINTER :: next => NULL() !< Next extraction in the parent's cache
+END TYPE native_extraction
 !---------------------------------------------------------------------------------
 !> Native CRS matrix class
 !---------------------------------------------------------------------------------
@@ -293,10 +315,11 @@ end type oft_native_cmatrix
 !---------------------------------------------------------------------------------
 type, public, extends(oft_native_matrix) :: oft_native_submatrix
   integer(i4) :: slice = -1 !< Slice of parent matrix
-  INTEGER(i4), POINTER, DIMENSION(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz]
-  TYPE(oft_scatter_plan) :: vplan !< Value gather plan from the parent's full values (built with `lcmap`)
-  integer(i4), pointer, dimension(:) :: part => NULL() !< Column list
+  INTEGER(i4), POINTER, DIMENSION(:) :: lcmap => NULL() !< Location in the parent's full values of each entry [nnz] (alias of `ext%lcmap`)
+  INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL() !< Parent rows (and columns) of the submatrix
   class(oft_native_matrix), pointer :: parent => NULL() !< Parent matrix
+  TYPE(oft_native_pattern), POINTER :: parent_pattern => NULL() !< Pattern of the parent (reference held, owns `ext`)
+  TYPE(native_extraction), POINTER :: ext => NULL() !< Extraction (symbolic map) used
 contains
   !> Build submatrix
   procedure :: setup => submatrix_setup
@@ -416,6 +439,7 @@ public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
 PUBLIC native_pattern_create, native_pattern_retain, native_pattern_release
 PUBLIC native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
+PUBLIC native_extraction_get
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -2279,9 +2303,10 @@ END SUBROUTINE native_pattern_retain
 !! The pattern and everything it owns are freed when the last reference is
 !! released. `pattern` is nullified on return in either case.
 !---------------------------------------------------------------------------------
-SUBROUTINE native_pattern_release(pattern)
+RECURSIVE SUBROUTINE native_pattern_release(pattern)
 TYPE(oft_native_pattern), POINTER, INTENT(inout) :: pattern !< Pattern
 INTEGER(i4) :: i,j,nleft
+TYPE(native_extraction), POINTER :: ext
 IF(.NOT.ASSOCIATED(pattern))RETURN
 DEBUG_STACK_PUSH
 !$omp atomic capture
@@ -2293,6 +2318,11 @@ IF(nleft<=0)THEN
   IF(ASSOCIATED(pattern%lc))DEALLOCATE(pattern%lc)
   IF(ASSOCIATED(pattern%lc_small))DEALLOCATE(pattern%lc_small)
   IF(ASSOCIATED(pattern%redind))DEALLOCATE(pattern%redind)
+  DO WHILE(ASSOCIATED(pattern%extracts))
+    ext=>pattern%extracts
+    pattern%extracts=>ext%next
+    CALL native_extraction_free(ext)
+  END DO
   CALL native_csc_delete(pattern%csc)
   CALL native_diag_delete(pattern%diag_index)
   IF(ASSOCIATED(pattern%map))THEN
@@ -2871,6 +2901,8 @@ IF((.NOT.ASSOCIATED(self%pattern)).AND.ASSOCIATED(self%kr))CALL native_matrix_ad
 CALL native_pattern_release(self%pattern)
 CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,self%redind,self%nred,self%nnz)
 IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
+!---Cell overlap builder is not owned by the matrix
+NULLIFY(self%cell_ovl)
 DEBUG_STACK_POP
 end subroutine mat_delete
 !---------------------------------------------------------------------------------
@@ -3377,45 +3409,91 @@ DEBUG_STACK_POP
 END SUBROUTINE matrix_update_slice
 !---------------------------------------------------------------------------------
 !> Setup local submatrix from parent matrix
-!! - Create stitching structures for parent matrix if necessary
+!!
+!! The submatrix holds the entries of the parent's full local matrix (see
+!! @ref native_matrix_setup_full) in a set of rows and a set of columns, numbered in
+!! the order given:
+!! - `rows` (and optionally `cols`, default equal to `rows`): parent local indices;
+!! - `part`: rows and columns `part` (kept as a pointer);
+!! - `slice`: owned rows and columns of one block, in slice order;
+!! - none of these: all owned rows and columns, in slice order.
+!!
+!! The symbolic extraction is cached by the parent's pattern (@ref native_extraction_get).
 !---------------------------------------------------------------------------------
-subroutine submatrix_setup(self,mat,u,slice,part)
+SUBROUTINE submatrix_setup(self,mat,u,slice,part,rows,cols)
 class(oft_native_submatrix), intent(inout) :: self
 class(oft_matrix), intent(inout) :: mat !< Parent matrix
 class(oft_vector), intent(inout) :: u !< Constructed vector for parent row space
 integer(i4), optional, intent(in) :: slice !< Index of field slice to use (optional)
 integer(i4), optional, target, intent(in) :: part(:) !< Array of elements to define submatrix [:] (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: rows(:) !< Parent rows of the submatrix (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: cols(:) !< Parent columns of the submatrix (optional, requires `rows`)
 class(oft_native_matrix), pointer :: parent
+INTEGER(i4) :: i,j,nr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rlist
 DEBUG_STACK_PUSH
 !---
-IF(PRESENT(part).AND.PRESENT(slice))CALL oft_abort('"slice" and "part" cannot both be specified', &
-  'submatrix_setup',__FILE__)
+IF(COUNT([PRESENT(part),PRESENT(slice),PRESENT(rows)])>1)CALL oft_abort('Only one of "slice", "part" and "rows" '// &
+  'may be specified','submatrix_setup',__FILE__)
+IF(PRESENT(cols).AND.(.NOT.PRESENT(rows)))CALL oft_abort('"cols" requires "rows"','submatrix_setup',__FILE__)
 IF(PRESENT(part))self%part=>part
 IF(PRESENT(slice))self%slice=slice
 IF(.NOT.native_matrix_cast(parent,mat))CALL oft_abort('Native matrix required', &
   'submatrix_setup',__FILE__)
 self%parent=>parent
-IF(self%slice<0.AND.ASSOCIATED(self%part))THEN
-  self%nr=SIZE(self%part)
-ELSE IF(self%slice<0.AND.(.NOT.ASSOCIATED(self%part)))THEN
-  self%nr=self%parent%nrslice
+!---Parent rows of the submatrix
+IF(PRESENT(rows))THEN
+  nr=SIZE(rows)
+  ALLOCATE(rlist(nr))
+  rlist=rows
+ELSE IF(ASSOCIATED(self%part))THEN
+  nr=SIZE(self%part)
+  ALLOCATE(rlist(nr))
+  rlist=self%part
 ELSE IF(self%slice>0)THEN
-  self%nr=parent%i_map(self%slice)%nslice
+  ASSOCIATE(mp=>parent%i_map(self%slice))
+    nr=mp%nslice
+    ALLOCATE(rlist(nr))
+    DO j=1,nr
+      rlist(j)=mp%offset+mp%slice(j)
+    END DO
+  END ASSOCIATE
+ELSE
+  nr=parent%nrslice
+  ALLOCATE(rlist(nr))
+  DO i=1,parent%ni
+    ASSOCIATE(mp=>parent%i_map(i))
+      DO j=1,mp%nslice
+        rlist(mp%soffset+j)=mp%offset+mp%slice(j)
+      END DO
+    END ASSOCIATE
+  END DO
 END IF
+!---Full local matrix of the parent and symbolic extraction (cached by the parent pattern)
+CALL native_matrix_setup_full(self%parent,u)
+IF(PRESENT(cols))THEN
+  self%ext=>native_extraction_get(parent%pattern,nr,rlist,SIZE(cols),cols)
+ELSE
+  self%ext=>native_extraction_get(parent%pattern,nr,rlist,nr,rlist)
+END IF
+DEALLOCATE(rlist)
+CALL native_pattern_retain(parent%pattern)
+self%parent_pattern=>parent%pattern
+self%nr=self%ext%nr
+self%nc=self%ext%nc
 self%nrg=self%nr
-self%nc=self%nr
-self%ncg=self%nr
+self%ncg=self%nc
 self%ni=1
 self%nj=1
 self%nrslice=self%nr
-self%ncslice=self%nr
-ALLOCATE(self%i_map(1),self%j_map(1),self%map(1,1))
+self%ncslice=self%nc
+ALLOCATE(self%i_map(1),self%j_map(1))
 self%i_map(1)%n=self%nr
-self%j_map(1)%n=self%nr
-!---
-CALL native_matrix_setup_full(self%parent,u)
+self%j_map(1)%n=self%nc
+CALL native_matrix_set_pattern(self,self%ext%pattern)
+self%lcmap=>self%ext%lcmap
+ALLOCATE(self%M(self%nnz))
 CALL self%update_slice
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_setup
 !---------------------------------------------------------------------------------
@@ -3423,83 +3501,12 @@ end subroutine submatrix_setup
 !---------------------------------------------------------------------------------
 subroutine submatrix_update_slice(self)
 class(oft_native_submatrix), intent(inout) :: self
-class(oft_native_matrix), pointer :: parent
-integer(i4) :: i,j,k,jp,jn
-integer(i4), allocatable, dimension(:) :: slice_map
 DEBUG_STACK_PUSH
 IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
-parent=>self%parent
-!---Get graph
-IF(.NOT.ASSOCIATED(self%lcmap))THEN
-  !---
-  ALLOCATE(slice_map(parent%nr))
-  slice_map=0
-  IF(self%slice>0)THEN
-    i=self%slice
-    !$omp parallel do
-    DO j=1,parent%i_map(i)%nslice
-      slice_map(parent%i_map(i)%offset+parent%i_map(i)%slice(j))=j
-    END DO
-  ELSE
-    IF(ASSOCIATED(self%part))THEN
-      !$omp parallel do
-      DO i=1,self%nr
-        slice_map(self%part(i))=i
-      END DO
-    ELSE
-      DO i=1,parent%ni
-        !$omp parallel do
-        DO j=1,parent%i_map(i)%nslice
-          slice_map(parent%i_map(i)%offset+parent%i_map(i)%slice(j))=parent%i_map(i)%soffset+j
-        END DO
-      END DO
-    END IF
-  END IF
-  !---
-  ALLOCATE(self%kr(self%nr+1))
-  self%kr=0
-  !$omp parallel do private(j) schedule(static,20)
-  do i=1,parent%nr
-    IF(slice_map(i)==0)CYCLE
-    do j=parent%kr(i),parent%kr(i+1)-1
-      IF(slice_map(parent%lc(j))/=0)self%kr(slice_map(i))=self%kr(slice_map(i))+1
-    end do
-  end do
-  !---
-  self%nnz=sum(self%kr)
-  self%kr(self%nr+1)=self%nnz+1
-  do i=self%nr,1,-1 ! cumulative point to point count
-    self%kr(i)=self%kr(i+1)-self%kr(i)
-  end do
-  if(self%kr(1)/=1)call oft_abort('Bad element to element count', &
-    'submatrix_update_slice',__FILE__)
-  !---
-  ALLOCATE(self%lcmap(self%nnz))
-  ALLOCATE(self%lc(self%nnz))
-  do i=1,parent%nr
-    IF(slice_map(i)==0)CYCLE
-    k=self%kr(slice_map(i))
-    do j=parent%kr(i),parent%kr(i+1)-1
-      IF(slice_map(parent%lc(j))/=0)THEN
-        self%lc(k)=slice_map(parent%lc(j))
-        self%lcmap(k)=j
-        k=k+1
-      END IF
-    end do
-    jp=self%kr(slice_map(i))
-    jn=self%kr(slice_map(i)+1)-1
-    CALL sort_array(self%lc(jp:jn),self%lcmap(jp:jn),jn-jp+1)
-  end do
-  DEALLOCATE(slice_map)
-  CALL native_matrix_adopt_pattern(self)
-  ALLOCATE(self%M(self%nnz))
-  CALL scatter_plan_setup_local(self%vplan,self%nnz,self%lcmap)
-END IF
-!---Get values
-CALL matrix_update_slice(parent)
-CALL scatter_local(self%vplan,parent%Mfull,self%M,OFT_SCATTER_INSERT)
+IF(.NOT.ASSOCIATED(self%ext))CALL oft_abort('Submatrix not set up','submatrix_update_slice',__FILE__)
+CALL matrix_update_slice(self%parent)
+CALL scatter_local(self%ext%vplan,self%parent%Mfull,self%M,OFT_SCATTER_INSERT)
 self%full_current=.FALSE.
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_update_slice
 !---------------------------------------------------------------------------------
@@ -3509,12 +3516,141 @@ subroutine submatrix_delete(self)
 class(oft_native_submatrix), intent(inout) :: self
 DEBUG_STACK_PUSH
 CALL mat_delete(self)
-IF(ASSOCIATED(self%lcmap))DEALLOCATE(self%lcmap)
-CALL scatter_plan_delete(self%vplan)
+NULLIFY(self%lcmap,self%ext)
 IF(ASSOCIATED(self%part))NULLIFY(self%part)
+CALL native_pattern_release(self%parent_pattern)
 NULLIFY(self%parent)
 DEBUG_STACK_POP
 end subroutine submatrix_delete
+!---------------------------------------------------------------------------------
+!> Get the extraction of a submatrix (rows by columns) from a pattern, building it if needed
+!!
+!! Extractions are cached in a list held by `pattern` and matched by their row and
+!! column lists, so the symbolic work is done once per pattern and set of rows and
+!! columns. Submatrix rows and columns are numbered in the order of `rows` and `cols`
+!! (parent local indices, each list without repeats); entries of each submatrix row
+!! are sorted by column. The build is threaded over rows and may run concurrently
+!! for different extractions; cache access is serialized.
+!---------------------------------------------------------------------------------
+FUNCTION native_extraction_get(pattern,nr,rows,nc,cols) RESULT(ext)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Parent pattern
+INTEGER(i4), INTENT(in) :: nr !< Number of submatrix rows
+INTEGER(i4), INTENT(in) :: rows(nr) !< Parent row of each submatrix row [nr]
+INTEGER(i4), INTENT(in) :: nc !< Number of submatrix columns
+INTEGER(i4), INTENT(in) :: cols(nc) !< Parent column of each submatrix column [nc]
+TYPE(native_extraction), POINTER :: ext !< Extraction
+TYPE(native_extraction), POINTER :: new
+!---Look for a cached extraction
+!$omp critical (native_extraction_cache)
+ext=>native_extraction_find(pattern,nr,rows,nc,cols)
+!$omp end critical (native_extraction_cache)
+IF(ASSOCIATED(ext))RETURN
+!---Build outside the lock and insert, unless another thread inserted the same extraction
+CALL native_extraction_build(pattern,nr,rows,nc,cols,new)
+!$omp critical (native_extraction_cache)
+ext=>native_extraction_find(pattern,nr,rows,nc,cols)
+IF(.NOT.ASSOCIATED(ext))THEN
+  new%next=>pattern%extracts
+  pattern%extracts=>new
+  ext=>new
+  NULLIFY(new)
+END IF
+!$omp end critical (native_extraction_cache)
+IF(ASSOCIATED(new))CALL native_extraction_free(new)
+END FUNCTION native_extraction_get
+!---------------------------------------------------------------------------------
+!> Find a cached extraction with the given rows and columns (NULL if none)
+!---------------------------------------------------------------------------------
+FUNCTION native_extraction_find(pattern,nr,rows,nc,cols) RESULT(ext)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Parent pattern
+INTEGER(i4), INTENT(in) :: nr !< Number of submatrix rows
+INTEGER(i4), INTENT(in) :: rows(nr) !< Parent row of each submatrix row [nr]
+INTEGER(i4), INTENT(in) :: nc !< Number of submatrix columns
+INTEGER(i4), INTENT(in) :: cols(nc) !< Parent column of each submatrix column [nc]
+TYPE(native_extraction), POINTER :: ext !< Matching extraction (NULL if none)
+ext=>pattern%extracts
+DO WHILE(ASSOCIATED(ext))
+  IF((ext%nr==nr).AND.(ext%nc==nc))THEN
+    IF(ALL(ext%rows==rows).AND.ALL(ext%cols==cols))RETURN
+  END IF
+  ext=>ext%next
+END DO
+END FUNCTION native_extraction_find
+!---------------------------------------------------------------------------------
+!> Build the symbolic extraction of a submatrix (threaded over submatrix rows)
+!---------------------------------------------------------------------------------
+SUBROUTINE native_extraction_build(pattern,nr,rows,nc,cols,ext)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Parent pattern
+INTEGER(i4), INTENT(in) :: nr !< Number of submatrix rows
+INTEGER(i4), INTENT(in) :: rows(nr) !< Parent row of each submatrix row [nr]
+INTEGER(i4), INTENT(in) :: nc !< Number of submatrix columns
+INTEGER(i4), INTENT(in) :: cols(nc) !< Parent column of each submatrix column [nc]
+TYPE(native_extraction), POINTER, INTENT(out) :: ext !< New extraction (not cached)
+INTEGER(i4) :: i,j,k,r,nnz
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cmap
+INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr,lc
+ALLOCATE(ext)
+ext%nr=nr
+ext%nc=nc
+ALLOCATE(ext%rows(nr),ext%cols(nc))
+ext%rows=rows
+ext%cols=cols
+!---Submatrix column of each parent column
+ALLOCATE(cmap(pattern%nc))
+cmap=0
+DO k=1,nc
+  IF(cmap(cols(k))/=0)CALL oft_abort('Repeated column','native_extraction_build',__FILE__)
+  cmap(cols(k))=k
+END DO
+!---Count entries of each row
+ALLOCATE(kr(nr+1))
+kr(1)=1
+!$omp parallel do private(i,j,k) if(nr>OFT_OMP_VTHRESH/10)
+DO r=1,nr
+  i=rows(r)
+  k=0
+  DO j=pattern%kr(i),pattern%kr(i+1)-1
+    IF(cmap(pattern%lc(j))/=0)k=k+1
+  END DO
+  kr(r+1)=k
+END DO
+DO r=1,nr
+  kr(r+1)=kr(r+1)+kr(r)
+END DO
+nnz=kr(nr+1)-1
+!---Fill and sort each row by submatrix column
+ALLOCATE(lc(nnz),ext%lcmap(nnz))
+!$omp parallel do private(i,j,k) schedule(guided) if(nr>OFT_OMP_VTHRESH/10)
+DO r=1,nr
+  i=rows(r)
+  k=kr(r)
+  DO j=pattern%kr(i),pattern%kr(i+1)-1
+    IF(cmap(pattern%lc(j))/=0)THEN
+      lc(k)=cmap(pattern%lc(j))
+      ext%lcmap(k)=j
+      k=k+1
+    END IF
+  END DO
+  IF(kr(r+1)-kr(r)>1)CALL sort_array(lc(kr(r):kr(r+1)-1),ext%lcmap(kr(r):kr(r+1)-1),kr(r+1)-kr(r))
+END DO
+DEALLOCATE(cmap)
+CALL native_pattern_create(ext%pattern,nr,nc,kr,lc)
+CALL native_pattern_retain(ext%pattern)
+CALL scatter_plan_setup_local(ext%vplan,nnz,ext%lcmap)
+END SUBROUTINE native_extraction_build
+!---------------------------------------------------------------------------------
+!> Free an extraction (not the rest of its list)
+!---------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE native_extraction_free(ext)
+TYPE(native_extraction), POINTER, INTENT(inout) :: ext !< Extraction
+IF(.NOT.ASSOCIATED(ext))RETURN
+IF(ASSOCIATED(ext%rows))DEALLOCATE(ext%rows)
+IF(ASSOCIATED(ext%cols))DEALLOCATE(ext%cols)
+IF(ASSOCIATED(ext%lcmap))DEALLOCATE(ext%lcmap)
+CALL scatter_plan_delete(ext%vplan)
+CALL native_pattern_release(ext%pattern)
+DEALLOCATE(ext)
+END SUBROUTINE native_extraction_free
 !---------------------------------------------------------------------------------
 !> Perform graph partitioning (METIS)
 !---------------------------------------------------------------------------------

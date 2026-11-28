@@ -662,13 +662,14 @@ end subroutine mesh_boundary
 !---------------------------------------------------------------------------------
 !> Perform local mesh decomposition (METIS)
 !---------------------------------------------------------------------------------
-SUBROUTINE mesh_local_partition(self,tloc_p,tloc_e,tloc_f,tloc_c,nparts)
+SUBROUTINE mesh_local_partition(self,tloc_p,tloc_e,tloc_f,tloc_c,nparts,cpart_out)
 CLASS(oft_mesh), INTENT(inout) :: self !< Mesh to partition
 TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_p !< Point partitioning [self%np]
 TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_e !< Edge partitioning [self%ne]
 TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_f !< Face partitioning [self%nf]
 TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_c !< Cell partitioning [self%nc]
 INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
+INTEGER(i4), OPTIONAL, INTENT(out) :: cpart_out(:) !< Partition (1:nparts) of each cell, consistent with `tloc_*` [self%nc] (optional)
 INTEGER(i4) :: i,j,k,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart,ppart,epart,fpart
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: town
@@ -800,6 +801,10 @@ DO i=1,nparts
     END IF
   END DO
 END DO
+IF(PRESENT(cpart_out))THEN
+  IF(SIZE(cpart_out)<self%nc)CALL oft_abort('Cell partition output too small','mesh_local_partition',__FILE__)
+  cpart_out(1:self%nc)=cpart
+END IF
 DEALLOCATE(ppart,fpart,cpart,trand,own_tmp)
 DEBUG_STACK_POP
 END SUBROUTINE mesh_local_partition

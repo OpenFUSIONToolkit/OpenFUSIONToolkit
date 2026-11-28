@@ -52,6 +52,7 @@ USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec, &
   fem_map_flag, comp_fem_partition
+USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_3D_lagrange_cast, &
   oft_lag_geval_all, oft_scalar_fem, lagrange_vector_unpack, lagrange_vector_repack, &
   lagrange_vector_packrows, lagrange_vector_packcols, lagrange_vector_transmat, &
@@ -342,6 +343,9 @@ TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL() !< MG interpolation operators
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian operators
+!> Cell overlap builders of the Jacobian matrices, by level (referenced by `ml_J(:)%m%cell_ovl`;
+!! like the operators these live for the duration of the run and are not freed)
+TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl => NULL()
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 INTEGER(i4) :: gmres_maxits = 200
 INTEGER(i4) :: gmres_ninner = 20
@@ -423,7 +427,7 @@ CONTAINS
 !! | `lin_tol=1E-9`     | Linear solver tolerance | real |
 !! | `nl_tol=1E-5`      | Non-Linear solver tolerance | real |
 !! | `nu_xmhd=1`        | Number of smoother iterations for MG preconditioner | int [nlevels] |
-!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring | int [nlevels] |
+!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring. When the native `add_schwarz` preconditioner uses `<overlap_mode>cell</overlap_mode>`, these parts are the cores of the overlapping blocks (one block per process when 1) | int [nlevels] |
 !! | `gmres_maxits=200` | Maximum number of GMRES iterations per linear solve | int |
 !! | `gmres_ninner=20`  | GMRES restart length (iterations between restarts) | int |
 !! | `nclean=500`       | Frequency of divergence cleaning | int |
@@ -2630,6 +2634,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 allocate(ml_J(xmhd_ML_hcurl%nlevels-xmhd_minlev+1),ml_int(xmhd_ML_hcurl%nlevels-xmhd_minlev))
 allocate(oft_xmhd_ops_ML(xmhd_ML_hcurl%nlevels))
+ALLOCATE(xmhd_cell_ovl(xmhd_ML_hcurl%nlevels))
 xmhd_blevel=xmhd_ML_hcurl%blevel
 xmhd_nlevels=xmhd_ML_hcurl%nlevels
 xmhd_level=xmhd_ML_hcurl%level
@@ -2716,25 +2721,33 @@ do level=levelin,xmhd_minlev,-1
   ops=>oft_xmhd_ops
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
-  !---Set element coloring
+  !---Set number of local partitions (blocks)
+  j=1
   IF(xmhd_nparts(level)>1)THEN
-    SELECT TYPE(this=>ops%J)
-      CLASS IS(oft_matrix)
-        ALLOCATE(this%color(this%nr))
-        IF(mesh%fullmesh)THEN
-          j = xmhd_nparts(level)
-        ELSE
-          j = INT(REAL(xmhd_nparts(level),8)/REAL(oft_env%nprocs,8),4)
-        END IF
-        IF(j<=0)THEN
-           CALL oft_abort('Coloring results in fewer than one block per processor (xmhd_nparts < nprocs)','xmhd_alloc_ops',__FILE__)
-        ELSE IF(j==1)THEN
-          DEALLOCATE(this%color)
-        ELSE
-          CALL comp_fem_partition(xmhd_rep,this%color,j)
-        END IF
-    END SELECT
+    IF(mesh%fullmesh)THEN
+      j=xmhd_nparts(level)
+    ELSE
+      j=INT(REAL(xmhd_nparts(level),8)/REAL(oft_env%nprocs,8),4)
+    END IF
+    IF(j<=0)CALL oft_abort('Coloring results in fewer than one block per processor (xmhd_nparts < nprocs)','xmhd_alloc_ops',__FILE__)
   END IF
+  !---Create cell overlap builder and set element coloring (both from the same partition)
+  !---(native matrices only; other back ends keep the plain FE coloring)
+  SELECT TYPE(this=>ops%J)
+    CLASS IS(oft_native_matrix)
+      IF(j>1)THEN
+        ALLOCATE(this%color(this%nr))
+        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j,this%color)
+      ELSE
+        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j)
+      END IF
+      this%cell_ovl=>xmhd_cell_ovl(level)
+    CLASS IS(oft_matrix)
+      IF(j>1)THEN
+        ALLOCATE(this%color(this%nr))
+        CALL comp_fem_partition(xmhd_rep,this%color,j)
+      END IF
+  END SELECT
 end do
 IF(mesh%periodic%revolved)THEN
   CALL build_ML_interp()

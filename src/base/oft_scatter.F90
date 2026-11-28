@@ -5,8 +5,8 @@
 !---------------------------------------------------------------------------------
 !> @file oft_scatter.F90
 !
-!> Scatter plans: general gather/scatter of values between arrays on one or several
-!! processes
+!> Index sets and scatter plans: general gather/scatter of values between arrays on
+!! one or several processes
 !!
 !! A scatter plan (@ref oft_scatter_base::oft_scatter_plan "oft_scatter_plan") moves
 !! values from a source array `x` to a destination array `y`, which may be the same
@@ -60,17 +60,28 @@
 !!   program order: MPI does not reorder messages with the same source, tag and
 !!   communicator.
 !!
+!! An index set (@ref oft_scatter_base::oft_index_set "oft_index_set") is a sorted list
+!! of unique local indices, with growth along the edges of a graph for overlapping
+!! subdomains (no MPI).
+!!
+!! Setup of plans whose index lists are computed from data on other processes (eg.
+!! overlapping subdomains) exchanges index data with the collective
+!! @ref oft_scatter_base::oft_exchange_i8 "oft_exchange_i8". Like the communicating
+!! plan operations it must be called from serial code (not inside a parallel region),
+!! by all processes in the same order.
+!!
 !! @authors Chris Hansen
 !! @date November 2026
 !! @ingroup doxy_oft_base
 !---------------------------------------------------------------------------------
 #include "local.h"
 !---------------------------------------------------------------------------------
-!> Scatter plan type, setup and type-independent operations
+!> Index set and scatter plan types, setup and type-independent operations
 !---------------------------------------------------------------------------------
 MODULE oft_scatter_base
 USE oft_local
 USE oft_base
+USE oft_sort, ONLY: sort_array
 IMPLICIT NONE
 PRIVATE
 !> Replace destination values
@@ -81,6 +92,13 @@ INTEGER(i4), PUBLIC, PARAMETER :: OFT_SCATTER_ADD = 1
 INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_STITCH = 101
 !> Default MPI tag for general scatter plans
 INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_SCATTER = 102
+!---------------------------------------------------------------------------------
+!> Sorted set of unique local indices
+!---------------------------------------------------------------------------------
+TYPE, PUBLIC :: oft_index_set
+  INTEGER(i4) :: n = 0 !< Number of indices in set
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ind !< Indices, in increasing order [n]
+END TYPE oft_index_set
 !---------------------------------------------------------------------------------
 !> Plan for gathering/scattering values between arrays, locally and between processes
 !!
@@ -126,6 +144,8 @@ TYPE, PUBLIC :: oft_scatter_plan
 #endif
 END TYPE oft_scatter_plan
 PUBLIC scatter_plan_setup, scatter_plan_setup_local, scatter_plan_delete, scatter_plan_check, scatter_plan_inflight
+PUBLIC index_set_create, index_set_delete, index_set_grow
+PUBLIC oft_exchange_i8
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up a scatter plan from its index lists
@@ -306,6 +326,142 @@ ELSE
   plan%inflight_kind=kind
 END IF
 END SUBROUTINE scatter_plan_inflight
+!---------------------------------------------------------------------------------
+!> Create an index set from a list of indices (sorted, duplicates removed)
+!---------------------------------------------------------------------------------
+SUBROUTINE index_set_create(set,n,list)
+TYPE(oft_index_set), INTENT(inout) :: set !< Index set
+INTEGER(i4), INTENT(in) :: n !< Number of indices in list
+INTEGER(i4), INTENT(in) :: list(n) !< Indices (any order, may repeat) [n]
+INTEGER(i4) :: i,m
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: tmp
+CALL index_set_delete(set)
+ALLOCATE(tmp(MAX(1,n)))
+IF(n>0)THEN
+  tmp(1:n)=list
+  CALL sort_array(tmp,n)
+END IF
+m=0
+DO i=1,n
+  IF(m>0)THEN
+    IF(tmp(i)==tmp(m))CYCLE
+  END IF
+  m=m+1
+  tmp(m)=tmp(i)
+END DO
+set%n=m
+ALLOCATE(set%ind(m))
+IF(m>0)set%ind=tmp(1:m)
+DEALLOCATE(tmp)
+END SUBROUTINE index_set_create
+!---------------------------------------------------------------------------------
+!> Release an index set
+!---------------------------------------------------------------------------------
+SUBROUTINE index_set_delete(set)
+TYPE(oft_index_set), INTENT(inout) :: set !< Index set
+IF(ALLOCATED(set%ind))DEALLOCATE(set%ind)
+set%n=0
+END SUBROUTINE index_set_delete
+!---------------------------------------------------------------------------------
+!> Grow an index set along the edges of a graph
+!!
+!! Each level adds every index `lc(k)`, `kr(i)<=k<kr(i+1)`, connected to an index `i`
+!! in the set (one layer of overlap per level). If `allowed` is present only indices
+!! with `allowed(j)` are added, and indices are only reached through rows `i` with
+!! `same(i)==same(j)` when `same` is present (eg. to stay within a group of fields).
+!---------------------------------------------------------------------------------
+SUBROUTINE index_set_grow(set,nr,kr,lc,levels,allowed,same)
+TYPE(oft_index_set), INTENT(inout) :: set !< Index set
+INTEGER(i4), INTENT(in) :: nr !< Number of graph rows (indices range over 1..nr)
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< Graph row pointer [nr+1]
+INTEGER(i4), INTENT(in) :: lc(:) !< Graph column list [kr(nr+1)-1]
+INTEGER(i4), INTENT(in) :: levels !< Number of layers to add
+LOGICAL, OPTIONAL, INTENT(in) :: allowed(nr) !< Indices that may be added [nr] (optional)
+INTEGER(i4), OPTIONAL, INTENT(in) :: same(nr) !< Group of each index, edges must stay in a group [nr] (optional)
+INTEGER(i4) :: i,j,k,l,nfront,nnew
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: inset
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: front,newf
+IF(levels<=0)RETURN
+ALLOCATE(inset(nr))
+inset=.FALSE.
+DO i=1,set%n
+  inset(set%ind(i))=.TRUE.
+END DO
+ALLOCATE(front(MAX(1,set%n)))
+nfront=set%n
+IF(set%n>0)front(1:nfront)=set%ind
+DO l=1,levels
+  nnew=0
+  ALLOCATE(newf(MAX(1,nr)))
+  DO k=1,nfront
+    i=front(k)
+    DO j=kr(i),kr(i+1)-1
+      IF(inset(lc(j)))CYCLE
+      IF(PRESENT(allowed))THEN
+        IF(.NOT.allowed(lc(j)))CYCLE
+      END IF
+      IF(PRESENT(same))THEN
+        IF(same(lc(j))/=same(i))CYCLE
+      END IF
+      inset(lc(j))=.TRUE.
+      nnew=nnew+1
+      newf(nnew)=lc(j)
+    END DO
+  END DO
+  DEALLOCATE(front)
+  CALL MOVE_ALLOC(newf,front)
+  nfront=nnew
+  IF(nnew==0)EXIT
+END DO
+DEALLOCATE(front)
+!---Rebuild sorted list
+set%n=COUNT(inset)
+IF(ALLOCATED(set%ind))DEALLOCATE(set%ind)
+ALLOCATE(set%ind(set%n))
+k=0
+DO i=1,nr
+  IF(.NOT.inset(i))CYCLE
+  k=k+1
+  set%ind(k)=i
+END DO
+DEALLOCATE(inset)
+END SUBROUTINE index_set_grow
+!---------------------------------------------------------------------------------
+!> Exchange int8 data grouped by process with every other process (collective)
+!!
+!! `scnt(q)` values of `sbuf` (grouped by process in increasing rank order) go to
+!! process `q`; `rbuf` receives the values sent to this process, grouped likewise.
+!! Uses `MPI_ALLTOALL`/`MPI_ALLTOALLV`, so it must be called from serial code by all
+!! processes (see the MPI rules in @ref oft_scatter.F90).
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_exchange_i8(scnt,sbuf,rcnt,rbuf)
+INTEGER(i4), INTENT(in) :: scnt(0:) !< Number of values sent to each process
+INTEGER(i8), INTENT(in) :: sbuf(:) !< Values to send
+INTEGER(i4), INTENT(out) :: rcnt(0:) !< Number of values received from each process
+INTEGER(i8), ALLOCATABLE, INTENT(out) :: rbuf(:) !< Values received
+#ifdef HAVE_MPI
+INTEGER(i4) :: i,ierr,np
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: sdisp,rdisp
+np=SIZE(scnt)
+CALL MPI_ALLTOALL(scnt,1,OFT_MPI_I4,rcnt,1,OFT_MPI_I4,oft_env%comm,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALL','oft_exchange_i8',__FILE__)
+ALLOCATE(sdisp(0:np-1),rdisp(0:np-1),rbuf(MAX(1,SUM(rcnt))))
+!---Zero-based displacements of each process' part of the buffers
+sdisp(0)=0
+rdisp(0)=0
+DO i=1,np-1
+  sdisp(i)=sdisp(i-1)+scnt(i-1)
+  rdisp(i)=rdisp(i-1)+rcnt(i-1)
+END DO
+CALL MPI_ALLTOALLV(sbuf,scnt,sdisp,OFT_MPI_I8,rbuf,rcnt,rdisp,OFT_MPI_I8,oft_env%comm,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALLV','oft_exchange_i8',__FILE__)
+DEALLOCATE(sdisp,rdisp)
+#else
+rcnt=scnt
+ALLOCATE(rbuf(MAX(1,SUM(rcnt))))
+IF(SUM(rcnt)>0)rbuf(1:SUM(rcnt))=sbuf(1:SUM(rcnt))
+#endif
+END SUBROUTINE oft_exchange_i8
 END MODULE oft_scatter_base
 !---------------------------------------------------------------------------------
 ! Value type instantiations of the scatter operations
@@ -341,7 +497,7 @@ END MODULE oft_scatter_c8
 #undef SRBUF
 #undef SMPI
 !---------------------------------------------------------------------------------
-!> Scatter plans for real and complex values
+!> Index sets and scatter plans for real and complex values
 !!
 !! Collects @ref oft_scatter_base and the generic operations of each value type
 !! (`scatter_begin`, `scatter_end`, `scatter_wait_recv`, `scatter_unpack`,

@@ -2,6 +2,7 @@ set( LA_OBJS
   lin_alg_base.F90
   native_kernels.F90
   native_la.F90
+  native_overlap.F90
   petsc_la.F90
   deriv_matrices.F90
 )
