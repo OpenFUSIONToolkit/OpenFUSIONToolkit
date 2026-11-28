@@ -113,7 +113,6 @@ CALL ML_vlag%vec_create(g)
 CALL ML_vlag%vec_create(g0)
 CALL build_operator()
 CALL set_rhs()
-IF(oft_env%head_proc)WRITE(*,'(A,I10,A,I10)')'Global DoFs: ',aop%nrg,' cells: ',mg_mesh%mesh%global%nc
 nfail=0
 its=0
 DO ip=1,2
@@ -123,7 +122,6 @@ IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='cell_schwarz_fields.results')
   WRITE(io_unit,'(I0)')nfail
   DO ip=1,2
-    WRITE(*,'(A,I2,A,21I5)')'nparts=',nparts_list(ip),' results: ',its(:,ip)
     WRITE(io_unit,'(*(I0,1X))')its(:,ip)
   END DO
   CLOSE(io_unit)
@@ -179,11 +177,10 @@ SUBROUTINE run_cases(nparts,res)
 INTEGER(i4), INTENT(in) :: nparts
 INTEGER(i4), INTENT(out) :: res(nres)
 INTEGER(i4) :: kfull,k,kd,nb
-REAL(r8) :: rnorm,t0
+REAL(r8) :: rnorm
 TYPE(oft_overlap_dofs) :: dofs
 CHARACTER(LEN=16) :: tag
 WRITE(tag,'(A,I1)')' nparts=',nparts
-t0=omp_get_wtime()
 CALL fem_cell_overlap_create(cbld,mg_mesh,ML_vlag%current_level,nparts)
 aop%cell_ovl=>cbld
 cbld%field_groups=[1,1,2] ! Default field groups (used by nlocal<-1 without groups)
@@ -212,7 +209,6 @@ CALL check_tol('Covering blocks, groups 1,1,2: solution'//tag,maxdiff(v,x)/maxab
 res(4)=solve(-1,kfull,.TRUE.,.TRUE.,v,rnorm,weighted=.TRUE.)
 CALL check_tol('Covering blocks, weighted: <=3 iterations'//tag,REAL(res(4),r8),3.d0)
 CALL check_tol('Covering blocks, weighted: solution'//tag,maxdiff(v,x)/maxabs(x),1.d-8)
-CALL timing('Covering blocks',tag,t0)
 !---Iteration counts: no groups, one group per field, groups 1,1,2 x layers 0-2
 DO k=0,2
   res(5+k)=solve(1,k,.TRUE.,.FALSE.,v,rnorm)
@@ -223,7 +219,6 @@ DO k=0,2
   CALL check_conv('Groups 1,1,2'//tag,rnorm,v)
 END DO
 CALL check_exact('Blocks: builder blocks x fields'//tag,REAL(res(21),r8),REAL(nf*nb,r8))
-CALL timing('Iteration counts',tag,t0)
 !---Groups 1,1,1 of 2 (empty group 2): same blocks as without field groups
 k=solve(1,1,.TRUE.,.FALSE.,w,rnorm)
 res(14)=solve(-2,1,.TRUE.,.FALSE.,v,rnorm,groups=[1,1,1])
@@ -239,10 +234,8 @@ res(19)=solve(-1,1,.TRUE.,.TRUE.,v,rnorm,weighted=.TRUE.)
 CALL check_conv('One group per field, weighted'//tag,rnorm,v)
 res(20)=solve(-1,1,.TRUE.,.TRUE.,v,rnorm)
 CALL check_conv('One group per field, additive'//tag,rnorm,v)
-CALL timing('Additive',tag,t0)
 !---Numeric update and delete/re-setup
 CALL check_update(nparts,res(15:18))
-CALL timing('Update and re-setup',tag,t0)
 NULLIFY(aop%cell_ovl)
 CALL cbld%delete
 END SUBROUTINE run_cases
@@ -254,13 +247,6 @@ CLASS(oft_vector), INTENT(inout) :: y
 CALL check_tol(name//': converged',rnorm,1.d-9)
 CALL check_tol(name//': solution',maxdiff(y,x)/maxabs(x),1.d-5)
 END SUBROUTINE check_conv
-! Print the wall time since the last call (or `t0` set by the caller)
-SUBROUTINE timing(label,tag,t0)
-CHARACTER(LEN=*), INTENT(in) :: label,tag
-REAL(r8), INTENT(inout) :: t0
-IF(oft_env%head_proc)WRITE(*,'(3A,F10.2,A)')'Time: ',label,tag,omp_get_wtime()-t0,' s'
-t0=omp_get_wtime()
-END SUBROUTINE timing
 ! Solve the coupled problem with GMRES preconditioned by Schwarz (cell mode with point
 ! adjacency, or graph mode) with direct sub-solves, returning the iteration count and
 ! relative residual (`groups`: field groups for nlocal<-1; `nblocks`: number of blocks
