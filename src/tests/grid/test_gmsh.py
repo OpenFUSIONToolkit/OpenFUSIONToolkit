@@ -120,6 +120,15 @@ def test_surf_quad(top_lev):
     area_gmsh = pytest.approx(12.565964, abs=1.E-4)
     assert gmsh_setup(1,top_lev,'cyl_gmsh_2D.msh',grid_order=2,test_2d='T')
     assert check_result(volume_gmsh, area_gmsh)
+# Refining the imported quadratic mesh (shared and distributed levels) places the
+# new nodes on the parent's quadratic map, so the area must not change
+@pytest.mark.coverage
+@pytest.mark.parametrize("levels", ((2, 2), (1, 3)))
+def test_surf_quad_ref(levels):
+    volume_gmsh = pytest.approx(0.0, abs=1.E-4)
+    area_gmsh = pytest.approx(12.565964, abs=1.E-4)
+    assert gmsh_setup(levels[0],levels[1],'cyl_gmsh_2D.msh',grid_order=2,test_2d='T')
+    assert check_result(volume_gmsh, area_gmsh)
 @pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_surf_1ref(top_lev):

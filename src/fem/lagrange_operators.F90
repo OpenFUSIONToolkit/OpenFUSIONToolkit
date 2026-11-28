@@ -24,11 +24,12 @@
 !------------------------------------------------------------------------------
 MODULE oft_lag_operators
 USE oft_base
-USE oft_sort, ONLY: sort_array
+USE oft_sort, ONLY: sort_array, search_array
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr
+  oft_graph, oft_graph_ptr, oft_local_mat, &
+  OFT_ACCESS_READ, OFT_ACCESS_WRITE, OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
@@ -44,7 +45,7 @@ USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
   oft_lag_nodes, oft_blag_eval, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem, &
-  oft_3D_lagrange_cast
+  oft_3D_lagrange_cast, lagrange_vector_unpack, lagrange_vector_repack, lagrange_vector_packblock
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -349,6 +350,7 @@ ELSE
   vtmp=>self%vals(3,:)
   CALL self%u%get_local(vtmp,3)
   IF(.NOT.oft_3D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE type","lag_vrinterp_setup",__FILE__)
+  CALL lagrange_vector_unpack(self%lag_rep,self%vals)
   self%mesh=>self%lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
@@ -511,11 +513,11 @@ subroutine zerob_apply(self,a)
 class(oft_lag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
 integer(i4) :: i,j
-real(r8), pointer, dimension(:) :: vloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vloc
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(vloc)
-call a%get_local(vloc)
+CALL a%borrow_local(vloc,OFT_ACCESS_READWRITE)
 !---Zero boundary values
 !$omp parallel do private(j)
 do i=1,self%ML_lag_rep%current_level%nbe
@@ -523,8 +525,8 @@ do i=1,self%ML_lag_rep%current_level%nbe
   if(self%ML_lag_rep%current_level%global%gbe(j))vloc(j)=0.d0
 end do
 !---
-call a%restore_local(vloc)
-deallocate(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(vloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
@@ -543,19 +545,19 @@ end subroutine zerob_delete
 subroutine zerogrnd_apply(self,a)
 class(oft_lag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
-real(r8), pointer, dimension(:) :: aloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: aloc
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER ::lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zerogrnd_apply",__FILE__)
 !---Zero boundary values
 NULLIFY(aloc)
-CALL a%get_local(aloc)
+CALL a%borrow_local(aloc,OFT_ACCESS_READWRITE)
 !---
 if(lag_rep%mesh%igrnd(1)>0)aloc(lag_rep%mesh%igrnd(1))=0.d0
 if(lag_rep%mesh%igrnd(2)>0)aloc(lag_rep%mesh%igrnd(2))=0.d0
-CALL a%restore_local(aloc)
-DEALLOCATE(aloc)
+!---The ground node is set on every process that holds it, so no sync is needed
+CALL a%release_local(aloc,OFT_ACCESS_READWRITE,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !------------------------------------------------------------------------------
@@ -565,28 +567,30 @@ subroutine vzerob_apply(self,a)
 class(oft_vlag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
-real(r8), pointer :: vloc(:,:),vtmp(:)
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vx,vy,vz
 CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
-ALLOCATE(vloc(3,a%n))
-DO i=1,3
-  vtmp=>vloc(i,:)
-  call a%get_local(vtmp,i)
-END DO
+NULLIFY(vx,vy,vz)
+CALL a%borrow_local(vx,OFT_ACCESS_READWRITE,1)
+CALL a%borrow_local(vy,OFT_ACCESS_READWRITE,2)
+CALL a%borrow_local(vz,OFT_ACCESS_READWRITE,3)
 !---Zero boundary values
 lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
-  if(lag_rep%global%gbe(j))vloc(:,j)=0.d0
+  IF(lag_rep%global%gbe(j))THEN
+    vx(j)=0.d0
+    vy(j)=0.d0
+    vz(j)=0.d0
+  END IF
 end do
 !---
-DO i=1,3
-  vtmp=>vloc(i,:)
-  call a%restore_local(vtmp,i,wait=(i/=3))
-END DO
-DEALLOCATE(vloc)
+!---Every process sharing a value zeroes it (global boundary flag), so no sync is needed
+CALL a%release_local(vx,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=1)
+CALL a%release_local(vy,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=2)
+CALL a%release_local(vz,OFT_ACCESS_READWRITE,sync=.FALSE.,iblock=3)
 DEBUG_STACK_POP
 end subroutine vzerob_apply
 !------------------------------------------------------------------------------
@@ -603,34 +607,41 @@ subroutine vzeron_apply(self,a)
 class(oft_vlag_zeron), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
-real(r8), pointer, dimension(:) :: x,y,z
+real(r8), pointer, dimension(:,:) :: vectmp
+real(r8), pointer, dimension(:) :: vtmp
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe))CALL oft_abort("Incorrect FE type","vzeron_apply",__FILE__)
 !---Cast to vector type
-NULLIFY(x,y,z)
-CALL a%get_local(x,1)
-CALL a%get_local(y,2)
-CALL a%get_local(z,3)
+ALLOCATE(vectmp(3,lag_rep%ne))
+vtmp=>vectmp(1,:)
+CALL a%get_local(vtmp,1)
+vtmp=>vectmp(2,:)
+CALL a%get_local(vtmp,2)
+vtmp=>vectmp(3,:)
+CALL a%get_local(vtmp,3)
+CALL lagrange_vector_unpack(lag_rep,vectmp)
 !---Zero boundary values
 !$omp parallel do private(j,vec,nn)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
   if(lag_rep%global%gbe(j))then
-    CALL lag_vbc_tensor(lag_rep,j,1,nn)
-    vec=(/x(j),y(j),z(j)/)
+    CALL lag_vbc_tensor(lag_rep,j,2,nn)
+    vec=vectmp(:,j)
     vec=MATMUL(nn,vec)
-    x(j)=vec(1)
-    y(j)=vec(2)
-    z(j)=vec(3)
+    vectmp(:,j)=vec
   end if
 end do
 !---
-CALL a%restore_local(x,1,wait=.TRUE.)
-CALL a%restore_local(y,2,wait=.TRUE.)
-CALL a%restore_local(z,3)
-DEALLOCATE(x,y,z)
+CALL lagrange_vector_repack(lag_rep,vectmp)
+vtmp=>vectmp(1,:)
+CALL a%restore_local(vtmp,1,wait=.TRUE.)
+vtmp=>vectmp(2,:)
+CALL a%restore_local(vtmp,2,wait=.TRUE.)
+vtmp=>vectmp(3,:)
+CALL a%restore_local(vtmp,3)
+DEALLOCATE(vectmp)
 DEBUG_STACK_POP
 end subroutine vzeron_apply
 !------------------------------------------------------------------------------
@@ -640,34 +651,41 @@ subroutine vzerot_apply(self,a)
 class(oft_vlag_zerot), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
-real(r8), pointer, dimension(:) :: x,y,z
+real(r8), pointer, dimension(:,:) :: vectmp
+real(r8), pointer, dimension(:) :: vtmp
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe))CALL oft_abort("Incorrect FE type","vzerot_apply",__FILE__)
 !---Cast to vector type
-NULLIFY(x,y,z)
-CALL a%get_local(x,1)
-CALL a%get_local(y,2)
-CALL a%get_local(z,3)
+ALLOCATE(vectmp(3,lag_rep%ne))
+vtmp=>vectmp(1,:)
+CALL a%get_local(vtmp,1)
+vtmp=>vectmp(2,:)
+CALL a%get_local(vtmp,2)
+vtmp=>vectmp(3,:)
+CALL a%get_local(vtmp,3)
+CALL lagrange_vector_unpack(lag_rep,vectmp)
 !---Zero boundary values
 !$omp parallel do private(j,vec,nn)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
   if(lag_rep%global%gbe(j))then
-    CALL lag_vbc_tensor(lag_rep,j,2,nn)
-    vec=(/x(j),y(j),z(j)/)
+    CALL lag_vbc_tensor(lag_rep,j,3,nn)
+    vec=vectmp(:,j)
     vec=MATMUL(nn,vec)
-    x(j)=vec(1)
-    y(j)=vec(2)
-    z(j)=vec(3)
+    vectmp(:,j)=vec
   end if
 end do
 !---
-CALL a%restore_local(x,1,wait=.TRUE.)
-CALL a%restore_local(y,2,wait=.TRUE.)
-CALL a%restore_local(z,3)
-DEALLOCATE(x,y,z)
+CALL lagrange_vector_repack(lag_rep,vectmp)
+vtmp=>vectmp(1,:)
+CALL a%restore_local(vtmp,1,wait=.TRUE.)
+vtmp=>vectmp(2,:)
+CALL a%restore_local(vtmp,2,wait=.TRUE.)
+vtmp=>vectmp(3,:)
+CALL a%restore_local(vtmp,3)
+DEALLOCATE(vectmp)
 DEBUG_STACK_POP
 end subroutine vzerot_apply
 !------------------------------------------------------------------------------
@@ -682,7 +700,7 @@ integer(i4) :: i,j
 DEBUG_STACK_PUSH
 IF(lag_rep%global%gbe(j_lag))THEN
   SELECT CASE(bc_type)
-    CASE(1) ! Zero normal component
+    CASE(2) ! Zero normal component
       IF(lag_rep%bc(j_lag)==3)THEN ! On face
         nn(:,1) = (/1.d0,0.d0,0.d0/) &
           - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
@@ -697,7 +715,7 @@ IF(lag_rep%global%gbe(j_lag))THEN
       ELSE ! At vertex
         nn=0.d0
       END IF
-    CASE(2) ! Zero tangential components
+    CASE(3) ! Zero tangential components
       IF(lag_rep%bc(j_lag)==3)THEN ! On face
         nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
         nn(:,2) = lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
@@ -725,7 +743,7 @@ real(r8), intent(out) :: nn(3,3) !< Diagonal entries (3,3)
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 SELECT CASE(bc_type)
-  CASE(1) ! Get normal projections
+  CASE(2) ! Get normal projections
     !---Set diagonal entries for boundary terms
     IF(lag_rep%bc(j_lag)==3)THEN
       nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
@@ -743,7 +761,7 @@ SELECT CASE(bc_type)
       nn(:,2)=(/0.d0,1.d0,0.d0/)
       nn(:,3)=(/0.d0,0.d0,1.d0/)
     END IF
-  CASE(2) ! Get tangential projections
+  CASE(3) ! Get tangential projections
     IF(lag_rep%bc(j_lag)==3)THEN ! On face
       nn(:,1) = (/1.d0,0.d0,0.d0/) &
         - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
@@ -1155,7 +1173,7 @@ class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 real(r8) :: bcc(1),vol,det,goptmp(3,4)
-real(r8), pointer :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: rop(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
@@ -1164,7 +1182,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1186,8 +1204,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project
 !------------------------------------------------------------------------------
@@ -1203,7 +1220,7 @@ class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,vol,goptmp(3,4)
-real(r8), pointer :: xloc(:)
+REAL(r8), POINTER, CONTIGUOUS :: xloc(:)
 real(r8), allocatable :: gop(:,:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1214,7 +1231,7 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type",
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
-call x%get_local(xloc)
+CALL x%borrow_local(xloc,OFT_ACCESS_ACCUMULATE)
 !---Integerate over the volume
 !$omp parallel private(j,gop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1236,8 +1253,7 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
 end do
 deallocate(j,gop)
 !$omp end parallel
-call x%restore_local(xloc,add=.TRUE.)
-deallocate(xloc)
+CALL x%release_local(xloc,OFT_ACCESS_ACCUMULATE,.TRUE.)
 DEBUG_STACK_POP
 end subroutine oft_lag_project_div
 !------------------------------------------------------------------------------
@@ -1253,10 +1269,7 @@ subroutine oft_lag_vgetmop(vlag_rep,mat,bc)
 class(oft_fem_comp_type), target, intent(inout) :: vlag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-type :: block_mat
-  real(r8), pointer, dimension(:,:) :: m => NULL()
-end type block_mat
-type(block_mat) :: mtmp(3,3)
+type(oft_local_mat) :: mtmp(3,3)
 integer(i4) :: i,m,jr,jc,jp,jn,vbc_type
 integer(i4), allocatable :: j(:)
 real(r8) :: u,vol,det,goptmp(3,4),mloc(3,3),nn(3,3),elapsed_time
@@ -1275,13 +1288,13 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,vlag_rep%fields(1)%fe))CALL oft_abort("Inco
 !---Set BC flag
 SELECT CASE(TRIM(bc))
   CASE("none")
-    vbc_type=-1
-  CASE("all")
     vbc_type=0
-  CASE("norm")
+  CASE("all")
     vbc_type=1
-  CASE("tang")
+  CASE("norm")
     vbc_type=2
+  CASE("tang")
+    vbc_type=3
   CASE DEFAULT
     CALL oft_abort("Unknown BC requested","oft_lag_vgetmop",__FILE__)
 END SELECT
@@ -1314,7 +1327,6 @@ DO i=1,lag_rep%mesh%nc
   !---Compute local matrix contributions
   DO jp=1,3
     DO jn=1,3
-      IF(vbc_type<=0.AND.jp/=jn)CYCLE
       mtmp(jp,jn)%m = 0.d0
     END DO
   END DO
@@ -1336,11 +1348,11 @@ DO i=1,lag_rep%mesh%nc
   !---Compute BC projection matrices
   DO jr=1,lag_rep%nce
     IF(lag_rep%global%gbe(j(jr)))THEN
-      IF(vbc_type==0)THEN
+      IF(vbc_type==1)THEN
         DO jp=1,3
           mtmp(jp,jp)%m(jr,:)=0.d0
         END DO
-      ELSE IF(vbc_type>0)THEN
+      ELSE IF(vbc_type>1)THEN
         DO jc=1,lag_rep%nce
           mloc=0.d0
           u=mtmp(1,1)%m(jr,jc)
@@ -1359,11 +1371,12 @@ DO i=1,lag_rep%mesh%nc
     END IF
   END DO
   ! !$omp critical
+  !---Handle periodicity
+  CALL lagrange_vector_packblock(lag_rep,mtmp,j)
   !---Add local values to global matrix
   lcache(1,1)=0
   DO jp=1,3
     DO jn=1,3
-      IF(vbc_type<=0.AND.jp/=jn)CYCLE
       CALL mat%atomic_add_values(j,j,mtmp(jp,jn)%m,lag_rep%nce,lag_rep%nce,jp,jn,lcache)
     END DO
   END DO
@@ -1379,7 +1392,7 @@ deallocate(j,rop,lcache)
 !$omp end parallel
 ALLOCATE(j(1),rop(1))
 !---Set diagonal entries for dirichlet rows
-IF(vbc_type==0)THEN
+IF(vbc_type==1)THEN
   rop=1.d0
   DO i=1,lag_rep%nbe
     IF(.NOT.lag_rep%linkage%leo(i))CYCLE
@@ -1390,7 +1403,7 @@ IF(vbc_type==0)THEN
     CALL mat%add_values(j,j,rop,1,1,2,2)
     CALL mat%add_values(j,j,rop,1,1,3,3)
   END DO
-ELSE IF(vbc_type>0)THEN
+ELSE IF(vbc_type>1)THEN
   DO i=1,lag_rep%nbe
     IF(.NOT.lag_rep%linkage%leo(i))CYCLE
     jr=lag_rep%lbe(i)
@@ -1428,7 +1441,8 @@ class(fem_interp), intent(inout) :: field !< Vector field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,goptmp(3,4),vol
-real(r8), pointer, dimension(:) :: xloc,yloc,zloc
+real(r8), pointer, dimension(:,:) :: vectmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: vtmp
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1437,11 +1451,9 @@ CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_vproject",__FILE__)
 !---Initialize vectors to zero
-NULLIFY(xloc,yloc,zloc)
+ALLOCATE(vectmp(3,lag_rep%ne))
 call x%set(0.d0)
-call x%get_local(xloc,1)
-call x%get_local(yloc,2)
-call x%get_local(zloc,3)
+vectmp=0.d0
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1457,20 +1469,23 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
     call oft_lag_eval_all(lag_rep,i,lag_rep%quad%pts(:,m),rop)
     do jc=1,lag_rep%nce
       !$omp atomic
-      xloc(j(jc))=xloc(j(jc))+rop(jc)*bcc(1)*det
+      vectmp(1,j(jc))=vectmp(1,j(jc))+rop(jc)*bcc(1)*det
       !$omp atomic
-      yloc(j(jc))=yloc(j(jc))+rop(jc)*bcc(2)*det
+      vectmp(2,j(jc))=vectmp(2,j(jc))+rop(jc)*bcc(2)*det
       !$omp atomic
-      zloc(j(jc))=zloc(j(jc))+rop(jc)*bcc(3)*det
+      vectmp(3,j(jc))=vectmp(3,j(jc))+rop(jc)*bcc(3)*det
     end do
   end do
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,1,add=.TRUE.,wait=.TRUE.)
-call x%restore_local(yloc,2,add=.TRUE.,wait=.TRUE.)
-call x%restore_local(zloc,3,add=.TRUE.)
-deallocate(xloc,yloc,zloc)
+CALL lagrange_vector_repack(lag_rep,vectmp)
+DO i=1,3
+  CALL x%borrow_local(vtmp,OFT_ACCESS_ACCUMULATE,i)
+  vtmp=vectmp(i,:)
+  CALL x%release_local(vtmp,OFT_ACCESS_ACCUMULATE,(i==3),i) ! Last block completes accumulation
+END DO
+deallocate(vectmp)
 DEBUG_STACK_POP
 end subroutine oft_lag_vproject
 !------------------------------------------------------------------------------
@@ -1545,6 +1560,9 @@ DO i=ML_lag_rep%minlev+1,ML_lag_rep%nlevels
 END DO
 !---Create vector interpolation operator
 IF(PRESENT(ML_vlag_rep))THEN
+  IF(ML_lag_rep%ml_mesh%meshes(ML_lag_rep%ml_mesh%level-1)%periodic%revolved)THEN
+    CALL oft_abort('Vector MG with revolved periodicity not supported','lag_setup_interp',__FILE__)
+  END IF
   CALL ML_vlag_rep%build_interp
 END IF
 DEBUG_STACK_POP
@@ -1554,10 +1572,10 @@ CONTAINS
 !------------------------------------------------------------------------------
 SUBROUTINE lag_ginterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat !< Needs docs
-INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
+INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1),ifind
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
-REAL(r8) :: f(4),val,mop(1)
+REAL(r8) :: f(4),val,mop(1,1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_afem_type), POINTER :: lag_cors => NULL()
 CLASS(oft_scalar_fem), POINTER :: lag_fine => NULL()
@@ -1585,8 +1603,9 @@ interp_graph%ncg=lag_cors%global%ne
 !---Setup Matrix graph
 ALLOCATE(interp_graph%kr(interp_graph%nr+1))
 interp_graph%nnz=cmesh%np+2*cmesh%ne
-ALLOCATE(interp_graph%lc(interp_graph%nnz))
+ALLOCATE(interp_graph%lc(interp_graph%nnz),interp_graph%M(interp_graph%nnz))
 interp_graph%lc=0_i4
+interp_graph%M=0.d0
 !---Construct linkage
 DO i=1,cmesh%np
   interp_graph%kr(i)=1
@@ -1641,6 +1660,9 @@ DO i=1,cmesh%np
   j_ind=i
   mop=1.d0
   CALL mat%add_values(i_ind,j_ind,mop,1,1)
+  ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(i):interp_graph%kr(i+1)-1), &
+    interp_graph%kr(i+1)-interp_graph%kr(i))+interp_graph%kr(i)-1
+  interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
 END DO
 deallocate(pmap)
 !---
@@ -1660,6 +1682,9 @@ DO i=1,cmesh%ne
     j_ind=etmp(k)
     mop=1.d0/2.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
+    ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+      interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+    interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
   END DO
 END DO
 deallocate(emap)
@@ -1669,10 +1694,10 @@ END SUBROUTINE lag_ginterpmatrix
 !------------------------------------------------------------------------------
 SUBROUTINE lag_pinterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat !< Needs docs
-INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1)
+INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1),ifind
 INTEGER(i4) :: etmp(2),fc,ed,cell,dof,offset
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap,jcors,ftmp,fetmp,ctmp
-REAL(r8) :: f(4),val,mop(1)
+REAL(r8) :: f(4),val,mop(1,1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
 CLASS(oft_scalar_fem), POINTER :: lag_fine => NULL()
@@ -1705,8 +1730,9 @@ interp_graph%nnz=interp_graph%nnz + &
   (mesh%cell_np+lag_cors%gstruct(2)*mesh%cell_ne &
   + lag_cors%gstruct(3)*mesh%cell_nf &
   + lag_cors%gstruct(4))*mesh%nc*lag_fine%gstruct(4)
-ALLOCATE(interp_graph%lc(interp_graph%nnz))
+ALLOCATE(interp_graph%lc(interp_graph%nnz),interp_graph%M(interp_graph%nnz))
 interp_graph%lc=0_i4
+interp_graph%M=0.d0
 !---Construct matrix
 DO i=1,mesh%np
   interp_graph%kr(i)=1
@@ -1859,6 +1885,9 @@ DO i=1,mesh%np
   j_ind=i
   mop=1.d0
   CALL mat%add_values(i_ind,j_ind,mop,1,1)
+  ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(i):interp_graph%kr(i+1)-1), &
+    interp_graph%kr(i+1)-interp_graph%kr(i))+interp_graph%kr(i)-1
+  interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
 END DO
 deallocate(pmap)
 !---
@@ -1885,6 +1914,9 @@ DO i=1,mesh%ne
       j_ind=mesh%lc(dof,cell)
       mop=val
       CALL mat%add_values(i_ind,j_ind,mop,1,1)
+      ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+        interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+      interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
     END DO
     DO k=1,lag_cors%gstruct(2)
       dof = mesh%cell_np + (ed-1)*lag_cors%gstruct(2) + k
@@ -1893,6 +1925,9 @@ DO i=1,mesh%ne
       j_ind=mesh%np + (i-1)*lag_cors%gstruct(2) + k
       mop=val
       CALL mat%add_values(i_ind,j_ind,mop,1,1)
+      ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+        interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+      interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
     END DO
   END DO
 END DO
@@ -1923,6 +1958,9 @@ DO i=1,mesh%nf
       j_ind=mesh%lc(dof,cell)
       mop=val
       CALL mat%add_values(i_ind,j_ind,mop,1,1)
+      ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+        interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+      interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
       DO m=1,lag_cors%gstruct(2)
         ed=ABS(mesh%cell_fe(k,fc))
         dof = mesh%cell_np + (ed-1)*lag_cors%gstruct(2) + m
@@ -1931,6 +1969,9 @@ DO i=1,mesh%nf
         j_ind=mesh%np + (ABS(mesh%lce(ed,cell))-1)*lag_cors%gstruct(2)+m
         mop=val
         CALL mat%add_values(i_ind,j_ind,mop,1,1)
+        ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+          interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+        interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
       END DO
     END DO
     DO k=1,lag_cors%gstruct(3)
@@ -1941,6 +1982,9 @@ DO i=1,mesh%nf
       j_ind=mesh%np+lag_cors%gstruct(2)*mesh%ne+(i-1)*lag_cors%gstruct(3)+k
       mop=val
       CALL mat%add_values(i_ind,j_ind,mop,1,1)
+      ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+        interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+      interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
     END DO
   END DO
 END DO
@@ -1962,6 +2006,9 @@ DO i=1,mesh%nc
       j_ind=jcors(k)
       mop=val
       CALL mat%add_values(i_ind,j_ind,mop,1,1)
+      ifind=search_array(j_ind(1),interp_graph%lc(interp_graph%kr(ifine):interp_graph%kr(ifine+1)-1), &
+        interp_graph%kr(ifine+1)-interp_graph%kr(ifine))+interp_graph%kr(ifine)-1
+      interp_graph%M(ifind)=interp_graph%M(ifind)+mop(1,1)
     END DO
   END DO
 END DO
@@ -1971,6 +2018,76 @@ DEALLOCATE(ftmp,fetmp,ctmp)
 END SUBROUTINE lag_pinterpmatrix
 END SUBROUTINE lag_setup_interp
 !------------------------------------------------------------------------------
+!> Construct interpolation matrices on each MG level
+!------------------------------------------------------------------------------
+SUBROUTINE lag_build_per_vinterp(ML_lag_rep,mats)
+TYPE(oft_ml_fem_type), intent(inout) :: ML_lag_rep
+TYPE(oft_matrix_ptr), intent(inout) :: mats(3,3)
+INTEGER(i4) :: i,j,jr,k,jc,rt,ct
+REAL(r8) :: vmapr(3,3),vmapc(3,3),mat_val(1,1)
+REAL(r8), PARAMETER :: eye(3,3) = RESHAPE([1.d0,0.d0,0.d0,0.d0,1.d0,0.d0,0.d0,0.d0,1.d0],[3,3])
+CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
+CLASS(oft_scalar_fem), POINTER :: lag_fine => NULL()
+class(oft_mesh), pointer :: mesh => NULL()
+type(oft_graph), POINTER :: interp_graph
+IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_build_per_vinterp",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(ML_lag_rep%level-1)%fe))CALL oft_abort("Incorrect coarse FE type","lag_build_per_vinterp",__FILE__)
+mesh=>lag_fine%mesh
+interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
+IF(mesh%periodic%revolved)THEN
+  DO i=1,3
+    DO j=1,3
+      CALL mats(i,j)%m%zero()
+    END DO
+  END DO
+  DO jr=1,lag_fine%ne
+    IF(lag_fine%per_vmap(jr)==1)THEN
+      rt=1
+      vmapr=lag_fine%mesh%periodic%vmap_mats(:,:,1)
+    ELSE IF(lag_fine%per_vmap(jr)==2)THEN
+      rt=2
+      vmapr=lag_fine%mesh%periodic%vmap_mats(:,:,2)
+    ELSE
+      rt=0
+      vmapr=eye
+    END IF
+    DO k=interp_graph%kr(jr),interp_graph%kr(jr+1)-1
+      jc=interp_graph%lc(k)
+      IF(ABS(interp_graph%M(k))<1.d-8)CYCLE
+      IF(lag_cors%per_vmap(jc)==1)THEN
+        ct=1
+        vmapc=lag_cors%mesh%periodic%vmap_mats(:,:,1)
+      ELSE IF(lag_cors%per_vmap(jc)==2)THEN
+        ct=2
+        vmapc=lag_cors%mesh%periodic%vmap_mats(:,:,2)
+      ELSE
+        ct=0
+        vmapc=eye
+      END IF
+      IF(rt==ct)THEN
+        mat_val=interp_graph%M(k)
+        DO i=1,3
+          CALL mats(i,i)%m%add_values([jr],[jc],mat_val,1,1)
+        END DO
+      ELSE
+        DO i=1,3
+          DO j=1,3
+            mat_val = DOT_PRODUCT(vmapr(:,i),vmapc(:,j))
+            mat_val=mat_val*interp_graph%M(k)
+            CALL mats(i,j)%m%add_values([jr],[jc],mat_val,1,1)
+          END DO
+        END DO
+      END IF
+    END DO
+  END DO
+  DO i=1,3
+    DO j=1,3
+      CALL mats(i,j)%m%assemble()
+    END DO
+  END DO
+END IF
+END SUBROUTINE lag_build_per_vinterp
+!------------------------------------------------------------------------------
 !> Transfer a base level Lagrange scalar field to the next MPI level
 !------------------------------------------------------------------------------
 subroutine lag_base_pop(self,acors,afine)
@@ -1979,17 +2096,19 @@ class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
-real(r8), pointer, dimension(:) :: array_c,array_f
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_READ)
+CALL afine%borrow_local(array_f,OFT_ACCESS_WRITE)
 !$omp parallel do
 do i=1,afine%n
   array_f(i)=array_c(lptmp(i))
 end do
-CALL afine%restore_local(array_f)
-DEALLOCATE(array_c,array_f)
+!---Keep owner sync: base-level values are computed independently on each process
+CALL afine%release_local(array_f,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL acors%release_local(array_c,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 end subroutine lag_base_pop
 !------------------------------------------------------------------------------
@@ -2001,13 +2120,15 @@ class(oft_vector), intent(inout) :: afine !< Needs docs
 class(oft_vector), intent(inout) :: acors !< Needs docs
 integer(i4), pointer :: lptmp(:)
 integer(i4) :: i,j,ierr
-real(r8), pointer, dimension(:) :: alias,array_c,array_f
+REAL(r8), POINTER, DIMENSION(:) :: alias
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: array_c,array_f
 CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
 DEBUG_STACK_PUSH
 !---
 lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
-CALL acors%get_local(array_c)
-CALL afine%get_local(array_f)
+NULLIFY(array_c,array_f)
+CALL acors%borrow_local(array_c,OFT_ACCESS_WRITE)
+CALL afine%borrow_local(array_f,OFT_ACCESS_READ)
 lag_fine=>self%ML_FE_rep%levels(self%ML_FE_rep%level+1)%fe
 !---
 allocate(alias(acors%n))
@@ -2025,8 +2146,9 @@ do i=1,lag_fine%linkage%nbe
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
-call acors%restore_local(array_c)
-deallocate(alias,array_c,array_f)
+CALL acors%release_local(array_c,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL afine%release_local(array_f,OFT_ACCESS_READ,sync=.FALSE.)
+DEALLOCATE(alias)
 DEBUG_STACK_POP
 end subroutine lag_base_push
 !------------------------------------------------------------------------------

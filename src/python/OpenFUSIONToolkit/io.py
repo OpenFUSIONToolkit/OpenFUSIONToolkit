@@ -320,37 +320,60 @@ class XDMF_plot_mesh:
                 step_dict[field_name] = numpy.asarray(field_obj)
             self.time_fields.append(step_dict)
         self.times = numpy.array(self.times)
+        # Interpolation in time requires non-decreasing TIME values; flag here, raise only on use
+        # (some writers may legitimately store TIME as a label, so loading and timestep access are allowed)
+        self._time_decrease_index = None
+        decreasing = numpy.nonzero(numpy.diff(self.times) < 0.0)[0]
+        if decreasing.shape[0] > 0:
+            self._time_decrease_index = int(decreasing[0])
 
     def get_field(self,name,time=None,timestep=None):
         '''! Get raw data associated with field at a given time or timestep
 
+        When `time` is given the field is linearly interpolated between the two saved timesteps that
+        bracket it, which requires the stored TIME values to be non-decreasing in file order. If
+        several consecutive timesteps share the requested time (a zero-width interval), a copy of
+        the first of them in file order is returned.
+
         @param name Name of field
         @param time Time value to evaluate field (linear interpolation)
-        @param timestep Timestep index to retrieve
+        @param timestep Timestep index to retrieve (0-based, negative indices count from the last timestep)
+        @result Field data as a `numpy.ndarray`
         '''
-        if timestep is not None:
+        if (timestep is not None) or (time is not None):
+            if (timestep is not None) and (time is not None):
+                raise ValueError('"time" and "timestep" cannot be specified simultaneously')
+            ntimes = self.times.shape[0]
+            if ntimes == 0:
+                raise ValueError('Mesh has no time-dependent data, "time" and "timestep" cannot be used (only static fields are available)')
             if name not in self.time_field_names:
                 raise KeyError('"{0}" is not one of the timestep fields'.format(name))
-            if time is not None:
-                raise ValueError('"time" and "timestep" cannot be specified simultaneously')
-            if (timestep < 0) and (timestep > self.times.shape[0]-1):
-                raise ValueError("Requested timestep outside available range [0,{0}]".format(self.times.shape[0]-1))
+        if timestep is not None:
+            if (timestep < -ntimes) or (timestep > ntimes-1):
+                raise ValueError("Requested timestep {0} outside available range [{1},{2}]".format(timestep,-ntimes,ntimes-1))
+            if timestep < 0:
+                timestep += ntimes
             if (name not in self.time_fields[timestep]):
                 raise KeyError('"{0}" is not available at requested timestep {1}'.format(name,timestep))
             return self.time_fields[timestep][name]
         elif time is not None:
-            if name not in self.time_field_names:
-                raise KeyError('"{0}" is not one of the timestep fields'.format(name))
-            if timestep is not None:
-                raise ValueError('"time" and "timestep" cannot be specified simultaneously')
-            for i in range(self.times.shape[0]-1):
-                if (self.times[i] <= time) and (self.times[i+1] >= time):
-                    if (name not in self.time_fields[i]):
-                        raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i))
-                    if (name not in self.time_fields[i+1]):
-                        raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i+1))
-                    return (self.time_fields[i][name]-self.time_fields[i+1][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
-            raise ValueError("Requested time outside available range [{0:.6E},{1:.6E}]".format(self.times[0],self.times[-1]))
+            if self._time_decrease_index is not None:
+                i = self._time_decrease_index
+                raise ValueError('Stored TIME values decrease between timesteps {0} ({1:.6E}) and {2} ({3:.6E}), interpolation in time is not possible (use "timestep" instead)'.format(
+                    i,self.times[i],i+1,self.times[i+1]))
+            if not ((time >= self.times[0]) and (time <= self.times[-1])):
+                raise ValueError("Requested time outside available range [{0:.6E},{1:.6E}]".format(self.times[0],self.times[-1]))
+            for i in range(ntimes):
+                if (i == ntimes-1) or (self.times[i] == time) or (self.times[i+1] > time):
+                    break
+            if (name not in self.time_fields[i]):
+                raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i))
+            # Exact match (including zero-width intervals and single-timestep meshes): return a copy of the stored data
+            if self.times[i] == time:
+                return numpy.array(self.time_fields[i][name], dtype=numpy.float64)
+            if (name not in self.time_fields[i+1]):
+                raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i+1))
+            return (self.time_fields[i+1][name]-self.time_fields[i][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
         else:
             if name not in self.static_fields:
                 raise KeyError('"{0}" is not one of the static fields'.format(name))

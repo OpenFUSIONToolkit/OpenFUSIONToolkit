@@ -1,6 +1,8 @@
 set( LA_OBJS
   lin_alg_base.F90
+  native_kernels.F90
   native_la.F90
+  native_overlap.F90
   petsc_la.F90
   deriv_matrices.F90
 )
@@ -11,6 +13,7 @@ set( SOLVER_OBJS
   superlu_bridge.c
   superlu_dist_bridge.c
   umfpack_bridge.c
+  strumpack_bridge.cxx
   mkl_bridge.c
   oft_arpack.F90
   oft_lu.F90
@@ -25,3 +28,12 @@ add_library( oftla
   ${SOLVER_OBJS}
   ${MGMT_OBJS}
 )
+
+# STRUMPACK C++ interface requires C++17
+if( OFT_STRUMPACK_FOUND )
+  target_compile_features( oftla PRIVATE cxx_std_17 )
+  # C++ sources are not compiled with the MPI compiler wrappers
+  if( OFT_STRUMPACK_MPI )
+    target_include_directories( oftla PRIVATE ${MPI_C_INCLUDE_DIRS} )
+  endif()
+endif()

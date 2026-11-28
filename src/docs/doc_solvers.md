@@ -39,13 +39,43 @@ This method is supported through both the native and PETSc backends through
 \ref oft_petsc_solvers::oft_petsc_direct_solver "oft_petsc_direct_solver" for a full solver or
 \ref oft_petsc_solvers::oft_petsc_luprecond "oft_petsc_luprecond" as a PETSc preconditioner.
 
-\warning The native solver currently only supports local solves (ie as a sub-solver to Block Jacobi)
+By default the native solver performs local solves (ie as a sub-solver to Block Jacobi). With the
+`superd`, `mumps`, and `strumpack` packages, the full distributed system can instead be factored across
+all MPI tasks by setting `distributed` to true and using the solver directly on the global system (not
+as a sub-solver to Block Jacobi). This option has no effect in serial runs or for local systems.
+Distributed factorization with `strumpack` requires STRUMPACK built with MPI support (`--strumpack_mpi=1`
+with `build_libs.py`), in which case the STRUMPACK options below also apply.
 
 **XML Spec:** `<solver type="lu">`
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `package`  | Solver package to use {super, superd, mumps} | str | No |
+| `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack}, PETSc {petsc, super, superd, umfpack, mumps}. Native default: first available of mkl, strumpack, umfpack, mumps, super, superd | str | No |
+
+Native only options
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `distributed` | Factor full distributed system across all MPI tasks (`superd`, `mumps`, and `strumpack` only) | bool | No |
+
+Native STRUMPACK options, in a `<strumpack>` group (values of `-1` or omitted use the STRUMPACK defaults)
+
+| Group          | Description | Type      | List |
+|----------------|-------------|-----------|------|
+| `comp_type`    | Compression of frontal matrices {none, hss, blr} (default: none) | str | No |
+| `comp_rel_tol` | Relative compression tolerance | float | No |
+| `comp_abs_tol` | Absolute compression tolerance | float | No |
+| `leaf_size`    | Size of leaf/tile blocks for compression | int | No |
+| `max_rank`     | Maximum rank of compressed blocks | int | No |
+| `min_sep_size` | Minimum separator size for compression | int | No |
+| `verbose`      | Print STRUMPACK information | bool | No |
+
+\note With compression the STRUMPACK factorization is approximate, which is intended for use as a
+preconditioner (eg. Block Jacobi sub-solver). STRUMPACK's iterative refinement is not supported. A
+refactorization with an unchanged non-zero pattern reuses the reordering and MC64 matching/scaling from the
+last full factorization (local and distributed solves). STRUMPACK only pivots within each front, so after large
+changes in matrix values the solution can be inaccurate unless a full factorization is requested
+(`update(.TRUE.)`, as for a change in the non-zero pattern), even though the pattern has not changed.
 
 PETSc only options
 
@@ -69,15 +99,60 @@ This method is supported through both the native and PETSc backends through
 
 \subsection doc_solvers_basic_schwarz Additive Schwarz
 
-This method is currently only supported with the PETSc backend through
-\ref oft_petsc_solvers::oft_petsc_asprecond "oft_petsc_asprecond" as a preconditioner.
+This method is provided as a preconditioner through both the native and PETSc backends through
+\ref oft_native_solvers::oft_schwarz_precond "oft_schwarz_precond" and
+\ref oft_petsc_solvers::oft_petsc_asprecond "oft_petsc_asprecond". Subdomains are grown from a
+non-overlapping partition by `overlap` layers and solved with the sub-solver given by the nested
+`solver` (or `pre`) element, as for \ref doc_solvers_basic_bjacobi "Block Jacobi".
+
+In the native backend subdomains are grown in one of two modes (`overlap_mode`):
+- **Graph mode** (default): layers of the matrix graph. With `nlocal=1` each process has one
+  subdomain made of its owned rows, grown across processes (rows held only by other processes are
+  transferred). With several local blocks (`nlocal>1`, or negative for field based blocks) the
+  blocks are grown within the owned rows of each process. With `boverlap` the blocks are those of
+  block-Jacobi with `boverlap`, grown within each process. `overlap=0` is block-Jacobi with the
+  same `nlocal`, bit for bit, and restricted `overlap=1` with `nlocal>1` is block-Jacobi with
+  `loverlap`.
+- **Cell mode** (`<overlap_mode>cell</overlap_mode>`): blocks are grown by `overlap` layers of mesh
+  cells instead. Cells are adjacent if they share at least a point, an edge or a face (`adjacency`),
+  and a block contains every DoF of its cells. The cells and the number of blocks per process are
+  defined by a cell overlap builder (\ref fem_cell_overlap::oft_fem_cell_overlap
+  "oft_fem_cell_overlap") that the physics module or application attaches to the matrix
+  (`cell_ovl`; MUG attaches one to its native Jacobians on every level, with `xmhd_nparts` setting
+  the blocks); cell mode aborts if none is attached, and the builder's block count replaces
+  `nlocal` (field based blocks, `nlocal<0`, and `boverlap` are not supported, and abort). Blocks may cross process
+  boundaries for any number of blocks per process: the union of the blocks of each process is
+  assembled as one subdomain across processes, so the setup needs a fixed number of exchanges
+  whatever the overlap. With `overlap=0` the blocks are the DoFs of the core cells, which already
+  overlap at process and block interfaces.
+
+Subdomain solutions are combined (`type`, native only):
+- `restricted` (default): each row is taken from the one subdomain (or block) it is assigned to;
+- `additive`: sum of the subdomain solutions (rows in several subdomains are counted once per
+  subdomain);
+- `weighted`: additive with partition of unity weights, where each subdomain's solution is scaled
+  on every row by one over the number of subdomains containing that row. Unlike `additive`, rows in
+  the overlap are not over-weighted.
+
+Periodic meshes are supported in both modes: the periodic images of a DoF held by one process form
+a single subdomain DoF, and blocks grow across periodic seams. Revolved periodic domains have not
+been tested with this preconditioner.
 
 **XML Spec:** `<pre type="add_schwarz">`
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
-| `overlap`  | Overlap size | int | Yes |
+| `nlocal`   | Number of local blocks (-1 for field based, graph mode only; replaced by the builder's block count in cell mode, where `nlocal<0` aborts) | int | Yes |
+| `groups`   | Group index for each field in multi-field vector [n] (native graph mode only) | int | Yes |
+| `boverlap` | Overlap boundary rows, as for block-Jacobi (native graph mode only) | bool | No |
+| `overlap`  | Number of overlap layers (native default: 1; layers of cells in cell mode) | int | Yes |
+| `type`     | Combination of subdomain solutions: `restricted` (default), `additive` or `weighted` (native only) | str | No |
+| `overlap_mode` | How subdomains are grown: `graph` (default, matrix graph) or `cell` (layers of mesh cells; native only) | str | No |
+| `adjacency` | Cell contact defining a layer in cell mode: `point` (default), `edge` or `face` (native only) | str | No |
+| `base_layers` | Layers of base mesh cells bounding the cells exchanged between processes in cell mode (default -1: equal to `overlap`, always sufficient; smaller values can truncate blocks at process boundaries and print a warning; native only) | int | Yes |
+
+The block-Jacobi option `loverlap` is not accepted for the native Schwarz preconditioner (use
+`overlap`). Values given as a list are taken per multigrid level.
 
 \section doc_solvers_krylov Krylov Solvers
 

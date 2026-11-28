@@ -25,7 +25,7 @@ src/
 ├── base/           # Core runtime (I/O, XML, sorting, stitching)
 ├── grid/           # Mesh types, readers (Cubit, Gmsh, native, T3D), multigrid
 ├── fem/            # Finite element basis functions and operators (H1, Hcurl, Lagrange)
-├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK)
+├── lin_alg/        # Linear algebra (native solvers, PETSc, ARPACK, SuperLU, UMFPACK, STRUMPACK)
 ├── physics/        # Physics modules (Grad-Shafranov, thin-wall, Taylor, xMHD, tracing)
 ├── bin/            # Standalone Fortran executables
 ├── python/
@@ -105,7 +105,7 @@ Python code is linted with **ruff**. Configuration is in `src/python/pyproject.t
 cd src/python && ruff check
 ```
 
-Rules: Pyflakes (`F`) + pycodestyle (`E`) with ignores for `E722`, `F403`, `F405`. Target: Python 3.7.
+Rules are selected explicitly (keep both `pyproject.toml` files in sync): Pyflakes (`F`) + pycodestyle (`E4`, `E7`, `E9`, `W6`) + a few bug-finding checks (`B006`, `B023`, `PLW0127`), with ignores for `E722`, `F403`, `F405`, `E741`. Target: Python 3.7. CI pins ruff to a tested version range in `lint.yaml`; raise it deliberately when upgrading.
 
 ### Fortran stack checking
 
@@ -115,7 +115,7 @@ A custom lint checks Fortran debug stack entries:
 cd src && python utilities/generate_stack.py -l
 ```
 
-This validates that all `SUBROUTINE`/`FUNCTION` entries have matching debug stack annotations. Run from the `src/` directory.
+This checks that no generated debug stack markers (`#define DEBUG_STACK_*` / `#undef DEBUG_STACK_*` lines added by `generate_stack.py` for debug builds) have been committed to the Fortran sources, and exits non-zero if any are found. Run from the `src/` directory.
 
 ## CI Workflows (utilizing GitHub actions)
 
@@ -145,7 +145,7 @@ A representative build environment that can be used for creating a testing sandb
 
 - Free-form Fortran 90+ (`.F90` extension, preprocessed)
 - SPDX license header: `! SPDX-License-Identifier: LGPL-3.0-only`
-- Doxygen-style comments with `!>` and `!!` markers
+- Doxygen-style comments with `!>` and `!!` markers (not in `src/examples/`; see "Test and example code" below)
 - Module names typically prefixed with `oft_` (e.g., `oft_gs`, `oft_la_base`)
 - Line length: unlimited (`-ffree-line-length-none`), but keep reasonable
 - New functions/subroutines must have Doxygen documentation — this applies to code Doxygen actually processes; see "Test and example code" below
@@ -173,8 +173,13 @@ indirectly: the `build_ex_docs` target runs `src/utilities/generate_doc.py`, whi
 reads `examples/*.F90`, `examples/*/*/*.F90`, and `examples/*/*/*.ipynb` and writes
 `docs/generated/doc_*.md`, which Doxygen then picks up through its `docs` entry.
 
-- **Example sources are documentation.** Fortran examples under `src/examples/` carry their own `!!` comment format, including Doxygen page anchors and linking commands (eg. `!!API Example 1 ... {#doc_api_ex1}`, `\section`, `\ref`), which `generate_doc.py` parses into published pages. The same applies to the example notebooks. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
-- **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!!` function blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
+- **Example sources are documentation pages.** `generate_doc.py` turns each Fortran example under `src/examples/` into a Doxygen page, much like the Markdown and code cells of a notebook. Every line that starts with `!!` (in the first column) is page text, and every other line goes into a code listing, so each `!!` block ends the listing before it.
+  - Use `!!` only for the narrative blocks between code sections, with page-style commands only: the page anchor (eg. `!!API Example 1 ... {#doc_api_ex1}`), `\section`, `\subsection`, `\ref`, `\f$ ... \f$`, `\note`, `\image`, and similar.
+  - Do not use Doxygen source sentinels (`!>`, `!<`) or documentation commands (`@param`, `@result`, `@brief`) in example sources. They are not parsed as documentation: they show up verbatim in the listings, and a `!!` continuation of a `!>` block splits a listing in two.
+  - Use plain `!` comments for notes inside code, including descriptions of routines, arguments and variables.
+  - `! START SOURCE` / `! STOP SOURCE` and `! OFT_DOC_INCLUDE: <file>` are directives for `generate_doc.py`. All must start in the first column. `! OFT_DOC_INCLUDE: <file>` must also come directly after a `!!` block (before any code line); anywhere else it is copied into the listing as-is and the file is not included.
+  - The example notebooks follow the same idea with Markdown cells. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
+- **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!<` documentation blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
 - Doxygen **linking** commands (`\section`, `\ref`, …) remain valid anywhere and may be used where they help, even in files whose functions need no documentation blocks.
 - Function-level documentation blocks in test code are **optional**.
 - Brief documentation is still helpful and welcome: a short line saying what a test covers or what an example demonstrates aids the next reader.

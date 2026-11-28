@@ -33,7 +33,7 @@ PROGRAM MUG_sph_tilt
 USE oft_base
 !---Grid
 USE multigrid, ONLY: multigrid_mesh
-USE multigrid_build, ONLY: multigrid_construct, multigrid_add_quad
+USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -41,15 +41,17 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
   create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_operators, ONLY: lag_setup_interp
 !---H1 FE space (Grad(H^1) subspace)
 USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
+USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd, h1_setup_interp
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc, hcurl_grad_setup_interp
 !---Physics
 USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
-USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
+USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, xmhd_minlev, &
   xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
@@ -68,6 +70,7 @@ TYPE(oft_taylor_hmodes) :: taylor_states
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2
+INTEGER(i4) :: minlev = -1
 REAL(r8) :: b0_scale = 1.E-1_r8
 REAL(r8) :: b1_scale = 1.E-5_r8
 REAL(r8) :: n0 = 1.d19
@@ -87,17 +90,26 @@ CLOSE(io_unit)
 ! Setup grid
 !------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
+IF((minlev<mg_mesh%mgdim).AND.(minlev/=-1))CALL oft_abort("Only polynomial MG currently supported for xMHD","main",__FILE__)
 !------------------------------------------------------------------------------
 ! Build FE structures
 !------------------------------------------------------------------------------
 !--- Lagrange
-CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
+ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
+CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
+CALL lag_setup_interp(xmhd_ML_lagrange)
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=-1)
+ALLOCATE(xmhd_ML_H1)
+CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=minlev)
+CALL h1_setup_interp(xmhd_ML_H1)
 !--- H(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=-1)
+ALLOCATE(xmhd_ML_hcurl)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev)
+CALL hcurl_setup_interp(xmhd_ML_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,-1)
+ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)
+CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev=minlev)
+CALL hcurl_grad_setup_interp(xmhd_ML_hcurl_grad,xmhd_ML_H1)
 h1_zerogrnd%ML_H1_rep=>xmhd_ML_H1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
@@ -151,10 +163,11 @@ CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
 CALL create_bjacobi_pre(linv%pre,-1)
-DEALLOCATE(linv%pre%pre)
-CALL create_ilu_pre(linv%pre%pre)
-divout%solver=>linv
-divout%bc=>h1_zerogrnd
+IF(ASSOCIATED(linv%pre%pre))THEN ! Native only (PETSc block-Jacobi uses its own sub-solver)
+  DEALLOCATE(linv%pre%pre)
+  CALL create_ilu_pre(linv%pre%pre)
+END IF
+CALL divout%setup(xmhd_ML_hcurl_grad,'grnd',solver=linv)
 divout%pm=.TRUE.
 !------------------------------------------------------------------------------
 ! Setup initial conditions
@@ -172,8 +185,10 @@ CALL divout%apply(pert_fields%B)
 !---Clean up solver
 NULLIFY(divout%solver)
 CALL divout%delete()
-CALL linv%pre%pre%delete()
-DEALLOCATE(linv%pre%pre)
+IF(ASSOCIATED(linv%pre%pre))THEN
+  CALL linv%pre%pre%delete()
+  DEALLOCATE(linv%pre%pre)
+END IF
 CALL linv%pre%delete()
 DEALLOCATE(linv%pre)
 CALL linv%delete()
@@ -226,6 +241,7 @@ DEALLOCATE(tmp,lop)
 xmhd_taxis=3
 oft_env%pm=pm
 !---Run simulation
+xmhd_minlev=minlev
 IF(linear)THEN
   CALL xmhd_lin_run(ic_fields,pert_fields)
 ELSE
@@ -243,55 +259,7 @@ END PROGRAM MUG_sph_tilt
 !! significantly more challenging than previous examples. For more information on the options in the
 !! `xmhd_options` group see \ref xmhd::xmhd_run "xmhd_run".
 !!
-!!\verbatim
-!!&runtime_options
-!! ppn=1
-!! debug=0
-!!/
-!!
-!!&mesh_options
-!! meshname='test'
-!! cad_type=0
-!! nlevels=2
-!! nbase=1
-!! grid_order=2
-!! fix_boundary=T
-!!/
-!!
-!!&native_mesh_options
-!! filename='cyl_tilt.h5'
-!!/
-!!
-!!&sph_tilt_options
-!! order=2
-!! linear=F
-!! b0_scale=1.e-1
-!! b1_scale=1.e-4
-!! n0=1.E19
-!! t0=3.
-!! plot_run=F
-!! pm=F
-!!/
-!!
-!!&xmhd_options
-!! xmhd_adv_den=F    ! Do not advance density
-!! xmhd_adv_temp=F   ! Do not advance temperature
-!! bbc='bc'          ! Perfectly-conducting BC for B-field
-!! vbc='all'         ! Zero-flow BC for velocity
-!! dt=2.e-7          ! Maximum time step
-!! eta=1.            ! Resistivity
-!! nu_par=10.        ! Fluid viscosity
-!! nsteps=3000       ! Number of time steps to take
-!! rst_freq=10       ! Restart file frequency
-!! lin_tol=1.E-10    ! Linear solver tolerance
-!! nl_tol=1.E-5      ! Non-linear solver tolerance
-!! xmhd_mfnk=T       ! Use matrix-free Jacobian operator
-!! rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
-!! ittarget=40       ! Target for # of linear iterations per time step
-!! mu_ion=2.         ! Ion mass (atomic units)
-!! xmhd_prefreq=20   ! Preconditioner update frequency
-!!/
-!!\endverbatim
+! OFT_DOC_INCLUDE: oft.in
 !!
 !!\subsection doc_mug_sph_ex1_input_solver Solver specification
 !!
@@ -301,20 +269,7 @@ END PROGRAM MUG_sph_tilt
 !! Currently, this preconditioner method is the suggested starting preconditioner for all
 !! time-dependent MHD solves.
 !!
-!!```xml
-!!<oft>
-!!  <xmhd>
-!!    <pre type="gmres">
-!!      <its>8</its>
-!!      <nrits>8</nrits>
-!!      <pre type="block_jacobi">
-!!        <nlocal>-1</nlocal>
-!!        <solver type="ilu"></solver>
-!!      </pre>
-!!    </pre>
-!!  </xmhd>
-!!</oft>
-!!```
+! OFT_DOC_INCLUDE: oft_in.xml
 !!
 !! This solver can be used by specifying both the FORTRAN input and XML input files
 !! to the executable as below.
@@ -368,25 +323,7 @@ END PROGRAM MUG_sph_tilt
 !! A suitable mesh for this example, with radius of 1m and height of 2m, can be created using
 !! the CUBIT script below.
 !!
-!!\verbatim
-!!reset
-!!
-!!create Cylinder height 2 radius 1
-!!
-!!volume 1 scheme Tetmesh
-!!set tetmesher interior points on
-!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
-!!set tetmesher boundary recovery  off
-!!volume 1 size .2
-!!mesh volume 1
-!!
-!!set duplicate block elements off
-!!block 1 add volume 1
-!!block 1 element type tetra10
-!!
-!!set large exodus file on
-!!export Genesis  "cyl_tilt.g" overwrite block 1
-!!\endverbatim
+! OFT_DOC_INCLUDE: cyl_tilt.jou
 !!
 !! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_cubit.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
@@ -400,23 +337,7 @@ END PROGRAM MUG_sph_tilt
 !! If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
 !! geometry script below.
 !!
-!!\verbatim
-!!Coherence;
-!!Point(1) = {0, 0, 0, 1.0};
-!!Point(2) = {1, 0, 0, 1.0};
-!!Point(3) = {0, 1, 0, 1.0};
-!!Point(4) = {-1, 0, 0, 1.0};
-!!Point(5) = {0, -1, 0, 1.0};
-!!Circle(1) = {2, 1, 3};
-!!Circle(2) = {3, 1, 4};
-!!Circle(3) = {4, 1, 5};
-!!Circle(4) = {5, 1, 2};
-!!Line Loop(5) = {2, 3, 4, 1};
-!!Plane Surface(6) = {5};
-!!Extrude {0, 0, 2} {
-!!  Surface{6};
-!!}
-!!\endverbatim
+! OFT_DOC_INCLUDE: cyl_tilt.geo
 !!
 !! To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
 !! `cyl_tilt.geo` and run the following command.

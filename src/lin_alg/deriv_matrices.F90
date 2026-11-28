@@ -384,7 +384,7 @@ class(oft_vector), intent(inout) :: a
 DEBUG_STACK_PUSH
 ALLOCATE(oft_diagmatrix::self)
 CALL a%new(self%D)
-CALL self%D%add(0.d0,1.d0,a)
+CALL self%D%copy(a)
 self%nr=a%n; self%nrg=a%ng
 self%nc=a%n; self%ncg=a%ng
 DEBUG_STACK_POP
@@ -421,7 +421,7 @@ class(oft_vector), intent(inout) :: b !< Result of matrix product
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_real',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_real',__FILE__)
-call b%add(0.d0,1.d0,a)
+CALL b%copy(a)
 call b%mult(self%D)
 DEBUG_STACK_POP
 end subroutine diagmat_apply_real
@@ -437,7 +437,7 @@ class(oft_cvector), intent(inout) :: b !<
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_comp',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_comp',__FILE__)
-call b%add((0.d0,0.d0),(1.d0,0.d0),a)
+CALL b%copy(a)
 call b%mult(self%D)
 DEBUG_STACK_POP
 end subroutine diagmat_apply_comp
@@ -486,7 +486,7 @@ DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 IF(present(diag))THEN
   IF(associated(self%D))THEN
-    CALL diag%add(0.d0,1.d0,self%D)
+    CALL diag%copy(self%D)
   ELSE
     CALL oft_abort('Matrix not initialized.','diagmat_assemble',__FILE__)
   END IF
@@ -654,7 +654,7 @@ if(present(diag))then
     CALL self%K%assemble(self%D)
     !---
     CALL self%D%add(0.d0,self%beta,self%J%D,self%alam,self%K%D)
-    CALL diag%add(0.d0,1.d0,self%D)
+    CALL diag%copy(self%D)
   !end if
 else
   !---Assemble matrices
@@ -684,7 +684,7 @@ CALL a%new(vtmp)
 IF(ASSOCIATED(self%rJ))THEN
   CALL a%new(rtmp)
   CALL self%rJ%apply(a,rtmp)
-  CALL b%add((0.d0,0.d0),(1.d0,0.d0),rtmp)
+  CALL b%copy(rtmp)
   CALL rtmp%delete()
   DEALLOCATE(rtmp)
 ELSE IF(ASSOCIATED(self%cJ))THEN
@@ -693,7 +693,7 @@ END IF
 IF(ASSOCIATED(self%rK))THEN
   CALL a%new(rtmp)
   CALL self%rK%apply(a,rtmp)
-  CALL vtmp%add((0.d0,0.d0),(1.d0,0.d0),rtmp)
+  CALL vtmp%copy(rtmp)
   CALL rtmp%delete()
   DEALLOCATE(rtmp)
 ELSE IF(ASSOCIATED(self%cK))THEN
@@ -753,7 +753,7 @@ CALL a%new(vtmp)
 IF(ASSOCIATED(self%rJ))THEN
   CALL a%new(rtmp)
   CALL self%rJ%apply(a,rtmp)
-  CALL b%add((0.d0,0.d0),(1.d0,0.d0),rtmp)
+  CALL b%copy(rtmp)
   CALL rtmp%delete()
   DEALLOCATE(rtmp)
 ELSE IF(ASSOCIATED(self%cJ))THEN
@@ -762,7 +762,7 @@ END IF
 IF(ASSOCIATED(self%rK))THEN
   CALL a%new(rtmp)
   CALL self%rK%apply(a,rtmp)
-  CALL vtmp%add((0.d0,0.d0),(1.d0,0.d0),rtmp)
+  CALL vtmp%copy(rtmp)
   CALL rtmp%delete()
   DEALLOCATE(rtmp)
 ELSE IF(ASSOCIATED(self%cK))THEN
@@ -841,7 +841,7 @@ if(present(diag))then
     DEALLOCATE(rdiag)
   END IF
   !---
-  CALL diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
+  CALL diag%copy(self%D)
 else
   !---Assemble matrices
   IF(ASSOCIATED(self%rJ))THEN
@@ -881,12 +881,12 @@ IF(aa==0.d0)THEN
 ELSE
   IF(ASSOCIATED(self%utyp))THEN
     bb=a%dot(self%u0)
-    CALL self%tmp%add(0.d0,1.d0,a)
+    CALL self%tmp%copy(a)
     CALL self%tmp%mult(self%utyp)
     a1 = self%tmp%norm(1)
     eps=self%b0*MAX(ABS(bb),a1)*SIGN(1.d0,bb)/aa
   ELSE
-    bb=SQRT(self%u0%dot(self%u0))
+    bb=SQRT(clamp_nonneg(self%u0%dot(self%u0)))
     eps=self%b0*SQRT(1.d0+bb)/aa
   END IF
 END IF
@@ -909,7 +909,7 @@ CALL a%new(self%f0)
 CALL a%new(self%tmp)
 CALL a%new(self%utyp)
 IF(PRESENT(utyp))THEN
-  CALL self%utyp%add(0.d0,1.d0,utyp)
+  CALL self%utyp%copy(utyp)
 ELSE
   CALL self%utyp%set(1.d0)
 END IF
@@ -923,7 +923,7 @@ class(oft_vector), intent(inout) :: a !< New linearization point
 integer(i4) :: i,nslice,ierr
 real(r8) :: umin
 real(r8), pointer :: vals(:)
-CALL self%u0%add(0.d0,1.d0,a)
+CALL self%u0%copy(a)
 CALL self%f%apply(self%u0,self%f0)
 END SUBROUTINE mf_mat_update
 !------------------------------------------------------------------------------

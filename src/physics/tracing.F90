@@ -16,8 +16,10 @@
 !---------------------------------------------------------------------------------
 module tracing
 use oft_base
-use oft_mesh_type, only: mesh_findcell
+use oft_mesh_type, only: oft_mesh, mesh_findcell, cell_is_curved
+USE oft_hexmesh_type, ONLY: hex_face_dist
 use multigrid, only: multigrid_mesh
+USE tracing_2d, ONLY: bs32_c2, bs32_c3, bs32_b, bs32_e, rk_step_factor, rk_probe_step, rk_initial_step
 USE oft_io, only: hdf5_write
 !---
 use fem_utils, only: fem_interp
@@ -132,6 +134,44 @@ contains
   !> Clean-up internal storage
   procedure :: delete => tracer_lsode_delete
 end type oft_tracer_lsode
+!---------------------------------------------------------------------------------
+!> Tracer implementation using an embedded explicit Runge-Kutta method (Bogacki-Shampine 3(2))
+!!
+!! Fields interpolated from a finite element representation are only piecewise smooth,
+!! with jumps in the field or its derivatives at cell boundaries. Steps are therefore
+!! limited to end just past the (linearly extrapolated) exit point of the current cell, so
+!! that each step integrates a smooth right-hand side. This one-step method keeps no
+!! history across cell boundaries, so its error estimate remains reliable and the step
+!! size is set by the tolerance instead of by repeated crossings.
+!!
+!! The integrator state is only the solution, time and step size, so transfers between
+!! domains are exact.
+!---------------------------------------------------------------------------------
+type, extends(oft_tracer) :: oft_tracer_rk
+  INTEGER(i4) :: nisend = 2 !< Number of values in isend
+  INTEGER(i4) :: nrsend = 0 !< Number of values in rsend
+  INTEGER(i4), POINTER, DIMENSION(:) :: isend => NULL() !< Integer MPI transfer array
+  REAL(r8) :: t = 0.d0 !< Current time in ODE advance
+  REAL(r8) :: h = 0.d0 !< Step size for the next step (<=0 to compute a new initial step)
+  REAL(r8) :: gop(3,4) = 0.d0 !< Gradients of the logical coordinates at the last evaluation
+  REAL(r8), POINTER, DIMENSION(:) :: rsend => NULL() !< Real MPI transfer array
+  REAL(r8), POINTER, DIMENSION(:,:) :: k => NULL() !< Stage derivatives [neq,4]
+contains
+  !> Initialize tracer at a given point
+  procedure :: setup => tracer_rk_setup
+  !> Create a copy of this tracer
+  procedure :: copy => tracer_rk_copy
+  !> Save tracer information for transfer
+  procedure :: save => tracer_rk_save
+  !> Transfer tracer information to new domain
+  procedure :: send => tracer_rk_send
+  !> Receive tracer information from other domain
+  procedure :: recv => tracer_rk_recv
+  !> Advance tracer one step
+  procedure :: step => tracer_rk_step
+  !> Clean-up internal storage
+  procedure :: delete => tracer_rk_delete
+end type oft_tracer_rk
 !---Abstract procedure prototypes
 abstract interface
   !---------------------------------------------------------------------------------
@@ -214,6 +254,11 @@ REAL(r8), PRIVATE, PARAMETER :: offmesh_tol = 1.d-2 !< Tolerance for cell logica
 LOGICAL, PRIVATE :: test_timeout = .FALSE. !< Timeout has passed?
 REAL(r8), PRIVATE :: timeout = 60.d0 !< Timeout for tracing calls (seconds)
 TYPE(oft_timer), PRIVATE :: timeout_timer !< Timer for timeout tests
+REAL(r8), PRIVATE, PARAMETER :: rk_margin_linear = 1.d-9 !< Overshoot of RK steps past the faces of straight sided tetrahedra
+REAL(r8), PRIVATE, PARAMETER :: rk_margin_ho = 1.d-5 !< Overshoot of RK steps past the faces of curved cells and
+!! hexahedra, several times the accuracy of their logical coordinates (`ho_find_tol`)
+REAL(r8), PRIVATE, PARAMETER :: rk_margin_proc = 1.d-8 !< Minimum overshoot of RK steps past faces shared with other domains,
+!! in the logical coordinates of the base mesh used to find the domain containing the new point
 !---Tracer state definitions
 INTEGER(i4), PRIVATE, PARAMETER :: TRACER_INIT = 99 !< Tracer is awaiting setup
 !---Error states
@@ -252,6 +297,8 @@ end subroutine set_timeout
 !! BDF method
 !! - (3) \ref tracing::oft_tracer_euler "EULER tracer", using an adaptive
 !! step size
+!! - (4) \ref tracing::oft_tracer_rk "RK tracer", using a Bogacki-Shampine 3(2)
+!! Runge-Kutta method with steps limited at cell boundaries
 !------------------------------------------------------------------------------
 subroutine create_tracer(tracer,type)
 class(oft_tracer), pointer, intent(out) :: tracer !< Tracer object
@@ -268,6 +315,8 @@ SELECT CASE(type)
     END SELECT
   CASE(3)
     ALLOCATE(oft_tracer_euler::tracer)
+  CASE(4)
+    ALLOCATE(oft_tracer_rk::tracer)
   CASE DEFAULT
     CALL oft_abort('Invalid tracer type.','set_tracer',__FILE__)
 END SELECT
@@ -955,6 +1004,7 @@ class(oft_tracer), pointer, intent(out) :: new !< Copy of object with same toler
 DEBUG_STACK_PUSH
 allocate(oft_tracer_euler::new)
 new%B=>self%B
+new%ml_mesh=>self%ml_mesh
 new%maxsteps=self%maxsteps
 new%tol=self%tol
 new%maxtrans=self%maxtrans
@@ -1207,6 +1257,7 @@ allocate(oft_tracer_lsode::new)
 IF(.NOT.tracer_lsode_cast(newtmp,new))CALL oft_abort('Failure to allocate LSODE.', &
   'tracer_lsode_copy',__FILE__)
 new%B=>self%B
+new%ml_mesh=>self%ml_mesh
 new%maxsteps=self%maxsteps
 new%tol=self%tol
 new%maxtrans=self%maxtrans
@@ -1389,4 +1440,507 @@ self%comm_load=.FALSE.
 NULLIFY(self%ydot)
 DEBUG_STACK_POP
 end subroutine tracer_lsode_delete
+!---------------------------------------------------------------------------------
+!> Cast a tracer object to a oft_tracer_rk
+!!
+!! The source tracer must be @ref oft_tracer_rk or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
+!---------------------------------------------------------------------------------
+FUNCTION tracer_rk_cast(self,source) RESULT(success)
+CLASS(oft_tracer_rk), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_tracer), TARGET, INTENT(in) :: source !< Source tracer to cast
+LOGICAL :: success !< Cast success flag
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_tracer_rk)
+    self=>source
+    success=.TRUE.
+  CLASS DEFAULT
+    NULLIFY(self)
+    success=.FALSE.
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION tracer_rk_cast
+!------------------------------------------------------------------------------
+!> Evaluate the tracing ODE right-hand side for the RK tracer using the field in the current cell
+!!
+!! The field representation of the tracer's current cell is used, and extrapolated for points
+!! outside of the cell. The tracer's logical position and logical coordinate gradients are
+!! updated.
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_eval_cell(self,t,y,ydot)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+REAL(r8), INTENT(in) :: t !< Time
+REAL(r8), INTENT(in) :: y(:) !< State vector [neq]
+REAL(r8), INTENT(out) :: ydot(:) !< ODE right-hand side [neq]
+DEBUG_STACK_PUSH
+CALL self%ml_mesh%mesh%phys2log(self%cell,y(1:3),self%f)
+CALL tracer_rk_rhs(self,t,y,ydot)
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_eval_cell
+!------------------------------------------------------------------------------
+!> Evaluate the tracing ODE right-hand side at the tracer's current cell and logical position
+!!
+!! Also updates the logical coordinate gradients. As for the other tracers, points slightly
+!! outside the mesh use the field extrapolated from the closest cell.
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_rhs(self,t,y,ydot)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+REAL(r8), INTENT(in) :: t !< Time
+REAL(r8), INTENT(in) :: y(:) !< State vector [neq]
+REAL(r8), INTENT(out) :: ydot(:) !< ODE right-hand side [neq]
+REAL(r8) :: v,B(3)
+DEBUG_STACK_PUSH
+CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,self%gop,v)
+CALL self%B%interp(self%cell,self%f,self%gop,B)
+IF(ASSOCIATED(self%ydot))THEN
+  CALL self%ydot(t,y,B,self%neq,ydot)
+ELSE
+  ydot=B
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_rhs
+!------------------------------------------------------------------------------
+!> Get the coordinates of a point relative to each face of a cell and their gradients
+!!
+!! The face coordinates are zero on the face and positive inside the cell: the barycentric
+!! coordinates for tetrahedra and \f$ u_k \f$ or \f$ 1-u_k \f$ for hexahedra. Faces are
+!! numbered as in the cell neighbor list `mesh%lcc`.
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_faces(mesh,f,gop,nf,fb,gb)
+CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh
+REAL(r8), INTENT(in) :: f(4) !< Logical position in cell
+REAL(r8), INTENT(in) :: gop(3,4) !< Gradients of logical coordinates
+INTEGER(i4), INTENT(out) :: nf !< Number of faces
+REAL(r8), INTENT(out) :: fb(6) !< Face coordinates [nf]
+REAL(r8), INTENT(out) :: gb(3,6) !< Gradients of face coordinates [3,nf]
+DEBUG_STACK_PUSH
+IF(mesh%type==3)THEN ! Hexahedra
+  nf=6
+  CALL hex_face_dist(f,fb,gop,gb)
+ELSE ! Tetrahedra
+  nf=4
+  fb(1:4)=f
+  gb(:,1:4)=gop
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_faces
+!------------------------------------------------------------------------------
+!> Estimate the time until a trajectory leaves a cell
+!!
+!! Each face coordinate (see \ref tracing::tracer_rk_faces "tracer_rk_faces") is extrapolated
+!! linearly, \f$ \lambda_i(t) = \lambda_i + t \nabla \lambda_i \cdot \dot{x} \f$, and the
+!! exit is where the first one reaches \f$ -\delta \f$, so that the point is just past the
+!! face. For faces shared with another domain (`proc_face`) \f$ \delta \f$ is replaced by
+!! `pmargin`. A point that is already past any other face with no neighboring cell (boundary of
+!! the mesh, or periodic face) is instead allowed to continue by \f$ 1.5 \f$ `offmesh_tol` per step,
+!! so that it is clearly off the mesh and the trace leaves the domain promptly.
+!------------------------------------------------------------------------------
+FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin,pmargin,proc_face) RESULT(texit)
+CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh containing cell
+INTEGER(i4), INTENT(in) :: cell !< Current cell
+REAL(r8), INTENT(in) :: f(4) !< Logical position in cell
+REAL(r8), INTENT(in) :: gop(3,4) !< Gradients of logical coordinates
+REAL(r8), INTENT(in) :: dx(3) !< Velocity in physical coordinates
+REAL(r8), INTENT(in) :: margin !< Distance past the face \f$ \delta \f$ in logical coordinates
+REAL(r8), INTENT(in) :: pmargin !< Distance past faces shared with other domains in logical coordinates
+LOGICAL, INTENT(in) :: proc_face(:) !< Is each face shared with another domain? [nf]
+REAL(r8) :: texit !< Estimated exit time (`HUGE` if not leaving)
+INTEGER(i4) :: i,nf
+REAL(r8) :: rate,dist,fb(6),gb(3,6)
+DEBUG_STACK_PUSH
+CALL tracer_rk_faces(mesh,f,gop,nf,fb,gb)
+texit=HUGE(1.d0)
+DO i=1,nf
+  rate=DOT_PRODUCT(gb(:,i),dx)
+  IF(rate>=0.d0)CYCLE
+  dist=fb(i)
+  IF(proc_face(i))THEN
+    dist=dist+pmargin-margin
+  ELSE IF(mesh%lcc(i,cell)==0)THEN ! Mesh boundary or periodic face
+    IF(dist<=0.d0)dist=1.5d0*offmesh_tol
+  END IF
+  texit=MIN(texit,(MAX(dist,0.d0)+margin)/(-rate))
+END DO
+DEBUG_STACK_POP
+END FUNCTION tracer_rk_texit
+!------------------------------------------------------------------------------
+!> Setup a RK tracer with a new starting point
+!!
+!! The right-hand side is evaluated at the starting point (first stage of the next step).
+!! On a new trace an initial step size is also computed following Hairer, Norsett and
+!! Wanner (Solving ODEs I, Sec. II.4), otherwise the step size from the previous step,
+!! possibly on another domain, is used.
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_setup(self,y,cell,init)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+REAL(r8), INTENT(in) :: y(:) !< New start point [3]
+INTEGER(i4), OPTIONAL, INTENT(in) :: cell !< Guess cell for use in \ref oft_mesh_type::mesh_findcell
+!! "mesh_findcell" (optional)
+LOGICAL, OPTIONAL, INTENT(in) :: init !< Flag indicating tracer is starting a new trace and all counts
+!! should be set to zero (optional)
+INTEGER(i4) :: cell0
+REAL(r8) :: d0,d1,d2,h0,f0(4),gop0(3,4)
+REAL(r8) :: y0(self%neq),sc(self%neq)
+DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(self%isend))THEN
+  ALLOCATE(self%y(self%neq),self%dy(self%neq),self%dyp(self%neq))
+  ALLOCATE(self%k(self%neq,4))
+  self%y=0.d0
+  self%dy=0.d0
+  self%dyp=0.d0
+  self%k=0.d0
+  !---
+  self%nisend=2
+  self%nrsend=self%neq+2
+  ALLOCATE(self%isend(self%nisend),self%rsend(self%nrsend))
+END IF
+IF(PRESENT(init))THEN
+  IF(init)THEN
+    self%t=0.d0
+    self%h=0.d0
+    self%dyp=0.d0
+    !---
+    self%ntrans=0
+    self%nsteps=0
+    self%status=TRACER_INIT
+    self%estatus=0
+  END IF
+END IF
+!---Find starting point and evaluate first stage
+y0=y ! Copy as `y` may be associated with `self%y`
+self%cell=0
+IF(PRESENT(cell))self%cell=cell
+self%y=y0
+CALL mesh_findcell(self%ml_mesh%mesh,self%cell,y0(1:3),self%f)
+IF(self%cell/=0)CALL tracer_rk_rhs(self,self%t,y0,self%dy)
+self%initialized=.TRUE.
+IF((self%cell==0).OR.(self%h>0.d0))THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
+!---Initial step size (Hairer, Norsett & Wanner, Solving ODEs I, Sec. II.4)
+cell0=self%cell; f0=self%f; gop0=self%gop
+sc=self%tol*(1.d0+ABS(y0))
+d0=SQRT(SUM((y0/sc)**2)/REAL(self%neq,r8))
+d1=SQRT(SUM((self%dy/sc)**2)/REAL(self%neq,r8))
+h0=rk_probe_step(d0,d1)
+CALL tracer_rk_eval_cell(self,self%t+h0,y0+h0*self%dy,self%k(:,2))
+d2=SQRT(SUM(((self%k(:,2)-self%dy)/sc)**2)/REAL(self%neq,r8))/h0
+self%h=rk_initial_step(h0,d1,d2)
+!---Restore location at the starting point
+self%cell=cell0; self%f=f0; self%gop=gop0
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_setup
+!------------------------------------------------------------------------------
+!> Create a bare copy of the RK tracer object
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_copy(self,new)
+CLASS(oft_tracer_rk), INTENT(in) :: self !< Tracer object
+CLASS(oft_tracer), POINTER, INTENT(out) :: new !< Copy of object with same tolerances and referenced interpolator
+DEBUG_STACK_PUSH
+ALLOCATE(oft_tracer_rk::new)
+new%B=>self%B
+new%ml_mesh=>self%ml_mesh
+new%maxsteps=self%maxsteps
+new%tol=self%tol
+new%maxtrans=self%maxtrans
+new%neq=self%neq
+IF(ASSOCIATED(self%ydot))new%ydot=>self%ydot
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_copy
+!------------------------------------------------------------------------------
+!> Save tracer information for transfer (no action needed, see \ref tracer_rk_send)
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_save(self)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+END SUBROUTINE tracer_rk_save
+!------------------------------------------------------------------------------
+!> Send tracer information to a new domain
+!!
+!! This subroutine transfers the number of steps, tracer position, time and step
+!! size, which is the full state of the integrator (the right-hand side is re-evaluated
+!! by \ref tracing::tracer_rk_setup "tracer_rk_setup" on the new domain). Data is packed into a single array
+!! for each real and integer data types and non-blocking MPI sends are created to
+!! transfer each array
+!------------------------------------------------------------------------------
+FUNCTION tracer_rk_send(self,proc) RESULT(sid)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+INTEGER(i4), INTENT(in) :: proc !< Processor ID to send tracer information to
+#ifdef OFT_MPI_F08
+TYPE(mpi_request) :: sid(2) !< MPI request IDs for transfer of real and integer data (2)
+#else
+INTEGER(i4) :: sid(2) !< MPI request IDs for transfer of real and integer data (2)
+#endif
+#ifdef HAVE_MPI
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+!---Pack info
+self%isend(1)=self%nsteps
+self%isend(2)=self%estatus
+self%rsend(1:self%neq)=self%y
+self%rsend(self%neq+1)=self%t
+self%rsend(self%neq+2)=self%h
+!---Set send flags
+sid=MPI_REQUEST_NULL
+!---Send to all other procs
+CALL MPI_ISEND(self%rsend,self%nrsend,OFT_MPI_R8,proc,self%tids(1),oft_env%COMM,sid(1),ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_rk_send',__FILE__)
+CALL MPI_ISEND(self%isend,self%nisend,OFT_MPI_I4,proc,self%tids(2),oft_env%COMM,sid(2),ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_rk_send',__FILE__)
+self%status=TRACER_SEND_ACTIVE
+DEBUG_STACK_POP
+#else
+sid=MPI_REQUEST_NULL
+CALL oft_abort("Send requested without MPI","tracer_rk_send",__FILE__)
+#endif
+END FUNCTION tracer_rk_send
+!------------------------------------------------------------------------------
+!> Recieve tracer information from a different domain
+!!
+!! This subroutine sets up non-blocking MPI recieve requests and unpacks the
+!! resulting data sent by \ref tracing::tracer_rk_send "tracer_rk_send"
+!------------------------------------------------------------------------------
+FUNCTION tracer_rk_recv(self,proc) RESULT(rid)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+INTEGER(i4), INTENT(in) :: proc !< Processor ID to receive tracer information from
+#ifdef OFT_MPI_F08
+TYPE(mpi_request) :: rid(2) !< MPI request IDs for transfer of real and integer data (2)
+#else
+INTEGER(i4) :: rid(2) !< MPI request IDs for transfer of real and integer data (2)
+#endif
+#ifdef HAVE_MPI
+INTEGER(i4) :: ierr
+LOGICAL :: testr,testi
+DEBUG_STACK_PUSH
+IF(oft_mpi_check_reqs(2,self%rids))THEN
+  !---Setup recv
+  CALL MPI_IRECV(self%rsend,self%nrsend,OFT_MPI_R8,proc,self%tids(1),oft_env%COMM,self%rids(1),ierr)
+  IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','tracer_rk_recv',__FILE__)
+  CALL MPI_IRECV(self%isend,self%nisend,OFT_MPI_I4,proc,self%tids(2),oft_env%COMM,self%rids(2),ierr)
+  IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','tracer_rk_recv',__FILE__)
+  self%status=TRACER_RECV_ACTIVE
+  rid=self%rids
+ELSE
+  !---Test for completion of recv
+  CALL MPI_TEST(self%rids(1),testr,MPI_STATUS_IGNORE,ierr)
+  CALL MPI_TEST(self%rids(2),testi,MPI_STATUS_IGNORE,ierr)
+  rid=self%rids
+  !---Set flag and restore if complete
+  IF(testr.AND.testi)THEN
+    self%nsteps=self%isend(1)
+    self%estatus=self%isend(2)
+    self%y=self%rsend(1:self%neq)
+    self%t=self%rsend(self%neq+1)
+    self%h=self%rsend(self%neq+2)
+    rid=MPI_REQUEST_NULL
+    self%rids=MPI_REQUEST_NULL
+  END IF
+END IF
+DEBUG_STACK_POP
+#else
+rid=MPI_REQUEST_NULL
+CALL oft_abort("Receive requested without MPI","tracer_rk_recv",__FILE__)
+#endif
+END FUNCTION tracer_rk_recv
+!------------------------------------------------------------------------------
+!> Advance the tracer by one accepted step of the Bogacki-Shampine 3(2) method
+!!
+!! All stages use the field representation of the cell containing the start of the step
+!! (extrapolated past its faces if necessary), so each step integrates a smooth right-hand
+!! side and the error estimate is not polluted by jumps in the field between cells.
+!!
+!! To keep the part of a step integrated with the field of the wrong cell small, steps are
+!! limited to end just past (by \f$ \delta \f$ in logical coordinates) the point where a
+!! straight-line extrapolation of the current direction leaves the current cell (see
+!! \ref tracing::tracer_rk_texit "tracer_rk_texit"), so that the next step starts in the
+!! neighboring cell. \f$ \delta = 10^{-9} \f$ for straight sided tetrahedra and
+!! \f$ 10^{-5} \f$ for other cells, several times the accuracy of their logical coordinates.
+!! Truncated steps do not reduce the nominal step size \f$ h \f$.
+!!
+!! When the end of the step lies in a different cell the right-hand side is re-evaluated
+!! there, which is also the first stage of the next step. The error from the part of the step
+!! past the faces of the starting cell is estimated as the time spent past the faces times
+!! the jump in the right-hand side. If this exceeds the tolerance, typically because the
+!! straight-line estimate of the exit was poor and the field is discontinuous between cells,
+!! the step is retried with the exit time re-estimated from the start and end of the step.
+!!
+!! The field across a face shared with another domain is not available, so a step that
+!! crosses such a face is retried in the same way until it ends just past the face (by at most
+!! twice its overshoot). This overshoot is the larger of \f$ \delta \f$ and `rk_margin_proc` in the
+!! logical coordinates of the base mesh, which is used to find the domain containing the new
+!! point. The tracer then stops (`cell=0`) so that it is transferred to that domain.
+!!
+!! A step that is rejected by the error test is retried with a smaller step size. If no
+!! acceptable step can be found the tracer is stopped with an error.
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_step(self)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+INTEGER(i4) :: i,nf,cell0,cellnew,nfail
+REAL(r8) :: h,err,errover,facmax,texit,margin,pmargin,fmargin,fover,fproc,tover,tcross,fmin,fmax
+REAL(r8) :: f0(4),gop0(3,4),fnew(4),fb0(6),fb1(6),gb(3,6)
+REAL(r8) :: y0(self%neq),dy0(self%neq),dynew(self%neq),ynew(self%neq),ytmp(self%neq),sc(self%neq)
+LOGICAL :: clipped,leaving
+LOGICAL :: proc_face(6)
+CLASS(oft_mesh), POINTER :: mesh
+DEBUG_STACK_PUSH
+mesh=>self%ml_mesh%mesh
+self%nsteps=self%nsteps+1
+IF(self%cell==0)THEN
+  self%estatus=TRACER_ERROR_FAIL
+  DEBUG_STACK_POP
+  RETURN
+END IF
+self%dyp=self%dy
+!---Save state at the start of the step
+cell0=self%cell; f0=self%f; gop0=self%gop
+y0=self%y; dy0=self%dy
+facmax=5.d0
+nfail=0
+leaving=.FALSE.
+IF(cell_is_curved(mesh,cell0))THEN
+  margin=rk_margin_ho
+ELSE
+  margin=rk_margin_linear
+END IF
+!---Overshoot past faces shared with other domains, scaled so the new point is clearly in one
+!---cell of the base mesh used to find its domain (see tracing_line)
+pmargin=margin
+IF(self%ml_mesh%nbase<self%ml_mesh%mgdim)pmargin=MAX(margin,rk_margin_proc)* &
+  MAX(1.d0,self%ml_mesh%meshes(self%ml_mesh%nbase)%hrms/mesh%hrms)
+CALL tracer_rk_faces(mesh,f0,gop0,nf,fb0,gb)
+!---Faces shared with another domain. Periodic faces are also not on the global boundary, and are
+!---not distinguished from shared faces here, so on periodic meshes all faces without a neighbor
+!---are treated as the mesh boundary (the trace stops at periodic faces and shared faces are
+!---crossed as when leaving the mesh).
+proc_face=.FALSE.
+IF(mesh%periodic%nper==0)THEN
+  DO i=1,nf
+    IF(mesh%lcc(i,cell0)==0)proc_face(i)=(.NOT.mesh%global%gbf(ABS(mesh%lcf(i,cell0))))
+  END DO
+END IF
+texit=tracer_rk_texit(mesh,cell0,f0,gop0,dy0(1:3),margin,pmargin,proc_face(1:nf))
+DO
+  !---End the step just past the exit of the current cell
+  h=MIN(self%h,texit)
+  clipped=(texit<self%h)
+  !---Stages (first same as last), all using the field in the starting cell
+  self%k(:,1)=dy0
+  CALL tracer_rk_eval_cell(self,self%t+bs32_c2*h,y0+(bs32_c2*h)*self%k(:,1),self%k(:,2))
+  CALL tracer_rk_eval_cell(self,self%t+bs32_c3*h,y0+(bs32_c3*h)*self%k(:,2),self%k(:,3))
+  ynew=y0+h*(bs32_b(1)*self%k(:,1)+bs32_b(2)*self%k(:,2)+bs32_b(3)*self%k(:,3))
+  CALL tracer_rk_eval_cell(self,self%t+h,ynew,self%k(:,4))
+  !---Error test
+  ytmp=h*(bs32_e(1)*self%k(:,1)+bs32_e(2)*self%k(:,2)+bs32_e(3)*self%k(:,3)+bs32_e(4)*self%k(:,4))
+  sc=self%tol*(1.d0+MAX(ABS(y0),ABS(ynew)))
+  err=SQRT(SUM((ytmp/sc)**2)/REAL(self%neq,r8))
+  IF(err<=1.d0)THEN
+    !---Find how far the step went past the faces of the starting cell
+    CALL tracer_rk_faces(mesh,self%f,self%gop,nf,fb1,gb)
+    tover=0.d0
+    tcross=h
+    fover=0.d0
+    fproc=0.d0
+    cellnew=cell0
+    DO i=1,nf
+      IF((fb1(i)>=0.d0).OR.(fb0(i)<=fb1(i)))CYCLE
+      IF((-fb1(i)>fover).AND.(mesh%lcc(i,cell0)/=0))cellnew=mesh%lcc(i,cell0)
+      fover=MAX(fover,-fb1(i))
+      fmargin=margin
+      IF(proc_face(i))THEN
+        fmargin=pmargin
+        fproc=MAX(fproc,-fb1(i)/fmargin)
+      END IF
+      tover=MAX(tover,h*(-fb1(i))/(fb0(i)-fb1(i)))
+      tcross=MIN(tcross,h*(MAX(fb0(i),0.d0)+fmargin)/(fb0(i)-fb1(i)))
+    END DO
+    !---Step left the local domain: the field there is not available to check the error from the
+    !---part of the step past the face, so retry until the end point is just past the face
+    leaving=(fproc>0.d0)
+    IF(leaving)THEN
+      IF((fproc<=2.d0).OR.(tcross>=h))EXIT
+    ELSE
+      !---Locate the new point (starting from the neighbor across the face crossed furthest)
+      CALL mesh_findcell(mesh,cellnew,ynew(1:3),fnew)
+      IF((cellnew==cell0).OR.(cellnew==0))EXIT
+      IF(mesh%in_cell(fnew,margin)/=0)EXIT ! Off mesh
+      !---Error from integrating the part of the step past the faces of the starting cell
+      !---with its field, estimated from the jump in the field at the new point
+      self%cell=cellnew; self%f=fnew
+      CALL tracer_rk_rhs(self,self%t+h,ynew,dynew)
+      errover=tover*SQRT(SUM(((dynew-self%k(:,4))/sc)**2)/REAL(self%neq,r8))
+      IF((errover<=1.d0).OR.(fover<=2.d0*margin).OR.(tcross>=h))EXIT
+    END IF
+    !---Retry with exit time estimated from the start and end of the step
+    texit=tcross
+  ELSE
+    !---Reject step
+    self%h=h*rk_step_factor(err,1.d0)
+    facmax=1.d0
+  END IF
+  !---Restore state at the start of the step
+  nfail=nfail+1
+  self%cell=cell0; self%f=f0; self%gop=gop0
+  IF((self%t+MIN(self%h,texit)==self%t).OR.(nfail>50))THEN
+    self%cell=0
+    self%estatus=TRACER_ERROR_FAIL
+    DEBUG_STACK_POP
+    RETURN
+  END IF
+END DO
+!---Accept step
+self%y=ynew
+self%t=self%t+h
+IF(leaving)THEN ! Stop to transfer the tracer to the domain containing the new point
+  self%dy=self%k(:,4)
+  self%cell=0
+ELSE IF(cellnew==cell0)THEN ! Cell, logical position and gradients are already at the new point
+  self%dy=self%k(:,4)
+ELSE IF(cellnew==0)THEN
+  self%cell=0
+ELSE IF(self%cell==cellnew)THEN ! Already evaluated in the new cell
+  self%dy=dynew
+ELSE ! New point is off the mesh, use field from the closest cell
+  self%cell=cellnew
+  self%f=fnew
+  CALL tracer_rk_rhs(self,self%t,self%y,self%dy)
+END IF
+IF(clipped)THEN ! Truncated steps should not reduce the nominal step size
+  self%h=MAX(self%h,h*rk_step_factor(err,facmax))
+ELSE
+  self%h=h*rk_step_factor(err,facmax)
+END IF
+!---Check for exit from mesh
+IF(self%cell/=0)THEN
+  IF(self%ml_mesh%mesh%type==3)THEN
+    fmin=MINVAL(self%f(1:3)); fmax=MAXVAL(self%f(1:3))
+  ELSE
+    fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
+  END IF
+  IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
+END IF
+IF(ANY(ABS(self%y(1:3))>1.d20))THEN
+  self%cell=0
+  self%estatus=TRACER_ERROR_FAIL
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_step
+!------------------------------------------------------------------------------
+!> Delete internal storage and reset counters
+!------------------------------------------------------------------------------
+SUBROUTINE tracer_rk_delete(self)
+CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%isend))THEN
+  DEALLOCATE(self%y,self%dy,self%dyp,self%k)
+  DEALLOCATE(self%isend,self%rsend)
+END IF
+self%nsteps=0
+self%ntrans=0
+self%t=0.d0
+self%h=0.d0
+self%initialized=.FALSE.
+NULLIFY(self%ydot)
+DEBUG_STACK_POP
+END SUBROUTINE tracer_rk_delete
 end module tracing

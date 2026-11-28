@@ -50,8 +50,8 @@ jobs:
             os: ubuntu-24.04,
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
-            build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_strumpack=1",
+            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1 --build_strumpack=1 --strumpack_mpi=1"
           }
         - {
             name: "Ubuntu 24.04 Intel 2025.2",
@@ -190,7 +190,7 @@ jobs:
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
-      timeout-minutes: 30
+      timeout-minutes: 45
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
@@ -199,7 +199,7 @@ jobs:
     - name: Build external (MPICH+OpenMP)
       if: startsWith(matrix.parallel, 'mpich')
       shell: bash
-      timeout-minutes: 60
+      timeout-minutes: 90
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
