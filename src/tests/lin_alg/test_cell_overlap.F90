@@ -20,6 +20,8 @@
 !! - Face <= edge <= point and layer k <= k+1 (as DoF sets), and with no overlap and
 !!   one block the union is exactly the local rows
 !! - A larger base mesh bound (`base_layers`) gives the same result
+!! - Splitting the blocks by field group (field based Schwarz blocks) keeps the DoFs
+!!   (and assigned DoFs) of each block in the group of their field, in order
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -32,7 +34,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_stitching, ONLY: oft_global_stitch
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_overlap_dofs, overlap_dofs_delete, &
-  OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE
+  overlap_dofs_split_fields, OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
@@ -321,11 +323,91 @@ DO b=1,nb
   CALL check('base_layers>layers unchanged '//TRIM(tag), &
     same8([(dofs%gdof(dofs%blk(b)%v(i)),i=1,dofs%blk(b)%n)],dofs%blk(b)%n,res(b,1,1)%v,res(b,1,1)%n))
 END DO
+!---Split by field group (field based Schwarz blocks)
+CALL check_split(dofs,TRIM(tag))
 CALL overlap_dofs_delete(dofs)
 CALL ovl%delete
 CALL check('delete',(.NOT.ALLOCATED(ovl%cpart)).AND.(.NOT.ALLOCATED(ovl%dcolor)))
 DEALLOCATE(res,dcolor)
 END SUBROUTINE run_cases
+! Split of the blocks of a build by field group against the field of each DoF in the
+! reference cell table: composite fields in groups (1,2,1), the single field in group 2 of
+! 2 (group 1 empty)
+SUBROUTINE check_split(dofs,tag)
+TYPE(oft_overlap_dofs), INTENT(inout) :: dofs
+CHARACTER(LEN=*), INTENT(in) :: tag
+INTEGER(i4), PARAMETER :: ngroups=2
+INTEGER(i4) :: b,g,i,j,k,f,nb0,nf,ioff
+INTEGER(i4), ALLOCATABLE :: fgroup(:),jfield(:),dfield(:),ref(:)
+INTEGER(i8), ALLOCATABLE :: un0(:)
+TYPE(set8), ALLOCATABLE :: blk0(:),asg0(:)
+LOGICAL :: ok
+IF(mat%ni==1)THEN
+  fgroup=[2]
+ELSE
+  fgroup=[1,2,1]
+END IF
+!---Field of each entry of a cell's DoF list (ncdofs order, field by field)
+ALLOCATE(jfield(nce_tot))
+ioff=0
+DO f=1,mat%ni
+  IF(mat%ni==1)THEN
+    nf=ML_lag%current_level%nce
+  ELSE
+    nf=ML_vlag%current_level%fields(f)%fe%nce
+  END IF
+  jfield(ioff+1:ioff+nf)=f
+  ioff=ioff+nf
+END DO
+!---Field of each union DoF, from every cell holding it
+ALLOCATE(dfield(MAX(1,dofs%n)))
+dfield=0
+ok=.TRUE.
+DO i=1,ncg
+  DO j=1,nce_tot
+    k=INT(search_array(gdofs(j,i),dofs%gdof,INT(dofs%n,i8)),i4)
+    IF(k==0)CYCLE
+    IF(dfield(k)/=0.AND.dfield(k)/=jfield(j))ok=.FALSE.
+    dfield(k)=jfield(j)
+  END DO
+END DO
+IF(dofs%n>0)ok=ok.AND.ALL(dfield(1:dofs%n)>0)
+CALL check('split: field of union DoFs '//tag,ok)
+!---Copy of the unsplit sets (union positions)
+nb0=dofs%nblocks
+ALLOCATE(blk0(nb0),asg0(nb0),un0(dofs%n))
+un0=dofs%gdof
+DO b=1,nb0
+  blk0(b)%n=dofs%blk(b)%n
+  blk0(b)%v=INT(dofs%blk(b)%v(1:dofs%blk(b)%n),i8)
+  asg0(b)%n=dofs%asg(b)%n
+  asg0(b)%v=INT(dofs%asg(b)%v(1:dofs%asg(b)%n),i8)
+END DO
+CALL overlap_dofs_split_fields(dofs,mat%i_map,ngroups,fgroup)
+CALL check('split: block count '//tag,dofs%nblocks==nb0*ngroups.AND.SIZE(dofs%blk)==nb0*ngroups &
+  .AND.SIZE(dofs%asg)==nb0*ngroups)
+CALL check('split: union unchanged '//tag,same8(dofs%gdof,dofs%n,un0,SIZE(un0)))
+!---Block (b,g): DoFs of block b in group g, in the same order (same for assigned DoFs)
+ok=.TRUE.
+DO b=1,nb0
+  DO g=1,ngroups
+    ref=PACK(INT(blk0(b)%v,i4),fgroup(dfield(INT(blk0(b)%v,i4)))==g)
+    IF(.NOT.same4(dofs%blk((b-1)*ngroups+g),ref))ok=.FALSE.
+    ref=PACK(INT(asg0(b)%v,i4),fgroup(dfield(INT(asg0(b)%v,i4)))==g)
+    IF(.NOT.same4(dofs%asg((b-1)*ngroups+g),ref))ok=.FALSE.
+  END DO
+END DO
+CALL check('split: blocks and assigned DoFs by group '//tag,ok)
+DEALLOCATE(fgroup,jfield,dfield,un0,blk0,asg0)
+END SUBROUTINE check_split
+! Integer set equal to an array (same order)
+FUNCTION same4(a,b) RESULT(eq)
+TYPE(oft_1d_int), INTENT(in) :: a
+INTEGER(i4), INTENT(in) :: b(:)
+LOGICAL :: eq
+eq=(a%n==SIZE(b))
+IF(eq.AND.a%n>0)eq=ALL(a%v(1:a%n)==b)
+END FUNCTION same4
 ! Exact checks of one build against the brute force reference
 SUBROUTINE check_build(ovl,dofs,layers,adj,tag)
 TYPE(oft_fem_cell_overlap), INTENT(in) :: ovl

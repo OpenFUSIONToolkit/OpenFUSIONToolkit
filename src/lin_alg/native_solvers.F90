@@ -37,8 +37,8 @@ USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_
   OFT_SCATTER_INSERT, OFT_SCATTER_ADD, oft_index_set, index_set_create, index_set_grow, index_set_delete
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
-  OFT_ACCESS_READWRITE, oft_overlap_dofs, overlap_dofs_delete, OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE, &
-  OFT_CELL_ADJ_FACE
+  OFT_ACCESS_READWRITE, oft_overlap_dofs, overlap_dofs_delete, overlap_dofs_split_fields, &
+  OFT_CELL_ADJ_POINT, OFT_CELL_ADJ_EDGE, OFT_CELL_ADJ_FACE
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
@@ -262,7 +262,9 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   LOGICAL :: boundary_overlap = .FALSE. !< Use Additive-Schwarz with boundary elements
   LOGICAL :: loverlap = .FALSE. !< Use Additive-Schwarz with interior boundaries
   INTEGER(i4) :: nlocal = 1 !< Number of subdomains on each processor
-  INTEGER(i4) :: slice_group(10) = -1 !< Slice groupings
+  !> Group of each field for field based blocks (`nlocal<-1`), in `1..-nlocal` [ni]
+  !! (unallocated if not given; set to one group per field for `nlocal=-1` in graph mode)
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: slice_group
   INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL()
   TYPE(oft_native_submatrix), pointer, dimension(:) :: alocals => NULL() !< Local matrix block
   TYPE(oft_seam), pointer, dimension(:) :: local_stitch => NULL() !< Local vectors
@@ -316,7 +318,9 @@ END TYPE oft_bjprecond
 !!
 !! With `cell_mode` the blocks are instead grown by `overlap` layers of mesh cells
 !! (adjacent by `adjacency`) by the cell overlap builder attached to the matrix
-!! (`oft_matrix::cell_ovl`), which also sets the number of blocks per process. Blocks
+!! (`oft_matrix::cell_ovl`), which also sets the number of blocks per process
+!! (`nlocal>0` is replaced by it; with `nlocal<0` each of its blocks is split by field
+!! group as in graph mode, see @ref schwarz_cell_setup). Blocks
 !! may cross process boundaries for any number of blocks; their union on each process
 !! is one cross-process subdomain (@ref oft_native_overlap_mod::native_overlap_setup_dofs
 !! "native_overlap_setup_dofs") and each block is a submatrix of it (see
@@ -324,14 +328,14 @@ END TYPE oft_bjprecond
 !! `parts(i)%v` holds the (sorted) subdomain rows of block `i`, `alocals(i)` its
 !! submatrix of `ovl%amat`, `bplans(i)` its plan between the subdomain and block
 !! vectors (`ulocs(i)`, `glocs(i)`), `solvers(i)` its sub-solver and `nlocal` the
-!! number of blocks.
+!! number of blocks (builder blocks times field groups).
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_bjprecond) :: oft_schwarz_precond
   INTEGER(i4) :: overlap = 1 !< Number of overlap layers
   LOGICAL :: cell_mode = .FALSE. !< Grow blocks by layers of cells (requires `A%cell_ovl`) instead of the matrix graph
   INTEGER(i4) :: adjacency = OFT_CELL_ADJ_POINT !< Cell adjacency used to grow blocks in cell mode (`OFT_CELL_ADJ_*`)
   INTEGER(i4) :: base_layers = -1 !< Base mesh layers bounding the halo in cell mode (<0: builder default)
-  INTEGER(i4) :: nlocal_req = 1 !< Number of local blocks requested in graph mode (setup may replace `nlocal`; restored when rebuilding for a new pattern)
+  INTEGER(i4) :: nlocal_req = 1 !< Number of local blocks (or field groups, <0) requested (setup replaces `nlocal`; restored when rebuilding for a new pattern)
   TYPE(oft_native_overlap), POINTER :: ovl => NULL() !< Subdomain across processes (`nlocal=1`, `overlap>0`; union of blocks in cell mode)
   TYPE(oft_seam), POINTER :: sub_seam => NULL() !< Seam of subdomain vectors (no stitching)
   TYPE(oft_native_vector), POINTER :: usub => NULL() !< Subdomain solution vector (initial guess in cell mode)
@@ -2110,8 +2114,9 @@ IF(.NOT.self%initialized)THEN
   CALL solver_setup(self)
   IF(self%nlocal==-1)THEN
     self%nlocal=-self%A%ni
-    self%slice_group(1:self%A%ni)=(/(i,i=1,self%A%ni)/)
+    self%slice_group=(/(i,i=1,self%A%ni)/)
   END IF
+  IF(self%nlocal<-1)CALL check_field_groups(self%slice_group,self%A%ni,-self%nlocal,'bjprecond_apply')
   IF(ASSOCIATED(A_native%color))THEN
     ncolors=MAXVAL(A_native%color)
     IF((self%nlocal<1).AND.(ncolors>1))THEN
@@ -2157,7 +2162,7 @@ IF(.NOT.self%initialized)THEN
         !---Use slice partitioning
         self%nlocal=ABS(self%nlocal)
         IF(color_avail)THEN
-          ngroups=MAXVAL(self%slice_group)
+          ngroups=MAXVAL(self%slice_group(1:self%A%ni))
           j=0
           DO i=1,self%A%ni
             DO k=1,self%A%i_map(i)%n
@@ -2211,7 +2216,7 @@ IF(.NOT.self%initialized)THEN
         !---Use slice partitioning
         self%nlocal=ABS(self%nlocal)
         IF(color_avail)THEN
-          ngroups=MAXVAL(self%slice_group)
+          ngroups=MAXVAL(self%slice_group(1:self%A%ni))
           DO i=1,self%A%ni
             DO k=1,self%A%i_map(i)%nslice
               j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
@@ -2257,7 +2262,12 @@ IF(.NOT.self%initialized)THEN
       !---Grow each block along the matrix graph, within rows of the same slice group
       ALLOCATE(sflag(A_native%nr),allowed(A_native%nr))
       sflag=-1
+      IF(ALLOCATED(self%slice_group))THEN
+        IF(SIZE(self%slice_group)<self%A%ni)CALL oft_abort('A field group ("groups") must be given '// &
+          'for every field','bjprecond_apply',__FILE__)
+      END IF
       DO i=1,self%A%ni
+        IF(.NOT.ALLOCATED(self%slice_group))EXIT ! No field groups: one group
         IF(self%boundary_overlap)THEN
           DO k=1,self%A%i_map(i)%n
             sflag(self%A%i_map(i)%offset+k)=self%slice_group(i)
@@ -2542,11 +2552,7 @@ IF(self%nlocal<-1)THEN
     CALL xml_read_content(current_node,read_tmp,iostat=ierr)
     IF(ierr/=0)CALL oft_xml_abort("Error reading `groups` node","bjprecond_setup_xml",__FILE__)
     IF(ASSOCIATED(read_tmp))THEN
-      IF(SIZE(read_tmp)>10)THEN
-        CALL oft_abort("Too many slice groups specified","bjprecond_setup_xml",__FILE__)
-      ELSE
-        self%slice_group=read_tmp(1)
-      END IF
+      self%slice_group=read_tmp
       DEALLOCATE(read_tmp)
     END IF
   END IF
@@ -2707,6 +2713,22 @@ CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 END SUBROUTINE schwarz_apply
 !------------------------------------------------------------------------------
+!> Check the field groups of field based blocks (`nlocal<-1`): every one of the `ni`
+!! fields must be given a group in `1..ngroups` (abort otherwise)
+!------------------------------------------------------------------------------
+SUBROUTINE check_field_groups(groups,ni,ngroups,caller)
+INTEGER(i4), ALLOCATABLE, INTENT(in) :: groups(:) !< Group of each field (`slice_group`)
+INTEGER(i4), INTENT(in) :: ni !< Number of fields (matrix row blocks)
+INTEGER(i4), INTENT(in) :: ngroups !< Number of groups (`-nlocal`)
+CHARACTER(LEN=*), INTENT(in) :: caller !< Calling routine (for error messages)
+IF(.NOT.ALLOCATED(groups))CALL oft_abort('Field groups ("groups") required for nlocal<-1', &
+  caller,__FILE__)
+IF(SIZE(groups)<ni)CALL oft_abort('A field group ("groups") must be given for every field', &
+  caller,__FILE__)
+IF(ANY(groups(1:ni)<1).OR.ANY(groups(1:ni)>ngroups))CALL oft_abort('Field groups ("groups") '// &
+  'must lie in 1..-nlocal',caller,__FILE__)
+END SUBROUTINE check_field_groups
+!------------------------------------------------------------------------------
 !> Set up the blocks of the Schwarz preconditioner in cell mode (collective)
 !!
 !! The cell overlap builder attached to the matrix (`A%cell_ovl`) gives the DoFs of
@@ -2721,13 +2743,24 @@ END SUBROUTINE schwarz_apply
 !! combination the partition of unity weights count the blocks containing each DoF
 !! over all processes (@ref oft_native_overlap_mod::native_overlap_pu_setup
 !! "native_overlap_pu_setup").
+!!
+!! Field based blocks: with `nlocal=-1` (one group per field) or `nlocal<-1` (field
+!! `f` in group `slice_group(f)`, groups `1..-nlocal`; without groups, the builder's
+!! default `field_groups`, which must have `-nlocal` groups) each block of the builder is
+!! split by field group (@ref oft_la_base::overlap_dofs_split_fields
+!! "overlap_dofs_split_fields"), giving `nb*ngroups` blocks ordered by builder block,
+!! then group. The cells, and so the subdomain, are those of the builder blocks and
+!! shared by all groups; each DoF and each assigned DoF is in exactly one group, so the
+!! restricted write-back and partition of unity apply per split block unchanged.
+!! Coupling between fields of different groups within a block is dropped.
 !------------------------------------------------------------------------------
 SUBROUTINE schwarz_cell_setup(self,A_native,u)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
 CLASS(oft_native_matrix), POINTER, INTENT(in) :: A_native !< Matrix (`self%A` as native matrix)
 CLASS(oft_vector), INTENT(inout) :: u !< Vector of the matrix row space
-INTEGER(i4) :: i,j,nb,n
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,basg
+INTEGER(i4) :: i,j,nb,n,ngroups
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,basg,fgroup
+CHARACTER(LEN=80) :: stmp
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt,mult
 TYPE(oft_native_vector) :: uskip
 CLASS(oft_solver), POINTER :: pretmp
@@ -2738,22 +2771,52 @@ IF(.NOT.ASSOCIATED(self%A%cell_ovl))CALL oft_abort('Cell mode requires a cell ov
   'attached to the matrix ("cell_ovl")','schwarz_cell_setup',__FILE__)
 IF(self%boundary_overlap)CALL oft_abort('"boverlap" is not supported in cell mode', &
   'schwarz_cell_setup',__FILE__)
-IF(self%nlocal<0)CALL oft_abort('Field based blocks (nlocal<0) are not supported in cell mode: '// &
-  'the cell overlap builder defines the blocks','schwarz_cell_setup',__FILE__)
 IF((self%adjacency<OFT_CELL_ADJ_POINT).OR.(self%adjacency>OFT_CELL_ADJ_FACE))CALL oft_abort( &
   'Invalid cell adjacency','schwarz_cell_setup',__FILE__)
+!---Field groups (nlocal<0): one per field (-1) or from `slice_group` (groups 1..-nlocal)
+ALLOCATE(fgroup(self%A%ni))
+IF(self%nlocal==-1)THEN
+  ngroups=self%A%ni
+  fgroup=[(i,i=1,self%A%ni)]
+ELSE IF(self%nlocal<-1)THEN
+  ngroups=-self%nlocal
+  IF((.NOT.ALLOCATED(self%slice_group)).AND.ALLOCATED(self%A%cell_ovl%field_groups))THEN
+    !---No groups given: default groups of the builder (set by its owner)
+    IF(SIZE(self%A%cell_ovl%field_groups)/=self%A%ni)CALL oft_abort('Default field groups '// &
+      'do not match the matrix fields','schwarz_cell_setup',__FILE__)
+    fgroup=self%A%cell_ovl%field_groups
+    IF(MAXVAL(fgroup)/=ngroups)THEN
+      WRITE(stmp,'(A,I0,A,I0,A)')'Default field groups have ',MAXVAL(fgroup),' groups: use nlocal=-', &
+        MAXVAL(fgroup),' or give "groups"'
+      CALL oft_abort(TRIM(stmp),'schwarz_cell_setup',__FILE__)
+    END IF
+  ELSE
+    CALL check_field_groups(self%slice_group,self%A%ni,ngroups,'schwarz_cell_setup')
+    fgroup=self%slice_group(1:self%A%ni)
+  END IF
+ELSE
+  ngroups=1
+  fgroup=1
+END IF
 CALL solver_setup(self)
-!---Number of blocks is set by the builder
+!---Number of blocks is set by the builder (times the number of field groups)
 nb=self%A%cell_ovl%nblocks()
 IF(nb<1)CALL oft_abort('Cell overlap builder has no blocks','schwarz_cell_setup',__FILE__)
 IF(oft_env%head_proc.AND.(self%nlocal>1).AND.(self%nlocal/=nb))WRITE(*,'(A,X,I4)') &
   ' Updating number of local parts to match cell overlap blocks',nb
-self%nlocal=nb
 !---Block DoF sets and their union as one subdomain across processes
 ALLOCATE(self%cdofs)
 CALL self%A%cell_ovl%build(self%A,u,self%overlap,self%adjacency,self%base_layers,self%cdofs)
 IF(self%cdofs%nblocks/=nb)CALL oft_abort('Block count mismatch with cell overlap builder', &
   'schwarz_cell_setup',__FILE__)
+IF(ngroups>1)THEN
+  CALL overlap_dofs_split_fields(self%cdofs,self%A%i_map,ngroups,fgroup)
+  nb=nb*ngroups
+  IF(self%cdofs%nblocks/=nb)CALL oft_abort('Block count mismatch after field split', &
+    'schwarz_cell_setup',__FILE__)
+END IF
+DEALLOCATE(fgroup)
+self%nlocal=nb
 ALLOCATE(self%ovl)
 CALL native_overlap_setup_dofs(self%ovl,A_native,u,self%cdofs%n,self%cdofs%gdof,self%cdofs%odof)
 IF(self%ovl%n/=self%cdofs%n)CALL oft_abort('Subdomain size mismatch','schwarz_cell_setup',__FILE__)
@@ -2923,9 +2986,9 @@ END SUBROUTINE schwarz_cell_apply
 !! As @ref bjprecond_update (numeric update on next application), except that a new
 !! matrix pattern (`new_pattern=.TRUE.`) frees the subdomains and blocks built from the
 !! old one (their gather plans and submatrix extractions refer to the old pattern), which
-!! are rebuilt on the next application: the blocks and subdomain in cell mode, and in
-!! graph mode the subdomain of each process or the blocks within each process (with the
-!! number of blocks originally requested).
+!! are rebuilt on the next application (with the number of blocks originally requested,
+!! including field groups): the blocks and subdomain in cell mode, and in graph mode the
+!! subdomain of each process or the blocks within each process.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE schwarz_update(self,new_pattern)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
@@ -2936,10 +2999,11 @@ DEBUG_STACK_PUSH
 rebuild=.FALSE.
 IF(PRESENT(new_pattern))rebuild=new_pattern
 !---With a new pattern, subdomains and blocks built from the old one are rebuilt on the
-!   next application (cell mode: blocks and subdomain; graph mode: the subdomain across
-!   processes or the blocks within each process, with the requested number of blocks)
+!   next application, with the requested number of blocks or field groups (cell mode:
+!   blocks and subdomain; graph mode: the subdomain across processes or the blocks within
+!   each process)
 IF(rebuild.AND.self%cell_mode.AND.ASSOCIATED(self%cdofs))THEN
-  CALL schwarz_delete(self)
+  CALL schwarz_delete(self) ! Keeps requested field groups (a positive count is replaced by the builder's)
 ELSE IF(rebuild.AND.(.NOT.self%cell_mode).AND.self%initialized)THEN
   nl=self%nlocal_req
   CALL schwarz_delete(self)
@@ -3071,11 +3135,18 @@ DEBUG_STACK_POP
 END SUBROUTINE schwarz_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy Schwarz preconditioner and deallocate all internal storage
+!!
+!! In cell mode requested field groups (`nlocal<0`) are kept, so that the
+!! preconditioner can be set up again with the same blocks; otherwise `nlocal` is
+!! reset as for @ref bjprecond_delete.
 !------------------------------------------------------------------------------
 SUBROUTINE schwarz_delete(self,propogate)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
 LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL :: keep_groups
 DEBUG_STACK_PUSH
+!---Cell mode setup replaces `nlocal` by the number of blocks: keep requested field groups
+keep_groups=(self%cell_mode.AND.self%initialized.AND.(self%nlocal_req<0))
 !---Cell mode: blocks (submatrices of the subdomain matrix) before the subdomain
 IF(ASSOCIATED(self%cdofs))THEN
   CALL bjprecond_delete(self,propogate)
@@ -3103,6 +3174,7 @@ IF(ASSOCIATED(self%usub))THEN
   DEALLOCATE(self%usub,self%gsub,self%sub_seam)
 END IF
 CALL bjprecond_delete(self,propogate)
+IF(keep_groups)self%nlocal=self%nlocal_req
 self%overlap_levels=-1
 DEBUG_STACK_POP
 END SUBROUTINE schwarz_delete

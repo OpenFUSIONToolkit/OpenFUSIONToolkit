@@ -1,0 +1,18 @@
+<oft>
+  <xmhd>
+    <pre type="mg">
+      <smoother direction="up">
+        <solver type="gmres">
+          <its>2</its>
+          <nrits>2</nrits>
+          <pre type="add_schwarz">
+            <overlap_mode>cell</overlap_mode>
+            <overlap>1</overlap>
+            <nlocal>-3</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </smoother>
+    </pre>
+  </xmhd>
+</oft>

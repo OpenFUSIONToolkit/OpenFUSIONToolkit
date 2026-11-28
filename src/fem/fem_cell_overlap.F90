@@ -18,7 +18,9 @@
 !!   `face_np` points (a face) depending on `adj`. Layers are grown over the cells of
 !!   all processes ("extended cell graph" made of the local cells plus halo cells
 !!   received from other processes).
-!! - **Block DoFs:** every DoF of every field in the closure of the block cells.
+!! - **Block DoFs:** every DoF of every field in the closure of the block cells. Field
+!!   based blocks (Schwarz `nlocal<0`) split these afterwards by field group, sharing the
+!!   cells (see @ref oft_la_base::overlap_dofs_split_fields "overlap_dofs_split_fields").
 !! - **Assigned DoFs:** DoFs owned by this process with color `dcolor==b` (all owned
 !!   DoFs if `nparts==1`). Every owned DoF is assigned to exactly one block.
 !!
@@ -252,6 +254,7 @@ DEBUG_STACK_PUSH
 IF(ALLOCATED(self%fields))DEALLOCATE(self%fields)
 IF(ALLOCATED(self%cpart))DEALLOCATE(self%cpart)
 IF(ALLOCATED(self%dcolor))DEALLOCATE(self%dcolor)
+IF(ALLOCATED(self%field_groups))DEALLOCATE(self%field_groups)
 NULLIFY(self%ml_mesh,self%mesh,self%fe,self%fe_comp)
 self%nparts=0
 self%nfields=0
