@@ -8,7 +8,12 @@
 # fields in the plot file
 import functools
 import pytest
-from mug_testing import alfven_setup as _alfven_setup, validate_alfven
+from mug_testing import (
+    alfven_setup as _alfven_setup,
+    convert_rst_to_v2,
+    validate_alfven,
+    validate_alfven_auto_vel_scale,
+)
 
 alfven_setup = functools.partial(_alfven_setup, 'hcurl')
 
@@ -346,3 +351,40 @@ def test_hex_lin_r1_p4_mpi(petsc_flag):
     #assert alfven_setup(1,2,4,3,'0,0,2,2,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert alfven_setup(1,2,4,4,'0,0,0,0,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert validate_alfven(berr_exp,verr_exp,linear=True)
+
+#============================================================================
+# Automatic Alfven/acoustic-balanced scaling (defaults) and explicit override
+@pytest.mark.parametrize("mf", (False, True))
+def test_nl_r1_p2_auto_vel_scale(mf):
+    '''Nonlinear Alfven wave with automatic balanced velocity/temperature scaling (default `-1`), quadratic elements
+    on a tetrahedral mesh, serial, covering both analytic and matrix-free (MFNK) Jacobians.'''
+    berr_exp = 4.2660712289547556E-002
+    verr_exp = 2.124825E-02
+    assert alfven_setup(1,1,2,2,mf=mf,vel_scale=-1,temp_scale=-1)
+    assert validate_alfven(berr_exp,verr_exp)
+    assert validate_alfven_auto_vel_scale(t0=0.5)
+@pytest.mark.linear
+def test_lin_r1_p2_auto_vel_scale():
+    '''Linearized Alfven wave with automatic balanced velocity/temperature scaling (default `-1`), quadratic elements
+    on a tetrahedral mesh, serial.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,1,2,2,linear=True,vel_scale=-1,temp_scale=-1)
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+    assert validate_alfven_auto_vel_scale(t0=0.5)
+def test_nl_r1_p2_explicit_scale():
+    '''Nonlinear Alfven wave with explicit positive `vel_scale` and `temp_scale` overrides, verifying backwards
+    compatibility with manual scaling.'''
+    berr_exp = 4.2660712289547556E-002
+    verr_exp = 2.124825E-02
+    assert alfven_setup(1,1,2,2,vel_scale=1.E3,temp_scale=1.0)
+    assert validate_alfven(berr_exp,verr_exp)
+def test_nl_r1_p2_v2_restart():
+    '''Restarting a nonlinear Alfven wave from a legacy `xMHD_Version=2` restart file (stored with V scaled by 1e3
+    and unscaled T) into a run with automatic balanced scaling rescales V and T accurately.'''
+    berr_exp = 4.2660712289547556E-002
+    verr_exp = 2.124825E-02
+    assert alfven_setup(1,1,2,2,vel_scale=1.E3,temp_scale=1.0,nsteps=25,rst_freq=25)
+    convert_rst_to_v2('xMHD_00025.rst')
+    assert alfven_setup(1,1,2,2,vel_scale=-1,temp_scale=-1,rst_ind=25,nsteps=100,rst_freq=25,plot_t0='2.9e-5')
+    assert validate_alfven(berr_exp,verr_exp,steps_exp=9)
