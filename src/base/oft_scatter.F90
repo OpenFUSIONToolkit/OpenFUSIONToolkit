@@ -92,9 +92,6 @@ INTEGER(i4), PUBLIC, PARAMETER :: OFT_SCATTER_ADD = 1
 INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_STITCH = 101
 !> Default MPI tag for general scatter plans
 INTEGER(i4), PUBLIC, PARAMETER :: OFT_TAG_SCATTER = 102
-!> Number of values sent to other processes by @ref oft_exchange_i8 on this process
-!! (cumulative; setup diagnostics, see @ref oft_exchange_report)
-INTEGER(i8), PUBLIC :: oft_exchange_nsent = 0
 !---------------------------------------------------------------------------------
 !> Sorted set of unique local indices
 !---------------------------------------------------------------------------------
@@ -148,7 +145,7 @@ TYPE, PUBLIC :: oft_scatter_plan
 END TYPE oft_scatter_plan
 PUBLIC scatter_plan_setup, scatter_plan_setup_local, scatter_plan_delete, scatter_plan_check, scatter_plan_inflight
 PUBLIC index_set_create, index_set_delete, index_set_grow
-PUBLIC oft_exchange_i8, oft_exchange_report
+PUBLIC oft_exchange_i8
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up a scatter plan from its index lists
@@ -459,36 +456,12 @@ END DO
 CALL MPI_ALLTOALLV(sbuf,scnt,sdisp,OFT_MPI_I8,rbuf,rcnt,rdisp,OFT_MPI_I8,oft_env%comm,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_ALLTOALLV','oft_exchange_i8',__FILE__)
 DEALLOCATE(sdisp,rdisp)
-oft_exchange_nsent=oft_exchange_nsent+INT(SUM(scnt)-scnt(oft_env%rank),i8)
 #else
 rcnt=scnt
 ALLOCATE(rbuf(MAX(1,SUM(rcnt))))
 IF(SUM(rcnt)>0)rbuf(1:SUM(rcnt))=sbuf(1:SUM(rcnt))
 #endif
 END SUBROUTINE oft_exchange_i8
-!---------------------------------------------------------------------------------
-!> Print the time and message volume of a setup phase (collective when debugging)
-!!
-!! Only active with `debug>=1` (no communication otherwise). Prints, on the head
-!! process, the maximum over processes of the time since the last `tick`/`tock` of
-!! `timer`, and the total and maximum over processes of the number of int8 values sent
-!! to other processes by @ref oft_exchange_i8 since `nsent0` (a previous value of
-!! @ref oft_exchange_nsent). Must be called by all processes, from serial code.
-!---------------------------------------------------------------------------------
-SUBROUTINE oft_exchange_report(label,timer,nsent0)
-CHARACTER(LEN=*), INTENT(in) :: label !< Name of the phase
-TYPE(oft_timer), INTENT(inout) :: timer !< Timer started at the beginning of the phase (restarted)
-INTEGER(i8), INTENT(in) :: nsent0 !< Value of @ref oft_exchange_nsent at the beginning of the phase
-REAL(r8) :: t,w,tmax,wsum,wmax
-IF(oft_env%debug<1)RETURN
-t=timer%tock()
-w=REAL(oft_exchange_nsent-nsent0,r8)
-tmax=oft_mpi_max(t)
-wsum=oft_mpi_sum(w)
-wmax=oft_mpi_max(w)
-IF(oft_env%head_proc)WRITE(*,'(4A,ES10.3,A,I12,A,I10,A)')oft_indent,'Setup timing: ',label, &
-  ': time =',tmax,' s, int8 sent =',INT(wsum,i8),' (max',INT(wmax,i8),')'
-END SUBROUTINE oft_exchange_report
 END MODULE oft_scatter_base
 !---------------------------------------------------------------------------------
 ! Value type instantiations of the scatter operations

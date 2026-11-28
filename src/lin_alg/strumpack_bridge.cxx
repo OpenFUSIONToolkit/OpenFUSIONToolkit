@@ -10,6 +10,9 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include "StrumpackSparseSolver.hpp"
 #ifdef HAVE_STRUMPACK_MPI
 #include "StrumpackSparseSolverMPIDist.hpp"
@@ -81,6 +84,35 @@ static bool setup_solver(factors_t *f, const options_t& o) {
     return true;
 }
 
+/*
+* Compute matching, scaling and fill-reducing ordering for a new matrix.
+*
+* STRUMPACK pads the (matching-permuted) matrix to a symmetric non-zero pattern by
+* appending the missing entries inside an OpenMP critical section, so with multiple
+* threads the order of each row depends on thread scheduling. The graph passed to
+* METIS then differs between runs, giving a different ordering and pivot sequence on
+* every factorization. For indefinite matrices that need off-diagonal pivoting this
+* occasionally yields a much less accurate factorization. This step is (almost) all
+* serial, so run it with a single thread to keep the ordering deterministic.
+*/
+static ReturnCode reorder_serial(SparseSolver<double,int>& sp) {
+#ifdef _OPENMP
+    const int nthreads = omp_get_max_threads();
+    omp_set_num_threads(1);
+    ReturnCode ierr;
+    try {
+        ierr = sp.reorder();
+    } catch (...) {
+        omp_set_num_threads(nthreads);
+        throw;
+    }
+    omp_set_num_threads(nthreads);
+    return ierr;
+#else
+    return sp.reorder();
+#endif
+}
+
 extern "C" void
 oft_strumpack_sparse_c(int iopt, int n, int nnz, int nrhs,
                        double *values, int *colind, int *rowptr,
@@ -134,6 +166,13 @@ oft_strumpack_sparse_c(int iopt, int n, int nnz, int nrhs,
                 f->sp->set_csr_matrix(n, rowptr, colind, values, false);
                 f->n = n;
                 f->nnz = nnz;
+                ReturnCode ierr = reorder_serial(*f->sp);
+                if ( ierr != ReturnCode::SUCCESS ) {
+                    std::cerr << "STRUMPACK reordering failed: " << ierr << std::endl;
+                    f->sp.reset();
+                    *info = 1;
+                    return;
+                }
             } else {
                 /* STRUMPACK does not report a changed non-zero pattern, so check size here */
                 if ( n != f->n || nnz != f->nnz ) {

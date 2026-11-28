@@ -45,12 +45,12 @@
 MODULE harris_helpers
 USE oft_local
 IMPLICIT NONE
-REAL(r8) :: den_inf = 2.d-1 !< Background density, relative to n0
-REAL(r8) :: lam_n = 2.d0 !< Equilibrium density width
-REAL(r8) :: lam_b = 2.d0 !< Equilibrium current sheet (flux) width
-REAL(r8) :: L_x = 2.d0 !< Box length in x
-REAL(r8) :: L_z = 2.d0 !< Box length in z
-REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
+REAL(r8) :: den_inf = 2.d-1 ! Background density, relative to n0
+REAL(r8) :: lam_n = 2.d0 ! Equilibrium density width
+REAL(r8) :: lam_b = 2.d0 ! Equilibrium current sheet (flux) width
+REAL(r8) :: L_x = 2.d0 ! Box length in x
+REAL(r8) :: L_z = 2.d0 ! Box length in z
+REAL(r8) :: delta = 1.d-1 ! Relative size of perturbation (<<1)
 CONTAINS
 ! Equilibrium density
 SUBROUTINE dens_harris(pt, val)
@@ -102,7 +102,7 @@ TYPE(poss_scalar_bfield) :: field_init
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_vector), POINTER :: u,v
-LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: free_bc => NULL() !< Neumann (no Dirichlet) BC flags for density and temperature
+LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: free_bc => NULL() ! Neumann (no Dirichlet) BC flags for density and temperature
 !!\subsection doc_mug2d_harris_ex_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
 !! run the time-dependent solve. Runtime options are read from the
@@ -111,22 +111,22 @@ LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: free_bc => NULL() !< Neumann (no D
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nsteps = 100
 INTEGER(i4) :: rst_freq = 10
-INTEGER(i4) :: pre_freq = 1 !< Preconditioner update frequency (steps, with use_mfnk=T)
-INTEGER(i4) :: ittarget = 40 !< Target linear iterations per step for adaptive time step
-REAL(r8) :: B_0(3)=0.d0  !< Background magnetic field
-REAL(r8) :: n0 = 1.d0 !< Density scale
-REAL(r8) :: velx0 = 1.d0 !< Velocity scale (x-direction)
-REAL(r8) :: vely0 = 1.d0 !< Velocity scale (y-direction)
-REAL(r8) :: velz0 = 1.d0 !< Velocity scale (z-direction)
-REAL(r8) :: t0 = 1.d0 !< Temperature scale
-REAL(r8) :: psi0 = 1.d0 !< Magnetic flux scale
-REAL(r8) :: by0 = 1.d0 !< Magnetic field scale (y-direction)
-REAL(r8) :: chi=1.d0 !< thermal diffusivity
-REAL(r8) :: eta=1.d0 !< electrical resistivity
-REAL(r8) :: nu=1.d0 !< viscosity
-REAL(r8) :: gamma=2.d0/3.d0 !< adiabatic index
-REAL(r8) :: D_diff=1.d0 !< Diffusion coefficient
-REAL(r8) :: den_scale=1.d19 !< Density scale factor for normalization of equations (used for post-processing)
+INTEGER(i4) :: pre_freq = 1 ! Preconditioner update frequency (steps, with use_mfnk=T)
+INTEGER(i4) :: ittarget = 40 ! Target linear iterations per step for adaptive time step
+REAL(r8) :: B_0(3)=0.d0  ! Background magnetic field
+REAL(r8) :: n0 = 1.d0 ! Density scale
+REAL(r8) :: velx0 = 1.d0 ! Velocity scale (x-direction)
+REAL(r8) :: vely0 = 1.d0 ! Velocity scale (y-direction)
+REAL(r8) :: velz0 = 1.d0 ! Velocity scale (z-direction)
+REAL(r8) :: t0 = 1.d0 ! Temperature scale
+REAL(r8) :: psi0 = 1.d0 ! Magnetic flux scale
+REAL(r8) :: by0 = 1.d0 ! Magnetic field scale (y-direction)
+REAL(r8) :: chi=1.d0 ! thermal diffusivity
+REAL(r8) :: eta=1.d0 ! electrical resistivity
+REAL(r8) :: nu=1.d0 ! viscosity
+REAL(r8) :: gamma=2.d0/3.d0 ! adiabatic index
+REAL(r8) :: D_diff=1.d0 ! Diffusion coefficient
+REAL(r8) :: den_scale=1.d19 ! Density scale factor for normalization of equations (used for post-processing)
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.

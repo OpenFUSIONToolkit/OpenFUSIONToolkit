@@ -34,8 +34,7 @@ USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
 USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_delete, scatter_local, &
-  OFT_SCATTER_INSERT, OFT_SCATTER_ADD, oft_index_set, index_set_create, index_set_grow, index_set_delete, &
-  oft_exchange_report, oft_exchange_nsent
+  OFT_SCATTER_INSERT, OFT_SCATTER_ADD, oft_index_set, index_set_create, index_set_grow, index_set_delete
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
   OFT_ACCESS_READWRITE, oft_overlap_dofs, overlap_dofs_delete, overlap_dofs_split_fields, &
@@ -2089,8 +2088,7 @@ CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
 CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
 !---
 LOGICAL :: thread_safe,color_avail,lcopy
-LOGICAL, POINTER, DIMENSION(:) :: eflag
-INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
+INTEGER(i4) :: i,j,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals,uinit
@@ -2102,7 +2100,6 @@ TYPE(oft_index_set) :: bset
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
-TYPE(oft_1d_int), pointer, dimension(:) :: parts_tmp => NULL()
 DEBUG_STACK_PUSH
 !---
 IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
@@ -2656,8 +2653,6 @@ CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
-TYPE(oft_timer) :: stimer
-INTEGER(i8) :: nsent0
 DEBUG_STACK_PUSH
 IF(self%overlap<0)CALL oft_abort('Negative overlap','schwarz_apply',__FILE__)
 !---Requested number of blocks (graph mode setup may replace nlocal)
@@ -2683,8 +2678,6 @@ IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix requir
 IF(.NOT.self%initialized)THEN
   IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
     'schwarz_apply',__FILE__)
-  CALL stimer%tick
-  nsent0=oft_exchange_nsent
   CALL solver_setup(self)
   ALLOCATE(self%ovl)
   CALL native_overlap_setup(self%ovl,A_native,u,self%overlap)
@@ -2697,7 +2690,6 @@ IF(.NOT.self%initialized)THEN
   CALL bjprecond_local_vec(self%usub,self%ovl%n,self%sub_seam)
   CALL bjprecond_local_vec(self%gsub,self%ovl%n,self%sub_seam)
   self%update_slice=.FALSE.
-  CALL oft_exchange_report('Schwarz graph mode setup (total)',stimer,nsent0)
 ELSE IF(self%update_slice)THEN
   CALL native_overlap_update(self%ovl)
   self%update_slice=.FALSE.
@@ -2752,11 +2744,7 @@ CHARACTER(LEN=80) :: stmp
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt,mult
 TYPE(oft_native_vector) :: uskip
 CLASS(oft_solver), POINTER :: pretmp
-TYPE(oft_timer) :: stimer
-INTEGER(i8) :: nsent0
 DEBUG_STACK_PUSH
-CALL stimer%tick
-nsent0=oft_exchange_nsent
 IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
   'schwarz_cell_setup',__FILE__)
 IF(.NOT.ASSOCIATED(self%A%cell_ovl))CALL oft_abort('Cell mode requires a cell overlap builder '// &
@@ -2880,7 +2868,6 @@ IF(self%additive.AND.self%weighted)THEN
   DEALLOCATE(mult)
 END IF
 self%update_slice=.FALSE.
-CALL oft_exchange_report('Schwarz cell mode setup (total)',stimer,nsent0)
 DEBUG_STACK_POP
 END SUBROUTINE schwarz_cell_setup
 !------------------------------------------------------------------------------

@@ -54,7 +54,7 @@ CONTAINS
   PROCEDURE :: interp => GEM_interp_apply ! Reconstruct field
 END TYPE GEM_interp
 !------------------------------------------------------------------------------
-!> Probe object for evaluating reconnected flux
+! Probe object for evaluating reconnected flux
 !------------------------------------------------------------------------------
 TYPE, EXTENDS(oft_xmhd_probe) :: GEM_probe
   INTEGER(4) :: io_unit ! I/O unit for history file

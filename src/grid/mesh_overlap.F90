@@ -35,7 +35,7 @@ IMPLICIT NONE
 PRIVATE
 !> Number of children of a volume (tet or hex) cell under uniform refinement
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_overlap_nchild = 8
-PUBLIC mesh_has_transfer_level, mesh_base_gid_inverse, mesh_base_candidates, mesh_cell_base_index
+PUBLIC mesh_base_gid_inverse, mesh_base_candidates, mesh_cell_base_index
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Does the multi-level mesh have distributed levels (a transfer level `nbase+1`)?

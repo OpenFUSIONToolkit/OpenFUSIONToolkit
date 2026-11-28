@@ -54,7 +54,7 @@ MODULE fem_cell_overlap
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
 USE oft_stitching, ONLY: oft_global_stitch
-USE oft_scatter_base, ONLY: oft_exchange_i8, oft_exchange_report, oft_exchange_nsent
+USE oft_scatter_base, ONLY: oft_exchange_i8
 USE oft_mesh_type, ONLY: oft_mesh
 USE multigrid, ONLY: multigrid_mesh
 USE oft_mesh_overlap, ONLY: mesh_overlap_nchild, mesh_base_gid_inverse, mesh_base_candidates, &
@@ -69,13 +69,6 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 !---------------------------------------------------------------------------------
-!> Sorted list of global cell ids
-!---------------------------------------------------------------------------------
-TYPE, PUBLIC :: oft_cell_gid_set
-  INTEGER(i4) :: n = 0 !< Number of cells
-  INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: v !< Global cell ids (sorted) [n]
-END TYPE oft_cell_gid_set
-!---------------------------------------------------------------------------------
 !> Integer list (setup work storage)
 !---------------------------------------------------------------------------------
 TYPE :: ilist
@@ -86,16 +79,13 @@ END TYPE ilist
 !> Cell-adjacency overlap builder for a single or composite FE representation
 !!
 !! Created with @ref fem_cell_overlap_create. The FE representation, mesh and
-!! multi-level mesh are referenced, not owned. `core_cells` and `blk_cells` hold the
-!! result of the last @ref fem_cell_overlap_build "build" for diagnostics.
+!! multi-level mesh are referenced, not owned.
 !---------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_cell_overlap_builder) :: oft_fem_cell_overlap
   INTEGER(i4) :: nparts = 0 !< Number of blocks on this process
   INTEGER(i4) :: nfields = 0 !< Number of FE fields
   INTEGER(i4) :: ndofs = 0 !< Total number of local DoFs (all fields)
   INTEGER(i4) :: level = 0 !< Level of `mesh` in `ml_mesh`
-  INTEGER(i4) :: nhalo = 0 !< Number of halo cells received in the last build
-  INTEGER(i4) :: nhalo_used = 0 !< Number of halo cells used by a block in the last build
   LOGICAL :: warned_base_layers = .FALSE. !< Truncation warning (base layers < overlap) already printed
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Multi-level mesh
   CLASS(oft_mesh), POINTER :: mesh => NULL() !< Mesh of the FE representation (one level of `ml_mesh`)
@@ -104,8 +94,6 @@ TYPE, PUBLIC, EXTENDS(oft_cell_overlap_builder) :: oft_fem_cell_overlap
   TYPE(oft_fem_ptr), ALLOCATABLE, DIMENSION(:) :: fields !< FE representation of each field [nfields]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart !< Block (part) of each local cell [mesh%nc]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dcolor !< Block (color) of each local DoF [ndofs]
-  TYPE(oft_cell_gid_set), ALLOCATABLE, DIMENSION(:) :: core_cells !< Global ids of each block's core cells [nparts]
-  TYPE(oft_cell_gid_set), ALLOCATABLE, DIMENSION(:) :: blk_cells !< Global ids of each block's cells [nparts]
 CONTAINS
   !> Build the overlapping DoF sets (collective)
   PROCEDURE :: build => fem_cell_overlap_build
@@ -263,7 +251,6 @@ END FUNCTION fem_cell_overlap_nblocks
 SUBROUTINE fem_cell_overlap_delete(self)
 CLASS(oft_fem_cell_overlap), INTENT(inout) :: self !< Builder object
 DEBUG_STACK_PUSH
-CALL clear_cell_sets(self)
 IF(ALLOCATED(self%fields))DEALLOCATE(self%fields)
 IF(ALLOCATED(self%cpart))DEALLOCATE(self%cpart)
 IF(ALLOCATED(self%dcolor))DEALLOCATE(self%dcolor)
@@ -273,18 +260,8 @@ self%nparts=0
 self%nfields=0
 self%ndofs=0
 self%level=0
-self%nhalo=0
-self%nhalo_used=0
 DEBUG_STACK_POP
 END SUBROUTINE fem_cell_overlap_delete
-!---------------------------------------------------------------------------------
-!> Release the diagnostic cell sets of the last build
-!---------------------------------------------------------------------------------
-SUBROUTINE clear_cell_sets(self)
-CLASS(oft_fem_cell_overlap), INTENT(inout) :: self !< Builder object
-IF(ALLOCATED(self%core_cells))DEALLOCATE(self%core_cells)
-IF(ALLOCATED(self%blk_cells))DEALLOCATE(self%blk_cells)
-END SUBROUTINE clear_cell_sets
 !---------------------------------------------------------------------------------
 !> Build the overlapping DoF sets of the blocks of this process (collective)
 !!
@@ -313,7 +290,7 @@ CLASS(oft_native_vector), POINTER :: uv
 CLASS(oft_mesh), POINTER :: mesh,bmesh
 INTEGER(i4) :: i,j,k,l,m,b,e,e2,f,q,np,me,nc,ncp,nce_tot,thr,kb,ncand,nref,nfine,next,nhalo, &
   npair,nup,pass,ntl,nused,nu,nown,istart,iend,nb,ioff,row
-INTEGER(i8) :: n8,nfine8
+INTEGER(i8) :: n8
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: owner,cand,cown,cb,inv,scnt,rcnt,kbc,lbc,ibc,eown, &
   iperm,upos,kp,lpx,knb,lnb,nnb,cnt,tl,list,hit,nsel,lperm
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: lrow,hdown
@@ -327,8 +304,6 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lastp
 INTEGER(i4), POINTER, DIMENSION(:) :: lcpart
 TYPE(ilist), ALLOCATABLE, DIMENSION(:) :: core,bx
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ldofs
-TYPE(oft_timer) :: stimer
-INTEGER(i8) :: nsent0
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%mesh))CALL oft_abort('Builder not created','fem_cell_overlap_build',__FILE__)
 IF(.NOT.native_vector_cast(uv,u))CALL oft_abort('Native vector required','fem_cell_overlap_build',__FILE__)
@@ -344,9 +319,6 @@ CASE DEFAULT
   CALL oft_abort('Invalid cell adjacency type','fem_cell_overlap_build',__FILE__)
 END SELECT
 CALL overlap_dofs_delete(dofs)
-CALL clear_cell_sets(self)
-CALL stimer%tick
-nsent0=oft_exchange_nsent
 mesh=>self%mesh
 np=oft_env%nprocs
 me=oft_env%rank
@@ -499,7 +471,6 @@ IF(.NOT.mesh%fullmesh)THEN
   END DO
   nhalo=SUM(rcnt)/(1+ncp)
 END IF
-CALL oft_exchange_report('cell overlap A-B (halo topology)',stimer,nsent0)
 !---------------------------------------------------------------------------------
 ! Step C: extended cell graph and block growth
 !---------------------------------------------------------------------------------
@@ -694,37 +665,16 @@ DO b=1,nb
     needed(bx(b)%v(i))=.TRUE.
   END DO
 END DO
-!---Diagnostic cell sets (global cell ids)
-ALLOCATE(self%core_cells(nb),self%blk_cells(nb))
-DO b=1,nb
-  self%core_cells(b)%n=core(b)%n
-  ALLOCATE(self%core_cells(b)%v(core(b)%n))
-  DO i=1,core(b)%n
-    self%core_cells(b)%v(i)=egid(core(b)%v(i))
-  END DO
-  n8=INT(core(b)%n,i8)
-  CALL sort_array(self%core_cells(b)%v,n8)
-  self%blk_cells(b)%n=bx(b)%n
-  ALLOCATE(self%blk_cells(b)%v(bx(b)%n))
-  DO i=1,bx(b)%n
-    self%blk_cells(b)%v(i)=egid(bx(b)%v(i))
-  END DO
-  n8=INT(bx(b)%n,i8)
-  CALL sort_array(self%blk_cells(b)%v,n8)
-END DO
-CALL oft_exchange_report('cell overlap C (layers)',stimer,oft_exchange_nsent)
-nsent0=oft_exchange_nsent
 !---------------------------------------------------------------------------------
 ! Step D: DoFs (global id and owner) of the used halo cells from their owners
 !---------------------------------------------------------------------------------
-self%nhalo=nhalo
-self%nhalo_used=COUNT(needed(nc+1:next))
+nused=COUNT(needed(nc+1:next))
 ALLOCATE(hdof(nce_tot,MAX(1,nhalo)),hdown(nce_tot,MAX(1,nhalo)))
 IF(.NOT.mesh%fullmesh)THEN
   !---Requests in increasing halo index (grouped by owner)
   scnt=0
   nsel=0
-  ALLOCATE(sbuf(MAX(1,self%nhalo_used)))
+  ALLOCATE(sbuf(MAX(1,nused)))
   k=0
   DO e=nc+1,next
     IF(.NOT.needed(e))CYCLE
@@ -903,7 +853,6 @@ DO b=1,nb
 END DO
 IF(SUM(dofs%asg(:)%n)/=nown)CALL oft_abort('Owned DoF count mismatch','fem_cell_overlap_build',__FILE__)
 DEALLOCATE(hit,dtmp)
-CALL oft_exchange_report('cell overlap D-E (halo DoFs)',stimer,nsent0)
 !---Clean up
 DO b=1,nb
   IF(ALLOCATED(core(b)%v))DEALLOCATE(core(b)%v)

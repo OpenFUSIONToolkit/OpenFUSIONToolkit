@@ -169,10 +169,6 @@ been tested with this preconditioner.
 The block-Jacobi option `loverlap` is not accepted for the native Schwarz preconditioner (use
 `overlap`). Values given as a list are taken per multigrid level.
 
-With `debug>=1` in `runtime_options`, the setup of the Schwarz subdomains (both modes) prints the
-time of each phase (maximum over processes) and the number of int8 index values sent between
-processes (total and maximum per process) as `Setup timing:` lines.
-
 \section doc_solvers_krylov Krylov Solvers
 
 \subsection doc_solvers_krylov_cg Conjugate Gradient
