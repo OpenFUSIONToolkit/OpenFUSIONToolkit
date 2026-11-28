@@ -593,7 +593,7 @@ class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_matrix), pointer :: A
-logical :: pm_save,pre_full_res,inner_conv
+logical :: pm_save,pre_full_res,inner_conv,converged
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin,wnorm0,res_u_tol
 real(r8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:),znorm(:)
@@ -647,9 +647,13 @@ res_u_tol=-1.d0
 IF(its==-1)res_u_tol=1.d-7
 IF(its==-2)res_u_tol=1.d-14
 nits=0
+converged=.FALSE.
 if(self%its/=0.AND.self%nrits/=0)THEN
 do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
-  IF(gg==0.d0)EXIT
+  IF(gg==0.d0)THEN
+    converged=.TRUE.
+    EXIT
+  END IF
   res=0.d0
   res(1)=sqrt(gg)
   call v(1)%f%add(0.d0,1.d0/res(1),r)
@@ -709,11 +713,12 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     res(i+1) = -s(i)*res(i)
     res(i) = c(i)*res(i)
     nits=nits+1
+    IF(ABS(res(i+1))==0.d0.OR.ABS(res(i+1))<self%atol.OR.ABS(res(i+1))/SQRT(ggin)<self%rtol)THEN
+      converged=.TRUE.
+      EXIT
+    END IF
     IF(i==nrits)EXIT
-    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
-    IF(ABS(res(i+1))<self%atol)EXIT
-    IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
     !---Check |r|/|u| criterion for current iterate (after `min_nits` inner iterations
     !   to avoid stalling through many short restart cycles)
     IF(res_u_tol>0.d0.AND.i>=self%min_nits)THEN
@@ -744,16 +749,15 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(associated(self%bc))call self%bc%apply(w)
   call r%add(0.d0,1.d0,g,-1.d0,w)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
-  IF(nits==its)EXIT
   ggold=gg; uuold=uu
   gg = clamp_nonneg(r%dot(r)) ! Clamp round-off (see Arnoldi step)
   uu = clamp_nonneg(u%dot(u))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
-  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
-  IF(SQRT(gg)<self%atol)EXIT
-  IF(SQRT(gg/ggin)<self%rtol)EXIT
+  converged=(gg==0.d0.OR.SQRT(gg)<self%atol.OR.SQRT(gg/ggin)<self%rtol)
+  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)converged=.TRUE.
+  IF(converged)EXIT
   IF(nits==its)EXIT
   IF((k<nrits).AND.(.NOT.inner_conv))EXIT
   IF(uu==uuold)EXIT
@@ -762,7 +766,7 @@ END IF
 CALL g%copy(r)
 deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
-IF(nits==its)self%cits=-1
+IF(nits==its.AND.(.NOT.converged))self%cits=-1
 DEBUG_STACK_POP
 end subroutine gmres_solver_apply
 !------------------------------------------------------------------------------
@@ -882,7 +886,7 @@ class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
 class(oft_cvector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_cvector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_cmatrix), pointer :: A
-logical :: pm_save,pre_full_res,inner_conv
+logical :: pm_save,pre_full_res,inner_conv,converged
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,ggin
 real(r8) :: wnorm0,res_u_tol
@@ -939,9 +943,13 @@ res_u_tol=-1.d0
 IF(its==-1)res_u_tol=1.d-7
 IF(its==-2)res_u_tol=1.d-14
 nits=0
+converged=.FALSE.
 if(self%its/=0.AND.self%nrits/=0)THEN
 do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
-  IF(gg==0.d0)EXIT
+  IF(gg==0.d0)THEN
+    converged=.TRUE.
+    EXIT
+  END IF
   res=0.d0
   res(1)=sqrt(gg)
   call v(1)%f%add((0.d0,0.d0),(1.d0,0.d0)/res(1),r)
@@ -1001,11 +1009,12 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     res(i+1) = -s(i)*res(i)
     res(i) = CONJG(c(i))*res(i)
     nits=nits+1
+    IF(ABS(res(i+1))==0.d0.OR.ABS(res(i+1))<self%atol.OR.ABS(res(i+1))/SQRT(ggin)<self%rtol)THEN
+      converged=.TRUE.
+      EXIT
+    END IF
     IF(i==nrits)EXIT
-    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
-    IF(ABS(res(i+1))<self%atol)EXIT
-    IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
     !---Check |r|/|u| criterion for current iterate (after `min_nits` inner iterations
     !   to avoid stalling through many short restart cycles)
     IF(res_u_tol>0.d0.AND.i>=self%min_nits)THEN
@@ -1035,16 +1044,15 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(associated(self%bc))call self%bc%apply(w)
   call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
-  IF(nits==its)EXIT
   ggold=gg; uuold=uu
   gg = clamp_nonneg(REAL(r%dot(r),r8)) ! Clamp round-off (see Arnoldi step)
   uu = clamp_nonneg(REAL(u%dot(u),r8))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
-  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
-  IF(SQRT(gg)<self%atol)EXIT
-  IF(SQRT(gg/ggin)<self%rtol)EXIT
+  converged=(gg==0.d0.OR.SQRT(gg)<self%atol.OR.SQRT(gg/ggin)<self%rtol)
+  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)converged=.TRUE.
+  IF(converged)EXIT
   IF(nits==its)EXIT
   IF(uu==uuold)EXIT
 end do
@@ -1052,7 +1060,7 @@ END IF
 CALL g%copy(r)
 deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
-IF(nits==its)self%cits=-1
+IF(nits==its.AND.(.NOT.converged))self%cits=-1
 DEBUG_STACK_POP
 end subroutine cgmres_solver_apply
 !------------------------------------------------------------------------------
@@ -1401,6 +1409,14 @@ atol_save=0.d0
 res_prev=0.d0
 eta_prev=self%ew_eta0
 IF(self%ew_forcing)THEN
+  IF(self%ew_gamma<=0.d0.OR.self%ew_gamma>1.d0) &
+    CALL oft_abort('ew_gamma must be in (0, 1]','nksolver_apply',__FILE__)
+  IF(self%ew_alpha<=1.d0.OR.self%ew_alpha>2.d0) &
+    CALL oft_abort('ew_alpha must be in (1, 2]','nksolver_apply',__FILE__)
+  IF(self%ew_eta0<=0.d0.OR.self%ew_eta0>=1.d0) &
+    CALL oft_abort('ew_eta0 must be in (0, 1)','nksolver_apply',__FILE__)
+  IF(self%ew_eta_max<=0.d0.OR.self%ew_eta_max>=1.d0) &
+    CALL oft_abort('ew_eta_max must be in (0, 1)','nksolver_apply',__FILE__)
   rtol_save=self%J_inv%rtol
   atol_save=self%J_inv%atol
 END IF
@@ -1452,7 +1468,15 @@ outer: do i=0,its
   !---Update jacobian
   IF(MOD(i,self%up_freq)==0.AND.ASSOCIATED(self%J_update))THEN
     if(oft_env%head_proc)CALL mytimer%tick
+    IF(self%ew_forcing)THEN
+      self%J_inv%rtol=rtol_save
+      self%J_inv%atol=atol_save
+    END IF
     CALL self%J_update(u)
+    IF(self%ew_forcing)THEN
+      rtol_save=self%J_inv%rtol
+      atol_save=self%J_inv%atol
+    END IF
     if(oft_env%head_proc)up_time=up_time+mytimer%tock()
   END IF
   !---Compute adaptive forcing tolerance (Eisenstat-Walker Choice 2)

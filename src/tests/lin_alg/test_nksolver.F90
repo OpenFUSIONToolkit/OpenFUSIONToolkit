@@ -31,6 +31,8 @@ CONTAINS
 END TYPE nl_rd_op
 
 REAL(r8), PUBLIC :: nl_lambda = 50.d0
+LOGICAL, PUBLIC :: nl_update_set_tol = .FALSE.
+REAL(r8), PUBLIC :: nl_updated_rtol = 1.d-11
 TYPE(oft_ml_fem_type), POINTER, PUBLIC :: nl_ml_lag => NULL()
 CLASS(oft_matrix), POINTER, PUBLIC :: nl_jmat => NULL()
 CLASS(oft_solver), POINTER, PUBLIC :: nl_jinv => NULL()
@@ -89,6 +91,7 @@ CALL nl_jmat%assemble(diag_tmp)
 CALL diag_tmp%delete
 DEALLOCATE(diag_tmp)
 CALL nl_jinv%update(.FALSE.)
+IF(nl_update_set_tol)nl_jinv%rtol=nl_updated_rtol
 END SUBROUTINE nl_update_jacobian
 
 END MODULE test_nksolver_ops
@@ -106,10 +109,10 @@ USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 USE test_nksolver_ops, ONLY: nl_rd_op, nl_lambda, nl_ml_lag, nl_jmat, nl_jinv, &
-  nl_weight, nl_update_jacobian
+  nl_weight, nl_update_jacobian, nl_update_set_tol, nl_updated_rtol
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=3
-INTEGER(i4) :: io_unit,nfail,nlits_fixed,lits_fixed,nlits_ew,lits_ew
+INTEGER(i4) :: io_unit,nfail,nlits_fixed,lits_fixed,nlits_ew,lits_ew,exact_its
 REAL(r8), PARAMETER :: rtol_init=1.d-10, atol_init=1.d-14
 REAL(r8) :: u_norm,diff_norm
 TYPE(multigrid_mesh) :: mg_mesh
@@ -119,7 +122,7 @@ TYPE(nl_rd_op), TARGET :: nl_op
 TYPE(oft_nksolver) :: nksolver
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
-CLASS(oft_vector), POINTER :: u_fixed => NULL(), u_ew => NULL(), rhs => NULL(), diff => NULL()
+CLASS(oft_vector), POINTER :: u_fixed => NULL(), u_ew => NULL(), rhs => NULL(), diff => NULL(), work => NULL()
 
 CALL oft_init
 CALL multigrid_construct(mg_mesh)
@@ -133,6 +136,7 @@ CALL ML_oft_lagrange%vec_create(u_fixed)
 CALL ML_oft_lagrange%vec_create(u_ew)
 CALL ML_oft_lagrange%vec_create(rhs)
 CALL ML_oft_lagrange%vec_create(diff)
+CALL ML_oft_lagrange%vec_create(work)
 CALL ML_oft_lagrange%vec_create(nl_weight)
 
 ! Build base FE operators
@@ -233,6 +237,69 @@ IF(nl_jinv%rtol/=rtol_init.OR.nl_jinv%atol/=atol_init)THEN
   nfail=nfail+1
 END IF
 
+! Verify J_inv%cits<0 on failed solve (native and PETSc), resetting its>0 -> its<=0 clears cap,
+! and converging on the exact last allowed iteration (nits==its) reports positive cits
+nl_jinv%rtol=rtol_init
+nl_jinv%atol=atol_init
+nl_jinv%its=1
+CALL diff%set(0.d0)
+CALL work%copy(rhs)
+CALL nl_jinv%apply(diff,work)
+IF(nl_jinv%cits>=0)THEN
+  IF(oft_env%head_proc)WRITE(*,*)'FAIL: Expected cits<0 when linear solver hits its=1',nl_jinv%cits
+  nfail=nfail+1
+END IF
+nl_jinv%its=-3
+CALL diff%set(0.d0)
+CALL work%copy(rhs)
+CALL nl_jinv%apply(diff,work)
+IF(nl_jinv%cits<=1)THEN
+  IF(oft_env%head_proc)WRITE(*,*)'FAIL: Resetting its from >0 to <=0 left stale iteration cap',nl_jinv%cits
+  nfail=nfail+1
+END IF
+exact_its=nl_jinv%cits
+nl_jinv%its=exact_its
+CALL diff%set(0.d0)
+CALL work%copy(rhs)
+CALL nl_jinv%apply(diff,work)
+IF(nl_jinv%cits/=exact_its)THEN
+  IF(oft_env%head_proc)WRITE(*,*)'FAIL: Solver converging on last allowed iteration reported wrong cits', &
+    nl_jinv%cits,exact_its
+  nfail=nfail+1
+END IF
+
+! Verify linear solver failure propagates into nksolver%cits<0 and restores J_inv tolerances
+nksolver%its=10
+nksolver%ew_forcing=.TRUE.
+nksolver%ew_eta0=1.d-10
+nl_jinv%its=1
+CALL diff%set(0.d0)
+CALL nksolver%apply(diff,rhs)
+IF(nksolver%cits>=0.OR.nksolver%nlits/=0)THEN
+  IF(oft_env%head_proc)WRITE(*,*)'FAIL: Expected nksolver abort on failed linear solve', &
+    nksolver%cits,nksolver%nlits
+  nfail=nfail+1
+END IF
+IF(nl_jinv%rtol/=rtol_init.OR.nl_jinv%atol/=atol_init)THEN
+  IF(oft_env%head_proc)WRITE(*,*)'FAIL: J_inv tolerances not restored after linear failure', &
+    nl_jinv%rtol,nl_jinv%atol
+  nfail=nfail+1
+END IF
+
+! Verify tolerance updates performed inside J_update are preserved while ew_forcing is on
+nksolver%its=30
+nksolver%ew_eta0=0.5d0
+nl_jinv%its=500
+nl_update_set_tol=.TRUE.
+CALL diff%set(0.d0)
+CALL nksolver%apply(diff,rhs)
+nl_update_set_tol=.FALSE.
+IF(nksolver%cits<0.OR.nl_jinv%rtol/=nl_updated_rtol)THEN
+  IF(oft_env%head_proc)WRITE(*,*)'FAIL: J_update tolerance change was not preserved', &
+    nksolver%cits,nl_jinv%rtol
+  nfail=nfail+1
+END IF
+
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='nksolver.results')
   WRITE(io_unit,*)nfail
@@ -255,7 +322,8 @@ CALL u_fixed%delete
 CALL u_ew%delete
 CALL rhs%delete
 CALL diff%delete
+CALL work%delete
 CALL nl_weight%delete
-DEALLOCATE(u_fixed,u_ew,rhs,diff,nl_weight)
+DEALLOCATE(u_fixed,u_ew,rhs,diff,work,nl_weight)
 CALL oft_finalize
 END PROGRAM test_nksolver
