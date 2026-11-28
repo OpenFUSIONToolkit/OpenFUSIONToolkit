@@ -8,7 +8,7 @@ import os
 import json
 import pytest
 import numpy as np
-from tokamaker_testing import mp_run, validate_dict
+from tokamaker_testing import mp_run, validate_dict, test_dir
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
@@ -96,6 +96,23 @@ def run_LTX_case(fe_order,test_type,mp_q):
     mygs.settings.pm=True
     mygs.update_settings()
     mygs.solve()
+    if test_type == 'ifile_limited':
+        # X-point packing of i-file angles needs a diverted plasma: requested explicitly for a limited one it is an
+        # error, not a silent fallback; the default ('auto') writes uniform angles for it
+        _, diverted = mygs.get_xpoints()
+        info = {'diverted': bool(diverted), 'xpt_error': ''}
+        mygs.save_ifile('ltx_default.ifile',npsi=32,ntheta=65)
+        mygs.save_ifile('ltx_uniform.ifile',npsi=32,ntheta=65,theta_sampling='uniform')
+        with open('ltx_default.ifile','rb') as fid1, open('ltx_uniform.ifile','rb') as fid2:
+            info['default_is_uniform'] = (fid1.read() == fid2.read())
+        try:
+            mygs.save_ifile('ltx_xpt.ifile',npsi=32,ntheta=65,theta_sampling='xpoint')
+        except Exception as e:
+            info['xpt_error'] = str(e)
+        info['xpt_written'] = os.path.exists('ltx_xpt.ifile')
+        mp_q.put([info])
+        oftpy_dump_cov()
+        return
     if test_type == 'stab':
         eig_vals, _ = mygs.compute_linear_stability(1.E3,10,False)
         mp_q.put([{'gamma': eig_vals[:5]}])
@@ -157,6 +174,19 @@ LTX_eq_dict = {
     'beta_tor': 1.9276444168027145,
     'beta_n': 1.3972402635015146
 }
+
+def test_LTX_ifile_limited():
+    '''i-file of the limited LTX equilibrium: the default ('auto') writes the same bytes as uniform angles; X-point
+    packing requested explicitly raises an error naming the limited plasma and writes no file'''
+    if os.path.exists(os.path.join(test_dir,'ltx_xpt.ifile')):
+        os.remove(os.path.join(test_dir,'ltx_xpt.ifile'))
+    results = mp_run(run_LTX_case,(2,'ifile_limited'))
+    assert results is not None
+    assert not results[0]['diverted']
+    assert results[0]['default_is_uniform']
+    assert 'limited' in results[0]['xpt_error']
+    assert not results[0]['xpt_written']
+
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))

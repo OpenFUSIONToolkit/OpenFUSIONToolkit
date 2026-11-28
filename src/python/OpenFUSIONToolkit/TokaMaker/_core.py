@@ -2386,7 +2386,8 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,lcfs_pad,rcentr,truncate_eq,limiter_file,lcfs_pressure,cocos)
 
-    def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0):
+    def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0,
+                   theta_sampling='auto',xpoint_amp=7.0,xpoint_width=0.10,psi_nodes=None):
         r'''! Save current equilibrium to iFile format
 
         @param filename Filename to save equilibrium to
@@ -2401,10 +2402,29 @@ class TokaMaker():
         @param axis_pack Normalized flux of the innermost surface, with the spacing growing by about 1.5 per surface away from
         the axis (\f$\le 0\f$: off); this uses about \f$\log_{1.5}(f_1/\mathrm{axis\_pack})\f$ of the `npsi` surfaces, with
         \f$f_1 = 2/(n_\psi-1)\f$ if `pack_lcfs` and \f$1/(n_\psi-1)\f$ otherwise
+        @param theta_sampling Poloidal sampling of each surface: `'auto'` (default: `'xpoint'` for a diverted equilibrium,
+        `'uniform'` for a limited one), `'uniform'` (uniform polar angle about the magnetic axis) or `'xpoint'` (polar angle with
+        point density \f$\propto 1 + A \sum_x \exp[-\Delta\theta_x^2/(2\sigma^2)]\f$, \f$\Delta\theta_x\f$ the angle from the
+        direction of an X-point on the LCFS). Points lie on their flux surfaces either way and the first point stays at
+        \f$\theta=0\f$ (outboard midplane). `'xpoint'` needs a diverted equilibrium (an error is raised for a limited one); in a
+        double null the second X-point gets a bump when its normalized flux is within 0.01 of the LCFS. For codes that integrate
+        along the file's poloidal label (e.g. GPEC), `ntheta` \f$\approx\f$ 513 with `'xpoint'` resolves \f$q\f$ near the separatrix
+        that uniform angles need \f$\gtrsim\f$ 2049 points for. **The default changed**: earlier versions always wrote uniform
+        angles, so the default files of a diverted equilibrium differ from before; `theta_sampling='uniform'` writes the earlier
+        files exactly
+        @param xpoint_amp X-point packing only: peak relative increase \f$A \ge 0\f$ of the point density at the X-point direction
+        (default 7). With one X-point the largest-to-smallest angular spacing is about \f$1 + A\f$ (8 for the defaults), and the
+        point density away from the X-point is lower than for uniform angles by the factor \f$1 + A\sigma/\sqrt{2\pi}\f$
+        (1.28 for the defaults)
+        @param xpoint_width X-point packing only: Gaussian width \f$\sigma\f$ in polar angle [rad], \f$0 < \sigma \le \pi\f$
+        (default 0.10)
+        @param psi_nodes Explicit radial nodes in normalized flux (0 at the axis, first node 0, strictly increasing, last node
+        \f$< 1\f$; keep a small pad below 1, as for `lcfs_pad`). Overrides `npsi`, `lcfs_pad`, `pack_lcfs` and `axis_pack`
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.save_ifile(filename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,profile_derivs,psi_bounds,axis_pack)
+        self._tMaker_equil.save_ifile(filename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,profile_derivs,psi_bounds,axis_pack,
+                                      theta_sampling,xpoint_amp,xpoint_width,psi_nodes)
 
     def save_mug(self,filename):
         r'''! Save current equilibrium to MUG transfer format
@@ -4146,7 +4166,8 @@ class TokaMaker_equilibrium():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0):
+    def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0,
+                   theta_sampling='auto',xpoint_amp=7.0,xpoint_width=0.10,psi_nodes=None):
         r'''! Save current equilibrium to iFile format
 
         @param filename Filename to save equilibrium to
@@ -4161,10 +4182,42 @@ class TokaMaker_equilibrium():
         @param axis_pack Normalized flux of the innermost surface, with the spacing growing by about 1.5 per surface away from
         the axis (\f$\le 0\f$: off); this uses about \f$\log_{1.5}(f_1/\mathrm{axis\_pack})\f$ of the `npsi` surfaces, with
         \f$f_1 = 2/(n_\psi-1)\f$ if `pack_lcfs` and \f$1/(n_\psi-1)\f$ otherwise
+        @param theta_sampling Poloidal sampling of each surface: `'auto'` (default: `'xpoint'` for a diverted equilibrium,
+        `'uniform'` for a limited one), `'uniform'` (uniform polar angle about the magnetic axis) or `'xpoint'` (polar angle with
+        point density \f$\propto 1 + A \sum_x \exp[-\Delta\theta_x^2/(2\sigma^2)]\f$, \f$\Delta\theta_x\f$ the angle from the
+        direction of an X-point on the LCFS). Points lie on their flux surfaces either way and the first point stays at
+        \f$\theta=0\f$ (outboard midplane). `'xpoint'` needs a diverted equilibrium (an error is raised for a limited one); in a
+        double null the second X-point gets a bump when its normalized flux is within 0.01 of the LCFS. For codes that integrate
+        along the file's poloidal label (e.g. GPEC), `ntheta` \f$\approx\f$ 513 with `'xpoint'` resolves \f$q\f$ near the separatrix
+        that uniform angles need \f$\gtrsim\f$ 2049 points for. **The default changed**: earlier versions always wrote uniform
+        angles, so the default files of a diverted equilibrium differ from before; `theta_sampling='uniform'` writes the earlier
+        files exactly
+        @param xpoint_amp X-point packing only: peak relative increase \f$A \ge 0\f$ of the point density at the X-point direction
+        (default 7). With one X-point the largest-to-smallest angular spacing is about \f$1 + A\f$ (8 for the defaults), and the
+        point density away from the X-point is lower than for uniform angles by the factor \f$1 + A\sigma/\sqrt{2\pi}\f$
+        (1.28 for the defaults)
+        @param xpoint_width X-point packing only: Gaussian width \f$\sigma\f$ in polar angle [rad], \f$0 < \sigma \le \pi\f$
+        (default 0.10)
+        @param psi_nodes Explicit radial nodes in normalized flux (0 at the axis, first node 0, strictly increasing, last node
+        \f$< 1\f$; keep a small pad below 1, as for `lcfs_pad`). Overrides `npsi`, `lcfs_pad`, `pack_lcfs` and `axis_pack`
         '''
+        theta_modes = {'uniform': 0, 'xpoint': 1, 'auto': 2}
+        if theta_sampling not in theta_modes:
+            raise ValueError("theta_sampling must be 'auto', 'uniform' or 'xpoint'")
+        if psi_nodes is None:
+            nodes = numpy.zeros((1,), dtype=numpy.float64)
+            npsi_nodes = 0
+        else:
+            nodes = numpy.ascontiguousarray(psi_nodes, dtype=numpy.float64)
+            if nodes.ndim != 1 or nodes.shape[0] < 3:
+                raise ValueError("psi_nodes must be a 1D array of at least 3 values")
+            if (nodes[0] != 0.0) or (not numpy.all(numpy.diff(nodes) > 0.0)) or (not nodes[-1] < 1.0):
+                raise ValueError("psi_nodes must start at 0 (axis), increase strictly and end below 1 (LCFS)")
+            npsi_nodes = nodes.shape[0]
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_ifile(self._equil_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,profile_derivs,psi_bounds,axis_pack,error_string)
+        tokamaker_save_ifile(self._equil_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,profile_derivs,psi_bounds,axis_pack,
+                             theta_modes[theta_sampling],xpoint_amp,xpoint_width,npsi_nodes,nodes,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
