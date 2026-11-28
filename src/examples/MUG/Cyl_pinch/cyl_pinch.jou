@@ -1,0 +1,77 @@
+reset
+undo off
+
+#
+create Cylinder height 1.0 radius 2.0
+move Volume 1 x 0 y 0 z 0.5 include_merged 
+
+#
+webcut volume 1  with cylinder radius 0.5 axis z center 0 0 0
+webcut volume 1  with cylinder radius 1 axis z center 0 0 0
+
+webcut volume 1  with cylinder radius 1.235 axis z center 0 0 0
+webcut volume 1  with cylinder radius 1.265 axis z center 0 0 0
+
+#
+imprint all
+merge all
+
+#
+curve 3  interval 30
+curve 3  scheme equal
+mesh curve 3
+
+#
+surface 15  scheme hole rad_intervals 10 bias 2
+#surface 15  scheme hole rad_intervals 6 bias 2
+mesh surface 15
+surface 21  scheme hole rad_intervals 5 bias -2
+#surface 21  scheme hole rad_intervals 3 bias -2
+mesh surface 21
+surface 27  scheme hole rad_intervals 1 bias 0
+mesh surface 27
+surface 24  scheme hole rad_intervals 3 bias 0
+mesh surface 24
+
+#
+volume 1 3 4 5  interval 2
+volume 1  redistribute nodes off 
+volume 1  scheme Sweep  source surface 24 target surface 23 sweep_transform least_squares  
+volume 1  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 1
+volume 3  redistribute nodes off 
+volume 3  scheme Sweep  source surface 15 target surface 14 sweep_transform least_squares  
+volume 3  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 3
+volume 4  redistribute nodes off 
+volume 4  scheme Sweep  source surface 21 target surface 20 sweep_transform least_squares  
+volume 4  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 4
+volume 5  redistribute nodes off 
+volume 5  scheme Sweep  source surface 27 target surface 26 sweep_transform least_squares  
+volume 5  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 5
+
+#
+#HTet Volume 1 3 4 5 UNSTRUCTURED
+HTet Volume 1 3 4 5 STRUCTURED
+
+#
+volume 2 scheme Tetmesh
+set tetmesher interior points on 
+set tetmesher optimize level 3  overconstrained  off sliver  off 
+set tetmesher boundary recovery  off 
+volume 2 tetmesh growth_factor 1.0
+mesh volume 2
+
+# Output mesh
+set duplicate block elements off
+nodeset 1 surface 9 15 21 27 24
+block 1 volume 2 3
+block 2 volume 4
+block 3 volume 5
+block 4 volume 1
+block all element type tetra10
+export Genesis  "MUG-cyl_pinch.g" block 1 2 3 4 overwrite
+
+

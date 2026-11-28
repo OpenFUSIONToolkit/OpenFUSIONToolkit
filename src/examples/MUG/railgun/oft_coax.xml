@@ -1,0 +1,15 @@
+<oft>
+  <xmhd>
+    <den_bc>1,0,0</den_bc>
+    <temp_bc>1,0,1</temp_bc>
+    <vel_bc>1,1,2</vel_bc>
+    <pre type="gmres">
+      <its>2</its>
+      <nrits>2</nrits>
+      <pre type="block_jacobi">
+        <nlocal>1</nlocal>
+        <solver type="lu"></solver>
+      </pre>
+    </pre>
+  </xmhd>
+</oft>

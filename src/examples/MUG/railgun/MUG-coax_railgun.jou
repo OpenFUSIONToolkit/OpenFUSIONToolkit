@@ -1,0 +1,39 @@
+reset
+undo off
+
+create surface rectangle width 1 height 0.1 zplane
+move Surface 1  x 0 y 0.15 z 0 include_merged
+sweep surface 1  xaxis angle 5
+
+nodeset 1 add surface 4
+nodeset 2 add surface 2
+nodeset 3 add surface 3 5
+nodeset 4 add surface 1
+
+volume all scheme tetmesh
+volume all size 0.01
+mesh volume all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add volume all
+block 1 element type tetra10
+
+# Export grid
+set large exodus file on
+export Genesis  "MUG-coax_railgun-tet.g" overwrite block 1
+
+# Recreate with hexmesh
+delete mesh volume all propagate
+volume all  scheme map
+mesh volume all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add volume all
+block 1 element type hex27
+
+# Export grid
+set large exodus file on
+export Genesis  "MUG-coax_railgun-hex.g" overwrite block 1
+

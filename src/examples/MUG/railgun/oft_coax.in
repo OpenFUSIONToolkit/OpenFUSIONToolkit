@@ -1,0 +1,62 @@
+&runtime_options
+ debug=0              ! Debug level
+/
+
+&mesh_options
+ cad_type=0           ! Mesh interface type
+ nlevels=2            ! Total number of grid levels
+ nbase=1              ! Number of base levels (grid on every MPI task)
+ grid_order=2         ! Order of spatial mapping
+ part_meth=2          ! Spatial partitioning method
+/
+
+&native_mesh_options
+ filename='MUG-coax_railgun-tet.h5'
+ reflect=T            ! Reflect mesh across X-Y plane?
+ ref_periodic=T       ! Make specified faces periodic?
+/
+
+&railgun_options
+ order=2              ! FE order
+ plot_run=F           ! Perform plotting run?
+ n0=5.E19             ! Initial density [m^-3]
+ t0=6.                ! Initial temperature [eV]
+ voltage=5.E2         ! Bias voltage [V]
+ ramp_time=1.E-6      ! Bias voltage ramp time [s]
+ pm=F                 ! Show solver iterations?
+/
+
+&xmhd_options
+ xmhd_adv_den=T       ! Advance plasma density?
+ xmhd_adv_temp=T      ! Advance plasma temperature?
+ xmhd_ohmic=F         ! Include Ohmic heating?
+ xmhd_visc_heat=F     ! Include viscous heating?
+ bbc='bc'             ! BC for B-field (perfectly-conducting walls)
+ vbc='xml'            ! BC for velocity (per nodeset from XML)
+ nbc='x'              ! BC for density (per nodeset from XML)
+ tbc='x'              ! BC for temperature (per nodeset from XML)
+ dt=3.e-8             ! Maximum time step [s]
+ mu_ion=2.            ! Ion mass (atomic units)
+ eta=25.0             ! Resistivity [m^2/s]
+ nu_visc=400.         ! Fluid viscosity [m^2/s]
+ d_dens=10.           ! Density diffusion [m^2/s]
+ kappa_par=1.E3       ! Parallel thermal conduction [m^2/s]
+ kappa_perp=1.E3      ! Perpendicular thermal conduction [m^2/s]
+ nsteps=350           ! Number of time steps to perform before stopping
+ rst_freq=10          ! Restart file frequency
+ lin_tol=1.E-10       ! Linear solver tolerance
+ nl_tol=1.E-5         ! Non-linear solver tolerance
+ ittarget=40          ! Target for # of linear iterations per time step
+ xmhd_mfnk=T          ! Use matrix-free solver?
+ xmhd_prefreq=20      ! Minimum preconditioner update frequency
+ nclean=50            ! Frequency of finite-tolerance divergence cleaning
+ rst_ind=0            ! Index of file to restart from (0 -> use subroutine arguments)
+ xmhd_nparts=0,0,320  ! Number of partitions for color-based factorizations
+/
+
+&xmhd_plot_options
+ t0=1.E-8             ! Starting time
+ dt=-1.E-6            ! Time-step (negative to plot all `*rst` files)
+ rst_start=0          ! Starting restart file
+ rst_end=350          ! Last restart file
+/

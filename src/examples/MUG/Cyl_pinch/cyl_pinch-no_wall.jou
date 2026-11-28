@@ -1,0 +1,105 @@
+reset
+undo off
+
+#
+create Cylinder height 0.1 radius 0.2
+move Volume 1 x 0 y 0 z 0.05 include_merged 
+
+#
+webcut volume 1  with cylinder radius 0.06 axis z center 0 0 0
+webcut volume 1  with cylinder radius 0.1 axis z center 0 0 0
+
+webcut volume 1  with cylinder radius 0.1235 axis z center 0 0 0
+
+set duplicate block elements off
+nodeset 1 surface 9 15 18 21
+block 1 volume 2 3 4
+block 2 volume 1
+
+#
+imprint all
+merge all
+
+#
+curve 3  interval 50
+curve 3  scheme equal
+mesh curve 3 
+
+#
+surface 15  scheme hole rad_intervals 7
+mesh surface 15
+surface 21  scheme hole rad_intervals 5
+mesh surface 21
+surface 18  scheme hole rad_intervals 4 bias 0
+mesh surface 18
+surface 9  scheme circle
+mesh surface 9
+
+#
+#volume 1 3 4 2  interval 3
+volume 1 3 4 2  interval 3
+volume 1  redistribute nodes off 
+volume 1  scheme Sweep  source surface 18 target surface 17 sweep_transform least_squares  
+volume 1  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 1
+volume 3  redistribute nodes off 
+volume 3  scheme Sweep  source surface 15 target surface 14 sweep_transform least_squares  
+volume 3  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 3
+volume 4  redistribute nodes off 
+volume 4  scheme Sweep  source surface 21 target surface 20 sweep_transform least_squares  
+volume 4  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 4
+volume 2  redistribute nodes off 
+volume 2  scheme Sweep  source surface 9 target surface 8 sweep_transform least_squares  
+volume 2  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 2
+
+#
+HTet Volume 1 2 3 4 UNSTRUCTURED
+#HTet Volume 1 2 3 4 STRUCTURED
+
+# Output mesh
+block all element type tetra10
+export Genesis  "MUG-cyl_pinch.g" block all overwrite
+
+#
+delete mesh volume all propagate
+curve in Volume all interval default
+
+#
+curve 3  interval 40
+curve 3  scheme equal
+mesh curve 3 
+
+#
+surface 15  scheme hole rad_intervals 8 bias 0
+mesh surface 15
+surface 21  scheme hole rad_intervals 6 bias 0
+mesh surface 21
+surface 18  scheme hole rad_intervals 3 bias 0
+mesh surface 18
+surface 9  scheme circle
+mesh surface 9
+
+#
+volume 1 3 4 2  interval 2
+volume 1  redistribute nodes off 
+volume 1  scheme Sweep  source surface 18 target surface 17 sweep_transform least_squares  
+volume 1  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 1
+volume 3  redistribute nodes off 
+volume 3  scheme Sweep  source surface 15 target surface 14 sweep_transform least_squares  
+volume 3  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 3
+volume 4  redistribute nodes off 
+volume 4  scheme Sweep  source surface 21 target surface 20 sweep_transform least_squares  
+volume 4  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 4
+volume 2  redistribute nodes off 
+volume 2  scheme Sweep  source surface 9 target surface 8 sweep_transform least_squares  
+volume 2  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
+mesh volume 2
+
+block all element type hex27
+export Genesis  "MUG-cyl_pinch-hex.g" block all overwrite

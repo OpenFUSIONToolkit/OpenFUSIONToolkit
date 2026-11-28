@@ -1,6 +1,8 @@
 add_subdirectory( slab_recon )
 add_subdirectory( Spheromak_tilt )
 add_subdirectory( Spheromak_heating )
+add_subdirectory( railgun )
+add_subdirectory( Cyl_pinch )
 add_subdirectory( harris_sheet )
 add_subdirectory( gyro_gravitational )
 add_subdirectory( rayleigh_taylor_2d )
