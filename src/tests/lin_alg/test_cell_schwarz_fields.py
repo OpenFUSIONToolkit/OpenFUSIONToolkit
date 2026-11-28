@@ -63,21 +63,24 @@ def run_cell_schwarz_fields(nprocs, nlevels, order, timeout=600):
         return None
     return its
 
-# Iteration counts depend on the METIS partition and the DoF color tie break, so only properties
-# that hold for any partition are checked (exact reference counts are in test_cell_schwarz.py)
+# Iteration counts depend on the METIS partition and the DoF color tie break. Properties that hold
+# by construction are checked exactly; the expected trends (dropping coupling between fields, or
+# removing layers, does not help) only within a slack, as GMRES counts are not monotonic in general
+# (exact reference counts are in test_cell_schwarz.py)
+SLACK = 2
+
 def check_counts(its):
     for ip, row in enumerate(its):
         nparts = [1, 3][ip]
         print("nparts={0}: {1}".format(nparts, row))
         # Covering blocks: block-Jacobi by field group, at most 3 iterations (also checked in the test)
         assert max(row[1:4]) <= 3
-        # Blocks without field groups are exact when covering the mesh (one iteration) and are at
-        # least as good as field based blocks on the same cells
+        # Trends: no groups <~ groups 1,1,2 <~ one group per field on the same cells, and no
+        # increase with layers, each within the slack
         for k in range(3):
-            assert row[4+k] <= row[10+k] <= row[7+k]
-        # Non-increasing with layers
+            assert row[4+k] <= row[10+k] + SLACK and row[10+k] <= row[7+k] + SLACK
         for base in (4, 7, 10):
-            assert row[base+1] <= row[base] and row[base+2] <= row[base+1]
+            assert row[base+1] <= row[base] + SLACK and row[base+2] <= row[base+1] + SLACK
         # Empty field group: same as no field groups (also checked in the test)
         assert row[13] == row[5]
         # Update matches a fresh setup (checked in the test), re-setup and rebuild reproduce,

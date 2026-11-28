@@ -25,10 +25,11 @@
 !!   `cell_schwarz_fields.results` for checking by the driver)
 !! - Groups 1,1,1 out of 2 (group 2 empty) reproduce the blocks without field groups
 !! - Without `groups`, `nlocal<-1` uses the builder's default field groups (here 1,1,2)
+!! - Graph mode field based blocks (one group per field, groups 1,1,2) converge
 !! - Number of blocks is the number of builder blocks times the number of groups
 !! - Additive and weighted additive with one group per field converge
 !! - Numeric update after the operator values change matches a fresh setup, and delete
-!!   and re-setup (and an update with a new pattern, which keeps the field groups)
+!!   and re-setup (both keep the field groups) and an update with a new pattern
 !!   reproduce the first solve
 !!
 !! @ingroup testing
@@ -219,6 +220,11 @@ DO k=0,2
   CALL check_conv('Groups 1,1,2'//tag,rnorm,v)
 END DO
 CALL check_exact('Blocks: builder blocks x fields'//tag,REAL(res(21),r8),REAL(nf*nb,r8))
+!---Graph mode field based blocks (groups read per field) converge
+k=solve(-1,1,.FALSE.,.FALSE.,v,rnorm)
+CALL check_conv('Graph mode, one group per field'//tag,rnorm,v)
+k=solve(-2,1,.FALSE.,.FALSE.,v,rnorm,groups=[1,1,2])
+CALL check_conv('Graph mode, groups 1,1,2'//tag,rnorm,v)
 !---Groups 1,1,1 of 2 (empty group 2): same blocks as without field groups
 k=solve(1,1,.TRUE.,.FALSE.,w,rnorm)
 res(14)=solve(-2,1,.TRUE.,.FALSE.,v,rnorm,groups=[1,1,1])
@@ -290,7 +296,7 @@ linv%its=-3
 linv%nrits=20
 linv%rtol=1.d-10
 sw%nlocal=nlocal
-IF(PRESENT(groups))sw%slice_group(1:SIZE(groups))=groups
+IF(PRESENT(groups))sw%slice_group=groups
 sw%overlap=overlap
 sw%cell_mode=cell
 sw%adjacency=OFT_CELL_ADJ_POINT
@@ -330,9 +336,9 @@ CALL check_tol('Updated = fresh setup (solution)'//tag,maxdiff(w,x)/maxabs(x),1.
 CALL w%scale(2.d0)
 CALL check_tol('Updated solution scales with operator'//tag,maxdiff(v,w)/maxabs(v),1.d-8)
 CALL scale_op(0.5d0)
-!---Delete and re-setup on the original operator (delete resets nlocal)
+!---Delete and re-setup on the original operator (field groups are kept)
 CALL sw%delete
-sw%nlocal=-1
+CALL check_exact('Delete: requested nlocal kept'//tag,REAL(sw%nlocal,r8),-1.d0)
 CALL linv%update(.FALSE.)
 CALL w%set(0.d0)
 CALL g%copy(g0)

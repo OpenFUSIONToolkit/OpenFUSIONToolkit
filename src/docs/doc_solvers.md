@@ -94,7 +94,7 @@ This method is supported through both the native and PETSc backends through
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
 | `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
-| `groups`   | Group index for each field in multi-field vector [n] | int | Yes |
+| `groups`   | Group index for each field in multi-field vector [n], in `1..-nlocal` and required for every field with `nlocal<-1` (native) | int | Yes |
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
 
 \subsection doc_solvers_basic_schwarz Additive Schwarz
@@ -158,7 +158,7 @@ been tested with this preconditioner.
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
 | `nlocal`   | Number of local blocks (-1 for field based, `-n` for `n` field groups; in cell mode a positive value is replaced by the builder's block count, and field based blocks split each builder block) | int | Yes |
-| `groups`   | Group index for each field in multi-field vector [n] (native only, with `nlocal<-1`) | int | Yes |
+| `groups`   | Group index for each field in multi-field vector [n], in `1..-nlocal` and required for every field with `nlocal<-1` (except for the default groups in cell mode; native only) | int | Yes |
 | `boverlap` | Overlap boundary rows, as for block-Jacobi (native graph mode only) | bool | No |
 | `overlap`  | Number of overlap layers (native default: 1; layers of cells in cell mode) | int | Yes |
 | `type`     | Combination of subdomain solutions: `restricted` (default), `additive` or `weighted` (native only) | str | No |
