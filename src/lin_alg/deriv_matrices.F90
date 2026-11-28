@@ -935,8 +935,11 @@ IF(ASSOCIATED(self%u0))THEN
   CALL self%u0%delete
   CALL self%f0%delete
   CALL self%tmp%delete
+  DEALLOCATE(self%u0,self%f0,self%tmp)
+END IF
+IF(ASSOCIATED(self%utyp))THEN
   CALL self%utyp%delete
-  DEALLOCATE(self%u0,self%f0,self%tmp,self%utyp)
+  DEALLOCATE(self%utyp)
 END IF
 NULLIFY(self%f)
 end subroutine mf_mat_delete

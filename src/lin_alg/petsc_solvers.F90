@@ -1783,6 +1783,7 @@ TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver defin
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: i,ierr,nnodes,nread
+LOGICAL :: package_set
 TYPE(xml_node) :: current_node
 CHARACTER(LEN=:), ALLOCATABLE :: factor_type,factor_package
 DEBUG_STACK_PUSH
@@ -1792,22 +1793,29 @@ IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_type,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort("Error reading `type` node","lu_pc_load_xml",__FILE__)
   IF(ALLOCATED(factor_type))THEN
-    IF(LEN(factor_type)>6)CALL oft_abort('Factorization type name too long','lu_pc_load_xml',__FILE__)
-    self%type=factor_type
+    IF(LEN_TRIM(factor_type)>0)THEN
+      IF(LEN(factor_type)>6)CALL oft_abort('Factorization type name too long','lu_pc_load_xml',__FILE__)
+      self%type=factor_type
+    END IF
     DEALLOCATE(factor_type)
   END IF
 END IF
 !---
+package_set=.FALSE.
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_package,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","lu_pc_load_xml",__FILE__)
   IF(ALLOCATED(factor_package))THEN
-    IF(LEN(factor_package)>6)CALL oft_abort('Factorization package name too long','lu_pc_load_xml',__FILE__)
-    self%package=factor_package
+    IF(LEN_TRIM(factor_package)>0)THEN
+      IF(LEN(factor_package)>6)CALL oft_abort('Factorization package name too long','lu_pc_load_xml',__FILE__)
+      self%package=factor_package
+      package_set=.TRUE.
+    END IF
     DEALLOCATE(factor_package)
   END IF
-ELSE IF(TRIM(self%type)=='ilu')THEN
+END IF
+IF((.NOT.package_set).AND.(TRIM(self%type)=='ilu'))THEN
   self%package='petsc'
 END IF
 DEBUG_STACK_POP

@@ -1513,7 +1513,7 @@ INTEGER(i4) :: k
 REAL(r8) :: rel_err
 REAL(r8), PARAMETER :: scales(2) = [1.d-6, 1.d8]
 REAL(r8), PARAMETER :: mf_tol = 1.d-4
-CLASS(oft_vector), POINTER :: u0,v,b,ref,utyp_save
+CLASS(oft_vector), POINTER :: u0,v,b,ref
 TYPE(quad_test_op), TARGET :: fop
 TYPE(oft_mf_matrix) :: mfmat
 CALL ML_oft_lagrange%vec_create(u0)
@@ -1521,9 +1521,9 @@ CALL ML_oft_lagrange%vec_create(v)
 CALL ML_oft_lagrange%vec_create(b)
 CALL ML_oft_lagrange%vec_create(ref)
 CALL mfmat%setup(u0,fop)
-! Exercise the unassociated-utyp branch while keeping utyp for cleanup
-utyp_save=>mfmat%utyp
-NULLIFY(mfmat%utyp)
+! Deallocate utyp to exercise the unscaled Pernice-Walker branch and guarded delete
+CALL mfmat%utyp%delete()
+DEALLOCATE(mfmat%utyp)
 CALL fill(u0,0.37d0,1.5d0)
 CALL mfmat%update(u0)
 ! Zero perturbation must return zero
@@ -1548,7 +1548,6 @@ DO k=1,2
     IF(oft_env%head_proc)WRITE(*,'(A,I1,ES25.16)')'PASSED: mf_matrix no-utyp scale ',k,rel_err
   END IF
 END DO
-mfmat%utyp=>utyp_save
 CALL mfmat%delete()
 CALL u0%delete()
 CALL v%delete()
