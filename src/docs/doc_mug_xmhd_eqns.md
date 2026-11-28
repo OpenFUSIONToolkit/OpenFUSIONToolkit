@@ -33,6 +33,11 @@ The following conventions are used throughout:
  - \f$ m_i = \mu_{ion} m_p \f$ (`mu_ion`) and \f$ m_e' = f_{m_e} m_e \f$, where \f$ f_{m_e} \f$ is the artificial electron
    mass enhancement `me_factor`.
  - \f$ n_0 \f$ is the density scale `den_scale`, which defaults to the RMS value of the initial density.
+ - `vel_scale` and `temp_scale` default to `-1` (automatic), selecting \f$ v_{\text{scale}} = (\mu_0 n_0 m_i)^{-1/2} \f$
+   and \f$ T_{\text{scale}} = v_{\text{scale}} \sqrt{m_i T_0 / k} \f$ (where \f$ T_0 \f$ is the initial RMS temperature).
+   These choices balance the off-diagonal Alfven (\f$ B \f$-\f$ V \f$) and acoustic (\f$ V \f$-\f$ T \f$) Jacobian coupling
+   blocks symmetrically (at \f$ v_A \f$ and \f$ c_s = \sqrt{k T_0 / m_i} \f$, respectively, independent of plasma \f$ \beta \f$)
+   rather than normalizing stored \f$ T \f$ to \f$ O(1) \f$.
  - Resistivities, viscosities, and diffusivities are given in diffusivity units (m^2/s). In particular,
    \f$ \eta \f$ is the physical resistivity divided by \f$ \mu_0 \f$.
  - \f$ \hat{b} = B / \left( |B| + \epsilon_B \right) \f$, where \f$ \epsilon_B \f$ is `xmhd_B_eps`.

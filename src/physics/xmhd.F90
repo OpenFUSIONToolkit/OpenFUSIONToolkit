@@ -438,8 +438,8 @@ CONTAINS
 !! | `xmhd_monitor_div=F` | Monitor divergence error | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
-!! | `vel_scale=-1`     | Velocity scaling factor (<0 for automatic Alfven-balanced scaling \f$ (\mu_0 n_0 m_i)^{-1/2} \f$) | real |
-!! | `temp_scale=-1`    | Temperature scaling factor (<0 for automatic acoustic-balanced scaling \f$ v_{\text{scale}} \sqrt{m_i T_0 / k_B} \f$) | real |
+!! | `vel_scale=-1`     | Velocity scaling factor (<0 for automatic Alfven-balanced scaling \f$ (\mu_0 n_0 m_i)^{-1/2} \f$, balancing the \f$ B \f$-\f$ V \f$ off-diagonal Jacobian blocks at \f$ v_A \f$) | real |
+!! | `temp_scale=-1`    | Temperature scaling factor (<0 for automatic acoustic-balanced scaling \f$ v_{\text{scale}} \sqrt{m_i T_0 / k_B} \f$, balancing the \f$ V \f$-\f$ T \f$ off-diagonal Jacobian blocks symmetrically at \f$ c_s \f$) | real |
 !
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
@@ -623,6 +623,7 @@ IF(temp_scale<0.d0)THEN
   IF(xmhd_two_temp.AND.ASSOCIATED(initial_fields%Te))temp_rms=MAX(temp_rms, &
     SQRT(initial_fields%Te%dot(initial_fields%Te)/REAL(initial_fields%Te%ng,r8)))
   IF((temp_rms>0.d0).AND.(vel_scale>0.d0).AND.(m_ion>0.d0).AND.(k_boltz>0.d0))THEN
+    ! Balance acoustic V-T Jacobian blocks symmetrically at c_s (|J_VT| = |J_TV|)
     temp_scale=vel_scale*SQRT(m_ion*temp_rms/k_boltz)
   ELSE
     temp_scale=1.d0
@@ -1206,6 +1207,7 @@ IF(temp_scale<0.d0)THEN
   IF(xmhd_two_temp.AND.ASSOCIATED(equil_fields%Te))temp_rms=MAX(temp_rms, &
     SQRT(equil_fields%Te%dot(equil_fields%Te)/REAL(equil_fields%Te%ng,r8)))
   IF((temp_rms>0.d0).AND.(vel_scale>0.d0).AND.(m_ion>0.d0).AND.(k_boltz>0.d0))THEN
+    ! Balance acoustic V-T Jacobian blocks symmetrically at c_s (|J_VT| = |J_TV|)
     temp_scale=vel_scale*SQRT(m_ion*temp_rms/k_boltz)
   ELSE
     temp_scale=1.d0
@@ -2549,8 +2551,9 @@ do ii=1,mesh%tloc_c(ip)%n
 ! End quadrature loop
 !------------------------------------------------------------------------------
   end do
+  IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m) ! Remove Hall-term alias before scaling and BCs
   !------------------------------------------------------------------------------
-  ! Apply BCs to local matrices
+  ! Apply row/column scaling for scaled fields (V, n, T, N2, J2)
   !------------------------------------------------------------------------------
   DO m=1,xmhd_rep%nfields
     IF(ASSOCIATED(mtmp(3,m)%m).AND.(m/=3))mtmp(3,m)%m = mtmp(3,m)%m/vel_scale
@@ -2623,7 +2626,6 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
 ! Add local contribution to full matrix
 !------------------------------------------------------------------------------
-  IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m)
   IF(reg_solid(mesh%reg(i)))THEN
     CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
   ELSE
@@ -4737,16 +4739,38 @@ IF(PRESENT(rst_version_out))rst_version_out=rst_version
 !---Rescale if necessary scales
 IF(rst_version>2)THEN
   CALL hdf5_read(scale_tmp,filename,'vel_scale')
-  IF(vel_scale<0.d0)vel_scale=scale_tmp
-  IF(scale_tmp/=vel_scale)THEN
-    NULLIFY(stmp)
-    DO i=3,5
-      CALL u%get_local(stmp, i)
-      stmp=stmp*scale_tmp/vel_scale
-      CALL u%restore_local(stmp, i)
-    END DO
-    DEALLOCATE(stmp)
+ELSE
+  scale_tmp=1.d3
+END IF
+IF(vel_scale<0.d0)vel_scale=scale_tmp
+IF(scale_tmp/=vel_scale)THEN
+  NULLIFY(stmp)
+  DO i=3,5
+    CALL u%get_local(stmp, i)
+    stmp=stmp*scale_tmp/vel_scale
+    CALL u%restore_local(stmp, i)
+  END DO
+  DEALLOCATE(stmp)
+END IF
+IF(rst_version>3.OR.(rst_version>2.AND.hdf5_field_exist(filename,'temp_scale')))THEN
+  CALL hdf5_read(scale_tmp,filename,'temp_scale')
+ELSE
+  scale_tmp=1.d0
+END IF
+IF(temp_scale<0.d0)temp_scale=scale_tmp
+IF(scale_tmp/=temp_scale)THEN
+  NULLIFY(stmp)
+  CALL u%get_local(stmp, 7)
+  stmp=stmp*scale_tmp/temp_scale
+  CALL u%restore_local(stmp, 7)
+  IF(xmhd_two_temp)THEN
+    CALL u%get_local(stmp, te_ind)
+    stmp=stmp*scale_tmp/temp_scale
+    CALL u%restore_local(stmp, te_ind)
   END IF
+  DEALLOCATE(stmp)
+END IF
+IF(rst_version>2)THEN
   CALL hdf5_read(scale_tmp,filename,'den_scale')
   IF(den_scale<0.d0)den_scale=scale_tmp
   IF(scale_tmp/=den_scale)THEN
@@ -4754,24 +4778,6 @@ IF(rst_version>2)THEN
     CALL u%get_local(stmp, 6)
     stmp=stmp*scale_tmp/den_scale
     CALL u%restore_local(stmp, 6)
-    DEALLOCATE(stmp)
-  END IF
-  IF(rst_version>3.OR.hdf5_field_exist(filename,'temp_scale'))THEN
-    CALL hdf5_read(scale_tmp,filename,'temp_scale')
-  ELSE
-    scale_tmp=1.d0
-  END IF
-  IF(temp_scale<0.d0)temp_scale=scale_tmp
-  IF(scale_tmp/=temp_scale)THEN
-    NULLIFY(stmp)
-    CALL u%get_local(stmp, 7)
-    stmp=stmp*scale_tmp/temp_scale
-    CALL u%restore_local(stmp, 7)
-    IF(xmhd_two_temp)THEN
-      CALL u%get_local(stmp, te_ind)
-      stmp=stmp*scale_tmp/temp_scale
-      CALL u%restore_local(stmp, te_ind)
-    END IF
     DEALLOCATE(stmp)
   END IF
   IF(n2_ind>0)THEN
@@ -4794,9 +4800,6 @@ IF(rst_version>2)THEN
       DEALLOCATE(stmp)
     END IF
   END IF
-ELSE
-  IF(vel_scale<0.d0)vel_scale=1.d3
-  IF(temp_scale<0.d0)temp_scale=1.d0
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_rst_load
