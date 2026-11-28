@@ -57,6 +57,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_CUTE_ex3
  - \subpage doc_tMaker_CUTE_ex4
  - \subpage doc_tMaker_ARC_ex3
+ - \subpage doc_tMaker_VARYPED_ex
  - \subpage doc_tMaker_GPEC_ex1
  - \subpage doc_tMaker_blanket_vde_ex
  - \subpage doc_tMaker_DIIID_ex3
